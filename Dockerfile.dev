@@ -1,0 +1,15 @@
+FROM golang:1.24-alpine
+RUN apk add --no-cache git docker-cli docker-compose
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /lookout ./cmd/lookout
+
+VOLUME /data/stacks
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget -q --spider http://localhost:3000/_lookout/health
+
+ENTRYPOINT ["/lookout"]
