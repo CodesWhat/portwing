@@ -1,0 +1,25 @@
+[Unit]
+Description=Lookout - Remote Docker Agent
+Documentation=https://github.com/codeswhat/lookout
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/lookout/config
+ExecStart=/usr/local/bin/lookout
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+TimeoutStopSec=15
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/stacks
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,89 @@
+version: 2
+
+project_name: lookout
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: lookout
+    main: ./cmd/lookout
+    binary: lookout
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/codeswhat/lookout/internal/protocol.AgentVersion={{.Version}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      - goos: darwin
+        goarch: arm
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/codeswhat/lookout:{{ .Version }}-amd64"
+      - "ghcr.io/codeswhat/lookout:latest-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+
+  - image_templates:
+      - "ghcr.io/codeswhat/lookout:{{ .Version }}-arm64"
+      - "ghcr.io/codeswhat/lookout:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+    goarch: arm64
+
+  - image_templates:
+      - "ghcr.io/codeswhat/lookout:{{ .Version }}-armv7"
+      - "ghcr.io/codeswhat/lookout:latest-armv7"
+    dockerfile: Dockerfile.armv7
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm/v7"
+    goarch: arm
+    goarm: "7"
+
+docker_manifests:
+  - name_template: "ghcr.io/codeswhat/lookout:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/codeswhat/lookout:{{ .Version }}-amd64"
+      - "ghcr.io/codeswhat/lookout:{{ .Version }}-arm64"
+      - "ghcr.io/codeswhat/lookout:{{ .Version }}-armv7"
+
+  - name_template: "ghcr.io/codeswhat/lookout:latest"
+    image_templates:
+      - "ghcr.io/codeswhat/lookout:latest-amd64"
+      - "ghcr.io/codeswhat/lookout:latest-arm64"
+      - "ghcr.io/codeswhat/lookout:latest-armv7"
