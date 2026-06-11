@@ -1,0 +1,18 @@
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Exclude close/teardown calls where the error is unactionable:
+      #   - deferred Close on HTTP response bodies (io.ReadCloser / io.Closer)
+      #   - deferred Close on read-only /proc files (*os.File opened for reading)
+      #   - deferred Close on net.Conn in error / shutdown paths
+      #   - SetReadDeadline used as a one-way deadline gate (gorilla websocket)
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net.Conn).Close
+        - (net.Conn).SetReadDeadline
+        - (*github.com/gorilla/websocket.Conn).Close
+        - (*github.com/gorilla/websocket.Conn).SetReadDeadline
