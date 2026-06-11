@@ -12,6 +12,21 @@ import (
 	"time"
 )
 
+// tokenVerifier is the interface used by AuthMiddleware to verify a presented
+// token. It abstracts over plain-text and Argon2id verification.
+type tokenVerifier interface {
+	Verify(token string) bool
+}
+
+// rawTokenVerifier performs timing-safe comparison against a plain-text token.
+type rawTokenVerifier struct {
+	token string
+}
+
+func (v *rawTokenVerifier) Verify(token string) bool {
+	return subtle.ConstantTimeCompare([]byte(token), []byte(v.token)) == 1
+}
+
 // RateLimiter tracks failed authentication attempts by IP address and blocks
 // IPs that exceed the failure threshold within a rolling window.
 type RateLimiter struct {
@@ -106,21 +121,27 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 }
 
 // AuthMiddleware returns an http.Handler that validates the authentication
-// token before calling next. If token is empty, authentication is disabled
+// token before calling next. If verifier is nil, authentication is disabled
 // and all requests are passed through.
 //
 // The middleware checks the X-Lookout-Token header first, then falls back to
 // X-Dd-Agent-Secret for Drydock backwards compatibility.
-func (rl *RateLimiter) AuthMiddleware(token string, next http.Handler) http.Handler {
+//
+// Rate limiting is applied before verification, so failed attempts are always
+// counted regardless of whether the verifier uses a raw token or Argon2id.
+func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// No authentication configured - pass through.
-		if token == "" {
+		if verifier == nil {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		clientIP := getClientIP(r)
 
+		// Rate-limit check happens BEFORE verification. This ensures that failed
+		// attempts accumulate in the limiter even for expensive Argon2id paths,
+		// and that blocked IPs never reach the verifier.
 		if rl.IsRateLimited(clientIP) {
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 			return
@@ -132,7 +153,7 @@ func (rl *RateLimiter) AuthMiddleware(token string, next http.Handler) http.Hand
 			provided = r.Header.Get("X-Dd-Agent-Secret")
 		}
 
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+		if !verifier.Verify(provided) {
 			rl.RecordFailure(clientIP)
 			slog.Warn("authentication failed", "ip", clientIP)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
