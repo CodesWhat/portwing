@@ -52,6 +52,7 @@ const (
 	EventComposeOp   = "compose_op"   // Docker Compose operation
 	EventAuthFailure = "auth_failure" // invalid token presented
 	EventRateLimited = "rate_limited" // request blocked by rate limiter
+	EventEnrollment  = "enrollment"   // Ed25519 key enrolled via /api/lookout/enroll
 )
 
 // Outcome values for the "outcome" field.
@@ -162,6 +163,20 @@ func (l *Logger) ComposeOp(actor, operation, stack, outcome string) {
 		slog.String("actor", actor),
 		slog.String("operation", operation),
 		slog.String("stack", stack),
+		slog.String("outcome", outcome),
+	)
+}
+
+// Enrollment records an Ed25519 key enrollment event.
+// outcome is OutcomeAllowed on success, OutcomeDenied on failure.
+func (l *Logger) Enrollment(actor, keyID, outcome string) {
+	if l.log == nil {
+		return
+	}
+	l.log.Info("",
+		slog.String("event", EventEnrollment),
+		slog.String("actor", actor),
+		slog.String("key_id", keyID),
 		slog.String("outcome", outcome),
 	)
 }

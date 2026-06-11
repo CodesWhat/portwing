@@ -48,6 +48,7 @@ type Server struct {
 	rateLimiter  *RateLimiter
 	verifier     tokenVerifier
 	ed25519      Ed25519Config
+	enroller     *auth.Enroller
 	auditor      *audit.Logger
 	httpServer   *http.Server
 	startTime    time.Time
@@ -90,6 +91,15 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		}
 	}
 
+	// Set up enrollment handler if ENROLLMENT_TOKEN is configured.
+	var enroller *auth.Enroller
+	if cfg.EnrollmentToken != "" {
+		if ed25519Cfg.Registry == nil {
+			return nil, fmt.Errorf("ENROLLMENT_TOKEN requires AUTHORIZED_KEYS to be set")
+		}
+		enroller = auth.NewEnroller(cfg.EnrollmentToken, cfg.AuthorizedKeysFile, ed25519Cfg.Registry)
+	}
+
 	s := &Server{
 		cfg:          cfg,
 		dockerClient: dockerClient,
@@ -99,6 +109,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		rateLimiter:  NewRateLimiter(),
 		verifier:     verifier,
 		ed25519:      ed25519Cfg,
+		enroller:     enroller,
 		auditor:      auditor,
 		startTime:    time.Now(),
 	}
@@ -149,6 +160,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// No auth required.
 	mux.HandleFunc("GET /_lookout/health", s.handleHealth)
 	mux.HandleFunc("GET /health", s.handleSimpleHealth)
+
+	// Enrollment endpoint: reachable WITHOUT auth (it IS the bootstrap), but
+	// rate-limited. Registered only when ENROLLMENT_TOKEN is configured.
+	if s.enroller != nil {
+		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller)
+		mux.Handle("POST /api/lookout/enroll", enrollHandler)
+	}
 
 	// Auth required - wrap with audit-aware auth middleware (with Ed25519 support).
 	authWrap := func(h http.HandlerFunc) http.Handler {
