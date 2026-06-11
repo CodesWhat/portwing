@@ -111,6 +111,8 @@ Without these, no P2–P7 feature will get evaluated. Supply-chain gaps block en
 - [x] **Security model documentation**: Named controls (proxy-first architecture, Compose path-traversal guard, env denylist, flag injection filter), CVE mapping table, supply-chain verification instructions
 - [x] **Watchtower migration guide**: `docs/migrating-from-watchtower.md` covering Lookout + Drydock as the replacement stack, targeting the migrating 36k-star user base
 - [x] **Argon2id token-at-rest**: Stored token value hashed with Argon2id, replacing plaintext config storage
+- [x] **Full Drydock SSE compatibility**: `dd:watcher-snapshot` emitted after every poll cycle and on connect — zero Drydock-side changes needed (GAP-1 closed)
+- [x] **Repo infrastructure parity with drydock/sockguard**: hardened SHA-pinned CI (zizmor, CodeQL, OpenSSF Scorecard, dependency review), Go fuzz targets (5 parsers, tier-1 CI + nightly), integration tests against real dockerd, monthly Gremlins mutation testing, weekly govulncheck/grype/gosec, release-cut dispatch workflow, dependabot, CHANGELOG/CONTRIBUTING/CODE_OF_CONDUCT/RELEASING/AGENTS docs, hardened compose examples incl. sockguard two-layer defense
 
 ---
 
@@ -124,7 +126,7 @@ Pulled before P2 because Komodo shipped Ed25519 PKI in March 2026 and Arcane shi
   request with timestamp window + nonce LRU replay protection. Token auth retained
   as fallback. `lookout keygen` CLI subcommand. Edge-mode signed hello.
   See `docs/design/ed25519-auth.md` (Status: Implemented Phase 1).
-- [ ] **Audit logging**: Structured JSON log of all authenticated Docker API calls, exec sessions, and Compose operations (timestamp, caller identity, endpoint, method, outcome). Portainer charges for this in BE; Lookout ships it free.
+- [x] **Audit logging** *(shipped v0.2.0)*: Structured JSON log of all authenticated Docker API calls, exec sessions, enrollment attempts, and Compose operations (timestamp, caller identity, endpoint, method, outcome) via `AUDIT_LOG`. Portainer charges for this in BE; Lookout ships it free.
 
 ---
 
