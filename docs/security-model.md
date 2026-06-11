@@ -147,6 +147,53 @@ logs the full stack trace at ERROR level and returns HTTP 500. This prevents
 a single malformed request from crashing the agent process and taking the
 Docker proxy offline.
 
+### 11. Ed25519 Per-Client Key Authentication
+
+When `AUTHORIZED_KEYS` is configured, Lookout authenticates requests using
+per-client Ed25519 keypairs instead of (or alongside) the shared token. Full
+design rationale is in `docs/design/ed25519-auth.md`.
+
+**Key registry:** Operator writes an `authorized_keys`-style file listing
+trusted 32-byte Ed25519 public keys (one per line, `ed25519 <base64> [comment]`
+format). The agent loads this file at startup and on `SIGHUP`. Hot reload adds
+or removes keys from the in-memory map without restarting.
+
+**Per-request signature:** Every authenticated HTTP request carries four
+headers (`X-Lookout-Key-ID`, `X-Lookout-Timestamp`, `X-Lookout-Nonce`,
+`X-Lookout-Signature`). The agent verifies the Ed25519 signature over a
+canonical string of `METHOD\nPATH\nbody-sha256-hex\ntimestamp\nnonce` using
+`crypto/ed25519.Verify` from the Go standard library. No new dependencies.
+
+**Replay protection:** Two complementary mechanisms:
+1. **Timestamp window:** Requests with `|now - timestamp| > MAX_CLOCK_SKEW_SECONDS`
+   (default 60 s) are rejected with `X-Lookout-Reason: timestamp-skew`.
+2. **Nonce LRU:** An in-memory nonce cache (capacity `NONCE_LRU_SIZE`, default
+   10,000 entries) tracks nonces within the timestamp window. Repeated nonces
+   return `X-Lookout-Reason: replay`. The LRU is preserved across SIGHUP reloads.
+
+**Verification order in middleware:** If `X-Lookout-Signature` is present, Ed25519
+verification runs; if absent, the request falls through to the existing token
+verifier. Both auth methods can coexist during migration.
+
+**File security:** The agent refuses to load an authorized_keys file with world-
+read permission (`mode & 0004 != 0`), ensuring key material is never readable
+by untrusted system users.
+
+**Edge-mode signed hello:** In edge (WebSocket) mode, when `PRIVATE_KEY_FILE`
+is configured the agent signs the WebSocket hello message with its Ed25519
+private key, embedding `pubKeyId`/`timestamp`/`nonce`/`signature` fields. The
+controller verifies these before sending `welcome`. Falls back to `tokenHash`
+when no private key is configured.
+
+**Model C enrollment (optional):** When `ENROLLMENT_TOKEN` is set alongside
+`AUTHORIZED_KEYS`, the agent exposes `POST /api/lookout/enroll` (outside the
+auth middleware, rate-limited). A caller presents the enrollment token and a
+public key; the agent appends the key to the authorized_keys file, reloads the
+registry, and burns the token (refusing further enrollment until restart).
+
+See `docs/design/ed25519-auth.md` for full threat analysis, key rotation
+procedures, and migration path from token auth.
+
 ---
 
 ## CVE Mapping
