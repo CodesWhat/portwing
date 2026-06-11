@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: go.mod
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -50,25 +50,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Attest release archives and checksums
-        uses: actions/attest@v4
-        with:
-          subject-path: dist/checksums.txt
-
-      - name: Attest container image digests
+      - name: Resolve container manifest digest
+        id: manifest-digest
         shell: bash
         run: |
-          DIGESTS=$(jq -r '.[] | select(.type == "Docker Image") | .extra.Digest // empty' dist/artifacts.json 2>/dev/null || true)
-          if [ -z "$DIGESTS" ]; then
-            echo "No image digests found in dist/artifacts.json, skipping image attestation."
-            exit 0
+          VERSION="${GITHUB_REF_NAME#v}"
+          DIGEST=$(docker buildx imagetools inspect "ghcr.io/codeswhat/lookout:${VERSION}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"' || true)
+          if [ -z "$DIGEST" ]; then
+            echo "No manifest digest resolved, skipping image attestation."
           fi
-          echo "$DIGESTS" | while read -r digest; do
-            gh attestation create \
-              --subject-name ghcr.io/codeswhat/lookout \
-              --subject-digest "$digest" \
-              --repo "${{ github.repository }}" || true
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      # Attests every artifact listed in checksums.txt (all release archives).
+      # Verify with: gh attestation verify <archive> --repo CodesWhat/lookout
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-checksums: dist/checksums.txt
+
+      # Container images are cosign keyless-signed by GoReleaser docker_signs;
+      # the version-tag manifest additionally gets build provenance here.
+      - name: Attest container manifest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/codeswhat/lookout
+          subject-digest: ${{ steps.manifest-digest.outputs.digest }}
+          push-to-registry: true
+        if: steps.manifest-digest.outputs.digest != ''
