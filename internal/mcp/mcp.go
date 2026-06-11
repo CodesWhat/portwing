@@ -238,6 +238,10 @@ func (h *Handler) handleToolsCall(ctx context.Context, w http.ResponseWriter, re
 
 // toolListContainers lists all containers.
 func (h *Handler) toolListContainers(ctx context.Context, w http.ResponseWriter, id json.RawMessage) {
+	if h.docker == nil {
+		writeToolError(w, id, "docker client not available")
+		return
+	}
 	containers, err := h.docker.ListContainers(ctx, true)
 	if err != nil {
 		writeToolError(w, id, fmt.Sprintf("list containers: %v", err))
@@ -271,6 +275,10 @@ func (h *Handler) toolListContainers(ctx context.Context, w http.ResponseWriter,
 // toolInspectContainer inspects a single container. Env values are never
 // returned — only the count is exposed to prevent credential leakage.
 func (h *Handler) toolInspectContainer(ctx context.Context, w http.ResponseWriter, id json.RawMessage, args json.RawMessage) {
+	if h.docker == nil {
+		writeToolError(w, id, "docker client not available")
+		return
+	}
 	var p struct {
 		ID string `json:"id"`
 	}
@@ -329,6 +337,10 @@ func (h *Handler) toolInspectContainer(ctx context.Context, w http.ResponseWrite
 // toolContainerLogs returns demuxed log lines (stdout/stderr) for a container.
 // Tail is capped at 500 lines.
 func (h *Handler) toolContainerLogs(ctx context.Context, w http.ResponseWriter, id json.RawMessage, args json.RawMessage) {
+	if h.docker == nil {
+		writeToolError(w, id, "docker client not available")
+		return
+	}
 	var p struct {
 		ID   string `json:"id"`
 		Tail int    `json:"tail"`
@@ -369,6 +381,10 @@ func (h *Handler) toolContainerLogs(ctx context.Context, w http.ResponseWriter, 
 
 // toolHostMetrics returns the collector's host metrics snapshot.
 func (h *Handler) toolHostMetrics(w http.ResponseWriter, id json.RawMessage) {
+	if h.collector == nil {
+		writeToolError(w, id, "metrics collector not available")
+		return
+	}
 	m, err := h.collector.Collect()
 	if err != nil {
 		writeToolError(w, id, fmt.Sprintf("collect metrics: %v", err))
@@ -379,6 +395,10 @@ func (h *Handler) toolHostMetrics(w http.ResponseWriter, id json.RawMessage) {
 
 // toolContainerStats returns a single-shot stats snapshot for a container.
 func (h *Handler) toolContainerStats(ctx context.Context, w http.ResponseWriter, id json.RawMessage, args json.RawMessage) {
+	if h.docker == nil {
+		writeToolError(w, id, "docker client not available")
+		return
+	}
 	var p struct {
 		ID string `json:"id"`
 	}

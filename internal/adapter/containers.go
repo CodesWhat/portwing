@@ -215,8 +215,10 @@ func ParseImageRef(imageRef string) (registry, name, tag string) {
 		// Make sure this colon is not part of a registry port by checking
 		// if the part after the colon contains a slash (which would mean
 		// it's a port:path, not name:tag).
+		// Also skip empty candidates (e.g. input ":") to preserve the
+		// default "latest" tag.
 		candidate := ref[idx+1:]
-		if !strings.Contains(candidate, "/") {
+		if candidate != "" && !strings.Contains(candidate, "/") {
 			tag = candidate
 			ref = ref[:idx]
 		}

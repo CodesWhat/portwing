@@ -1,0 +1,37 @@
+# Lookout — edge mode: outbound WebSocket tunnel to Drydock.
+# No inbound ports are published; the agent dials out, so it works
+# behind NAT and firewalls. The built-in HEALTHCHECK still works
+# (the health endpoint listens container-locally in edge mode too).
+#
+# Generate a token first (must match the token Drydock expects):
+#   openssl rand -hex 32 > lookout_token.txt
+
+services:
+  lookout:
+    image: ghcr.io/codeswhat/lookout:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - lookout-stacks:/data/stacks
+    environment:
+      - DRYDOCK_URL=https://drydock.example.com
+      - TOKEN_FILE=/run/secrets/lookout_token
+      - AGENT_NAME=edge-host-01
+      # Key-based hello instead of a shared token:
+      #   lookout keygen  →  PRIVATE_KEY_FILE=/run/secrets/lookout_key
+    secrets:
+      - lookout_token
+
+secrets:
+  lookout_token:
+    file: ./lookout_token.txt
+
+volumes:
+  lookout-stacks:
