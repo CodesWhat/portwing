@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +14,21 @@ import (
 
 	"github.com/codeswhat/lookout/internal/docker"
 )
+
+// shortSocketPath returns a temp socket path short enough for the unix
+// socket path limit (104 bytes on darwin); t.TempDir() embeds the full
+// test name and overflows it.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "lk")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return filepath.Join(dir, "d.sock")
+}
 
 func TestContainerManagerConcurrentRefreshAndRead(t *testing.T) {
 	t.Parallel()
@@ -70,7 +86,7 @@ func TestContainerManagerConcurrentRefreshAndRead(t *testing.T) {
 func newStubDockerClient(t *testing.T) (*docker.Client, func()) {
 	t.Helper()
 
-	socketPath := filepath.Join(t.TempDir(), "docker.sock")
+	socketPath := shortSocketPath(t)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatalf("listen on unix socket: %v", err)

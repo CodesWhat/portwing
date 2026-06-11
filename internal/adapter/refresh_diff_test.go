@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -151,7 +150,7 @@ func assertContainerIDs(t *testing.T, containers []Container, want []string) {
 func newDynamicDockerClient(t *testing.T) (*docker.Client, *dynamicDockerFixture, func()) {
 	t.Helper()
 
-	socketPath := filepath.Join(t.TempDir(), "docker.sock")
+	socketPath := shortSocketPath(t)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatalf("listen on unix socket: %v", err)
