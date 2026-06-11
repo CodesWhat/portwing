@@ -1,14 +1,23 @@
 package server
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/lookout/internal/audit"
+	"github.com/codeswhat/lookout/internal/auth"
 )
 
 // noAudit returns a disabled audit.Logger for tests that only care about HTTP
@@ -394,6 +403,192 @@ func TestAuthMiddlewarePreservesStreamingInterfaces(t *testing.T) {
 	}
 	if !sawHijacker {
 		t.Error("http.Hijacker lost through AuthMiddleware (no-auth mode)")
+	}
+}
+
+// ---- Ed25519 middleware integration tests ---------------------------------
+
+// setupEd25519 creates an Ed25519 keypair, writes the authorized_keys file,
+// returns a loaded Ed25519Config plus the private key.
+func setupEd25519(t *testing.T) (Ed25519Config, ed25519.PrivateKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	b64 := base64.StdEncoding.EncodeToString(pub)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "authorized_keys")
+	if err := os.WriteFile(path, []byte("ed25519 "+b64+" testkey\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	reg := auth.NewKeyRegistry(path)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg := Ed25519Config{
+		Registry:       reg,
+		Nonces:         auth.NewNonceLRU(1000, 60),
+		MaxSkewSeconds: 60,
+	}
+	return cfg, priv
+}
+
+// signEd25519Request attaches Ed25519 headers to req.
+func signEd25519Request(t *testing.T, req *http.Request, body []byte, priv ed25519.PrivateKey, tsUnix int64, nonce string) {
+	t.Helper()
+	pub := priv.Public().(ed25519.PublicKey)
+	bodyHash := auth.BodyHashHex(body)
+	msg := auth.CanonicalMessage(req.Method, req.URL.Path, bodyHash, tsUnix, nonce)
+	sig := ed25519.Sign(priv, msg)
+
+	h := sha256.Sum256(pub)
+	keyID := hex.EncodeToString(h[:8])
+
+	req.Header.Set(auth.HeaderKeyID, keyID)
+	req.Header.Set(auth.HeaderTimestamp, strconv.FormatInt(tsUnix, 10))
+	req.Header.Set(auth.HeaderNonce, nonce)
+	req.Header.Set(auth.HeaderSignature, base64.RawURLEncoding.EncodeToString(sig))
+}
+
+func freshNonce(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	return hex.EncodeToString(b)
+}
+
+// TestEd25519MiddlewareAccept verifies a correctly signed request is accepted.
+func TestEd25519MiddlewareAccept(t *testing.T) {
+	t.Parallel()
+	ed, priv := setupEd25519(t)
+	rl := NewRateLimiter()
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
+
+	req := httptest.NewRequest(http.MethodGet, "/_lookout/info", nil)
+	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+// TestEd25519MiddlewareTokenFallback verifies that if no Ed25519 config is set,
+// the token verifier is still used.
+func TestEd25519MiddlewareTokenFallback(t *testing.T) {
+	t.Parallel()
+	rl := NewRateLimiter()
+	verifier := &rawTokenVerifier{token: "mysecret"}
+	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), http.HandlerFunc(okHandler))
+
+	req := httptest.NewRequest(http.MethodGet, "/path", nil)
+	req.Header.Set("X-Lookout-Token", "mysecret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for token fallback, got %d", rec.Code)
+	}
+}
+
+// TestEd25519MiddlewareBothConfigured verifies that when both Ed25519 and token
+// are configured, a signed request uses the Ed25519 path (not the token path).
+func TestEd25519MiddlewareBothConfigured(t *testing.T) {
+	t.Parallel()
+	ed, priv := setupEd25519(t)
+	rl := NewRateLimiter()
+	verifier := &rawTokenVerifier{token: "mysecret"}
+	h := rl.AuthMiddlewareWithEd25519(verifier, ed, noAudit(t), http.HandlerFunc(okHandler))
+
+	req := httptest.NewRequest(http.MethodGet, "/path", nil)
+	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
+	// Do not set the token — should succeed via Ed25519 alone.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 via Ed25519 when both configured, got %d", rec.Code)
+	}
+}
+
+// TestEd25519MiddlewareBadTimestamp verifies that a skewed timestamp returns
+// 401 with X-Lookout-Reason: timestamp-skew.
+func TestEd25519MiddlewareBadTimestamp(t *testing.T) {
+	t.Parallel()
+	ed, priv := setupEd25519(t)
+	rl := NewRateLimiter()
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
+
+	req := httptest.NewRequest(http.MethodGet, "/path", nil)
+	signEd25519Request(t, req, nil, priv, time.Now().Unix()-200, freshNonce(t))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	if got := rec.Header().Get(auth.HeaderReason); got != "timestamp-skew" {
+		t.Errorf("X-Lookout-Reason: got %q want %q", got, "timestamp-skew")
+	}
+}
+
+// TestEd25519MiddlewareReplayedNonce verifies replay protection.
+func TestEd25519MiddlewareReplayedNonce(t *testing.T) {
+	t.Parallel()
+	ed, priv := setupEd25519(t)
+	rl := NewRateLimiter()
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
+
+	nonce := freshNonce(t)
+	tsUnix := time.Now().Unix()
+
+	req1 := httptest.NewRequest(http.MethodGet, "/path", nil)
+	signEd25519Request(t, req1, nil, priv, tsUnix, nonce)
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d", rec1.Code)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/path", nil)
+	signEd25519Request(t, req2, nil, priv, tsUnix, nonce)
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("replayed request: expected 401, got %d", rec2.Code)
+	}
+	if got := rec2.Header().Get(auth.HeaderReason); got != "replay" {
+		t.Errorf("X-Lookout-Reason: got %q want %q", got, "replay")
+	}
+}
+
+// TestEd25519MiddlewareUnknownKey verifies that an unknown key returns 401.
+func TestEd25519MiddlewareUnknownKey(t *testing.T) {
+	t.Parallel()
+	ed, _ := setupEd25519(t)
+	rl := NewRateLimiter()
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
+
+	// Generate a key that is NOT in the registry.
+	_, priv2, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/path", nil)
+	signEd25519Request(t, req, nil, priv2, time.Now().Unix(), freshNonce(t))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unknown key, got %d", rec.Code)
+	}
+	if got := rec.Header().Get(auth.HeaderReason); got != "unknown-key" {
+		t.Errorf("X-Lookout-Reason: got %q want %q", got, "unknown-key")
 	}
 }
 

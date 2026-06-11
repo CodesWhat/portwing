@@ -2,8 +2,10 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/subtle"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/codeswhat/lookout/internal/audit"
+	"github.com/codeswhat/lookout/internal/auth"
 )
 
 // tokenVerifier is the interface used by AuthMiddleware to verify a presented
@@ -162,6 +165,120 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 
 		// Check Authorization: Bearer first, then X-Lookout-Token, then the
 		// Drydock-compatible X-Dd-Agent-Secret.
+		provided := bearerToken(r)
+		if provided == "" {
+			provided = r.Header.Get("X-Lookout-Token")
+		}
+		if provided == "" {
+			provided = r.Header.Get("X-Dd-Agent-Secret")
+		}
+
+		if !verifier.Verify(provided) {
+			rl.RecordFailure(clientIP)
+			slog.Warn("authentication failed", "ip", clientIP)
+			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+	})
+}
+
+// Ed25519Config holds the optional Ed25519 verifier parameters for
+// AuthMiddlewareWithEd25519. When Registry is nil the Ed25519 path is skipped
+// and the middleware behaves identically to AuthMiddleware.
+type Ed25519Config struct {
+	Registry       *auth.KeyRegistry
+	Nonces         *auth.NonceLRU
+	MaxSkewSeconds int
+}
+
+// AuthMiddlewareWithEd25519 is AuthMiddleware extended with an optional Ed25519
+// verification path. When an incoming request carries X-Lookout-Signature it
+// is verified via Ed25519; otherwise the request falls through to the token
+// verifier. Either path (ed25519 or token) must succeed for the request to
+// proceed.
+//
+// The body is consumed and buffered for signature verification; the downstream
+// handler sees a fresh reader.
+func (rl *RateLimiter) AuthMiddlewareWithEd25519(
+	verifier tokenVerifier,
+	ed Ed25519Config,
+	auditor *audit.Logger,
+	next http.Handler,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// No authentication configured - pass through.
+		if verifier == nil && ed.Registry == nil {
+			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			return
+		}
+
+		clientIP := rl.clientIP(r)
+
+		if rl.IsRateLimited(clientIP) {
+			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+			return
+		}
+
+		// If Ed25519 is configured and the request carries a signature, use
+		// that path exclusively. Reading the body first is required because
+		// VerifyRequest needs it for the canonical message.
+		if ed.Registry != nil && r.Header.Get(auth.HeaderSignature) != "" {
+			// Buffer the body.
+			var body []byte
+			if r.Body != nil {
+				var err error
+				body, err = io.ReadAll(io.LimitReader(r.Body, 64*1024*1024))
+				r.Body.Close()
+				if err != nil {
+					http.Error(w, "reading request body", http.StatusBadRequest)
+					return
+				}
+				// Restore for downstream handlers.
+				r.Body = io.NopCloser(bytes.NewReader(body))
+			}
+
+			skew := ed.MaxSkewSeconds
+			if skew <= 0 {
+				skew = 60
+			}
+			keyID, err := auth.VerifyRequest(r, body, ed.Registry, ed.Nonces, skew)
+			if err != nil {
+				rl.RecordFailure(clientIP)
+				slog.Warn("ed25519 authentication failed",
+					"ip", clientIP, "reason", auth.ReasonFor(err))
+				auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+				w.Header().Set(auth.HeaderReason, auth.ReasonFor(err))
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			slog.Debug("ed25519 authentication succeeded", "key_id", keyID, "ip", clientIP)
+			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			return
+		}
+
+		// Fall through to token verifier.
+		if verifier == nil {
+			// Ed25519 was configured but request had no signature, and there
+			// is no token verifier — authentication required but none presented.
+			rl.RecordFailure(clientIP)
+			slog.Warn("authentication failed: no credentials presented", "ip", clientIP)
+			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		provided := bearerToken(r)
 		if provided == "" {
 			provided = r.Header.Get("X-Lookout-Token")
