@@ -1,0 +1,113 @@
+---
+# Lefthook configuration for lookout.
+#
+# Pre-push pipeline (piped = sequential, fail-fast):
+#   1. Clean-tree check (no stray artifacts before push)
+#   2. GoReleaser snapshot dry-run (full release pipeline, skip publish)
+#   3. golangci-lint
+#   4. go test -race
+#   5. govulncheck (reachable CVEs in deps + stdlib)
+#   6. Go fuzz smoke (5 s per fuzzer, all 5 fuzzers) — tier 0 of the fuzz
+#      strategy. Catches broken fuzz drivers and stale seed corpora before
+#      the push leaves the machine. Real coverage tiers live in
+#      .github/workflows/ci.yml (60 s, every push/PR) and
+#      quality-fuzz-nightly.yml (5 m, daily).
+#   7. actionlint + zizmor (workflow correctness + security)
+#
+# Tools that may not be installed locally (goreleaser, govulncheck,
+# actionlint, zizmor) are skipped when absent — CI still enforces them.
+
+commit-msg:
+  commands:
+    convention:
+      run: scripts/validate-commit-msg.sh {1}
+      fail_text: "Commit message does not follow emoji conventional commit format"
+
+pre-commit:
+  piped: true
+  commands:
+    gofmt:
+      glob: "*.go"
+      run: |
+        out="$(gofmt -l {staged_files})"
+        if [ -n "$out" ]; then
+          echo "gofmt needed on:"
+          echo "$out"
+          exit 1
+        fi
+
+pre-push:
+  piped: true
+  commands:
+    clean-tree:
+      run: |
+        if ! git diff --quiet --exit-code || ! git diff --cached --quiet --exit-code; then
+          echo "Uncommitted changes detected — commit or stash before pushing."
+          exit 1
+        fi
+      fail_text: "Uncommitted changes detected"
+      priority: 0
+      timeout: 10s
+
+    # Full release dry-run — mirrors what release.yml runs in CI, minus
+    # publish. Catches goreleaser config, build, archive, and dirty-tree
+    # bugs locally before they surface in a tagged release.
+    goreleaser-snapshot:
+      run: goreleaser release --snapshot --clean --skip=sign,docker,publish,sbom
+      skip:
+        - run: '! command -v goreleaser >/dev/null 2>&1'
+      priority: 1
+      timeout: 3m
+
+    go-lint:
+      run: golangci-lint run
+      skip:
+        - run: '! command -v golangci-lint >/dev/null 2>&1'
+      priority: 2
+      timeout: 2m
+
+    go-test:
+      run: go test -race ./...
+      priority: 3
+      timeout: 5m
+
+    govulncheck:
+      run: govulncheck ./...
+      skip:
+        - run: '! command -v govulncheck >/dev/null 2>&1'
+      priority: 4
+      timeout: 2m
+
+    # Fuzz smoke — 5 s per fuzzer, all 5 in series. Keep a finite Go
+    # watchdog above the tiny smoke budget so a hung input fails with a
+    # stack dump instead of consuming the hook timeout.
+    go-fuzz:
+      run: |
+        set -e
+        for entry in \
+          "FuzzParsePHC ./internal/server/" \
+          "FuzzParseTrustedProxies ./internal/server/" \
+          "FuzzParseImageRef ./internal/adapter/" \
+          "FuzzParseLabels ./internal/adapter/drydock/" \
+          "FuzzMCPHandler ./internal/mcp/"; do
+          set -- $entry
+          go test -run='^$' -fuzz="^$1\$" -fuzztime=5s -timeout=1m "$2"
+        done
+      priority: 5
+      timeout: 3m
+
+    actionlint:
+      glob: '.github/workflows/*.yml'
+      run: actionlint
+      skip:
+        - run: '! command -v actionlint >/dev/null 2>&1'
+      priority: 6
+      timeout: 30s
+
+    zizmor:
+      glob: '.github/workflows/*.yml'
+      run: zizmor .github/workflows/
+      skip:
+        - run: '! command -v zizmor >/dev/null 2>&1'
+      priority: 7
+      timeout: 30s
