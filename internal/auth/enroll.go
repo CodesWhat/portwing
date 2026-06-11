@@ -26,11 +26,11 @@ type enrollResponse struct {
 
 // Enroller handles one-shot Model C enrollment. It is safe for concurrent use.
 type Enroller struct {
-	mu              sync.Mutex
-	token           string // burned after first successful use; zero-valued when burned
-	authorizedFile  string // path to the authorized_keys file to append to
-	registry        *KeyRegistry
-	burned          bool
+	mu             sync.Mutex
+	token          string // burned after first successful use; zero-valued when burned
+	authorizedFile string // path to the authorized_keys file to append to
+	registry       *KeyRegistry
+	burned         bool
 }
 
 // NewEnroller creates an Enroller. token is the pre-configured enrollment
@@ -135,4 +135,3 @@ func appendKeyLine(path, line string) error {
 	_, err = fmt.Fprintln(f, line)
 	return err
 }
-
