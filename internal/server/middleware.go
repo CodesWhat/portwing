@@ -188,7 +188,9 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 }
 
 // rateLimitOnly wraps a handler with rate limiting (by IP) but no auth check.
-// This is used for the enrollment endpoint which does its own credential check.
+// This is used for the enrollment endpoint which does its own credential
+// check. Downstream 401 responses are recorded as failures so the endpoint
+// cannot be brute-forced past the limiter.
 func (rl *RateLimiter) rateLimitOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientIP := rl.clientIP(r)
@@ -196,7 +198,11 @@ func (rl *RateLimiter) rateLimitOnly(next http.Handler) http.Handler {
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
-		next.ServeHTTP(w, r)
+		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		if rw.code == http.StatusUnauthorized {
+			rl.RecordFailure(clientIP)
+		}
 	})
 }
 

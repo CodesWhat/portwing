@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -321,5 +323,38 @@ func TestReasonFor(t *testing.T) {
 				t.Errorf("ReasonFor(%v) = %q, want %q", tc.err, got, tc.reason)
 			}
 		})
+	}
+}
+
+// TestVerifyRequest_ConcurrentReplay fires N copies of the same signed
+// request concurrently and asserts exactly one is accepted. This guards the
+// atomic check-and-set in the nonce LRU: a Seen()-then-Add() pair that is not
+// atomic would let two racing copies both pass.
+func TestVerifyRequest_ConcurrentReplay(t *testing.T) {
+	t.Parallel()
+
+	registry, lru, pub, priv := testSetup(t)
+	tsUnix := time.Now().Unix()
+	nonce := randomNonce(t)
+
+	const n = 16
+	var wg sync.WaitGroup
+	var accepted atomic.Int32
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, "/api/containers", nil)
+			signRequest(t, req, nil, priv, pub, tsUnix, nonce)
+			if _, err := VerifyRequest(req, nil, registry, lru, 60); err == nil {
+				accepted.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := accepted.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 accepted request, got %d", got)
 	}
 }

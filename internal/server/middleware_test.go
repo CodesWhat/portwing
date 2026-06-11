@@ -592,6 +592,38 @@ func TestEd25519MiddlewareUnknownKey(t *testing.T) {
 	}
 }
 
+// TestRateLimitOnlyRecordsFailures verifies that the enrollment guard counts
+// downstream 401s toward the rate limit, so the enrollment token cannot be
+// brute-forced past the limiter.
+func TestRateLimitOnlyRecordsFailures(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	deny := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+	h := rl.rateLimitOnly(deny)
+
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", nil)
+		req.RemoteAddr = "192.0.2.9:40000"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401, got %d", i, rec.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", nil)
+	req.RemoteAddr = "192.0.2.9:40000"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after 10 enrollment failures, got %d", rec.Code)
+	}
+}
+
 // helpers
 
 func readFile(path string) (string, error) {

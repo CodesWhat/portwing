@@ -11,8 +11,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/codeswhat/lookout/internal/adapter"
@@ -89,6 +91,20 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 			Nonces:         auth.NewNonceLRU(cfg.NonceLRUSize, cfg.MaxClockSkewSeconds),
 			MaxSkewSeconds: cfg.MaxClockSkewSeconds,
 		}
+
+		// Reload authorized_keys on SIGHUP so keys can be rotated or revoked
+		// without a restart. The nonce LRU is preserved across reloads.
+		hup := make(chan os.Signal, 1)
+		signal.Notify(hup, syscall.SIGHUP)
+		go func() {
+			for range hup {
+				if err := reg.Load(); err != nil {
+					slog.Error("SIGHUP: authorized_keys reload failed", "error", err)
+					continue
+				}
+				slog.Info("SIGHUP: authorized_keys reloaded", "keys", reg.Len())
+			}
+		}()
 	}
 
 	// Set up enrollment handler if ENROLLMENT_TOKEN is configured.
@@ -98,6 +114,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 			return nil, fmt.Errorf("ENROLLMENT_TOKEN requires AUTHORIZED_KEYS to be set")
 		}
 		enroller = auth.NewEnroller(cfg.EnrollmentToken, cfg.AuthorizedKeysFile, ed25519Cfg.Registry)
+		enroller.OnResult = auditor.Enrollment
 	}
 
 	s := &Server{

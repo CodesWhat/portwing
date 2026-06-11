@@ -161,8 +161,12 @@ func VerifyRequest(
 		return "", ErrBadSignature
 	}
 
-	// Record nonce only after successful verification.
-	lru.Add(nonceHeader)
+	// Record the nonce after successful verification. Add is the
+	// authoritative atomic check-and-set: if two copies of the same request
+	// race past the Seen() pre-check above, only one wins here.
+	if !lru.Add(nonceHeader) {
+		return "", ErrNonceReplay
+	}
 
 	return kidHeader, nil
 }
