@@ -17,12 +17,12 @@ type LabelParser func(labels map[string]string) LabelResult
 
 // LabelResult holds the parsed label values used by the container manager.
 type LabelResult struct {
-	DisplayName  string
-	DisplayIcon  string
-	IncludeTags  string
-	ExcludeTags  string
+	DisplayName   string
+	DisplayIcon   string
+	IncludeTags   string
+	ExcludeTags   string
 	TransformTags string
-	Watcher      string
+	Watcher       string
 }
 
 // HelloExtension carries adapter-specific fields merged into the hello

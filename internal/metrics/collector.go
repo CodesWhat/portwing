@@ -294,4 +294,3 @@ func (c *Collector) collectUptime() uint64 {
 
 	return uint64(uptime)
 }
-
