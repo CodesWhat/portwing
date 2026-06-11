@@ -15,10 +15,10 @@ type Adapter struct{}
 
 func New() *Adapter { return &Adapter{} }
 
-func (a *Adapter) Name() string              { return "generic" }
-func (a *Adapter) Capabilities() []string     { return nil }
+func (a *Adapter) Name() string                            { return "generic" }
+func (a *Adapter) Capabilities() []string                  { return nil }
 func (a *Adapter) HelloExtension() *adapter.HelloExtension { return nil }
-func (a *Adapter) PollInterval() int          { return 0 }
+func (a *Adapter) PollInterval() int                       { return 0 }
 
 func (a *Adapter) OnConnect(_ context.Context, _ adapter.MessageSender) error {
 	return nil
