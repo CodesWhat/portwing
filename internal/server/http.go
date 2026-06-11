@@ -126,6 +126,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	mux.Handle("GET /_lookout/info", auth(s.handleInfo))
 	mux.Handle("POST /_lookout/compose", auth(s.handleCompose))
+	mux.Handle("GET /_lookout/metrics", auth(s.handleMetrics))
+	mux.Handle("GET /metrics", auth(s.handleMetrics))
 
 	// Adapter-specific routes.
 	s.adapter.RegisterRoutes(mux, auth)
