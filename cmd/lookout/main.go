@@ -103,7 +103,7 @@ func main() {
 func selectAdapter(cfg *config.Config, dockerClient *docker.Client) adapter.Adapter {
 	switch cfg.Adapter {
 	case "generic":
-		return generic.New()
+		return generic.New(dockerClient, cfg.AgentName)
 	case "drydock":
 		return drydock.NewAdapter(dockerClient, cfg.AgentName)
 	default:

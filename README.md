@@ -54,6 +54,72 @@ docker run -d \
 curl -fsSL https://raw.githubusercontent.com/codeswhat/lookout/main/scripts/install.sh | bash
 ```
 
+## Standalone (Generic) Mode
+
+Run Lookout without any external controller by setting `ADAPTER=generic`.
+You get a clean REST + SSE API on `/api/v1/*` backed directly by the local
+Docker daemon — no Drydock account required.
+
+```bash
+docker run -d \
+  --name lookout \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e ADAPTER=generic \
+  -e TOKEN=my-secret \
+  -p 3000:3000 \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/v1/version` | Agent version, protocol info |
+| `GET /api/v1/containers` | Cached container inventory |
+| `GET /api/v1/containers/{id}/logs` | Container logs (`tail`, `since`, `until`, `follow`) |
+| `GET /api/v1/events` | SSE stream of Docker lifecycle events |
+
+### curl examples
+
+```bash
+TOKEN=my-secret
+
+# Agent version
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/v1/version | jq .
+
+# Container inventory
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/v1/containers | jq .
+
+# Last 50 log lines from a container
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?tail=50"
+
+# Stream container logs live
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?follow=1"
+
+# Stream Docker lifecycle events (SSE)
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/events
+```
+
+Each SSE event is a JSON object:
+
+```json
+{
+  "ts": "2026-06-11T10:00:00Z",
+  "type": "container",
+  "action": "start",
+  "containerId": "abc123def456",
+  "name": "my-container",
+  "image": "nginx:latest",
+  "labels": { "app": "web" }
+}
+```
+
+A comment heartbeat line (`: heartbeat`) is written every 30 seconds to keep
+the connection alive through proxies.
+
 ## Connection Modes
 
 ### Standard Mode
@@ -119,6 +185,12 @@ Lookout initiates an outbound WebSocket connection to DockPilot.
 | `MAX_RECONNECT_DELAY` | `60` | Max reconnect delay (seconds) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `SKIP_DF_COLLECTION` | -- | Disable disk metrics |
+
+### Adapter
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADAPTER` | `drydock` | Adapter to use: `drydock` (Drydock-compatible) or `generic` (standalone REST/SSE) |
 
 ### Drydock Compatibility
 
