@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"crypto/subtle"
 	"fmt"
 	"log/slog"
@@ -183,7 +184,9 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 	})
 }
 
-// statusRecorder wraps ResponseWriter to capture the status code.
+// statusRecorder wraps ResponseWriter to capture the status code. It must
+// forward Flush and Hijack so SSE streaming and Docker exec/attach hijacking
+// keep working through the middleware chain.
 type statusRecorder struct {
 	http.ResponseWriter
 	code int
@@ -192,6 +195,24 @@ type statusRecorder struct {
 func (sr *statusRecorder) WriteHeader(code int) {
 	sr.code = code
 	sr.ResponseWriter.WriteHeader(code)
+}
+
+func (sr *statusRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := sr.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+// Unwrap supports http.ResponseController.
+func (sr *statusRecorder) Unwrap() http.ResponseWriter {
+	return sr.ResponseWriter
 }
 
 // ms returns elapsed milliseconds since start as a float64.

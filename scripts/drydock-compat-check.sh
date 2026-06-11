@@ -9,6 +9,10 @@
 #   TOKEN  Shared secret (X-Dd-Agent-Secret / X-Lookout-Token)
 #          If omitted, no auth header is sent (works when Lookout runs without a token).
 #
+# Environment (used when the positional argument is omitted):
+#   LOOKOUT_URL    Same as HOST
+#   LOOKOUT_TOKEN  Same as TOKEN (TOKEN env var also accepted)
+#
 # Requirements: curl, jq
 #
 # Exit codes:
@@ -17,8 +21,8 @@
 
 set -euo pipefail
 
-HOST="${1:-http://localhost:3000}"
-TOKEN="${2:-}"
+HOST="${1:-${LOOKOUT_URL:-http://localhost:3000}}"
+TOKEN="${2:-${LOOKOUT_TOKEN:-${TOKEN:-}}}"
 
 PASS=0
 FAIL=0
@@ -30,12 +34,8 @@ red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 
-auth_header() {
-  if [[ -n "$TOKEN" ]]; then
-    printf '%s' "-H \"X-Dd-Agent-Secret: ${TOKEN}\""
-  fi
-}
-
+# Note: ${arr[@]+...} expansions keep bash 3.2 (macOS default) happy under
+# set -u when an array is empty.
 curl_api() {
   local url="$1"; shift
   local extra_args=("$@")
@@ -43,7 +43,10 @@ curl_api() {
   if [[ -n "$TOKEN" ]]; then
     auth_args=(-H "X-Dd-Agent-Secret: ${TOKEN}")
   fi
-  curl -sf --max-time 10 "${auth_args[@]}" "${extra_args[@]}" "${HOST}${url}"
+  curl -sf --max-time 10 \
+    ${auth_args[@]+"${auth_args[@]}"} \
+    ${extra_args[@]+"${extra_args[@]}"} \
+    "${HOST}${url}"
 }
 
 assert() {
@@ -163,11 +166,6 @@ fi
 
 bold "5. GET /api/watchers/unknown/missing (should 404)"
 
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-  $( [[ -n "$TOKEN" ]] && printf '%s' "-H \"X-Dd-Agent-Secret: ${TOKEN}\"" ) \
-  "${HOST}/api/watchers/unknown/missing" 2>/dev/null) || HTTP_CODE="000"
-
-# Re-run without eval to avoid quoting issues
 if [[ -n "$TOKEN" ]]; then
   HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
     -H "X-Dd-Agent-Secret: ${TOKEN}" \
@@ -215,11 +213,11 @@ AUTH_ARGS=()
 [[ -n "$TOKEN" ]] && AUTH_ARGS+=(-H "X-Dd-Agent-Secret: ${TOKEN}")
 
 SSE_HEADERS=$(curl -sf --max-time 5 -D - -o /dev/null \
-  "${AUTH_ARGS[@]}" \
+  ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
   "${HOST}/api/events" 2>/dev/null || true)
 
-CT=$(printf '%s' "$SSE_HEADERS" | grep -i 'content-type:' | head -1 | tr -d '\r')
-CC=$(printf '%s' "$SSE_HEADERS" | grep -i 'cache-control:' | head -1 | tr -d '\r')
+CT=$(printf '%s' "$SSE_HEADERS" | grep -i 'content-type:' | head -1 | tr -d '\r') || true
+CC=$(printf '%s' "$SSE_HEADERS" | grep -i 'cache-control:' | head -1 | tr -d '\r') || true
 
 if printf '%s' "$CT" | grep -qi 'text/event-stream'; then
   assert "/api/events Content-Type: text/event-stream" "pass"
@@ -238,10 +236,10 @@ fi
 bold "9. GET /api/events dd:ack event shape"
 
 SSE_BODY=$(curl -sf --max-time 5 \
-  "${AUTH_ARGS[@]}" \
+  ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
   "${HOST}/api/events" 2>/dev/null || true)
 
-ACK_LINE=$(printf '%s' "$SSE_BODY" | grep '^data:' | head -1 | sed 's/^data: //')
+ACK_LINE=$(printf '%s' "$SSE_BODY" | grep '^data:' | head -1 | sed 's/^data: //') || true
 
 if [[ -n "$ACK_LINE" ]]; then
   ACK_TYPE=$(printf '%s' "$ACK_LINE" | jq -r '.type // empty' 2>/dev/null)
