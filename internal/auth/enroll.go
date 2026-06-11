@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -31,6 +32,11 @@ type Enroller struct {
 	authorizedFile string // path to the authorized_keys file to append to
 	registry       *KeyRegistry
 	burned         bool
+
+	// OnResult, when non-nil, is invoked after every enrollment attempt with
+	// the client address, the derived key ID ("" when unavailable), and the
+	// outcome ("allowed" or "denied"). Used for audit logging.
+	OnResult func(actor, keyID, outcome string)
 }
 
 // NewEnroller creates an Enroller. token is the pre-configured enrollment
@@ -62,19 +68,23 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actor := remoteHost(r)
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	// Refuse if token already burned.
 	if e.burned || e.token == "" {
-		slog.Warn("enrollment attempt after token burned")
+		slog.Warn("enrollment attempt after token burned", "actor", actor)
+		e.notify(actor, "", "denied")
 		http.Error(w, "enrollment token already used", http.StatusUnauthorized)
 		return
 	}
 
 	// Constant-time token comparison.
 	if subtle.ConstantTimeCompare([]byte(req.EnrollmentToken), []byte(e.token)) != 1 {
-		slog.Warn("enrollment failed: wrong token")
+		slog.Warn("enrollment failed: wrong token", "actor", actor)
+		e.notify(actor, "", "denied")
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -107,14 +117,13 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Key was written; continue — next SIGHUP will pick it up.
 	}
 
-	// Burn the token: zero it in memory and set burned flag.
-	for i := range []byte(e.token) {
-		_ = i // zero not possible on string; set to empty string
-	}
+	// Burn the token. Go strings are immutable so the secret cannot be wiped
+	// in place; dropping the only reference is the best available.
 	e.token = ""
 	e.burned = true
 
-	slog.Info("enrollment successful", "key_id", keyID)
+	slog.Info("enrollment successful", "key_id", keyID, "actor", actor)
+	e.notify(actor, keyID, "allowed")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -122,6 +131,21 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		KeyID:   keyID,
 		Comment: comment,
 	})
+}
+
+// notify invokes the OnResult callback if configured.
+func (e *Enroller) notify(actor, keyID, outcome string) {
+	if e.OnResult != nil {
+		e.OnResult(actor, keyID, outcome)
+	}
+}
+
+// remoteHost extracts the host portion of the request's remote address.
+func remoteHost(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // appendKeyLine appends a single key line to the authorized_keys file,
