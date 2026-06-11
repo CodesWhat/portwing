@@ -26,7 +26,7 @@ func shortSocketPath(t *testing.T) (string, func()) {
 	if err != nil {
 		t.Fatalf("mkdirtemp: %v", err)
 	}
-	cleanup := func() { os.RemoveAll(dir) }
+	cleanup := func() { _ = os.RemoveAll(dir) }
 	return filepath.Join(dir, "d.sock"), cleanup
 }
 
@@ -95,7 +95,7 @@ func newStubMetricsDockerClient(
 
 	client, err := docker.NewClient(sockPath, 5)
 	if err != nil {
-		srv.Close()
+		_ = srv.Close()
 		cleanup()
 		t.Fatalf("new docker client: %v", err)
 	}

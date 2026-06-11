@@ -13,7 +13,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/codeswhat/lookout/internal/adapter"
@@ -47,9 +46,6 @@ type Server struct {
 	verifier     tokenVerifier
 	httpServer   *http.Server
 	startTime    time.Time
-
-	execSessions sync.Map
-	streamCount  atomic.Int64
 }
 
 // NewServer creates and configures a new standard-mode Server.
@@ -160,7 +156,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": status,
 		"docker": dockerStatus,
 	})
@@ -170,7 +166,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": "ok",
 	})
 }
@@ -206,7 +202,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	_ = json.NewEncoder(w).Encode(info)
 }
 
 // handleCompose dispatches Docker Compose operations.
@@ -224,7 +220,7 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // handleDockerProxy is the transparent Docker API proxy. It forwards requests
@@ -271,7 +267,8 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	if isStream {
 		s.streamResponse(w, resp.Body)
 	} else {
-		io.Copy(w, resp.Body)
+		// io.Copy to a ResponseWriter: errors indicate a dropped client connection.
+		_, _ = io.Copy(w, resp.Body)
 	}
 }
 
@@ -294,7 +291,8 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 	// Connect to Docker daemon.
 	dockerConn, err := net.Dial("unix", s.dockerClient.GetSocketPath())
 	if err != nil {
-		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		// Best-effort 502 write; client may have already gone.
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 	defer dockerConn.Close()
@@ -308,7 +306,7 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 	rawReq += fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), string(body))
 
 	if _, err := dockerConn.Write([]byte(rawReq)); err != nil {
-		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 
@@ -316,29 +314,29 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 	dockerBuf := bufio.NewReader(dockerConn)
 	resp, err := http.ReadResponse(dockerBuf, nil)
 	if err != nil {
-		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 
 	// Forward the response status to the client.
-	resp.Write(clientConn)
+	_ = resp.Write(clientConn)
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		return
 	}
 
-	// Bidirectional proxy.
+	// Bidirectional proxy; io.Copy errors just mean one side closed.
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		io.Copy(dockerConn, clientBuf)
+		_, _ = io.Copy(dockerConn, clientBuf)
 	}()
 
 	go func() {
 		defer wg.Done()
-		io.Copy(clientConn, dockerBuf)
+		_, _ = io.Copy(clientConn, dockerBuf)
 	}()
 
 	wg.Wait()
@@ -372,7 +370,8 @@ func (s *Server) streamResponse(w http.ResponseWriter, body io.Reader) {
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
-			w.Write(buf[:n])
+			// Write to ResponseWriter: errors indicate a dropped client connection.
+			_, _ = w.Write(buf[:n])
 			if canFlush {
 				flusher.Flush()
 			}
@@ -424,6 +423,8 @@ func (s *Server) pollContainers() {
 			continue
 		}
 		// In standard mode, sender is nil — adapter handles SSE internally.
-		s.adapter.OnContainerRefresh(ctx, nil, added, updated, removed)
+		if err := s.adapter.OnContainerRefresh(ctx, nil, added, updated, removed); err != nil {
+			slog.Error("container refresh notify failed", "error", err)
+		}
 	}
 }

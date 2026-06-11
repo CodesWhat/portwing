@@ -15,7 +15,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -57,7 +56,6 @@ type Client struct {
 	connMu sync.Mutex
 
 	execSessions sync.Map
-	streamCount  atomic.Int64
 
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
@@ -82,7 +80,9 @@ func (c *Client) Run(ctx context.Context) error {
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		c.healthServer.Shutdown(shutdownCtx)
+		if err := c.healthServer.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("health server shutdown error", "error", err)
+		}
 	}()
 
 	delay := time.Duration(c.cfg.ReconnectDelay) * time.Second
@@ -98,7 +98,8 @@ func (c *Client) Run(ctx context.Context) error {
 			// Shutting down - send close frame if we still have a connection.
 			c.connMu.Lock()
 			if c.conn != nil {
-				c.conn.WriteMessage(
+				// Best-effort close frame on shutdown; ignore send errors.
+				_ = c.conn.WriteMessage(
 					websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shutdown"),
 				)
@@ -356,9 +357,8 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Debug("invalid ping message", "error", err)
 				continue
 			}
-			c.sendTypedMessage(protocol.TypePong, protocol.PongMessage{
-				Timestamp: ping.Timestamp,
-			})
+			// Best-effort pong reply; connection loss will surface on next read.
+			_ = c.sendTypedMessage(protocol.TypePong, protocol.PongMessage(ping))
 
 		default:
 			// Delegate to adapter for unrecognized message types.
@@ -389,7 +389,8 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 	}
 
 	if err != nil {
-		c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+		// Best-effort error reply; connection loss will surface on the read pump.
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
 		})
@@ -404,8 +405,8 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 	}
 
 	if isStream {
-		// Send initial response header.
-		c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		// Send initial response header; best-effort — connection loss surfaces on the read pump.
+		_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
 			RequestID:   req.RequestID,
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
@@ -419,7 +420,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			n, readErr := resp.Body.Read(buf)
 			if n > 0 {
 				encoded := base64.StdEncoding.EncodeToString(buf[:n])
-				c.sendTypedMessage(protocol.TypeStream, protocol.StreamMessage{
+				_ = c.sendTypedMessage(protocol.TypeStream, protocol.StreamMessage{
 					RequestID: req.RequestID,
 					Data:      encoded,
 				})
@@ -429,7 +430,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			}
 		}
 
-		c.sendTypedMessage(protocol.TypeStreamEnd, protocol.StreamEndMessage{
+		_ = c.sendTypedMessage(protocol.TypeStreamEnd, protocol.StreamEndMessage{
 			RequestID: req.RequestID,
 			Reason:    "complete",
 		})
@@ -437,7 +438,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 		// Read body (capped).
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 
-		c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
 			RequestID:   req.RequestID,
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
@@ -475,8 +476,8 @@ func (c *Client) writePump(ctx context.Context) {
 			// Send metrics.
 			c.sendMetrics()
 
-			// Send keepalive ping.
-			c.sendTypedMessage(protocol.TypePing, protocol.PingMessage{
+			// Send keepalive ping; best-effort — connection loss surfaces on the read pump.
+			_ = c.sendTypedMessage(protocol.TypePing, protocol.PingMessage{
 				Timestamp: time.Now().UnixMilli(),
 			})
 
@@ -487,7 +488,9 @@ func (c *Client) writePump(ctx context.Context) {
 				slog.Warn("container refresh failed", "error", err)
 				continue
 			}
-			c.adapter.OnContainerRefresh(ctx, sender, added, updated, removed)
+			if err := c.adapter.OnContainerRefresh(ctx, sender, added, updated, removed); err != nil {
+				slog.Warn("container refresh notify failed", "error", err)
+			}
 		}
 	}
 }
@@ -499,7 +502,8 @@ func (c *Client) sendMetrics() {
 		slog.Debug("metrics collection failed", "error", err)
 		return
 	}
-	c.sendTypedMessage(protocol.TypeMetrics, m)
+	// Best-effort metrics send; connection loss surfaces on the read pump.
+	_ = c.sendTypedMessage(protocol.TypeMetrics, m)
 }
 
 // sendTypedMessage wraps data in an Envelope and sends it over the WebSocket.
@@ -537,7 +541,7 @@ func (c *Client) startHealthServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_lookout/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "healthy",
 		})
 	})

@@ -7,21 +7,19 @@ import (
 )
 
 func TestGetWatcherComponentsReturnsProtocolDescriptors(t *testing.T) {
-	components := GetWatcherComponents()
-
-	// Compile-time guard: the drydock API should expose protocol descriptors directly.
-	var typed []protocol.ComponentDescriptor = components
-	if len(typed) == 0 {
+	// Compile-time guard: the drydock API must expose protocol descriptors directly.
+	//nolint:staticcheck // ST1023: explicit type annotation is the point of this guard.
+	var components []protocol.ComponentDescriptor = GetWatcherComponents()
+	if len(components) == 0 {
 		t.Fatalf("expected at least one watcher component")
 	}
 }
 
 func TestGetTriggerComponentsReturnsProtocolDescriptors(t *testing.T) {
-	components := GetTriggerComponents()
-
-	// Compile-time guard: the drydock API should expose protocol descriptors directly.
-	var typed []protocol.ComponentDescriptor = components
-	if typed == nil {
+	// Compile-time guard: the drydock API must expose protocol descriptors directly.
+	//nolint:staticcheck // ST1023: explicit type annotation is the point of this guard.
+	var components []protocol.ComponentDescriptor = GetTriggerComponents()
+	if components == nil {
 		t.Fatalf("expected non-nil trigger slice")
 	}
 }

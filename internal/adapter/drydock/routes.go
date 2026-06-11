@@ -27,7 +27,7 @@ func (a *Adapter) RegisterRoutes(mux *http.ServeMux, auth func(http.HandlerFunc)
 func (a *Adapter) handleContainers(w http.ResponseWriter, r *http.Request) {
 	containers := a.containers.GetContainers()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(containers)
+	_ = json.NewEncoder(w).Encode(containers)
 }
 
 func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
@@ -102,18 +102,18 @@ func (a *Adapter) handleContainerDelete(w http.ResponseWriter, r *http.Request) 
 
 func (a *Adapter) handleWatchers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(GetWatcherComponents())
+	_ = json.NewEncoder(w).Encode(GetWatcherComponents())
 }
 
 func (a *Adapter) handleTriggers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(GetTriggerComponents())
+	_ = json.NewEncoder(w).Encode(GetTriggerComponents())
 }
 
 func (a *Adapter) handleWatcherPoll(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":   "not implemented in v1.0",
 		"message": "registry checking is performed by the Drydock controller",
 	})
@@ -122,7 +122,7 @@ func (a *Adapter) handleWatcherPoll(w http.ResponseWriter, r *http.Request) {
 func (a *Adapter) handleWatcherContainer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":   "not implemented in v1.0",
 		"message": "registry checking is performed by the Drydock controller",
 	})
@@ -131,7 +131,7 @@ func (a *Adapter) handleWatcherContainer(w http.ResponseWriter, r *http.Request)
 func (a *Adapter) handleTriggerExec(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":   "not implemented in v1.0",
 		"message": "registry checking is performed by the Drydock controller",
 	})
@@ -140,7 +140,7 @@ func (a *Adapter) handleTriggerExec(w http.ResponseWriter, r *http.Request) {
 func (a *Adapter) handleTriggerBatch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":   "not implemented in v1.0",
 		"message": "registry checking is performed by the Drydock controller",
 	})
