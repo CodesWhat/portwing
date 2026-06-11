@@ -39,8 +39,8 @@ Lookout's structural advantages cannot be replicated by Hawser or any other agen
 | Per-client asymmetric key auth | No | No | mTLS enrollment | **WIN** (Ed25519, auto-rotate) | mTLS | No |
 | Rate limiting | Yes | No | Not documented | No | Yes | No |
 | Sockguard (request-body inspection) | **WIN** (sibling project) | No | No | No | No | Recommended (Tecnativa) |
-| Cosign-signed releases | No | No | Yes | No | No | No |
-| SBOM published | No | No | Yes | No | No | No |
+| Cosign-signed releases | **WIN** (v0.2.0+) | No | Yes | No | No | No |
+| SBOM published | **WIN** (v0.2.0+) | No | Yes | No | No | No |
 | Wolfi/scratch image | **WIN** | No (standard base) | Distroless | No | No | No |
 | Static binary, zero dependencies | **WIN** | Partial | No (binary + frontend) | No (Rust + MongoDB) | No | No (Node.js) |
 | No internal state database | **WIN** | Partial | No (SQLite) | No (MongoDB required) | No (Portainer DB) | No (SQLite) |
@@ -64,8 +64,8 @@ Lookout's structural advantages cannot be replicated by Hawser or any other agen
 | Compose path-traversal guard | **WIN** | Not documented | Not documented | Not documented | CVE-44885 |
 | Request-body-inspecting socket proxy | **WIN** (sockguard) | No | No | No | No |
 | Wolfi/scratch image | **WIN** | No | Distroless | No | No |
-| Cosign-signed releases | No | No | Yes | No | No |
-| SBOM | No | No | Yes | No | No |
+| Cosign-signed releases | **WIN** (v0.2.0+) | No | Yes | No | No |
+| SBOM | **WIN** (v0.2.0+) | No | Yes | No | No |
 | CVE history | None | None | 1 (fixed) | None | 9 in 2026 |
 
 ### Indirect Competitors
@@ -99,7 +99,7 @@ Lookout's structural advantages cannot be replicated by Hawser or any other agen
 
 ---
 
-### Phase 1.5: Release Integrity & Community Visibility (v0.2.0 — In Progress)
+### Phase 1.5: Release Integrity & Community Visibility (v0.2.0 — Complete)
 
 Without these, no P2–P7 feature will get evaluated. Supply-chain gaps block enterprise admission controllers. No API docs blocks developer adoption. No metrics endpoint blocks the existing Grafana user base. This is the actual launch phase.
 
@@ -109,7 +109,7 @@ Without these, no P2–P7 feature will get evaluated. Supply-chain gaps block en
 - [x] **OpenAPI 3.1 specification**: All current endpoints documented; published in-repo and rendered at docs URL
 - [x] **Prometheus `/metrics` endpoint**: Host metrics + per-container CPU/memory/net I/O in cAdvisor-compatible format, token-authenticated
 - [x] **Security model documentation**: Named controls (proxy-first architecture, Compose path-traversal guard, env denylist, flag injection filter), CVE mapping table, supply-chain verification instructions
-- [x] **Watchtower migration guide**: `WATCHTOWER.md` covering Lookout + Drydock as the replacement stack, targeting the migrating 36k-star user base
+- [x] **Watchtower migration guide**: `docs/migrating-from-watchtower.md` covering Lookout + Drydock as the replacement stack, targeting the migrating 36k-star user base
 - [x] **Argon2id token-at-rest**: Stored token value hashed with Argon2id, replacing plaintext config storage
 
 ---
