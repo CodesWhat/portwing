@@ -150,6 +150,75 @@ and Docker HEALTHCHECK instructions.
 | `/_lookout/compose` | POST | Yes | Docker Compose operations |
 | `/_lookout/metrics` | GET | Yes | Prometheus metrics (agent-scoped) |
 | `/metrics` | GET | Yes | Prometheus metrics (compat alias) |
+| `/_lookout/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol 2025-11-25) |
+
+### MCP — AI Assistant Integration
+
+Lookout exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io/) endpoint
+at `POST /_lookout/mcp`. AI assistants (Claude, Cursor, Windsurf, or any MCP client) can query
+live container state through this endpoint using their standard tool-call flow.
+
+**Protocol:** MCP 2025-11-25 — Streamable HTTP, stateless single-request mode, `Content-Type: application/json`.
+
+**Available tools:**
+
+| Tool | Description |
+|------|-------------|
+| `list_containers` | All containers — id, names, image, state, status, labels |
+| `inspect_container(id)` | State, image, env-var count (values never exposed), mounts, networks, restart policy |
+| `container_logs(id, tail)` | Last N lines of stdout/stderr (max 500) |
+| `host_metrics` | CPU, memory, disk, network, uptime snapshot |
+| `container_stats(id)` | One-shot CPU/memory/network stats for a container |
+
+**Credential hygiene:** `inspect_container` returns only the *count* of environment variables —
+values are never transmitted, preventing accidental secret leakage.
+
+#### Add to Claude Desktop (claude_desktop_config.json)
+
+```json
+{
+  "mcpServers": {
+    "lookout": {
+      "command": "curl",
+      "args": ["-s", "-X", "POST",
+               "-H", "Content-Type: application/json",
+               "-H", "Authorization: Bearer YOUR_LOOKOUT_TOKEN",
+               "http://your-host:3000/_lookout/mcp"],
+      "type": "http",
+      "url": "http://your-host:3000/_lookout/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_LOOKOUT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+#### Add via claude mcp add (CLI)
+
+```bash
+claude mcp add --transport http \
+  --header "Authorization: Bearer YOUR_LOOKOUT_TOKEN" \
+  lookout http://your-host:3000/_lookout/mcp
+```
+
+#### .mcp.json (project-level, Cursor / Windsurf / any client)
+
+```json
+{
+  "mcpServers": {
+    "lookout": {
+      "type": "http",
+      "url": "http://your-host:3000/_lookout/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_LOOKOUT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+Replace `YOUR_LOOKOUT_TOKEN` with the value you set in `TOKEN` / `TOKEN_FILE` / `TOKEN_HASH`.
 
 ### Drydock-Compatible Endpoints
 
