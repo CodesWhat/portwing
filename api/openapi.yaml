@@ -349,6 +349,62 @@ components:
         error:
           type: string
 
+    GenericVersionResponse:
+      type: object
+      required: [agentVersion, protocolName, protocolVersion, adapter]
+      description: Generic adapter version and protocol metadata.
+      properties:
+        agentVersion:
+          type: string
+          example: "0.1.0"
+        protocolName:
+          type: string
+          example: "lookout"
+        protocolVersion:
+          type: string
+          example: "1.0"
+        adapter:
+          type: string
+          example: "generic"
+
+    GenericEvent:
+      type: object
+      required: [ts, type, action, containerId, name, image]
+      description: Generic Docker lifecycle event envelope (ADAPTER=generic SSE stream).
+      properties:
+        ts:
+          type: string
+          format: date-time
+          description: Event timestamp in RFC 3339 UTC.
+          example: "2026-06-11T10:00:00Z"
+        type:
+          type: string
+          description: Docker object type (always "container" for this stream).
+          example: "container"
+        action:
+          type: string
+          description: Docker event action (create, start, stop, die, kill, etc.).
+          example: "start"
+        containerId:
+          type: string
+          description: Container ID from the Docker actor.
+          example: "abc123def456"
+        name:
+          type: string
+          description: Container name from event attributes.
+          example: "my-container"
+        image:
+          type: string
+          description: Image name from event attributes.
+          example: "nginx:latest"
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            User-defined container labels from event attributes. Synthetic
+            Docker keys (name, image, exitCode, etc.) are stripped.
+
 paths:
   /health:
     get:
@@ -900,6 +956,163 @@ paths:
         "401":
           description: Missing or invalid token.
 
+  /api/v1/version:
+    get:
+      operationId: getGenericVersion
+      summary: Agent version and protocol info (generic adapter)
+      description: >
+        Returns agent version, protocol name/version, and the active adapter
+        name. Available when `ADAPTER=generic`. No platform integration required.
+      tags: [Generic]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Version metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericVersionResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/v1/containers:
+    get:
+      operationId: getGenericContainers
+      summary: Container inventory (generic adapter)
+      description: >
+        Returns the cached container inventory built from the Docker daemon.
+        Available when `ADAPTER=generic`. The response shape is the same
+        `Container` model used by the Drydock-compatible endpoints.
+      tags: [Generic]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Array of containers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Container'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/v1/containers/{id}/logs:
+    get:
+      operationId: getGenericContainerLogs
+      summary: Container logs (generic adapter)
+      description: >
+        Returns demuxed container logs (Docker's 8-byte stream multiplexing
+        header is stripped). Supports optional tailing, time filtering, and
+        live following. Available when `ADAPTER=generic`.
+      tags: [Generic]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Container ID or name.
+          example: "abc123def456"
+        - name: tail
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          description: Number of lines from the end to return.
+          example: 100
+        - name: since
+          in: query
+          schema:
+            type: string
+          description: Show logs since this timestamp (RFC3339) or relative duration.
+          example: "2026-01-01T00:00:00Z"
+        - name: until
+          in: query
+          schema:
+            type: string
+          description: Show logs before this timestamp or duration.
+        - name: follow
+          in: query
+          schema:
+            type: string
+            enum: ["0", "1", "true", "false"]
+          description: Stream logs in real time with chunked transfer encoding.
+      responses:
+        "200":
+          description: Log output (plain text, demuxed).
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Invalid `tail` value.
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Error retrieving logs from Docker.
+
+  /api/v1/events:
+    get:
+      operationId: getGenericEvents
+      summary: Docker lifecycle event stream (generic adapter)
+      description: >
+        Server-Sent Events stream of Docker container lifecycle events in a
+        stable generic envelope. Available when `ADAPTER=generic`.
+
+        Each event is a JSON object on a `data:` line followed by a blank line
+        (standard SSE format). A comment heartbeat (`": heartbeat"`) is sent
+        every 30 seconds to keep the connection alive. The stream reconnects
+        internally with exponential backoff if Docker becomes unavailable.
+
+        Client disconnect cleanly terminates the stream.
+
+        **Event actions** (from `allowedActions` in `internal/docker/events.go`):
+        `create`, `start`, `stop`, `die`, `kill`, `restart`, `pause`,
+        `unpause`, `destroy`, `rename`, `update`, `oom`, `health_status`.
+
+        **Example stream:**
+        ```
+        data: {"ts":"2026-06-11T10:00:00Z","type":"container","action":"start","containerId":"abc123","name":"my-app","image":"nginx:latest"}
+
+        : heartbeat
+
+        data: {"ts":"2026-06-11T10:00:30Z","type":"container","action":"die","containerId":"abc123","name":"my-app","image":"nginx:latest","labels":{"app":"web"}}
+        ```
+      tags: [Generic]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: SSE stream opened.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >
+                  Newline-delimited SSE frames. Each `data:` frame contains a
+                  `GenericEvent` JSON object.
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Streaming not supported by server.
+
   /v1.44/{path}:
     x-docker-proxy: true
     get:
@@ -952,5 +1165,9 @@ tags:
     description: Prometheus-format host and agent metrics.
   - name: Drydock Compat
     description: Drydock-compatible REST and SSE endpoints (`/api/*`).
+  - name: Generic
+    description: >
+      Standalone headless management API (`/api/v1/*`). Active when
+      `ADAPTER=generic`. No external controller required.
   - name: Docker Proxy
     description: Transparent proxy to the local Docker Engine API.
