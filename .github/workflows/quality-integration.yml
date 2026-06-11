@@ -1,0 +1,65 @@
+name: "🐋 Quality: Integration"
+run-name: >-
+  ${{
+    github.event_name == 'schedule' && '🐋 Quality: Integration — Daily' ||
+    github.event_name == 'pull_request' && format('🐋 Quality: Integration — PR #{0}', github.event.pull_request.number) ||
+    format('🐋 Quality: Integration — Manual by {0}', github.actor)
+  }}
+
+# Runs the build-tagged integration suite against the Linux dockerd
+# preinstalled on the GitHub-hosted runner. Tests exercise a real Lookout
+# server (TOKEN auth, drydock adapter) pointed at /var/run/docker.sock.
+# No dind — the runner's Docker is configured the way a production host would be.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 6 * * *'  # 06:15 UTC daily
+  pull_request:
+    paths:
+      - 'internal/docker/**'
+      - 'internal/adapter/**'
+      - 'internal/server/**'
+      - '.github/workflows/quality-integration.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: "🐋 Integration (real dockerd)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: "1.26"
+
+      - name: Verify Docker daemon is reachable
+        run: |
+          docker version
+          docker info --format 'ServerVersion={{.ServerVersion}}'
+
+      - name: Pre-pull alpine sentinel image
+        run: docker pull alpine:3.20
+
+      - name: Run integration suite
+        env:
+          LOOKOUT_TEST_DOCKER_SOCKET: /var/run/docker.sock
+        run: go test -tags=integration -count=1 -timeout=10m -race ./internal/integration/
