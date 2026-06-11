@@ -13,7 +13,9 @@ import (
 func (a *Adapter) handleContainers(w http.ResponseWriter, _ *http.Request) {
 	containers := a.containers.GetContainers()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(containers)
+	if err := json.NewEncoder(w).Encode(containers); err != nil {
+		slog.Error("failed to encode containers response", "error", err)
+	}
 }
 
 func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
