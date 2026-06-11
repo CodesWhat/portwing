@@ -192,3 +192,32 @@ func TestArgon2VerifierSuccessCache(t *testing.T) {
 		t.Fatal("wrong token should not verify")
 	}
 }
+
+// TestParsePHCRejectsBelowMinimumParams verifies parameters below the argon2
+// library minimums are rejected at parse time instead of panicking at verify.
+func TestParsePHCRejectsBelowMinimumParams(t *testing.T) {
+	t.Parallel()
+
+	phc, err := HashToken("sometoken")
+	if err != nil {
+		t.Fatalf("HashToken: %v", err)
+	}
+
+	cases := map[string]struct {
+		old, new string
+	}{
+		"zero time":        {"t=2", "t=0"},
+		"zero parallelism": {"p=1", "p=0"},
+		"memory too low":   {"m=19456", "m=4"},
+	}
+
+	for name, c := range cases {
+		bad := strings.Replace(phc, c.old, c.new, 1)
+		if bad == phc {
+			t.Fatalf("%s: replacement %q not found in PHC", name, c.old)
+		}
+		if _, err := ParsePHC(bad); err == nil {
+			t.Errorf("%s: expected error, got nil", name)
+		}
+	}
+}

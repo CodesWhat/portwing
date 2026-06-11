@@ -11,15 +11,16 @@ import (
 
 type Config struct {
 	// Connection
-	DrydockURL    string
-	Token         string
-	TokenHash     string
-	CACert        string
-	TLSSkipVerify bool
-	Port          string
-	BindAddress   string
-	TLSCert       string
-	TLSKey        string
+	DrydockURL     string
+	Token          string
+	TokenHash      string
+	CACert         string
+	TLSSkipVerify  bool
+	Port           string
+	BindAddress    string
+	TLSCert        string
+	TLSKey         string
+	TrustedProxies []string
 
 	// Docker
 	DockerSocket string
@@ -107,15 +108,16 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		DrydockURL:    drydockURL,
-		Token:         token,
-		TokenHash:     tokenHash,
-		CACert:        getEnv("CA_CERT", ""),
-		TLSSkipVerify: getEnvBool("TLS_SKIP_VERIFY", false),
-		Port:          getEnv("PORT", "3000"),
-		BindAddress:   getEnv("BIND_ADDRESS", "0.0.0.0"),
-		TLSCert:       getEnv("TLS_CERT", ""),
-		TLSKey:        getEnv("TLS_KEY", ""),
+		DrydockURL:     drydockURL,
+		Token:          token,
+		TokenHash:      tokenHash,
+		CACert:         getEnv("CA_CERT", ""),
+		TLSSkipVerify:  getEnvBool("TLS_SKIP_VERIFY", false),
+		Port:           getEnv("PORT", "3000"),
+		BindAddress:    getEnv("BIND_ADDRESS", "0.0.0.0"),
+		TLSCert:        getEnv("TLS_CERT", ""),
+		TLSKey:         getEnv("TLS_KEY", ""),
+		TrustedProxies: splitCSV(getEnv("TRUSTED_PROXIES", "")),
 
 		DockerSocket: dockerSocket,
 		DockerHost:   getEnv("DOCKER_HOST", ""),
@@ -200,6 +202,19 @@ func getEnvBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func loadTokenFile(path string) (string, error) {
