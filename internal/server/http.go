@@ -80,6 +80,14 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		startTime:    time.Now(),
 	}
 
+	if len(cfg.TrustedProxies) > 0 {
+		nets, err := ParseTrustedProxies(cfg.TrustedProxies)
+		if err != nil {
+			return nil, fmt.Errorf("parsing TRUSTED_PROXIES: %w", err)
+		}
+		s.rateLimiter.SetTrustedProxies(nets)
+	}
+
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 

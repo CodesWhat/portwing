@@ -92,6 +92,7 @@ Lookout initiates an outbound WebSocket connection to DockPilot.
 | `BIND_ADDRESS` | `0.0.0.0` | Bind address |
 | `TLS_CERT` | -- | Server TLS certificate (Standard mode) |
 | `TLS_KEY` | -- | Server TLS key (Standard mode) |
+| `TRUSTED_PROXIES` | -- | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` is trusted; unset means forwarding headers are ignored |
 
 ### Docker
 

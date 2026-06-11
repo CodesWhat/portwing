@@ -110,6 +110,18 @@ func parseParams(s string) (*Argon2idParams, error) {
 			return nil, fmt.Errorf("argon2id: unknown parameter %q", kv[0])
 		}
 	}
+
+	// argon2.IDKey panics on parameters below its minimums; reject them at
+	// parse time so a malformed PHC fails at startup, not per request.
+	if p.Time < 1 {
+		return nil, fmt.Errorf("argon2id: time parameter must be >= 1")
+	}
+	if p.Parallelism < 1 {
+		return nil, fmt.Errorf("argon2id: parallelism parameter must be >= 1")
+	}
+	if p.Memory < 8*uint32(p.Parallelism) {
+		return nil, fmt.Errorf("argon2id: memory parameter must be >= 8*parallelism KiB")
+	}
 	return p, nil
 }
 

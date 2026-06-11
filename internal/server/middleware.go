@@ -35,6 +35,8 @@ type RateLimiter struct {
 	maxFails int
 	window   time.Duration
 	maxIPs   int
+
+	trustedProxies []*net.IPNet
 }
 
 type ipAttempts struct {
@@ -124,8 +126,8 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 // token before calling next. If verifier is nil, authentication is disabled
 // and all requests are passed through.
 //
-// The middleware checks the X-Lookout-Token header first, then falls back to
-// X-Dd-Agent-Secret for Drydock backwards compatibility.
+// The middleware checks Authorization: Bearer first, then X-Lookout-Token,
+// then X-Dd-Agent-Secret for Drydock backwards compatibility.
 //
 // Rate limiting is applied before verification, so failed attempts are always
 // counted regardless of whether the verifier uses a raw token or Argon2id.
@@ -137,7 +139,7 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, next http.Handler)
 			return
 		}
 
-		clientIP := getClientIP(r)
+		clientIP := rl.clientIP(r)
 
 		// Rate-limit check happens BEFORE verification. This ensures that failed
 		// attempts accumulate in the limiter even for expensive Argon2id paths,
@@ -147,8 +149,12 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, next http.Handler)
 			return
 		}
 
-		// Check X-Lookout-Token first, then fall back to X-Dd-Agent-Secret.
-		provided := r.Header.Get("X-Lookout-Token")
+		// Check Authorization: Bearer first, then X-Lookout-Token, then the
+		// Drydock-compatible X-Dd-Agent-Secret.
+		provided := bearerToken(r)
+		if provided == "" {
+			provided = r.Header.Get("X-Lookout-Token")
+		}
 		if provided == "" {
 			provided = r.Header.Get("X-Dd-Agent-Secret")
 		}
@@ -184,24 +190,89 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// getClientIP extracts the client IP address from the request, checking
-// X-Forwarded-For and X-Real-IP headers before falling back to RemoteAddr.
-func getClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For can contain multiple IPs; the first is the client.
-		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
+// bearerToken extracts a token from the Authorization header if it uses the
+// Bearer scheme.
+func bearerToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
+		return strings.TrimSpace(auth[7:])
+	}
+	return ""
+}
+
+// SetTrustedProxies configures the CIDR ranges whose forwarding headers are
+// trusted when extracting the client IP. It must be called before the server
+// starts handling requests. With no trusted proxies (the default),
+// X-Forwarded-For and X-Real-IP are ignored so spoofed headers cannot evade
+// rate limiting.
+func (rl *RateLimiter) SetTrustedProxies(nets []*net.IPNet) {
+	rl.trustedProxies = nets
+}
+
+// ParseTrustedProxies parses CIDR strings into networks for
+// SetTrustedProxies. Bare IPs are treated as /32 (or /128 for IPv6).
+func ParseTrustedProxies(entries []string) ([]*net.IPNet, error) {
+	nets := make([]*net.IPNet, 0, len(entries))
+	for _, e := range entries {
+		s := strings.TrimSpace(e)
+		if s == "" {
+			continue
 		}
-		return strings.TrimSpace(xff)
+		if !strings.Contains(s, "/") {
+			if ip := net.ParseIP(s); ip != nil {
+				if ip.To4() != nil {
+					s += "/32"
+				} else {
+					s += "/128"
+				}
+			}
+		}
+		_, n, err := net.ParseCIDR(s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy %q: %w", e, err)
+		}
+		nets = append(nets, n)
+	}
+	return nets, nil
+}
+
+// clientIP extracts the client IP for rate-limiting purposes. Forwarding
+// headers are only consulted when the direct peer is a trusted proxy; the
+// X-Forwarded-For chain is then walked right to left and the first hop that
+// is not itself a trusted proxy wins.
+func (rl *RateLimiter) clientIP(r *http.Request) string {
+	remote := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		remote = host
 	}
 
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
+	remoteIP := net.ParseIP(remote)
+	if remoteIP == nil || !ipInNets(remoteIP, rl.trustedProxies) {
+		return remote
 	}
 
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		hops := strings.Split(xff, ",")
+		for i := len(hops) - 1; i >= 0; i-- {
+			hop := strings.TrimSpace(hops[i])
+			if ip := net.ParseIP(hop); ip != nil && !ipInNets(ip, rl.trustedProxies) {
+				return hop
+			}
+		}
 	}
-	return host
+
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
+	}
+
+	return remote
+}
+
+func ipInNets(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
