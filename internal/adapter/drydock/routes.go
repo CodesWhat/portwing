@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // RegisterRoutes registers Drydock-specific HTTP routes.
@@ -17,7 +18,9 @@ func (a *Adapter) RegisterRoutes(mux *http.ServeMux, auth func(http.HandlerFunc)
 	mux.Handle("GET /api/containers/{id}/logs", auth(a.handleContainerLogs))
 	mux.Handle("DELETE /api/containers/{id}", auth(a.handleContainerDelete))
 	mux.Handle("GET /api/watchers", auth(a.handleWatchers))
+	mux.Handle("GET /api/watchers/{type}/{name}", auth(a.handleWatcherGet))
 	mux.Handle("GET /api/triggers", auth(a.handleTriggers))
+	mux.Handle("GET /api/log/entries", auth(a.handleLogEntries))
 	mux.Handle("POST /api/watchers/{type}/{name}", auth(a.handleWatcherPoll))
 	mux.Handle("POST /api/watchers/{type}/{name}/container/{id}", auth(a.handleWatcherContainer))
 	mux.Handle("POST /api/triggers/{type}/{name}", auth(a.handleTriggerExec))
@@ -105,9 +108,35 @@ func (a *Adapter) handleWatchers(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(GetWatcherComponents())
 }
 
+// handleWatcherGet returns a single watcher descriptor by type and name.
+// Called by Drydock's AgentClient.getWatcher() (AgentClient.ts:1552).
+func (a *Adapter) handleWatcherGet(w http.ResponseWriter, r *http.Request) {
+	watcherType := r.PathValue("type")
+	watcherName := r.PathValue("name")
+
+	for _, watcher := range GetWatcherComponents() {
+		if strings.EqualFold(watcher.Type, watcherType) && strings.EqualFold(watcher.Name, watcherName) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(watcher)
+			return
+		}
+	}
+
+	http.Error(w, fmt.Sprintf("watcher %s/%s not found", watcherType, watcherName), http.StatusNotFound)
+}
+
 func (a *Adapter) handleTriggers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(GetTriggerComponents())
+}
+
+// handleLogEntries returns an empty log entry array.
+// Drydock calls GET /api/log/entries (AgentClient.ts:1503) to populate the
+// agent log viewer. Lookout has no in-memory log buffer; returning [] is safe
+// and prevents 404 errors in Drydock's log panel.
+func (a *Adapter) handleLogEntries(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode([]struct{}{})
 }
 
 func (a *Adapter) handleWatcherPoll(w http.ResponseWriter, r *http.Request) {
