@@ -13,6 +13,7 @@ type Config struct {
 	// Connection
 	DrydockURL    string
 	Token         string
+	TokenHash     string
 	CACert        string
 	TLSSkipVerify bool
 	Port          string
@@ -66,6 +67,25 @@ func Load() (*Config, error) {
 		token = t
 	}
 
+	// Support TOKEN_HASH / TOKEN_HASH_FILE
+	tokenHash := getEnv("TOKEN_HASH", "")
+	if tokenHashFile := getEnv("TOKEN_HASH_FILE", ""); tokenHashFile != "" {
+		h, err := loadTokenFile(tokenHashFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading TOKEN_HASH_FILE: %w", err)
+		}
+		tokenHash = h
+	}
+
+	if token != "" && tokenHash != "" {
+		return nil, fmt.Errorf("TOKEN and TOKEN_HASH are mutually exclusive: choose one")
+	}
+
+	drydockURL := getEnv("DRYDOCK_URL", "")
+	if drydockURL != "" && token == "" && tokenHash != "" {
+		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires a raw TOKEN, not TOKEN_HASH: edge mode must present the credential to the platform")
+	}
+
 	agentID := getEnv("AGENT_ID", "")
 	if agentID == "" {
 		agentID = uuid.New().String()
@@ -87,8 +107,9 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		DrydockURL:    getEnv("DRYDOCK_URL", ""),
+		DrydockURL:    drydockURL,
 		Token:         token,
+		TokenHash:     tokenHash,
 		CACert:        getEnv("CA_CERT", ""),
 		TLSSkipVerify: getEnvBool("TLS_SKIP_VERIFY", false),
 		Port:          getEnv("PORT", "3000"),
