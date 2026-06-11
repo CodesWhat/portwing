@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -139,7 +140,7 @@ func TestVerifyRequest_BadSignature(t *testing.T) {
 	req.Header.Set(HeaderSignature, base64.RawURLEncoding.EncodeToString(make([]byte, 64)))
 
 	_, err := VerifyRequest(req, nil, reg, lru, 60)
-	if err != ErrBadSignature {
+	if !errors.Is(err, ErrBadSignature) {
 		t.Errorf("expected ErrBadSignature, got: %v", err)
 	}
 }
@@ -155,7 +156,7 @@ func TestVerifyRequest_SkewedTimestamp(t *testing.T) {
 	signRequest(t, req, nil, priv, pub, tsUnix, nonce)
 
 	_, err := VerifyRequest(req, nil, reg, lru, 60)
-	if err != ErrTimestampSkew {
+	if !errors.Is(err, ErrTimestampSkew) {
 		t.Errorf("expected ErrTimestampSkew, got: %v", err)
 	}
 }
@@ -178,7 +179,7 @@ func TestVerifyRequest_ReplayedNonce(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
 	signRequest(t, req2, nil, priv, pub, tsUnix, nonce)
 	_, err := VerifyRequest(req2, nil, reg, lru, 60)
-	if err != ErrNonceReplay {
+	if !errors.Is(err, ErrNonceReplay) {
 		t.Errorf("expected ErrNonceReplay, got: %v", err)
 	}
 }
@@ -199,7 +200,7 @@ func TestVerifyRequest_UnknownKey(t *testing.T) {
 	signRequest(t, req, nil, priv2, pub2, tsUnix, nonce)
 
 	_, err = VerifyRequest(req, nil, reg, lru, 60)
-	if err != ErrUnknownKey {
+	if !errors.Is(err, ErrUnknownKey) {
 		t.Errorf("expected ErrUnknownKey, got: %v", err)
 	}
 }
@@ -211,7 +212,7 @@ func TestVerifyRequest_MissingHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
 	// No signature headers at all.
 	_, err := VerifyRequest(req, nil, reg, lru, 60)
-	if err != ErrMissingHeaders {
+	if !errors.Is(err, ErrMissingHeaders) {
 		t.Errorf("expected ErrMissingHeaders, got: %v", err)
 	}
 }
@@ -245,7 +246,7 @@ func TestVerifyRequest_MissingIndividualHeaders(t *testing.T) {
 			req := makeReq()
 			req.Header.Del(tc.remove)
 			_, err := VerifyRequest(req, nil, reg, lru, 60)
-			if err != ErrMissingHeaders {
+			if !errors.Is(err, ErrMissingHeaders) {
 				t.Errorf("expected ErrMissingHeaders, got: %v", err)
 			}
 		})
@@ -262,7 +263,7 @@ func TestVerifyRequest_InvalidNonceLength(t *testing.T) {
 	req.Header.Set(HeaderNonce, "short")
 
 	_, err := VerifyRequest(req, nil, reg, lru, 60)
-	if err != ErrInvalidNonce {
+	if !errors.Is(err, ErrInvalidNonce) {
 		t.Errorf("expected ErrInvalidNonce, got: %v", err)
 	}
 }
@@ -298,7 +299,7 @@ func TestVerifyRequest_BodyMismatch(t *testing.T) {
 
 	// Verify with a different body — signature should not match.
 	_, err := VerifyRequest(req, []byte(`{"key":"other"}`), reg, lru, 60)
-	if err != ErrBadSignature {
+	if !errors.Is(err, ErrBadSignature) {
 		t.Errorf("expected ErrBadSignature for body mismatch, got: %v", err)
 	}
 }
