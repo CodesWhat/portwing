@@ -1,0 +1,20 @@
+# Keep the build context to what the Dockerfile actually needs:
+# Go sources, go.mod/go.sum, and apko.yaml.
+.git/
+.github/
+.claude/
+.idea/
+.vscode/
+dist/
+docs/
+examples/
+scripts/
+api/
+*.md
+LICENSE
+Dockerfile
+.dockerignore
+.goreleaser.yml
+.golangci.yml
+zizmor.yml
+lefthook.yml

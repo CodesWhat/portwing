@@ -2,6 +2,11 @@ version: "2"
 
 linters:
   default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
   settings:
     errcheck:
       # Exclude close/teardown calls where the error is unactionable:
@@ -16,3 +21,55 @@ linters:
         - (net.Conn).SetReadDeadline
         - (*github.com/gorilla/websocket.Conn).Close
         - (*github.com/gorilla/websocket.Conn).SetReadDeadline
+    gosec:
+      excludes:
+        # G115: integer overflow on conversion — flagged on well-bounded Docker
+        # API values (size uint32 → int, port uint16 → uint16). The values are
+        # bounded by the Docker API spec; overflow is not possible in practice.
+        - G115
+        # G112: Slowloris — flagged on test-only http.Server fixtures that
+        # are bound to a random port and torn down at test end.
+        - G112
+        # G704, G703: SSRF/taint — the Docker proxy path intentionally forwards
+        # client requests to the local Docker socket; not a real SSRF.
+        - G704
+        - G703
+        # G204: subprocess — docker compose invocation is the product feature.
+        - G204
+        # G301, G306: docker-compose stack directories need broader perms;
+        # docker-compose YAML files must be world-readable for docker compose.
+        - G301
+        - G306
+        # G402: TLS InsecureSkipVerify is gated by explicit config (TLS_SKIP_VERIFY).
+        - G402
+        # G104: unhandled errors on Close/SetReadDeadline in shutdown paths
+        # are already covered by the errcheck exclude-functions list above.
+        - G104
+        # G304: file paths in audit log, config token file, and test fixtures come from
+        # operator configuration or test setup — not user-controlled input.
+        - G304
+        # G602: slice bounds check in config_test.go helper is statically safe
+        # (the slice is always populated in pairs by the test helper itself).
+        - G602
+        # G404: jitter in reconnect delay uses math/rand intentionally — this value
+        # is not security-sensitive; crypto/rand would be wasteful here.
+        - G404
+  exclusions:
+    rules:
+      # bodyclose: http.ReadResponse on hijacked Docker streaming connections
+      # returns a response whose body IS the wire stream — the caller owns the
+      # connection lifetime and must NOT close the body or it closes the stream.
+      - path: internal/docker/client\.go
+        linters:
+          - bodyclose
+      - path: internal/server/http\.go
+        linters:
+          - bodyclose
+      - path: internal/edge/client\.go
+        linters:
+          - bodyclose
+      # errorlint: http.ErrServerClosed is a sentinel never wrapped; != is
+      # the idiomatic Go HTTP server shutdown pattern.
+      - path: cmd/lookout/main\.go
+        linters:
+          - errorlint

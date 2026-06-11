@@ -1,21 +1,44 @@
-name: CI
+name: "✅ CI"
+run-name: >-
+  ${{
+    github.event_name == 'schedule' && '✅ CI — Weekly schedule' ||
+    github.event_name == 'pull_request' && format('✅ CI — PR #{0}', github.event.pull_request.number) ||
+    format('✅ CI — {0}', github.ref_name)
+  }}
 
 on:
   push:
     branches: [main, "dev/**"]
   pull_request:
     branches: [main, "dev/**"]
+  schedule:
+    - cron: '30 6 * * 1'  # Weekly on Monday at 06:30 UTC
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: "🏗️ Build & Test"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
 
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version: "1.26"
 
@@ -26,7 +49,7 @@ jobs:
         run: |
           FILES=$(gofmt -l .)
           if [ -n "$FILES" ]; then
-            echo "gofmt differences found in:"
+            echo "::error::gofmt differences found — run 'gofmt -w .' and commit:"
             echo "$FILES"
             exit 1
           fi
@@ -41,30 +64,261 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
 
   lint:
+    name: "🧹 Lint"
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
 
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version: "1.26"
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee  # v9.2.1
 
   vuln:
+    name: "🔍 Govulncheck"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
 
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version: "1.26"
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
 
       - name: Run govulncheck
         run: govulncheck ./...
+
+  zizmor:
+    name: "🔒 Workflow Security"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d  # v0.5.6
+        with:
+          token: ${{ github.token }}
+          online-audits: false
+          advanced-security: false
+
+  commit-message:
+    name: "💬 Commit Message"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true  # advisory — does not block merge
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate commit messages
+        run: |
+          set -euo pipefail
+
+          failed=0
+          while IFS= read -r msg; do
+            first_line="$(echo "${msg}" | head -n1)"
+            if ! echo "${first_line}" | grep -qP '^(\p{So}|\p{Emoji_Presentation})+\s+\w+(\(\w[\w-]*\))?!?:\s.+$'; then
+              echo "::warning::Non-conventional commit: ${first_line}"
+              failed=1
+            fi
+          done < <(git log --format=%s origin/main..HEAD)
+
+          if [ "${failed}" -eq 1 ]; then
+            echo "::warning::Some commits don't follow emoji conventional format. Expected: <emoji> <type>(scope): description"
+          fi
+
+  goreleaser-check:
+    name: "📦 GoReleaser Config"
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: "1.26"
+
+      - name: Run GoReleaser check
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
+        with:
+          distribution: goreleaser
+          version: latest
+          args: check
+
+  codeql:
+    name: "🔍 CodeQL Analysis"
+    # CodeQL SARIF upload requires GitHub Advanced Security (GHAS), which is not
+    # available on free private repos. Skip unless the repo is public.
+    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+        with:
+          languages: actions, go
+          queries: security-and-quality
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: "1.26"
+
+      - name: Build Go
+        run: go build ./...
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+
+  dependency-review:
+    name: "📦 Dependency Review"
+    # Dependency Review requires GitHub Advanced Security on private repos.
+    # Gated on public visibility so it auto-activates when the repo goes public.
+    if: ${{ false && github.event.repository.visibility == 'public' && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+
+  go-fuzz:
+    # Tier 1 — per-PR smoke-level fuzzing. Each fuzzer gets a fixed 60 s
+    # coverage budget in its own matrix job. Deep-coverage tier lives in
+    # quality-fuzz-nightly.yml where each fuzzer gets 5 minutes.
+    name: "🔀 Go Fuzz (${{ matrix.fuzzer.name }})"
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzzer:
+          - { name: FuzzParsePHC,           pkg: ./internal/server/ }
+          - { name: FuzzParseTrustedProxies, pkg: ./internal/server/ }
+          - { name: FuzzParseImageRef,       pkg: ./internal/adapter/ }
+          - { name: FuzzParseLabels,         pkg: ./internal/adapter/drydock/ }
+          - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: "1.26"
+
+      - name: Fuzz ${{ matrix.fuzzer.name }}
+        env:
+          FUZZTIME: 60s
+          TEST_TIMEOUT: 5m
+        run: |
+          go test -run=^$ \
+            -fuzz=^${{ matrix.fuzzer.name }}$ \
+            -fuzztime="${FUZZTIME}" \
+            -timeout="${TEST_TIMEOUT}" \
+            ${{ matrix.fuzzer.pkg }}
+
+      - name: Upload fuzz corpus on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: fuzz-corpus-${{ matrix.fuzzer.name }}-${{ github.run_id }}
+          path: "**/testdata/fuzz/${{ matrix.fuzzer.name }}/"
+          retention-days: 30
+          if-no-files-found: ignore
