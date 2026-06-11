@@ -1,6 +1,6 @@
 # Ed25519 Per-Client Key Authentication — Design
 
-**Status:** Draft  
+**Status:** Implemented (Phase 1)  
 **Author:** Wave 2 design team  
 **Branch:** `feat/ed25519-design`  
 **Date:** 2026-06-11  
@@ -117,7 +117,7 @@ The client signs the following canonical byte string (UTF-8, no trailing newline
 ```
 <METHOD>\n
 <PATH>\n
-<SHA-256 of request body, hex-encoded, or the literal string "e3b0c44298fc1c149afb" for empty body>\n
+<SHA-256 of request body, hex-encoded, or the full 64-char SHA-256 of the empty string "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" for empty body>\n
 <Unix timestamp, seconds, decimal>\n
 <Nonce, 32 hex bytes>
 ```
