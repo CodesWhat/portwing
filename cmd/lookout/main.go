@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 	"github.com/codeswhat/lookout/internal/adapter"
 	"github.com/codeswhat/lookout/internal/adapter/drydock"
 	"github.com/codeswhat/lookout/internal/audit"
+	"github.com/codeswhat/lookout/internal/auth"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
 	"github.com/codeswhat/lookout/internal/edge"
@@ -27,6 +30,11 @@ import (
 func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "hash-token" {
 		runHashToken()
+		return
+	}
+
+	if len(os.Args) >= 2 && os.Args[1] == "keygen" {
+		runKeygen(os.Args[2:])
 		return
 	}
 
@@ -124,6 +132,62 @@ func modeString(cfg *config.Config) string {
 		return "edge"
 	}
 	return "standard"
+}
+
+// runKeygen generates an Ed25519 keypair and prints the private key in PKCS#8
+// PEM format and the authorized_keys line to stdout. Prompts are written to
+// stderr so stdout output is unambiguous and pipe-friendly.
+//
+// Usage:
+//
+//	lookout keygen [-comment <text>]
+//	lookout keygen -pub-from <private.pem> [-comment <text>]
+func runKeygen(args []string) {
+	fs := flag.NewFlagSet("keygen", flag.ExitOnError)
+	comment := fs.String("comment", "", "Comment to embed in the authorized_keys line (optional)")
+	pubFrom := fs.String("pub-from", "", "Re-derive the authorized_keys line from an existing private key PEM file")
+
+	// Print usage to stderr.
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: lookout keygen [-comment <text>]")
+		fmt.Fprintln(os.Stderr, "       lookout keygen -pub-from <private.pem> [-comment <text>]")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Generates an Ed25519 keypair for use with AUTHORIZED_KEYS authentication.")
+		fmt.Fprintln(os.Stderr, "The private key (PEM PKCS#8) and authorized_keys line are written to stdout.")
+		fmt.Fprintln(os.Stderr)
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		os.Exit(1)
+	}
+
+	if *pubFrom != "" {
+		// Re-derive the authorized_keys line from an existing private key.
+		priv, err := auth.LoadPrivateKey(*pubFrom)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "keygen: %v\n", err)
+			os.Exit(1)
+		}
+		pub := priv.Public().(ed25519.PublicKey)
+		line := auth.AuthorizedKeyLine(pub, *comment)
+		fmt.Fprintln(os.Stderr, "# authorized_keys line (add to AUTHORIZED_KEYS file on agent host):")
+		fmt.Println(line)
+		return
+	}
+
+	// Generate a new keypair.
+	fmt.Fprintln(os.Stderr, "Generating Ed25519 keypair...")
+	privPEM, authKeyLine, err := auth.GenerateKeyPair(*comment)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "keygen: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintln(os.Stderr, "# Private key (PKCS#8 PEM) — store securely; set as PRIVATE_KEY_FILE on the client:")
+	fmt.Print(string(privPEM))
+	fmt.Fprintln(os.Stderr, "# authorized_keys line — add to AUTHORIZED_KEYS file on agent host:")
+	fmt.Println(authKeyLine)
 }
 
 // runHashToken reads a token from stdin, hashes it with Argon2id, and prints
