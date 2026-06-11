@@ -202,9 +202,9 @@ Store only an Argon2id hash so the plaintext token never appears in env dumps
 or config files:
 
 ```bash
-# Generate the hash
-lookout hash-token --token "$TOKEN"
-# $argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>
+# Generate the hash (token is read from stdin, never argv)
+HASH=$(printf '%s' "$TOKEN" | lookout hash-token)
+# $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 
 # Use the hash instead of the plaintext
 docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/lookout:latest
@@ -213,7 +213,7 @@ docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/lookout:latest
 Or write the hash to a file and use `TOKEN_HASH_FILE`:
 
 ```bash
-lookout hash-token --token "$TOKEN" > /run/secrets/lookout-token-hash
+printf '%s' "$TOKEN" | lookout hash-token > /run/secrets/lookout-token-hash
 docker run -e TOKEN_HASH_FILE=/run/secrets/lookout-token-hash ...
 ```
 
