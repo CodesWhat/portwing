@@ -118,6 +118,10 @@ func (a *Adapter) OnContainerRefresh(ctx context.Context, sender adapter.Message
 	for _, c := range removed {
 		a.sse.BroadcastContainerRemoved(c.ID, c.Name)
 	}
+
+	// Full authoritative snapshot every poll cycle. Drydock relies on this
+	// to prune containers that disappeared without a removal event.
+	a.sse.BroadcastWatcherSnapshot()
 	return nil
 }
 
