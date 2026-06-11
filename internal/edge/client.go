@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/lookout/internal/audit"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
 	"github.com/codeswhat/lookout/internal/metrics"
@@ -51,6 +52,7 @@ type Client struct {
 	adapter      adapter.EdgeAdapter
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
+	auditor      *audit.Logger
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
@@ -62,13 +64,14 @@ type Client struct {
 }
 
 // NewClient creates a new edge-mode Client.
-func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAdapter) *Client {
+func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAdapter, auditor *audit.Logger) *Client {
 	return &Client{
 		cfg:          cfg,
 		dockerClient: dockerClient,
 		adapter:      a,
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
+		auditor:      auditor,
 	}
 }
 
@@ -325,6 +328,7 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Warn("invalid exec_start message", "error", err)
 				continue
 			}
+			c.auditor.ExecStart(c.cfg.DrydockURL, msg.ContainerID, msg.ExecID)
 			go c.StartExec(ctx, msg)
 
 		case protocol.TypeExecInput:
@@ -372,6 +376,7 @@ func (c *Client) readPump(ctx context.Context) error {
 // handleRequest executes a Docker API request locally and sends the response
 // back over the WebSocket.
 func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage) {
+	start := time.Now()
 	isStream := docker.IsStreamingPath(req.Path)
 
 	var bodyReader io.Reader
@@ -389,6 +394,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 	}
 
 	if err != nil {
+		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, 0, msEdge(start))
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
@@ -397,6 +403,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 		return
 	}
 	defer resp.Body.Close()
+	c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeAllowed, resp.StatusCode, msEdge(start))
 
 	// Build response headers.
 	headers := make(map[string]string)
@@ -534,6 +541,11 @@ func (c *Client) sendMessage(env protocol.Envelope) {
 	if err := c.conn.WriteJSON(env); err != nil {
 		slog.Warn("websocket write failed", "type", env.Type, "error", err)
 	}
+}
+
+// msEdge returns elapsed milliseconds since start as a float64.
+func msEdge(start time.Time) float64 {
+	return float64(time.Since(start).Nanoseconds()) / 1e6
 }
 
 // startHealthServer starts a minimal HTTP server for Docker HEALTHCHECK.

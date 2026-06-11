@@ -4,8 +4,23 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/codeswhat/lookout/internal/audit"
 )
+
+// noAudit returns a disabled audit.Logger for tests that only care about HTTP
+// status codes and don't need to verify audit output.
+func noAudit(t *testing.T) *audit.Logger {
+	t.Helper()
+	l, _, err := audit.New("")
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	return l
+}
 
 func okHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
@@ -17,7 +32,7 @@ func TestAuthMiddlewareRawTokenAccept(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Lookout-Token", "correct")
@@ -35,7 +50,7 @@ func TestAuthMiddlewareRawTokenReject(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Lookout-Token", "wrong")
@@ -65,7 +80,7 @@ func TestAuthMiddlewareArgon2idAccept(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := newArgon2Verifier(params)
-	h := rl.AuthMiddleware(verifier, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Lookout-Token", token)
@@ -95,7 +110,7 @@ func TestAuthMiddlewareArgon2idReject(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := newArgon2Verifier(params)
-	h := rl.AuthMiddleware(verifier, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Lookout-Token", "wrongtoken")
@@ -112,7 +127,7 @@ func TestAuthMiddlewareNilVerifier(t *testing.T) {
 	t.Parallel()
 
 	rl := NewRateLimiter()
-	h := rl.AuthMiddleware(nil, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(nil, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -130,7 +145,7 @@ func TestAuthMiddlewareBearerHeader(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "bearer-secret"}
-	h := rl.AuthMiddleware(verifier, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer bearer-secret")
@@ -189,7 +204,7 @@ func TestRateLimiterNotBypassedBySpoofedXFF(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	for i := 0; i < 10; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -222,7 +237,7 @@ func TestAuthMiddlewareFallbackHeader(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "legacytoken"}
-	h := rl.AuthMiddleware(verifier, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Dd-Agent-Secret", "legacytoken")
@@ -232,4 +247,119 @@ func TestAuthMiddlewareFallbackHeader(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for X-Dd-Agent-Secret header, got %d", rec.Code)
 	}
+}
+
+// TestAuditMiddlewareEmitsAuthFailure verifies that the middleware emits an
+// auth_failure audit event when a wrong token is presented.
+func TestAuditMiddlewareEmitsAuthFailure(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir() + "/audit.log"
+	l, close, err := audit.New(tmp)
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(close)
+
+	rl := NewRateLimiter()
+	verifier := &rawTokenVerifier{token: "correct"}
+	h := rl.AuthMiddleware(verifier, l, http.HandlerFunc(okHandler))
+
+	req := httptest.NewRequest(http.MethodGet, "/_lookout/info", nil)
+	req.Header.Set("X-Lookout-Token", "wrong")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+
+	data, _ := readFile(tmp)
+	if !contains(data, audit.EventAuthFailure) {
+		t.Errorf("expected %q in audit log, got: %s", audit.EventAuthFailure, data)
+	}
+}
+
+// TestAuditMiddlewareEmitsRateLimited verifies that a rate-limited request
+// produces a rate_limited audit event.
+func TestAuditMiddlewareEmitsRateLimited(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir() + "/audit.log"
+	l, close, err := audit.New(tmp)
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(close)
+
+	rl := NewRateLimiter()
+	verifier := &rawTokenVerifier{token: "correct"}
+	h := rl.AuthMiddleware(verifier, l, http.HandlerFunc(okHandler))
+
+	// Exhaust the 10-failure limit.
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		req.Header.Set("X-Lookout-Token", "bad")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+	}
+
+	// This request should now be rate-limited.
+	req := httptest.NewRequest(http.MethodGet, "/_lookout/compose", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Lookout-Token", "bad")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", rec.Code)
+	}
+
+	data, _ := readFile(tmp)
+	if !contains(data, audit.EventRateLimited) {
+		t.Errorf("expected %q in audit log, got: %s", audit.EventRateLimited, data)
+	}
+}
+
+// TestAuditMiddlewareEmitsAPIRequest verifies that an allowed request emits
+// an api_request event.
+func TestAuditMiddlewareEmitsAPIRequest(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir() + "/audit.log"
+	l, close, err := audit.New(tmp)
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(close)
+
+	rl := NewRateLimiter()
+	verifier := &rawTokenVerifier{token: "correct"}
+	h := rl.AuthMiddleware(verifier, l, http.HandlerFunc(okHandler))
+
+	req := httptest.NewRequest(http.MethodGet, "/_lookout/info", nil)
+	req.Header.Set("X-Lookout-Token", "correct")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	data, _ := readFile(tmp)
+	if !contains(data, audit.EventAPIRequest) {
+		t.Errorf("expected %q in audit log, got: %s", audit.EventAPIRequest, data)
+	}
+}
+
+// helpers
+
+func readFile(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	return string(b), err
+}
+
+func contains(s, sub string) bool {
+	return strings.Contains(s, sub)
 }

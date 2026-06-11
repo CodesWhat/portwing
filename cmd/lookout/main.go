@@ -14,6 +14,7 @@ import (
 
 	"github.com/codeswhat/lookout/internal/adapter"
 	"github.com/codeswhat/lookout/internal/adapter/drydock"
+	"github.com/codeswhat/lookout/internal/audit"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
 	"github.com/codeswhat/lookout/internal/edge"
@@ -64,7 +65,13 @@ func main() {
 
 	if cfg.IsEdgeMode() {
 		slog.Info("starting in edge mode", "url", cfg.DrydockURL)
-		edgeClient := edge.NewClient(cfg, dockerClient, a)
+		auditor, auditClose, err := audit.New(cfg.AuditLog)
+		if err != nil {
+			slog.Error("failed to open audit log", "error", err)
+			os.Exit(1)
+		}
+		defer auditClose()
+		edgeClient := edge.NewClient(cfg, dockerClient, a, auditor)
 		go func() {
 			<-sigCh
 			slog.Info("shutting down...")

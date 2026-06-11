@@ -45,6 +45,9 @@ type Config struct {
 
 	// Drydock compat
 	DDPollInterval int
+
+	// Audit
+	AuditLog string
 }
 
 func Load() (*Config, error) {
@@ -137,6 +140,8 @@ func Load() (*Config, error) {
 		Adapter: getEnv("ADAPTER", "drydock"),
 
 		DDPollInterval: getEnvInt("DD_POLL_INTERVAL", 300),
+
+		AuditLog: getEnv("AUDIT_LOG", ""),
 	}
 
 	return cfg, nil
