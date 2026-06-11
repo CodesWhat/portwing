@@ -22,6 +22,15 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
+      - name: Format check
+        run: |
+          FILES=$(gofmt -l .)
+          if [ -n "$FILES" ]; then
+            echo "gofmt differences found in:"
+            echo "$FILES"
+            exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 
