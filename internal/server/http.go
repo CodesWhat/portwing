@@ -19,6 +19,7 @@ import (
 	"github.com/codeswhat/lookout/internal/audit"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
+	"github.com/codeswhat/lookout/internal/mcp"
 	"github.com/codeswhat/lookout/internal/metrics"
 	"github.com/codeswhat/lookout/internal/protocol"
 )
@@ -141,6 +142,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /_lookout/compose", auth(s.handleCompose))
 	mux.Handle("GET /_lookout/metrics", auth(s.handleMetrics))
 	mux.Handle("GET /metrics", auth(s.handleMetrics))
+	mux.Handle("/_lookout/mcp", auth(func(w http.ResponseWriter, r *http.Request) {
+		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
+	}))
 
 	// Adapter-specific routes.
 	s.adapter.RegisterRoutes(mux, auth)
