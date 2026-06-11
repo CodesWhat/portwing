@@ -822,6 +822,8 @@ paths:
                   $ref: '#/components/schemas/TriggerComponent'
         "401":
           description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
 
   /api/watchers/{type}/{name}:
     post:
@@ -856,6 +858,8 @@ paths:
                 $ref: '#/components/schemas/NotImplementedResponse'
         "401":
           description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
 
   /api/watchers/{type}/{name}/container/{id}:
     post:
@@ -893,6 +897,8 @@ paths:
                 $ref: '#/components/schemas/NotImplementedResponse'
         "401":
           description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
 
   /api/triggers/{type}/{name}:
     post:
@@ -924,6 +930,8 @@ paths:
                 $ref: '#/components/schemas/NotImplementedResponse'
         "401":
           description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
 
   /api/triggers/{type}/{name}/batch:
     post:
@@ -955,6 +963,8 @@ paths:
                 $ref: '#/components/schemas/NotImplementedResponse'
         "401":
           description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
 
   /api/v1/version:
     get:
