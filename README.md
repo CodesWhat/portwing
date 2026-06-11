@@ -119,6 +119,7 @@ Lookout initiates an outbound WebSocket connection to DockPilot.
 | `MAX_RECONNECT_DELAY` | `60` | Max reconnect delay (seconds) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `SKIP_DF_COLLECTION` | -- | Disable disk metrics |
+| `AUDIT_LOG` | -- | Audit log sink: `stdout`, `stderr`, or a file path; unset disables auditing |
 
 ### Drydock Compatibility
 
@@ -277,6 +278,50 @@ checksums file.
 - **Resource Limits**: WebSocket (16 MB), response body (100 MB), exec sessions (100 concurrent)
 
 See [docs/security-model.md](docs/security-model.md) for the full citable spec and CVE mapping.
+
+## Audit Logging
+
+Lookout ships structured JSON audit logging for every security-relevant action — a feature that commercial container management platforms lock behind paid tiers.
+
+### Enable
+
+```bash
+# Write to a file (opened append-only, mode 0600)
+docker run -e AUDIT_LOG=/var/log/lookout-audit.log ...
+
+# Or to stdout/stderr (useful with log aggregators)
+docker run -e AUDIT_LOG=stdout ...
+```
+
+Auditing is disabled by default (`AUDIT_LOG` unset). When disabled the overhead is a single nil pointer check per request.
+
+### Events
+
+| `event` | Triggered when |
+|---------|---------------|
+| `api_request` | Any authenticated API call completes |
+| `auth_failure` | An invalid token is presented |
+| `rate_limited` | An IP is blocked by the rate limiter |
+| `compose_op` | A Docker Compose operation runs |
+| `exec_start` | An interactive exec tunnel opens |
+
+### Sample JSON line
+
+```json
+{"time":"2026-01-15T10:23:45.123456789Z","level":"INFO","msg":"","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_lookout/compose","outcome":"allowed","status":200,"duration_ms":3.14}
+```
+
+Compose operations include additional fields:
+
+```json
+{"time":"2026-01-15T10:23:45.200Z","level":"INFO","msg":"","event":"compose_op","actor":"203.0.113.42","operation":"up","stack":"nginx-stack","outcome":"allowed"}
+```
+
+Exec tunnel events:
+
+```json
+{"time":"2026-01-15T10:24:01.500Z","level":"INFO","msg":"","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
+```
 
 ## Building from Source
 

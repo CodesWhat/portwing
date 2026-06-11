@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codeswhat/lookout/internal/audit"
 )
 
 // tokenVerifier is the interface used by AuthMiddleware to verify a presented
@@ -131,11 +133,18 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 //
 // Rate limiting is applied before verification, so failed attempts are always
 // counted regardless of whether the verifier uses a raw token or Argon2id.
-func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, next http.Handler) http.Handler {
+//
+// auditor receives auth_failure and rate_limited events, and an api_request
+// event (with outcome and duration) for every request that reaches next.
+func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
 		// No authentication configured - pass through.
 		if verifier == nil {
-			next.ServeHTTP(w, r)
+			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
 			return
 		}
 
@@ -145,6 +154,7 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, next http.Handler)
 		// attempts accumulate in the limiter even for expensive Argon2id paths,
 		// and that blocked IPs never reach the verifier.
 		if rl.IsRateLimited(clientIP) {
+			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 			return
 		}
@@ -162,12 +172,31 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, next http.Handler)
 		if !verifier.Verify(provided) {
 			rl.RecordFailure(clientIP)
 			slog.Warn("authentication failed", "ip", clientIP)
+			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
 	})
+}
+
+// statusRecorder wraps ResponseWriter to capture the status code.
+type statusRecorder struct {
+	http.ResponseWriter
+	code int
+}
+
+func (sr *statusRecorder) WriteHeader(code int) {
+	sr.code = code
+	sr.ResponseWriter.WriteHeader(code)
+}
+
+// ms returns elapsed milliseconds since start as a float64.
+func ms(start time.Time) float64 {
+	return float64(time.Since(start).Nanoseconds()) / 1e6
 }
 
 // RecoveryMiddleware catches panics in downstream handlers, logs the stack

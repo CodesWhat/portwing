@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/lookout/internal/audit"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
 	"github.com/codeswhat/lookout/internal/metrics"
@@ -44,6 +45,7 @@ type Server struct {
 	collector    *metrics.Collector
 	rateLimiter  *RateLimiter
 	verifier     tokenVerifier
+	auditor      *audit.Logger
 	httpServer   *http.Server
 	startTime    time.Time
 }
@@ -65,6 +67,12 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	}
 	// verifier == nil means no auth configured.
 
+	auditor, auditClose, err := audit.New(cfg.AuditLog)
+	if err != nil {
+		return nil, fmt.Errorf("opening audit log: %w", err)
+	}
+	_ = auditClose // closed when process exits; file is append-only
+
 	s := &Server{
 		cfg:          cfg,
 		dockerClient: dockerClient,
@@ -73,6 +81,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
 		rateLimiter:  NewRateLimiter(),
 		verifier:     verifier,
+		auditor:      auditor,
 		startTime:    time.Now(),
 	}
 
@@ -123,9 +132,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /_lookout/health", s.handleHealth)
 	mux.HandleFunc("GET /health", s.handleSimpleHealth)
 
-	// Auth required - wrap with auth middleware.
+	// Auth required - wrap with audit-aware auth middleware.
 	auth := func(h http.HandlerFunc) http.Handler {
-		return s.rateLimiter.AuthMiddleware(s.verifier, http.HandlerFunc(h))
+		return s.rateLimiter.AuthMiddleware(s.verifier, s.auditor, http.HandlerFunc(h))
 	}
 
 	mux.Handle("GET /_lookout/info", auth(s.handleInfo))
@@ -207,6 +216,8 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 // handleCompose dispatches Docker Compose operations.
 func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
+	actor := s.rateLimiter.clientIP(r)
+
 	var req docker.ComposeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
@@ -215,9 +226,16 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.compose.Execute(r.Context(), req)
 	if err != nil {
+		s.auditor.ComposeOp(actor, req.Operation, req.StackName, audit.OutcomeError)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	outcome := audit.OutcomeAllowed
+	if !resp.Success {
+		outcome = audit.OutcomeError
+	}
+	s.auditor.ComposeOp(actor, req.Operation, req.StackName, outcome)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -275,6 +293,14 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 // handleExecHijack handles WebSocket-upgraded exec connections by hijacking
 // the HTTP connection and proxying bidirectionally to the Docker daemon.
 func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
+	actor := s.rateLimiter.clientIP(r)
+	// Extract exec resource ID from the path: /exec/<id>/start
+	execID := ""
+	if parts := strings.Split(r.URL.Path, "/"); len(parts) >= 3 {
+		execID = parts[len(parts)-2]
+	}
+	s.auditor.ExecStart(actor, r.URL.Path, execID)
+
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
