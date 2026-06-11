@@ -1,6 +1,28 @@
 # Lookout
 
-Lightweight remote Docker agent for the [Drydock](https://github.com/codeswhat/drydock) container monitoring platform.
+[![CI](https://github.com/CodesWhat/lookout/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CodesWhat/lookout/actions/workflows/ci.yml)
+[![Vulnerability Scan](https://github.com/CodesWhat/lookout/actions/workflows/security-vuln-weekly.yml/badge.svg)](https://github.com/CodesWhat/lookout/actions/workflows/security-vuln-weekly.yml)
+[![Go 1.26](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](go.mod)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
+[![Container Image](https://img.shields.io/badge/ghcr.io-codeswhat%2Flookout-2496ED?logo=docker)](https://github.com/CodesWhat/lookout/pkgs/container/lookout)
+
+Security-first remote Docker agent for the [Drydock](https://github.com/codeswhat/drydock) container update platform — and a standalone, signed, auditable Docker API proxy for everyone else.
+
+## Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Authentication](#authentication)
+- [Standalone (Generic) Mode](#standalone-generic-mode)
+- [Connection Modes](#connection-modes)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Token Security](#token-security)
+- [Verify a Release](#verify-a-release)
+- [Security](#security)
+- [Audit Logging](#audit-logging)
+- [Contributing](#contributing)
+- [License](#license)
 
 ```
 Remote Host A        Remote Host B           Your Server
@@ -18,11 +40,17 @@ Remote Host A        Remote Host B           Your Server
 
 - **Dual connection modes** -- Standard (inbound HTTP) and Edge (outbound WebSocket)
 - **Transparent Docker API proxy** -- All Docker Engine API paths forwarded
+- **Per-request Ed25519 signatures** -- per-client keys, replay protection, `authorized_keys`-style rotation via SIGHUP ([design](docs/design/ed25519-auth.md))
 - **Container inventory** -- Full container metadata with `dd.*` label parsing
+- **Prometheus `/metrics`** -- host + per-container CPU/memory/network in cAdvisor-compatible format, zero dependencies
+- **MCP server** -- AI assistants connect to `/_lookout/mcp` (streamable HTTP, read-only tools, env values never exposed)
+- **Audit logging** -- structured JSON of every API call, exec session, and Compose operation
 - **Host metrics** -- CPU, memory, disk, network, uptime collection
 - **Interactive exec** -- Terminal sessions via WebSocket or HTTP hijack
 - **Docker Compose** -- Full lifecycle management with security hardening
-- **SSE compatibility** -- Drop-in replacement for existing Drydock agents
+- **SSE compatibility** -- Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot`
+- **Signed supply chain** -- cosign keyless signatures, CycloneDX SBOM, SLSA provenance on every release
+- **Two-layer defense** -- pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket ([example](examples/docker-compose.with-sockguard.yml))
 - **Minimal footprint** -- Static Go binary, ~10 MB container image
 
 ## Quick Start
@@ -34,8 +62,14 @@ docker run -d \
   --name lookout \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 3000:3000 \
+  -e TOKEN=$(openssl rand -hex 24) \
   ghcr.io/codeswhat/lookout:latest
 ```
+
+> Without `TOKEN` (or `TOKEN_HASH`/`AUTHORIZED_KEYS`) the API is **unauthenticated**.
+> Always set a credential — anyone who can reach the port controls your Docker
+> daemon. For production use `TOKEN_FILE` or Ed25519 keys; see
+> [Authentication](#authentication) and [examples/](examples/).
 
 ### Edge Mode
 
@@ -529,6 +563,14 @@ Exec tunnel events:
 ```json
 {"time":"2026-01-15T10:24:01.500Z","level":"INFO","msg":"","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop and PR
+guidelines, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards,
+and [SECURITY.md](SECURITY.md) for vulnerability reporting. Release process:
+[RELEASING.md](RELEASING.md). Deployment templates live in
+[examples/](examples/).
 
 ## Building from Source
 
