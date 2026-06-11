@@ -3,6 +3,7 @@ package generic
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -53,7 +54,7 @@ func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, err := io.ReadFull(body, header)
 		if err != nil {
-			if err != io.EOF && err != io.ErrUnexpectedEOF {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 				slog.Debug("log stream ended", "error", err)
 			}
 			return
