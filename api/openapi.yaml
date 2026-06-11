@@ -10,10 +10,11 @@ info:
 
     ## Authentication
 
-    All protected endpoints require a bearer token supplied in one of two headers:
+    All protected endpoints require the agent token, supplied via one of:
 
-    - `X-Lookout-Token` (primary)
-    - `X-Dd-Agent-Secret` (Drydock backward-compat alias)
+    - `Authorization: Bearer <token>` (standard, checked first)
+    - `X-Lookout-Token` header
+    - `X-Dd-Agent-Secret` header (Drydock backward-compat alias)
 
     Token comparison uses `crypto/subtle.ConstantTimeCompare` (timing-safe).
     If no token is configured, authentication is disabled and all requests pass
@@ -59,12 +60,17 @@ servers:
 components:
   securitySchemes:
     bearerToken:
+      type: http
+      scheme: bearer
+      description: >
+        Agent token via Authorization: Bearer. Also accepted in the
+        `X-Lookout-Token` header, or `X-Dd-Agent-Secret` for Drydock
+        backward compatibility.
+    lookoutToken:
       type: apiKey
       in: header
       name: X-Lookout-Token
-      description: >
-        Bearer token. Also accepted as `X-Dd-Agent-Secret` for Drydock
-        backward compatibility.
+      description: Agent token via the X-Lookout-Token header.
 
   schemas:
     HealthResponse:
@@ -398,6 +404,7 @@ paths:
       tags: [Agent]
       security:
         - bearerToken: []
+        - lookoutToken: []
       responses:
         "200":
           description: Agent metadata.
@@ -424,6 +431,7 @@ paths:
       tags: [Metrics]
       security:
         - bearerToken: []
+        - lookoutToken: []
       responses:
         "200":
           description: Prometheus text format metrics.
@@ -457,6 +465,7 @@ paths:
       tags: [Metrics]
       security:
         - bearerToken: []
+        - lookoutToken: []
       responses:
         "200":
           description: Prometheus text format metrics.
@@ -489,6 +498,7 @@ paths:
       tags: [Compose]
       security:
         - bearerToken: []
+        - lookoutToken: []
       requestBody:
         required: true
         content:
@@ -578,6 +588,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       responses:
         "200":
           description: SSE stream opened.
@@ -604,6 +615,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       responses:
         "200":
           description: Array of containers.
@@ -629,6 +641,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       parameters:
         - name: id
           in: path
@@ -689,6 +702,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       parameters:
         - name: id
           in: path
@@ -717,6 +731,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       responses:
         "200":
           description: Array of watcher components.
@@ -739,6 +754,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       responses:
         "200":
           description: Array of trigger components.
@@ -761,6 +777,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       parameters:
         - name: type
           in: path
@@ -794,6 +811,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       parameters:
         - name: type
           in: path
@@ -829,6 +847,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       parameters:
         - name: type
           in: path
@@ -859,6 +878,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
+        - lookoutToken: []
       parameters:
         - name: type
           in: path
@@ -903,6 +923,7 @@ paths:
       tags: [Docker Proxy]
       security:
         - bearerToken: []
+        - lookoutToken: []
       parameters:
         - name: path
           in: path

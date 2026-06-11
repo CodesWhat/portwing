@@ -28,7 +28,8 @@ library. The comparison runs in constant time regardless of whether and where
 the provided token diverges from the configured secret, eliminating
 timing-oracle attacks that can leak token bytes one at a time.
 
-Applies to both `X-Lookout-Token` and `X-Dd-Agent-Secret` headers.
+Applies to all accepted credential headers: `Authorization: Bearer`,
+`X-Lookout-Token`, and `X-Dd-Agent-Secret`.
 
 ### 3. Argon2id Token-at-Rest (TOKEN_HASH)
 
@@ -41,11 +42,13 @@ plaintext. Three mechanisms are available (evaluated in order):
 | Plaintext file | `TOKEN_FILE` / `DD_AGENT_SECRET_FILE` | Path to a file containing the token |
 | Hash | `TOKEN_HASH` / `TOKEN_HASH_FILE` | Argon2id PHC string (see below) |
 
-The `lookout hash-token` CLI subcommand generates a suitable hash:
+The `lookout hash-token` CLI subcommand generates a suitable hash using
+OWASP-recommended parameters (m=19456 KiB, t=2, p=1). The token is read from
+stdin so it never appears in shell history or process listings:
 
 ```bash
-lookout hash-token --token mysecret
-# $argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>
+printf '%s' "$TOKEN" | lookout hash-token
+# $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 ```
 
 Set the output as `TOKEN_HASH` (or write it to a file referenced by
