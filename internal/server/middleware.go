@@ -187,6 +187,19 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 	})
 }
 
+// rateLimitOnly wraps a handler with rate limiting (by IP) but no auth check.
+// This is used for the enrollment endpoint which does its own credential check.
+func (rl *RateLimiter) rateLimitOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clientIP := rl.clientIP(r)
+		if rl.IsRateLimited(clientIP) {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Ed25519Config holds the optional Ed25519 verifier parameters for
 // AuthMiddlewareWithEd25519. When Registry is nil the Ed25519 path is skipped
 // and the middleware behaves identically to AuthMiddleware.
