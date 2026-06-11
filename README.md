@@ -188,12 +188,27 @@ scrape_configs:
 
 ## Token Security
 
-### Plaintext token (quickstart)
+### Plaintext token (testing only)
+
+> **Warning:** Environment variables are visible in `docker inspect` and
+> process listings. For production, use `TOKEN_FILE` or `TOKEN_HASH_FILE`
+> with a mounted secret.
 
 ```bash
 # Generate a strong token
 TOKEN=$(openssl rand -hex 32)
 docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/lookout:latest
+```
+
+### File-based token (production)
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+printf '%s' "$TOKEN" > /run/secrets/lookout-token
+chmod 600 /run/secrets/lookout-token
+docker run -e TOKEN_FILE=/run/secrets/lookout-token \
+  -v /run/secrets/lookout-token:/run/secrets/lookout-token:ro \
+  ... ghcr.io/codeswhat/lookout:latest
 ```
 
 ### Hash-at-rest with TOKEN_HASH
