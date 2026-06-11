@@ -17,6 +17,7 @@ import (
 
 	"github.com/codeswhat/lookout/internal/adapter"
 	"github.com/codeswhat/lookout/internal/audit"
+	"github.com/codeswhat/lookout/internal/auth"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
 	"github.com/codeswhat/lookout/internal/mcp"
@@ -46,6 +47,8 @@ type Server struct {
 	collector    *metrics.Collector
 	rateLimiter  *RateLimiter
 	verifier     tokenVerifier
+	ed25519      Ed25519Config
+	enroller     *auth.Enroller
 	auditor      *audit.Logger
 	httpServer   *http.Server
 	startTime    time.Time
@@ -74,6 +77,29 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	}
 	_ = auditClose // closed when process exits; file is append-only
 
+	// Set up Ed25519 key registry if configured.
+	var ed25519Cfg Ed25519Config
+	if cfg.AuthorizedKeysFile != "" {
+		reg := auth.NewKeyRegistry(cfg.AuthorizedKeysFile)
+		if err := reg.Load(); err != nil {
+			return nil, fmt.Errorf("loading authorized_keys: %w", err)
+		}
+		ed25519Cfg = Ed25519Config{
+			Registry:       reg,
+			Nonces:         auth.NewNonceLRU(cfg.NonceLRUSize, cfg.MaxClockSkewSeconds),
+			MaxSkewSeconds: cfg.MaxClockSkewSeconds,
+		}
+	}
+
+	// Set up enrollment handler if ENROLLMENT_TOKEN is configured.
+	var enroller *auth.Enroller
+	if cfg.EnrollmentToken != "" {
+		if ed25519Cfg.Registry == nil {
+			return nil, fmt.Errorf("ENROLLMENT_TOKEN requires AUTHORIZED_KEYS to be set")
+		}
+		enroller = auth.NewEnroller(cfg.EnrollmentToken, cfg.AuthorizedKeysFile, ed25519Cfg.Registry)
+	}
+
 	s := &Server{
 		cfg:          cfg,
 		dockerClient: dockerClient,
@@ -82,6 +108,8 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
 		rateLimiter:  NewRateLimiter(),
 		verifier:     verifier,
+		ed25519:      ed25519Cfg,
+		enroller:     enroller,
 		auditor:      auditor,
 		startTime:    time.Now(),
 	}
@@ -133,24 +161,31 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /_lookout/health", s.handleHealth)
 	mux.HandleFunc("GET /health", s.handleSimpleHealth)
 
-	// Auth required - wrap with audit-aware auth middleware.
-	auth := func(h http.HandlerFunc) http.Handler {
-		return s.rateLimiter.AuthMiddleware(s.verifier, s.auditor, http.HandlerFunc(h))
+	// Enrollment endpoint: reachable WITHOUT auth (it IS the bootstrap), but
+	// rate-limited. Registered only when ENROLLMENT_TOKEN is configured.
+	if s.enroller != nil {
+		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller)
+		mux.Handle("POST /api/lookout/enroll", enrollHandler)
 	}
 
-	mux.Handle("GET /_lookout/info", auth(s.handleInfo))
-	mux.Handle("POST /_lookout/compose", auth(s.handleCompose))
-	mux.Handle("GET /_lookout/metrics", auth(s.handleMetrics))
-	mux.Handle("GET /metrics", auth(s.handleMetrics))
-	mux.Handle("/_lookout/mcp", auth(func(w http.ResponseWriter, r *http.Request) {
+	// Auth required - wrap with audit-aware auth middleware (with Ed25519 support).
+	authWrap := func(h http.HandlerFunc) http.Handler {
+		return s.rateLimiter.AuthMiddlewareWithEd25519(s.verifier, s.ed25519, s.auditor, http.HandlerFunc(h))
+	}
+
+	mux.Handle("GET /_lookout/info", authWrap(s.handleInfo))
+	mux.Handle("POST /_lookout/compose", authWrap(s.handleCompose))
+	mux.Handle("GET /_lookout/metrics", authWrap(s.handleMetrics))
+	mux.Handle("GET /metrics", authWrap(s.handleMetrics))
+	mux.Handle("/_lookout/mcp", authWrap(func(w http.ResponseWriter, r *http.Request) {
 		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
 	}))
 
 	// Adapter-specific routes.
-	s.adapter.RegisterRoutes(mux, auth)
+	s.adapter.RegisterRoutes(mux, authWrap)
 
 	// Docker API proxy - catch-all (must be last).
-	mux.Handle("/", auth(s.handleDockerProxy))
+	mux.Handle("/", authWrap(s.handleDockerProxy))
 }
 
 // handleHealth returns the agent health status including Docker connectivity.

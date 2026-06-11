@@ -71,6 +71,33 @@ components:
       in: header
       name: X-Lookout-Token
       description: Agent token via the X-Lookout-Token header.
+    ed25519Signature:
+      type: apiKey
+      in: header
+      name: X-Lookout-Signature
+      description: |
+        Ed25519 per-request signature (base64url, no padding). When this header
+        is present the agent verifies the request via Ed25519 instead of the
+        shared token.
+
+        Four headers are required together:
+
+        | Header | Format | Example |
+        |--------|--------|---------|
+        | `X-Lookout-Key-ID` | hex(SHA-256(raw 32-byte pubkey)[:8]) | `4a3f2b1c9d8e7f6a` |
+        | `X-Lookout-Timestamp` | Unix epoch, seconds, decimal | `1749600000` |
+        | `X-Lookout-Nonce` | 32 random hex chars (128-bit) | `a1b2c3d4e5f6...` |
+        | `X-Lookout-Signature` | base64url (no padding) Ed25519 signature | `d2hh...` |
+
+        The signed canonical string is:
+        ```
+        METHOD\nPATH\nbody-sha256-hex\nunix-timestamp\nnonce
+        ```
+        For an empty body, `body-sha256-hex` is the full SHA-256 of the empty
+        string: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+        On failure, the response includes `X-Lookout-Reason` with one of:
+        `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`.
 
   schemas:
     HealthResponse:
@@ -1164,11 +1191,77 @@ paths:
         "502":
           description: Docker daemon unreachable or returned an error.
 
+  /api/lookout/enroll:
+    post:
+      operationId: enrollPublicKey
+      summary: Register an Ed25519 public key (Model C enrollment)
+      description: |
+        One-shot bootstrap endpoint that registers an Ed25519 public key using
+        a pre-configured enrollment token. The token is burned after first
+        successful use; subsequent calls are rejected until the agent restarts
+        with a new `ENROLLMENT_TOKEN`.
+
+        This endpoint is **only available** when `ENROLLMENT_TOKEN` (and
+        `AUTHORIZED_KEYS`) are configured. It is reachable without prior
+        authentication — the enrollment token IS the credential — but it is
+        rate-limited via the same IP-based rate limiter as auth failures.
+
+        On success the public key is appended to the authorized-keys file and
+        the key registry is hot-reloaded. The new key is immediately active.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enrollment_token, public_key]
+              properties:
+                enrollment_token:
+                  type: string
+                  description: The pre-configured enrollment token.
+                  example: "a3f2b1c9d8e7f6a4b5c6d7e8f9a0b1c2"
+                public_key:
+                  type: string
+                  description: >
+                    Base64 (standard encoding) of the raw 32-byte Ed25519
+                    public key to register.
+                  example: "AAAAC3NzaC1lZDI1NTE5AAAAIB3..."
+      responses:
+        "200":
+          description: Key enrolled successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key_id]
+                properties:
+                  key_id:
+                    type: string
+                    description: hex(SHA-256(pubkey)[:8]) — the Key-ID for subsequent requests.
+                    example: "4a3f2b1c9d8e7f6a"
+                  comment:
+                    type: string
+                    description: Comment assigned to the enrolled key.
+                    example: "enrolled:4a3f2b1c9d8e7f6a"
+        "400":
+          description: Invalid request body, bad base64, or wrong key length.
+        "401":
+          description: Wrong enrollment token, or token already burned.
+        "405":
+          description: Method not allowed (POST required).
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Could not write to the authorized_keys file.
+
 tags:
   - name: Health
     description: Health check endpoints (no auth).
   - name: Agent
     description: Lookout agent metadata endpoints.
+  - name: Auth
+    description: Ed25519 key enrollment (Model C bootstrap).
   - name: Compose
     description: Docker Compose lifecycle management.
   - name: Metrics

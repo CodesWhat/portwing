@@ -54,6 +54,65 @@ docker run -d \
 curl -fsSL https://raw.githubusercontent.com/codeswhat/lookout/main/scripts/install.sh | bash
 ```
 
+## Authentication
+
+### Token Authentication (Quickstart)
+
+Set `TOKEN` to a random secret. All requests must supply it via
+`Authorization: Bearer`, `X-Lookout-Token`, or `X-Dd-Agent-Secret`.
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+docker run -d --name lookout \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TOKEN="$TOKEN" \
+  -p 3000:3000 \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+### Ed25519 Per-Client Key Authentication (Recommended)
+
+Ed25519 keypairs give per-client identity with per-request signatures and
+replay protection. No shared secrets.
+
+**Generate a keypair:**
+
+```bash
+# Writes the private key (PEM PKCS#8) and the authorized_keys line to stdout.
+lookout keygen -comment "my-platform:prod"
+```
+
+**Copy the `authorized_keys` line to the agent host:**
+
+```
+# /etc/lookout/authorized_keys  (mode 0600)
+ed25519 AAAA... my-platform:prod
+```
+
+**Start the agent with Ed25519 auth:**
+
+```bash
+docker run -d --name lookout \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /etc/lookout/authorized_keys:/etc/lookout/authorized_keys:ro \
+  -e AUTHORIZED_KEYS=/etc/lookout/authorized_keys \
+  -p 3000:3000 \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+**Key rotation (zero-downtime):**
+
+1. Generate a new keypair: `lookout keygen -comment "my-platform:prod:2026-07"`
+2. Append the new public key line to the authorized_keys file on the agent host.
+3. Send `SIGHUP` to reload: `kill -HUP $(pidof lookout)` or
+   `docker kill --signal HUP lookout`. Both old and new keys are now active.
+4. Update the platform to use the new private key.
+5. Remove the old key from the file and send another `SIGHUP`.
+
+Token auth (`TOKEN`/`TOKEN_HASH`) continues to work alongside Ed25519 — both
+can be set simultaneously during migration. The middleware checks for
+`X-Lookout-Signature` first; if absent, it falls back to the token check.
+
 ## Standalone (Generic) Mode
 
 Run Lookout without any external controller by setting `ADAPTER=generic`.
@@ -152,6 +211,13 @@ Lookout initiates an outbound WebSocket connection to DockPilot.
 | `TOKEN_FILE` | -- | Path to file containing token |
 | `TOKEN_HASH` | -- | Argon2id hash of token (generate with `lookout hash-token`) |
 | `TOKEN_HASH_FILE` | -- | Path to file containing Argon2id hash |
+| `AUTHORIZED_KEYS` | -- | Path to Ed25519 authorized_keys file (per-client asymmetric auth) |
+| `AUTHORIZED_KEYS_FILE` | -- | Alias for `AUTHORIZED_KEYS` |
+| `MAX_CLOCK_SKEW_SECONDS` | `60` | Maximum allowed clock skew for Ed25519 request timestamps |
+| `NONCE_LRU_SIZE` | `10000` | In-memory nonce cache capacity for replay protection |
+| `ENROLLMENT_TOKEN` | -- | One-shot bootstrap token for Model C key enrollment |
+| `ENROLLMENT_TOKEN_FILE` | -- | File containing enrollment token |
+| `PRIVATE_KEY_FILE` | -- | Ed25519 private key (PEM PKCS#8) for signing edge-mode hello |
 | `CA_CERT` | -- | Custom CA certificate for Edge mode |
 | `TLS_SKIP_VERIFY` | `false` | Skip TLS verification (testing only) |
 | `PORT` | `3000` | HTTP server port |

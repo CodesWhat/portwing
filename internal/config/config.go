@@ -48,6 +48,17 @@ type Config struct {
 
 	// Audit
 	AuditLog string
+
+	// Ed25519 key authentication (Model B: operator-provisioned authorized_keys)
+	AuthorizedKeysFile  string // AUTHORIZED_KEYS / AUTHORIZED_KEYS_FILE
+	MaxClockSkewSeconds int    // MAX_CLOCK_SKEW_SECONDS (default 60)
+	NonceLRUSize        int    // NONCE_LRU_SIZE (default 10000)
+
+	// Model C enrollment token (consumed on first use)
+	EnrollmentToken string // ENROLLMENT_TOKEN / ENROLLMENT_TOKEN_FILE
+
+	// Edge-mode private key for signed hello (PRIVATE_KEY_FILE)
+	PrivateKeyFile string
 }
 
 func Load() (*Config, error) {
@@ -85,9 +96,33 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("TOKEN and TOKEN_HASH are mutually exclusive: choose one")
 	}
 
+	// Support AUTHORIZED_KEYS / AUTHORIZED_KEYS_FILE (aliases).
+	authorizedKeysFile := getEnv("AUTHORIZED_KEYS", "")
+	if authorizedKeysFile == "" {
+		authorizedKeysFile = getEnv("AUTHORIZED_KEYS_FILE", "")
+	}
+
+	// Support ENROLLMENT_TOKEN / ENROLLMENT_TOKEN_FILE.
+	enrollmentToken := getEnv("ENROLLMENT_TOKEN", "")
+	if enrollmentToken == "" {
+		if etFile := getEnv("ENROLLMENT_TOKEN_FILE", ""); etFile != "" {
+			t, err := loadTokenFile(etFile)
+			if err != nil {
+				return nil, fmt.Errorf("reading ENROLLMENT_TOKEN_FILE: %w", err)
+			}
+			enrollmentToken = t
+		}
+	}
+
 	drydockURL := getEnv("DRYDOCK_URL", "")
-	if drydockURL != "" && token == "" && tokenHash != "" {
-		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires a raw TOKEN, not TOKEN_HASH: edge mode must present the credential to the platform")
+	if drydockURL != "" && token == "" && tokenHash != "" && authorizedKeysFile == "" {
+		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone")
+	}
+	if drydockURL != "" && token == "" && tokenHash == "" && authorizedKeysFile == "" {
+		privateKeyFile := getEnv("PRIVATE_KEY_FILE", "")
+		if privateKeyFile == "" {
+			return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires TOKEN, AUTHORIZED_KEYS, or PRIVATE_KEY_FILE")
+		}
 	}
 
 	agentID := getEnv("AGENT_ID", "")
@@ -142,13 +177,24 @@ func Load() (*Config, error) {
 		DDPollInterval: getEnvInt("DD_POLL_INTERVAL", 300),
 
 		AuditLog: getEnv("AUDIT_LOG", ""),
+
+		AuthorizedKeysFile:  authorizedKeysFile,
+		MaxClockSkewSeconds: getEnvInt("MAX_CLOCK_SKEW_SECONDS", 60),
+		NonceLRUSize:        getEnvInt("NONCE_LRU_SIZE", 10000),
+
+		EnrollmentToken: enrollmentToken,
+
+		PrivateKeyFile: getEnv("PRIVATE_KEY_FILE", ""),
 	}
 
 	return cfg, nil
 }
 
 func (c *Config) IsEdgeMode() bool {
-	return c.DrydockURL != "" && c.Token != ""
+	if c.DrydockURL == "" {
+		return false
+	}
+	return c.Token != "" || c.AuthorizedKeysFile != "" || c.PrivateKeyFile != ""
 }
 
 func detectDockerSocket() string {
