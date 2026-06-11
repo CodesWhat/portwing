@@ -353,6 +353,50 @@ func TestAuditMiddlewareEmitsAPIRequest(t *testing.T) {
 	}
 }
 
+// TestAuthMiddlewarePreservesStreamingInterfaces verifies that the
+// statusRecorder wrapper still exposes http.Flusher and http.Hijacker to
+// downstream handlers — SSE streaming and Docker exec/attach hijacking
+// depend on them.
+func TestAuthMiddlewarePreservesStreamingInterfaces(t *testing.T) {
+	t.Parallel()
+
+	var sawFlusher, sawHijacker bool
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, sawFlusher = w.(http.Flusher)
+		_, sawHijacker = w.(http.Hijacker)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rl := NewRateLimiter()
+	verifier := &rawTokenVerifier{token: "correct"}
+	h := rl.AuthMiddleware(verifier, noAudit(t), inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req.Header.Set("X-Lookout-Token", "correct")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if !sawFlusher {
+		t.Error("http.Flusher lost through AuthMiddleware")
+	}
+	if !sawHijacker {
+		t.Error("http.Hijacker lost through AuthMiddleware")
+	}
+
+	// No-auth mode wraps with the same recorder; verify that path too.
+	sawFlusher, sawHijacker = false, false
+	h = rl.AuthMiddleware(nil, noAudit(t), inner)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/events", nil))
+
+	if !sawFlusher {
+		t.Error("http.Flusher lost through AuthMiddleware (no-auth mode)")
+	}
+	if !sawHijacker {
+		t.Error("http.Hijacker lost through AuthMiddleware (no-auth mode)")
+	}
+}
+
 // helpers
 
 func readFile(path string) (string, error) {

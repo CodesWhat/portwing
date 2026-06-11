@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -314,6 +315,43 @@ func newTestDockerClientWithEvents(t *testing.T) (*docker.Client, func()) {
 	return client, shutdown
 }
 
+// syncRecorder wraps httptest.ResponseRecorder so the test can read the body
+// while ServeHTTP is still writing from another goroutine.
+type syncRecorder struct {
+	mu  sync.Mutex
+	rec *httptest.ResponseRecorder
+}
+
+func (s *syncRecorder) Header() http.Header {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rec.Header()
+}
+
+func (s *syncRecorder) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rec.Write(p)
+}
+
+func (s *syncRecorder) WriteHeader(code int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rec.WriteHeader(code)
+}
+
+func (s *syncRecorder) Flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rec.Flush()
+}
+
+func (s *syncRecorder) BodyString() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rec.Body.String()
+}
+
 func TestEventSSEWritesWellFormedEvent(t *testing.T) {
 	t.Parallel()
 
@@ -327,7 +365,7 @@ func TestEventSSEWritesWellFormedEvent(t *testing.T) {
 	defer cancel()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
-	rec := httptest.NewRecorder()
+	rec := &syncRecorder{rec: httptest.NewRecorder()}
 
 	// Run ServeHTTP in a goroutine; cancel once we've read at least one line.
 	done := make(chan struct{})
@@ -340,7 +378,7 @@ func TestEventSSEWritesWellFormedEvent(t *testing.T) {
 	deadline := time.Now().Add(4 * time.Second)
 	var dataLine string
 	for time.Now().Before(deadline) {
-		scanner := bufio.NewScanner(strings.NewReader(rec.Body.String()))
+		scanner := bufio.NewScanner(strings.NewReader(rec.BodyString()))
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data:") {
