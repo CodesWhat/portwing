@@ -24,13 +24,13 @@ const (
 
 // Sentinel errors returned by VerifyRequest. Callers can use errors.Is.
 var (
-	ErrMissingHeaders  = errors.New("ed25519: missing required signature headers")
-	ErrUnknownKey      = errors.New("ed25519: unknown key ID")
-	ErrTimestampSkew   = errors.New("ed25519: timestamp outside allowed window")
-	ErrNonceReplay     = errors.New("ed25519: nonce already seen (replay)")
-	ErrBadSignature    = errors.New("ed25519: signature verification failed")
-	ErrInvalidNonce    = errors.New("ed25519: nonce must be 32 hex characters")
-	ErrInvalidSig      = errors.New("ed25519: signature is not valid base64url")
+	ErrMissingHeaders = errors.New("ed25519: missing required signature headers")
+	ErrUnknownKey     = errors.New("ed25519: unknown key ID")
+	ErrTimestampSkew  = errors.New("ed25519: timestamp outside allowed window")
+	ErrNonceReplay    = errors.New("ed25519: nonce already seen (replay)")
+	ErrBadSignature   = errors.New("ed25519: signature verification failed")
+	ErrInvalidNonce   = errors.New("ed25519: nonce must be 32 hex characters")
+	ErrInvalidSig     = errors.New("ed25519: signature is not valid base64url")
 )
 
 // ReasonFor maps a sentinel error to the value for the X-Lookout-Reason
