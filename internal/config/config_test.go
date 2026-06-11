@@ -104,3 +104,93 @@ func TestLoadEdgeModeWithBothTokenAndURL(t *testing.T) {
 		t.Fatal("expected IsEdgeMode() to be true")
 	}
 }
+
+// TestLoadAuthorizedKeysEnvVars verifies AUTHORIZED_KEYS and AUTHORIZED_KEYS_FILE.
+func TestLoadAuthorizedKeysEnvVars(t *testing.T) {
+	setEnv(t, "AUTHORIZED_KEYS", "/tmp/test_ak")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AuthorizedKeysFile != "/tmp/test_ak" {
+		t.Errorf("AuthorizedKeysFile: got %q want /tmp/test_ak", cfg.AuthorizedKeysFile)
+	}
+}
+
+// TestLoadAuthorizedKeysFileAlias verifies AUTHORIZED_KEYS_FILE is an alias.
+func TestLoadAuthorizedKeysFileAlias(t *testing.T) {
+	setEnv(t, "AUTHORIZED_KEYS_FILE", "/tmp/test_akf")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AuthorizedKeysFile != "/tmp/test_akf" {
+		t.Errorf("AuthorizedKeysFile via alias: got %q want /tmp/test_akf", cfg.AuthorizedKeysFile)
+	}
+}
+
+// TestLoadNonceLRUSizeDefault verifies NONCE_LRU_SIZE defaults to 10000.
+func TestLoadNonceLRUSizeDefault(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.NonceLRUSize != 10000 {
+		t.Errorf("NonceLRUSize default: got %d want 10000", cfg.NonceLRUSize)
+	}
+}
+
+// TestLoadMaxClockSkewDefault verifies MAX_CLOCK_SKEW_SECONDS defaults to 60.
+func TestLoadMaxClockSkewDefault(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxClockSkewSeconds != 60 {
+		t.Errorf("MaxClockSkewSeconds default: got %d want 60", cfg.MaxClockSkewSeconds)
+	}
+}
+
+// TestLoadEnrollmentToken verifies ENROLLMENT_TOKEN is loaded.
+func TestLoadEnrollmentToken(t *testing.T) {
+	setEnv(t, "ENROLLMENT_TOKEN", "topsecret")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.EnrollmentToken != "topsecret" {
+		t.Errorf("EnrollmentToken: got %q want topsecret", cfg.EnrollmentToken)
+	}
+}
+
+// TestLoadEnrollmentTokenFile verifies ENROLLMENT_TOKEN_FILE is read.
+func TestLoadEnrollmentTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/et"
+	if err := os.WriteFile(path, []byte("filetoken\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	setEnv(t, "ENROLLMENT_TOKEN_FILE", path)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.EnrollmentToken != "filetoken" {
+		t.Errorf("EnrollmentToken from file: got %q want filetoken", cfg.EnrollmentToken)
+	}
+}
+
+// TestIsEdgeModeWithAuthorizedKeys verifies IsEdgeMode with AUTHORIZED_KEYS.
+func TestIsEdgeModeWithAuthorizedKeys(t *testing.T) {
+	setEnv(t,
+		"DRYDOCK_URL", "https://drydock.example.com",
+		"AUTHORIZED_KEYS", "/tmp/ak",
+	)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.IsEdgeMode() {
+		t.Error("expected IsEdgeMode() true with DRYDOCK_URL + AUTHORIZED_KEYS")
+	}
+}

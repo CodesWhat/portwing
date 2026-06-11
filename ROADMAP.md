@@ -118,7 +118,12 @@ Without these, no P2–P7 feature will get evaluated. Supply-chain gaps block en
 
 Pulled before P2 because Komodo shipped Ed25519 PKI in March 2026 and Arcane shipped mTLS enrollment in May 2026. Lookout's shared token is now below the field average for a security-first agent.
 
-- [ ] **Per-client Ed25519 key pairs**: Generate a keypair per client; exchange public keys at registration; asymmetric signatures for all subsequent requests. Token auth retained as fallback for simple integrations.
+- [x] **Per-client Ed25519 key pairs** *(shipped v0.2.0)*: Generate a keypair per
+  client; exchange public keys via operator-provisioned `authorized_keys` file
+  (Model B) or one-shot enrollment token (Model C). Ed25519 signatures on every
+  request with timestamp window + nonce LRU replay protection. Token auth retained
+  as fallback. `lookout keygen` CLI subcommand. Edge-mode signed hello.
+  See `docs/design/ed25519-auth.md` (Status: Implemented Phase 1).
 - [ ] **Audit logging**: Structured JSON log of all authenticated Docker API calls, exec sessions, and Compose operations (timestamp, caller identity, endpoint, method, outcome). Portainer charges for this in BE; Lookout ships it free.
 
 ---

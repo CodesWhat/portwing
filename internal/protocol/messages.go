@@ -50,13 +50,19 @@ type HelloMessage struct {
 	Protocol      string   `json:"protocol"`
 	AgentID       string   `json:"agentId"`
 	AgentName     string   `json:"agentName"`
-	TokenHash     string   `json:"tokenHash"`
+	TokenHash     string   `json:"tokenHash,omitempty"`
 	DockerVersion string   `json:"dockerVersion"`
 	Hostname      string   `json:"hostname"`
 	Capabilities  []string `json:"capabilities"`
-	DrydockCompat string   `json:"drydockCompat"`
-	WatcherTypes  []string `json:"watcherTypes"`
-	TriggerTypes  []string `json:"triggerTypes"`
+	DrydockCompat string   `json:"drydockCompat,omitempty"`
+	WatcherTypes  []string `json:"watcherTypes,omitempty"`
+	TriggerTypes  []string `json:"triggerTypes,omitempty"`
+
+	// Ed25519 signed-hello fields (omitempty — absent when token auth is used).
+	PubKeyID  string `json:"pubKeyId,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
+	Nonce     string `json:"nonce,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
 type WelcomeMessage struct {

@@ -2,6 +2,7 @@ package edge
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/codeswhat/lookout/internal/adapter"
 	"github.com/codeswhat/lookout/internal/audit"
+	"github.com/codeswhat/lookout/internal/auth"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
 	"github.com/codeswhat/lookout/internal/metrics"
@@ -251,12 +253,10 @@ func (c *Client) connect(ctx context.Context) error {
 	return readErr
 }
 
-// sendHello sends the hello handshake message.
+// sendHello sends the hello handshake message. When PRIVATE_KEY_FILE is
+// configured, the hello is signed with Ed25519 and the signature fields are
+// populated (tokenHash is left empty). Otherwise, tokenHash is set as before.
 func (c *Client) sendHello(ctx context.Context) error {
-	// Hash the token.
-	hash := sha256.Sum256([]byte(c.cfg.Token))
-	tokenHash := fmt.Sprintf("%x", hash)
-
 	dockerVersion, err := c.dockerClient.GetVersion(ctx)
 	if err != nil {
 		dockerVersion = "unknown"
@@ -277,10 +277,19 @@ func (c *Client) sendHello(ctx context.Context) error {
 		Protocol:      protocol.ProtocolString,
 		AgentID:       c.cfg.AgentID,
 		AgentName:     c.cfg.AgentName,
-		TokenHash:     tokenHash,
 		DockerVersion: dockerVersion,
 		Hostname:      hostname,
 		Capabilities:  capabilities,
+	}
+
+	// Attempt Ed25519 signing if a private key is configured.
+	if c.cfg.PrivateKeyFile != "" {
+		if err := c.signHello(ctx, &hello); err != nil {
+			slog.Warn("ed25519 hello signing failed, falling back to token hash", "error", err)
+			c.setTokenHash(&hello)
+		}
+	} else {
+		c.setTokenHash(&hello)
 	}
 
 	// Merge adapter-specific hello extension fields.
@@ -291,6 +300,48 @@ func (c *Client) sendHello(ctx context.Context) error {
 	}
 
 	return c.sendTypedMessage(protocol.TypeHello, hello)
+}
+
+// setTokenHash sets the TokenHash field from cfg.Token.
+func (c *Client) setTokenHash(hello *protocol.HelloMessage) {
+	if c.cfg.Token != "" {
+		hash := sha256.Sum256([]byte(c.cfg.Token))
+		hello.TokenHash = fmt.Sprintf("%x", hash)
+	}
+}
+
+// signHello signs the hello message with the configured Ed25519 private key.
+// The WebSocket upgrade path is used as the "path" in the canonical string,
+// with the empty-body hash.
+func (c *Client) signHello(_ context.Context, hello *protocol.HelloMessage) error {
+	priv, err := auth.LoadPrivateKey(c.cfg.PrivateKeyFile)
+	if err != nil {
+		return fmt.Errorf("loading private key: %w", err)
+	}
+
+	pub := priv.Public().(ed25519.PublicKey)
+	keyID := auth.KeyIDForPublicKey(pub)
+
+	nonce, err := auth.NewNonce()
+	if err != nil {
+		return fmt.Errorf("generating nonce: %w", err)
+	}
+
+	tsUnix := time.Now().Unix()
+
+	// The canonical path is the WebSocket upgrade URL path.
+	wsPath := "/api/lookout/ws"
+	msg := auth.CanonicalMessage("GET", wsPath, auth.BodyHashHex(nil), tsUnix, nonce)
+	sig := ed25519.Sign(priv, msg)
+
+	hello.PubKeyID = keyID
+	hello.Timestamp = tsUnix
+	hello.Nonce = nonce
+	hello.Signature = base64.RawURLEncoding.EncodeToString(sig)
+	// Do not set TokenHash when using Ed25519 auth.
+	hello.TokenHash = ""
+
+	return nil
 }
 
 // readPump reads messages from the WebSocket and dispatches them.
