@@ -6,16 +6,18 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
   release:
     name: "🚀 GoReleaser + Cosign"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Harden Runner
@@ -35,15 +37,13 @@ jobs:
           go-version: "1.26"
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354dc8/v3  # pinning via tag reference — cosign-installer v3 (SHA below)
-        # Full SHA: see https://github.com/sigstore/cosign-installer/releases
-        # Using tag reference only; Dependabot will maintain the pin.
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
 
       - name: Login to GHCR
-        uses: docker/login-action@74a5d142397b4f3f4ffd70c53fc07d0e3bac9b5  # v3.4.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -53,7 +53,7 @@ jobs:
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff10e20d2f54e2cce25  # v3.6.0
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3  # v4.1.0
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
@@ -78,14 +78,14 @@ jobs:
       # Attests every artifact listed in checksums.txt (all release archives).
       # Verify with: gh attestation verify <archive> --repo CodesWhat/lookout
       - name: Attest release archives
-        uses: actions/attest-build-provenance@db8adeaaa4a5f3ccb8e7e99cfafcfb6c3fb62c9  # v2.4.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
         with:
           subject-checksums: dist/checksums.txt
 
       # Container images are cosign keyless-signed by GoReleaser docker_signs;
       # the version-tag manifest additionally gets build provenance here.
       - name: Attest container manifest
-        uses: actions/attest-build-provenance@db8adeaaa4a5f3ccb8e7e99cfafcfb6c3fb62c9  # v2.4.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
         with:
           subject-name: ghcr.io/codeswhat/lookout
           subject-digest: ${{ steps.manifest-digest.outputs.digest }}
@@ -112,7 +112,7 @@ jobs:
           egress-policy: audit
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
       - name: Pull released image
         run: |
