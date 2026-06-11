@@ -321,7 +321,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `GET /api/log/entries` returns `[]` | COMPATIBLE | Fixed in this PR: `routes.go:handleLogEntries`; Drydock `AgentClient.ts:1503` |
 | Authentication via `X-Dd-Agent-Secret` | COMPATIBLE | Lookout: `server/http.go` auth middleware; Drydock: `api/index.ts:73` |
 | `/health` unauthenticated | COMPATIBLE | Lookout: `routes.go:handleSimpleHealth`; Drydock: `api/index.ts:152` |
-| `dd:watcher-snapshot` SSE event | GAP | See below |
+| `dd:watcher-snapshot` SSE event | COMPATIBLE | Emitted after every poll cycle and on SSE connect (after `dd:ack`); see below |
 | `dd:update-applied` / `dd:update-failed` SSE | N-A | Drydock emits these; Lookout does not participate in update operations |
 | `dd:update-operation-changed` SSE | N-A | Same |
 | `dd:batch-update-completed` SSE | N-A | Same |
@@ -332,7 +332,15 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 
 ## Gaps Requiring Drydock-side Changes
 
-### GAP-1: `dd:watcher-snapshot` SSE event not emitted by Lookout
+None. GAP-1 below was originally identified as requiring a Drydock-side
+tolerance change; it has since been resolved Lookout-side.
+
+### GAP-1 (RESOLVED): `dd:watcher-snapshot` SSE event not emitted by Lookout
+
+**Resolution:** Lookout now emits `dd:watcher-snapshot` from `SSEBroadcaster`
+after every container poll cycle (`Adapter.OnContainerRefresh`) and sends the
+current snapshot to each newly connected SSE client immediately after
+`dd:ack`. No Drydock-side change is needed.
 
 **What Drydock expects:** When a watcher completes a full poll cycle, the original
 Drydock Node.js agent emits a `dd:watcher-snapshot` SSE event:
@@ -365,14 +373,12 @@ connection is dropped and the controller reconnects, the handshake call to
 is a zero-container handshake (preserved as ambiguous by Drydock, `AgentClient.ts:537`)
 which relies on `dd:watcher-snapshot` to later prune stale entries.
 
-**Recommendation for Drydock issue:** "Add tolerance for agents that never emit
-`dd:watcher-snapshot`: treat missing snapshots the same as the zero-container
-handshake path — defer prune to the next non-empty authoritative event. Lookout
-(and future lightweight agents) emit only incremental container events."
-
-**Lookout path to fix (v2):** After each container poll cycle, emit a
-`dd:watcher-snapshot` event from `SSEBroadcaster`. This requires adding cycle
-tracking to `ContainerManager.Refresh()`.
+**How it was fixed:** `SSEBroadcaster.BroadcastWatcherSnapshot` marshals the
+watcher descriptor plus the full cached inventory (`ContainerManager.GetContainers`,
+already rebuilt by the poll cycle that triggered the broadcast) — no extra
+cycle tracking was needed. The snapshot is also written to each new SSE client
+right after the `dd:ack` event so a reconnecting controller gets the
+authoritative list without waiting up to one poll interval.
 
 ---
 
