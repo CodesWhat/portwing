@@ -44,6 +44,7 @@ type Server struct {
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
 	rateLimiter  *RateLimiter
+	verifier     tokenVerifier
 	httpServer   *http.Server
 	startTime    time.Time
 
@@ -52,7 +53,22 @@ type Server struct {
 }
 
 // NewServer creates and configures a new standard-mode Server.
-func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.ServerAdapter) *Server {
+// It returns an error if the TokenHash is set but cannot be parsed; the PHC
+// string is validated at startup so malformed configuration is caught early.
+func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.ServerAdapter) (*Server, error) {
+	var verifier tokenVerifier
+	switch {
+	case cfg.Token != "":
+		verifier = &rawTokenVerifier{token: cfg.Token}
+	case cfg.TokenHash != "":
+		params, err := ParsePHC(cfg.TokenHash)
+		if err != nil {
+			return nil, fmt.Errorf("parsing TOKEN_HASH: %w", err)
+		}
+		verifier = newArgon2Verifier(params)
+	}
+	// verifier == nil means no auth configured.
+
 	s := &Server{
 		cfg:          cfg,
 		dockerClient: dockerClient,
@@ -60,6 +76,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
 		rateLimiter:  NewRateLimiter(),
+		verifier:     verifier,
 		startTime:    time.Now(),
 	}
 
@@ -92,7 +109,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		}
 	}
 
-	return s
+	return s, nil
 }
 
 // registerRoutes wires up all HTTP endpoints. Routes requiring authentication
@@ -104,7 +121,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Auth required - wrap with auth middleware.
 	auth := func(h http.HandlerFunc) http.Handler {
-		return s.rateLimiter.AuthMiddleware(s.cfg.Token, http.HandlerFunc(h))
+		return s.rateLimiter.AuthMiddleware(s.verifier, http.HandlerFunc(h))
 	}
 
 	mux.Handle("GET /_lookout/info", auth(s.handleInfo))

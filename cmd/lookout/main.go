@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +24,11 @@ import (
 )
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "hash-token" {
+		runHashToken()
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
@@ -68,7 +76,11 @@ func main() {
 		}
 	} else {
 		slog.Info("starting in standard mode", "address", cfg.BindAddress+":"+cfg.Port)
-		srv := server.NewServer(cfg, dockerClient, a)
+		srv, err := server.NewServer(cfg, dockerClient, a)
+		if err != nil {
+			slog.Error("failed to create server", "error", err)
+			os.Exit(1)
+		}
 		go func() {
 			<-sigCh
 			slog.Info("shutting down...")
@@ -103,4 +115,30 @@ func modeString(cfg *config.Config) string {
 		return "edge"
 	}
 	return "standard"
+}
+
+// runHashToken reads a token from stdin, hashes it with Argon2id, and prints
+// the resulting PHC string. The result can be stored as TOKEN_HASH.
+func runHashToken() {
+	fmt.Fprint(os.Stderr, "Enter token: ")
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "error reading input: %v\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "no input provided")
+		}
+		os.Exit(1)
+	}
+	token := strings.TrimSpace(scanner.Text())
+	if token == "" {
+		fmt.Fprintln(os.Stderr, "token must not be empty")
+		os.Exit(1)
+	}
+	phc, err := server.HashToken(token)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hash-token: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(phc)
 }
