@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -20,6 +22,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -41,3 +49,26 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest release archives and checksums
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/checksums.txt
+
+      - name: Attest container image digests
+        shell: bash
+        run: |
+          DIGESTS=$(jq -r '.[] | select(.type == "Docker Image") | .extra.Digest // empty' dist/artifacts.json 2>/dev/null || true)
+          if [ -z "$DIGESTS" ]; then
+            echo "No image digests found in dist/artifacts.json, skipping image attestation."
+            exit 0
+          fi
+          echo "$DIGESTS" | while read -r digest; do
+            gh attestation create \
+              --subject-name ghcr.io/codeswhat/lookout \
+              --subject-digest "$digest" \
+              --repo "${{ github.repository }}" || true
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
