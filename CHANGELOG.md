@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Release pipeline**: pin GoReleaser to the `~> v2` major line (was `latest`) so a release can't silently jump to a future GoReleaser v3, and to clear the action's "using 'latest' as default version" advisory.
+
 ## [0.2.0] - 2026-06-12
 
 ### Added
