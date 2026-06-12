@@ -1,8 +1,5 @@
 <div align="center">
 
-<!-- Placeholder mark — swap docs/lookout-logo.svg for a final logo when ready -->
-<img src="docs/lookout-logo.svg" alt="Lookout" width="180" height="180">
-
 <h1>Lookout</h1>
 
 **Security-first remote Docker agent — control your containers from anywhere, safely.**
@@ -72,21 +69,158 @@
 > [!NOTE]
 > **v0.2.0 is the current release.** Ships Ed25519 per-client authentication, key enrollment, Argon2id token hashing, a read-only MCP server, Prometheus metrics, structured audit logging, and hardened CI/supply-chain infrastructure. See [CHANGELOG.md](CHANGELOG.md) for full release notes.
 
-```
-Remote Host A        Remote Host B           Your Server
-+----------+        +----------+        +------------------+
-| Lookout  |--WSS-->|          |        |    DockPilot     |
-| (agent)  |        | Lookout  |--WSS-->|    (gateway)     |
-|          |        | (agent)  |        |        |         |
-| Docker   |        |          |        |    Drydock       |
-| Engine   |        | Docker   |        |    (platform)    |
-+----------+        | Engine   |        +------------------+
-                    +----------+
+```mermaid
+flowchart LR
+    subgraph hostA ["Remote Host A"]
+        LA["Lookout (agent)"]
+        DA["Docker Engine"]
+        LA --- DA
+    end
+
+    subgraph hostB ["Remote Host B"]
+        LB["Lookout (agent)"]
+        DB["Docker Engine"]
+        LB --- DB
+    end
+
+    subgraph server ["Your Server"]
+        GW["DockPilot (gateway)"]
+        PF["Drydock (platform)"]
+        GW --> PF
+    end
+
+    LA -- "WSS (outbound)" --> GW
+    LB -- "WSS (outbound)" --> GW
 ```
 
 <h2 align="center" id="quick-start">🚀 Quick Start</h2>
 
-### Docker
+### Recommended deployment (hardened)
+
+The strongest posture combines three controls: **sockguard** (socket-level request filtering so Lookout never touches the raw Docker socket directly), **Ed25519 per-request authentication** (signed requests, replay protection, no shared secrets), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted tokens). Use **Edge mode** (outbound WebSocket, no inbound ports) when deploying behind NAT or a firewall, or Standard mode strictly behind a TLS reverse proxy.
+
+**Step 1 — generate a token and pull the example:**
+
+```bash
+openssl rand -hex 32 > lookout_token.txt
+# Download the hardened compose file and its sockguard policy
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/docker-compose.with-sockguard.yml
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/sockguard.yaml
+```
+
+**Step 2 — start the hardened stack:**
+
+```bash
+docker compose -f docker-compose.with-sockguard.yml up -d
+```
+
+This runs sockguard and Lookout as separate containers sharing a filtered socket volume. Neither container has the raw Docker socket mounted directly; sockguard enforces an allowlist of Docker API operations at the socket level. The full compose file (`examples/docker-compose.with-sockguard.yml`):
+
+```yaml
+# Lookout + sockguard — two-layer defense.
+#
+# Sockguard sits between Lookout and the host's Docker socket and writes a
+# filtered unix socket into a shared named volume. Lookout talks to that
+# filtered socket instead of mounting /var/run/docker.sock directly, so even
+# a fully compromised agent is constrained to the explicit API allowlist in
+# sockguard.yaml.
+#
+# Generate a token first:
+#   openssl rand -hex 32 > lookout_token.txt
+
+services:
+  sockguard:
+    image: ghcr.io/codeswhat/sockguard:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./sockguard.yaml:/etc/sockguard/sockguard.yaml:ro
+      - sockguard-socket:/var/run/sockguard
+    environment:
+      - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
+
+  lookout:
+    image: ghcr.io/codeswhat/lookout:latest
+    restart: unless-stopped
+    depends_on:
+      - sockguard
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    ports:
+      - "3000:3000"
+    volumes:
+      - sockguard-socket:/var/run/sockguard:ro
+      - lookout-stacks:/data/stacks
+    environment:
+      - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
+      - TOKEN_FILE=/run/secrets/lookout_token
+    secrets:
+      - lookout_token
+
+secrets:
+  lookout_token:
+    file: ./lookout_token.txt
+
+volumes:
+  sockguard-socket:
+  lookout-stacks:
+```
+
+**Upgrade to Ed25519 key auth (zero shared secrets):** generate a keypair with `lookout keygen`, mount the `authorized_keys` file, and set `AUTHORIZED_KEYS=/etc/lookout/authorized_keys` — see [Authentication](#authentication). Use `PRIVATE_KEY_FILE` for signed edge-mode hellos.
+
+<details>
+<summary>Edge mode variant (outbound WebSocket — no inbound ports)</summary>
+
+For hosts behind NAT or a firewall, use [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml). Lookout dials out to your DockPilot gateway; no port is published on the remote host.
+
+```yaml
+services:
+  lookout:
+    image: ghcr.io/codeswhat/lookout:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - lookout-stacks:/data/stacks
+    environment:
+      - DRYDOCK_URL=https://drydock.example.com
+      - TOKEN_FILE=/run/secrets/lookout_token
+      - AGENT_NAME=edge-host-01
+      # Key-based hello instead of a shared token:
+      #   lookout keygen  →  PRIVATE_KEY_FILE=/run/secrets/lookout_key
+    secrets:
+      - lookout_token
+
+secrets:
+  lookout_token:
+    file: ./lookout_token.txt
+
+volumes:
+  lookout-stacks:
+```
+
+</details>
+
+<details>
+<summary>Quick start (evaluation only — not for production)</summary>
+
+> **This is for trying Lookout out locally.** Environment-variable tokens are visible in `docker inspect` and process listings. Do not use in production — use the hardened deployment above instead.
 
 ```bash
 docker run -d \
@@ -97,24 +231,7 @@ docker run -d \
   ghcr.io/codeswhat/lookout:latest
 ```
 
-> Without `TOKEN` (or `TOKEN_HASH`/`AUTHORIZED_KEYS`) the API is **unauthenticated**.
-> Always set a credential — anyone who can reach the port controls your Docker
-> daemon. For production use `TOKEN_FILE` or Ed25519 keys; see
-> [Authentication](#authentication) and [examples/](examples/).
-
-<details>
-<summary>Edge Mode (outbound WebSocket — works behind NAT)</summary>
-
-```bash
-docker run -d \
-  --name lookout \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e DRYDOCK_URL=wss://your-server:3001 \
-  -e TOKEN=your-secret-token \
-  ghcr.io/codeswhat/lookout:latest
-```
-
-Set `DRYDOCK_URL` to your DockPilot gateway. Lookout initiates the outbound connection — no inbound ports required.
+Without `TOKEN` (or `TOKEN_HASH`/`AUTHORIZED_KEYS`) the API is **unauthenticated** — anyone who can reach the port controls your Docker daemon.
 
 </details>
 
@@ -124,13 +241,6 @@ Set `DRYDOCK_URL` to your DockPilot gateway. Lookout initiates the outbound conn
 ```bash
 curl -fsSL https://raw.githubusercontent.com/codeswhat/lookout/main/scripts/install.sh | bash
 ```
-
-</details>
-
-<details>
-<summary>Pair with sockguard (recommended two-layer defense)</summary>
-
-Run Lookout behind [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. See the [example compose file](examples/docker-compose.with-sockguard.yml) for a hardened stack that combines both.
 
 </details>
 
