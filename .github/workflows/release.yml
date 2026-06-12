@@ -77,20 +77,25 @@ jobs:
 
       # Attests every artifact listed in checksums.txt (all release archives).
       # Verify with: gh attestation verify <archive> --repo CodesWhat/lookout
+      # Gated on public visibility: GitHub artifact attestation is not available
+      # for private repos on this org's plan (cosign blob signatures in
+      # checksums.txt.bundle still cover the archives either way).
       - name: Attest release archives
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
         with:
           subject-checksums: dist/checksums.txt
 
-      # Container images are cosign keyless-signed by GoReleaser docker_signs;
-      # the version-tag manifest additionally gets build provenance here.
+      # Container images (per-arch AND manifest lists) are cosign keyless-signed
+      # by GoReleaser docker_signs; the version-tag manifest additionally gets
+      # GitHub build provenance here when the repo is public.
       - name: Attest container manifest
+        if: github.event.repository.visibility == 'public' && steps.manifest-digest.outputs.digest != ''
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
         with:
           subject-name: ghcr.io/codeswhat/lookout
           subject-digest: ${{ steps.manifest-digest.outputs.digest }}
           push-to-registry: true
-        if: steps.manifest-digest.outputs.digest != ''
 
   verify-published:
     name: "✅ Verify Published"

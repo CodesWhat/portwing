@@ -64,7 +64,11 @@ docker_signs:
       - "sign"
       - "${artifact}@${digest}"
       - "--yes"
-    artifacts: images
+    # Sign both the per-arch images and the multi-arch manifest lists, so
+    # `cosign verify ghcr.io/codeswhat/lookout:<tag>` succeeds on the index
+    # users actually pull (not just the per-arch -amd64/-arm64/-armv7 tags).
+    artifacts: all
+    output: true
 
 changelog:
   sort: asc
