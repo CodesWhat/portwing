@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o /loo
 # derived from the base image's own /etc/alpine-release, so the `FROM` tag above
 # is the single source of truth for the Alpine version (Dependabot bumps it
 # cleanly with no repository-URL drift).
-FROM alpine:3.21 AS rootfs
+FROM alpine:3.24 AS rootfs
 RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
  && apk add --no-cache --initdb --root /out \
       --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \

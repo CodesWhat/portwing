@@ -29,10 +29,10 @@ jobs:
   cut:
     name: "🏷️ Release: Cut Tag"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       actions: read
-      contents: write
+      contents: read
 
     steps:
       - name: Harden Runner
@@ -60,7 +60,7 @@ jobs:
         with:
           workflow-file: ${{ env.CI_WORKFLOW_FILE }}
           target-sha: ${{ steps.target.outputs.sha }}
-          max-attempts: "20"
+          max-attempts: "76"
           github-token: ${{ github.token }}
 
       - name: Find latest release tag
