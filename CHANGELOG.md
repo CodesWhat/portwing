@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Release pipeline**: pin GoReleaser to the `~> v2` major line (was `latest`) so a release can't silently jump to a future GoReleaser v3, and to clear the action's "using 'latest' as default version" advisory.
+- **Release pipeline**: pin GoReleaser to the `~> v2` major line (was `latest`) in both the release workflow and the CI config-check job, so neither can silently jump to a future GoReleaser v3 and to clear the action's "using 'latest' as default version" advisory.
 
 ### Fixed
 
