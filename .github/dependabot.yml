@@ -32,7 +32,6 @@ updates:
       - dependencies
     cooldown:
       default-days: 7
-      semver-major-days: 14
     groups:
       actions-minor:
         update-types: [minor, patch]
@@ -51,7 +50,6 @@ updates:
       - dependencies
     cooldown:
       default-days: 7
-      semver-major-days: 14
     groups:
       docker-minor:
         update-types: [minor, patch]
