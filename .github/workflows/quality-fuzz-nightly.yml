@@ -69,7 +69,7 @@ jobs:
           # Parse the trailing unit (m or s) and convert to seconds, then add a
           # 120-second cushion so the go test -timeout always outlasts -fuzztime.
           if [[ "${FUZZTIME}" =~ ^([0-9]+)m$ ]]; then
-            budget_s=$(( ${BASH_REMATCH[1]} * 60 ))
+            budget_s=$(( BASH_REMATCH[1] * 60 ))
           elif [[ "${FUZZTIME}" =~ ^([0-9]+)s$ ]]; then
             budget_s=${BASH_REMATCH[1]}
           else
