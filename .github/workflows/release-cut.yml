@@ -8,6 +8,11 @@ run-name: "🏷️ Release: Cut — manual by ${{ github.actor }}"
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Explicit release version, e.g. 0.2.0 or v0.2.0. Leave blank to auto-compute from conventional commits since the last tag."
+        required: false
+        type: string
 
 permissions:
   actions: read
@@ -69,38 +74,49 @@ jobs:
           echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
           echo "current_version=${latest_tag#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Compute next version from commit history
+      - name: Compute next version
         id: next
         env:
           LATEST_TAG: ${{ steps.base.outputs.latest_tag }}
           CURRENT_VERSION: ${{ steps.base.outputs.current_version }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
-          # Determine bump level from conventional commits since last tag.
-          # feat = minor bump, fix/anything else = patch bump.
-          # A "!" suffix or BREAKING CHANGE in body = major bump.
-          bump="patch"
-          while IFS= read -r subject; do
-            if echo "${subject}" | grep -qP '^.+!\s*:'; then
-              bump="major"
-              break
-            elif echo "${subject}" | grep -qP '^✨\s+feat'; then
-              if [ "${bump}" != "major" ]; then
-                bump="minor"
-              fi
+          if [ -n "${VERSION_INPUT}" ]; then
+            # Explicit override: normalize an optional leading "v" and validate semver.
+            next_version="${VERSION_INPUT#v}"
+            if ! echo "${next_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Invalid version '${VERSION_INPUT}'. Expected MAJOR.MINOR.PATCH (optionally v-prefixed)."
+              exit 1
             fi
-          done < <(git log --format=%s "${LATEST_TAG}..${TARGET_SHA}" 2>/dev/null || true)
+            bump="manual"
+          else
+            # Determine bump level from conventional commits since last tag.
+            # feat = minor bump, fix/anything else = patch bump.
+            # A "!" suffix or BREAKING CHANGE in body = major bump.
+            bump="patch"
+            while IFS= read -r subject; do
+              if echo "${subject}" | grep -qP '^.+!\s*:'; then
+                bump="major"
+                break
+              elif echo "${subject}" | grep -qP '^✨\s+feat'; then
+                if [ "${bump}" != "major" ]; then
+                  bump="minor"
+                fi
+              fi
+            done < <(git log --format=%s "${LATEST_TAG}..${TARGET_SHA}" 2>/dev/null || true)
 
-          IFS='.' read -r major minor patch <<< "${CURRENT_VERSION:-0.0.0}"
-          case "${bump}" in
-            major) major=$((major+1)); minor=0; patch=0 ;;
-            minor) minor=$((minor+1)); patch=0 ;;
-            patch) patch=$((patch+1)) ;;
-          esac
+            IFS='.' read -r major minor patch <<< "${CURRENT_VERSION:-0.0.0}"
+            case "${bump}" in
+              major) major=$((major+1)); minor=0; patch=0 ;;
+              minor) minor=$((minor+1)); patch=0 ;;
+              patch) patch=$((patch+1)) ;;
+            esac
+            next_version="${major}.${minor}.${patch}"
+          fi
 
-          next_version="${major}.${minor}.${patch}"
           release_tag="v${next_version}"
 
           if git rev-parse -q --verify "refs/tags/${release_tag}" >/dev/null; then
