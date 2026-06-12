@@ -4,5 +4,8 @@ contact_links:
     url: https://github.com/CodesWhat/lookout/security/advisories/new
     about: Please report security vulnerabilities privately via GitHub Security Advisories — do NOT open a public issue.
   - name: Question / Help
-    url: https://github.com/CodesWhat/lookout/issues
-    about: Ask a question about configuration, setup, or usage by opening an issue.
+    url: https://github.com/CodesWhat/lookout/discussions/categories/q-a
+    about: Ask a question about configuration, setup, or usage in GitHub Discussions.
+  - name: Feature request / Idea
+    url: https://github.com/CodesWhat/lookout/discussions/categories/ideas
+    about: Propose a feature or share an idea in GitHub Discussions.
