@@ -1,28 +1,76 @@
-# Lookout
+<div align="center">
 
-[![CI](https://github.com/CodesWhat/lookout/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CodesWhat/lookout/actions/workflows/ci.yml)
-[![Vulnerability Scan](https://github.com/CodesWhat/lookout/actions/workflows/security-vuln-weekly.yml/badge.svg)](https://github.com/CodesWhat/lookout/actions/workflows/security-vuln-weekly.yml)
-[![Go 1.26](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](go.mod)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
-[![Container Image](https://img.shields.io/badge/ghcr.io-codeswhat%2Flookout-2496ED?logo=docker)](https://github.com/CodesWhat/lookout/pkgs/container/lookout)
+<!-- PLACEHOLDER: docs/lookout-logo.png does not exist yet — add the asset before shipping -->
+<img src="docs/lookout-logo.png" alt="lookout" width="180">
 
-Security-first remote Docker agent for the [Drydock](https://github.com/codeswhat/drydock) container update platform — and a standalone, signed, auditable Docker API proxy for everyone else.
+<h1>Lookout</h1>
 
-## Contents
+**Security-first remote Docker agent — control your containers from anywhere, safely.**
 
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Authentication](#authentication)
-- [Standalone (Generic) Mode](#standalone-generic-mode)
-- [Connection Modes](#connection-modes)
-- [Configuration](#configuration)
-- [API Reference](#api-reference)
-- [Token Security](#token-security)
-- [Verify a Release](#verify-a-release)
-- [Security](#security)
-- [Audit Logging](#audit-logging)
-- [Contributing](#contributing)
-- [License](#license)
+<img src="https://img.shields.io/badge/status-ALPHA-FF6B00?style=for-the-badge&labelColor=000000" alt="Status: Alpha" height="34">
+
+</div>
+
+> [!WARNING]
+> ### 🚧 Alpha software — not yet production-ready
+> Lookout is in **active alpha** (`v0.2.x`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
+
+<p align="center">
+  <a href="https://github.com/CodesWhat/lookout/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/lookout?include_prereleases&label=release" alt="Release"></a>
+  <a href="https://github.com/CodesWhat/lookout/pkgs/container/lookout"><img src="https://img.shields.io/badge/GHCR-image-2ea44f?logo=github&logoColor=white" alt="GHCR"></a>
+  <br>
+  <a href="https://github.com/orgs/CodesWhat/packages/container/package/lookout"><img src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white" alt="Multi-arch"></a>
+  <a href="https://github.com/orgs/CodesWhat/packages/container/package/lookout"><img src="https://img.shields.io/badge/image%20size-~10%20MB-informational?logo=docker&logoColor=white" alt="Image size"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-C9A227" alt="License AGPL-3.0"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/CodesWhat/lookout/stargazers"><img src="https://img.shields.io/github/stars/CodesWhat/lookout?style=flat" alt="Stars"></a>
+  <a href="https://github.com/CodesWhat/lookout/forks"><img src="https://img.shields.io/github/forks/CodesWhat/lookout?style=flat" alt="Forks"></a>
+  <a href="https://github.com/CodesWhat/lookout/issues"><img src="https://img.shields.io/github/issues/CodesWhat/lookout?style=flat" alt="Issues"></a>
+  <a href="https://github.com/CodesWhat/lookout/commits/main"><img src="https://img.shields.io/github/last-commit/CodesWhat/lookout?style=flat" alt="Last commit"></a>
+  <a href="https://github.com/CodesWhat/lookout/commits/main"><img src="https://img.shields.io/github/commit-activity/m/CodesWhat/lookout?style=flat" alt="Commit activity"></a>
+  <br>
+  <a href="https://github.com/CodesWhat/lookout"><img src="https://img.shields.io/github/repo-size/CodesWhat/lookout?style=flat" alt="Repo size"></a>
+  <img src="https://komarev.com/ghpvc/?username=CodesWhat-lookout&label=repo+views&style=flat" alt="Repo views">
+</p>
+
+<p align="center">
+  <a href="https://github.com/CodesWhat/lookout/actions/workflows/ci.yml"><img src="https://github.com/CodesWhat/lookout/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/CodesWhat/lookout/actions/workflows/security-vuln-weekly.yml"><img src="https://github.com/CodesWhat/lookout/actions/workflows/security-vuln-weekly.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
+  <a href="https://github.com/CodesWhat/lookout/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/lookout/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
+  <br>
+  <a href="https://goreportcard.com/report/github.com/codeswhat/lookout"><img src="https://goreportcard.com/badge/github.com/codeswhat/lookout" alt="Go Report Card"></a>
+  <a href="https://pkg.go.dev/github.com/codeswhat/lookout"><img src="https://pkg.go.dev/badge/github.com/codeswhat/lookout.svg" alt="Go Reference"></a>
+  <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/lookout"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/lookout?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
+  <!-- PLACEHOLDER: Snyk is not yet wired up for this repo — replace with a real monitored badge once onboarded -->
+  <a href="https://app.snyk.io/org/codeswhat/projects"><img src="https://img.shields.io/badge/Snyk-monitored-4C4A73?logo=snyk&logoColor=white" alt="Monitored by Snyk (placeholder)"></a>
+</p>
+
+<hr>
+
+<h2 align="center">📑 Contents</h2>
+
+- [🚀 Quick Start](#quick-start)
+- [🆕 Recent Updates](#recent-updates)
+- [✨ Features](#features)
+- [🔐 Authentication](#authentication)
+- [🔌 Connection Modes](#connection-modes)
+- [🖥️ Standalone Mode](#standalone-generic-mode)
+- [⚙️ Configuration](#configuration)
+- [📡 API Reference](#api-reference)
+- [🔑 Token Security](#token-security)
+- [✅ Verify a Release](#verify-a-release)
+- [🛡️ Security](#security)
+- [📋 Audit Logging](#audit-logging)
+- [⭐ Star History](#star-history)
+- [🛠️ Built With](#built-with)
+- [🤝 Community & Support](#community--support)
+
+<hr>
+
+> [!NOTE]
+> **v0.2.0 is the current release.** Ships Ed25519 per-client authentication, key enrollment, Argon2id token hashing, a read-only MCP server, Prometheus metrics, structured audit logging, and hardened CI/supply-chain infrastructure. See [CHANGELOG.md](CHANGELOG.md) for full release notes.
 
 ```
 Remote Host A        Remote Host B           Your Server
@@ -36,24 +84,7 @@ Remote Host A        Remote Host B           Your Server
                     +----------+
 ```
 
-## Features
-
-- **Dual connection modes** -- Standard (inbound HTTP) and Edge (outbound WebSocket)
-- **Transparent Docker API proxy** -- All Docker Engine API paths forwarded
-- **Per-request Ed25519 signatures** -- per-client keys, replay protection, `authorized_keys`-style rotation via SIGHUP ([design](docs/design/ed25519-auth.md))
-- **Container inventory** -- Full container metadata with `dd.*` label parsing
-- **Prometheus `/metrics`** -- host + per-container CPU/memory/network in cAdvisor-compatible format, zero dependencies
-- **MCP server** -- AI assistants connect to `/_lookout/mcp` (streamable HTTP, read-only tools, env values never exposed)
-- **Audit logging** -- structured JSON of every API call, exec session, and Compose operation
-- **Host metrics** -- CPU, memory, disk, network, uptime collection
-- **Interactive exec** -- Terminal sessions via WebSocket or HTTP hijack
-- **Docker Compose** -- Full lifecycle management with security hardening
-- **SSE compatibility** -- Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot`
-- **Signed supply chain** -- cosign keyless signatures, CycloneDX SBOM, SLSA provenance on every release
-- **Two-layer defense** -- pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket ([example](examples/docker-compose.with-sockguard.yml))
-- **Minimal footprint** -- Static Go binary, ~10 MB container image
-
-## Quick Start
+<h2 align="center" id="quick-start">🚀 Quick Start</h2>
 
 ### Docker
 
@@ -71,7 +102,8 @@ docker run -d \
 > daemon. For production use `TOKEN_FILE` or Ed25519 keys; see
 > [Authentication](#authentication) and [examples/](examples/).
 
-### Edge Mode
+<details>
+<summary>Edge Mode (outbound WebSocket — works behind NAT)</summary>
 
 ```bash
 docker run -d \
@@ -82,15 +114,76 @@ docker run -d \
   ghcr.io/codeswhat/lookout:latest
 ```
 
-### Binary Install
+Set `DRYDOCK_URL` to your DockPilot gateway. Lookout initiates the outbound connection — no inbound ports required.
+
+</details>
+
+<details>
+<summary>Binary install (install.sh)</summary>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/codeswhat/lookout/main/scripts/install.sh | bash
 ```
 
-## Authentication
+</details>
 
-### Token Authentication (Quickstart)
+<details>
+<summary>Pair with sockguard (recommended two-layer defense)</summary>
+
+Run Lookout behind [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. See the [example compose file](examples/docker-compose.with-sockguard.yml) for a hardened stack that combines both.
+
+</details>
+
+<hr>
+
+<h2 align="center" id="recent-updates">🆕 Recent Updates</h2>
+
+<details>
+<summary><strong>Latest release highlights</strong></summary>
+
+- **v0.2.0 shipped on 2026-06-12** — Ed25519 per-request authentication with signed requests via `X-Lookout-Key-ID` / `X-Lookout-Timestamp` / `X-Lookout-Nonce` / `X-Lookout-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `lookout keygen` CLI subcommand, and `X-Lookout-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`.
+- **Key enrollment** — optional single-use `ENROLLMENT_TOKEN` (`POST /api/lookout/enroll`) for bootstrapping the first Ed25519 key — burned on first use, rate-limited, and audit-logged.
+- **Argon2id token hashing** — `TOKEN_HASH` / `TOKEN_HASH_FILE` with OWASP-recommended parameters; SHA-256 success cache keeps per-request cost flat.
+- **MCP server** — read-only Model Context Protocol endpoint at `/_lookout/mcp` (Streamable HTTP, protocol 2025-11-25) for AI assistants (Claude, Cursor, Windsurf). Tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`.
+- **Prometheus metrics** — `/metrics` and `/_lookout/metrics` exposing `lookout_build_info`, container count, and host resource metrics.
+- **Structured audit logging** — `AUDIT_LOG` env var records auth events, Compose operations, and exec sessions as JSON lines.
+- **Generic REST adapter** — headless REST + SSE management API for standalone mode without a Drydock platform connection (`ADAPTER=generic`).
+- **Hardened CI & supply chain** — SHA-pinned actions, five Go fuzz targets (60s CI / 5m nightly), integration suite against a real Docker daemon, weekly vulnerability scans (govulncheck/grype/gosec), monthly mutation testing, OpenSSF Scorecard, CodeQL, and cosign keyless signing + CycloneDX SBOM + SLSA provenance on every release.
+- **v0.1.0 shipped on 2025-06-01** — initial release: transparent Docker API proxy, Edge mode WebSocket tunnel, Drydock adapter, SSE event stream, token auth, rate limiting, multi-arch image.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+
+</details>
+
+<hr>
+
+<h2 align="center" id="features">✨ Features</h2>
+
+| | Feature | Description |
+|---|---|---|
+| 🔄 | **Dual Connection Modes** | Standard (inbound HTTP) and Edge (outbound WebSocket) — works behind NAT, firewalls, and dynamic IPs with auto-reconnect and exponential backoff. |
+| 🐳 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
+| 🔑 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
+| 🔐 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
+| 🤖 | **MCP Server** | AI assistants connect to `/_lookout/mcp` (Streamable HTTP, protocol 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
+| 📦 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting, including `dd:watcher-snapshot` events for Drydock compatibility. |
+| 📈 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_lookout/metrics`. Zero external dependencies. |
+| 📋 | **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Disabled by default (single nil check overhead when off). |
+| 🖥️ | **Host Metrics** | CPU, memory, disk, network, and uptime collection. |
+| ⚡ | **Interactive Exec** | Terminal sessions via WebSocket or HTTP hijack with 100 concurrent session cap. |
+| 🗂️ | **Docker Compose** | Full lifecycle management with security hardening — path traversal protection, env var denylist, service name injection prevention. |
+| 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
+| ✍️ | **Signed Supply Chain** | Cosign keyless signatures, CycloneDX SBOM, and SLSA provenance on every release. Verifiable without managing signing keys. |
+| 🛡️ | **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
+| 🪶 | **Minimal Footprint** | Static Go binary, ~10 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
+| 🔌 | **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
+
+<hr>
+
+<h2 align="center" id="authentication">🔐 Authentication</h2>
+
+<details>
+<summary><strong>Token Authentication (quickstart)</strong></summary>
 
 Set `TOKEN` to a random secret. All requests must supply it via
 `Authorization: Bearer`, `X-Lookout-Token`, or `X-Dd-Agent-Secret`.
@@ -104,7 +197,10 @@ docker run -d --name lookout \
   ghcr.io/codeswhat/lookout:latest
 ```
 
-### Ed25519 Per-Client Key Authentication (Recommended)
+</details>
+
+<details>
+<summary><strong>Ed25519 Per-Client Key Authentication (recommended)</strong></summary>
 
 Ed25519 keypairs give per-client identity with per-request signatures and
 replay protection. No shared secrets.
@@ -147,7 +243,47 @@ Token auth (`TOKEN`/`TOKEN_HASH`) continues to work alongside Ed25519 — both
 can be set simultaneously during migration. The middleware checks for
 `X-Lookout-Signature` first; if absent, it falls back to the token check.
 
-## Standalone (Generic) Mode
+</details>
+
+<hr>
+
+<h2 align="center" id="connection-modes">🔌 Connection Modes</h2>
+
+<details>
+<summary><strong>Standard Mode and Edge Mode</strong></summary>
+
+### Standard Mode
+
+Lookout runs an HTTP(S) server. Drydock/DockPilot connects inbound.
+
+- Set when `DRYDOCK_URL` is not configured
+- Transparent Docker API proxy on all paths
+- Agent endpoints under `/_lookout/*`
+- Drydock-compatible REST + SSE under `/api/*`
+- Optional TLS with modern cipher suites (TLS 1.2+)
+
+### Edge Mode
+
+Lookout initiates an outbound WebSocket connection to DockPilot.
+
+- Set when both `DRYDOCK_URL` and `TOKEN` are configured
+- Works behind NAT, firewalls, and dynamic IPs
+- Auto-reconnect with exponential backoff + jitter
+- All communication multiplexed over a single WebSocket
+
+```
+DRYDOCK_URL set + TOKEN set  →  Edge Mode (outbound WebSocket)
+Otherwise                    →  Standard Mode (inbound HTTP server)
+```
+
+</details>
+
+<hr>
+
+<h2 align="center" id="standalone-generic-mode">🖥️ Standalone (Generic) Mode</h2>
+
+<details>
+<summary><strong>Run without a Drydock platform connection</strong></summary>
 
 Run Lookout without any external controller by setting `ADAPTER=generic`.
 You get a clean REST + SSE API on `/api/v1/*` backed directly by the local
@@ -213,28 +349,14 @@ Each SSE event is a JSON object:
 A comment heartbeat line (`: heartbeat`) is written every 30 seconds to keep
 the connection alive through proxies.
 
-## Connection Modes
+</details>
 
-### Standard Mode
+<hr>
 
-Lookout runs an HTTP(S) server. Drydock/DockPilot connects inbound.
+<h2 align="center" id="configuration">⚙️ Configuration</h2>
 
-- Set when `DRYDOCK_URL` is not configured
-- Transparent Docker API proxy on all paths
-- Agent endpoints under `/_lookout/*`
-- Drydock-compatible REST + SSE under `/api/*`
-- Optional TLS with modern cipher suites
-
-### Edge Mode
-
-Lookout initiates an outbound WebSocket connection to DockPilot.
-
-- Set when both `DRYDOCK_URL` and `TOKEN` are configured
-- Works behind NAT, firewalls, and dynamic IPs
-- Auto-reconnect with exponential backoff + jitter
-- All communication multiplexed over a single WebSocket
-
-## Configuration
+<details>
+<summary><strong>Environment variable reference</strong></summary>
 
 ### Connection
 
@@ -301,7 +423,14 @@ Lookout initiates an outbound WebSocket connection to DockPilot.
 | `DD_AGENT_SECRET_FILE` | -- | Backward-compatible token file |
 | `DD_POLL_INTERVAL` | `300` | Container inventory refresh (seconds) |
 
-## API Reference
+</details>
+
+<hr>
+
+<h2 align="center" id="api-reference">📡 API Reference</h2>
+
+<details>
+<summary><strong>Health, agent, MCP, Drydock-compatible, and proxy endpoints</strong></summary>
 
 ### Health Endpoints
 
@@ -428,7 +557,14 @@ scrape_configs:
       insecure_skip_verify: false
 ```
 
-## Token Security
+</details>
+
+<hr>
+
+<h2 align="center" id="token-security">🔑 Token Security</h2>
+
+<details>
+<summary><strong>Plaintext, file-based, and hash-at-rest token options</strong></summary>
 
 ### Plaintext token (testing only)
 
@@ -474,7 +610,14 @@ printf '%s' "$TOKEN" | lookout hash-token > /run/secrets/lookout-token-hash
 docker run -e TOKEN_HASH_FILE=/run/secrets/lookout-token-hash ...
 ```
 
-## Verify a Release
+</details>
+
+<hr>
+
+<h2 align="center" id="verify-a-release">✅ Verify a Release</h2>
+
+<details>
+<summary><strong>Cosign verification for checksums and container images</strong></summary>
 
 Lookout releases are signed with [Sigstore cosign](https://github.com/sigstore/cosign)
 via GitHub Actions keyless signing. Checksums and container images can be
@@ -510,9 +653,16 @@ Each release includes a CycloneDX SBOM attached as a release asset
 CycloneDX-compatible tool, or verify it with cosign the same way as the
 checksums file.
 
-## Security
+</details>
 
-- **Authentication**: Token-based with timing-safe comparison (`crypto/subtle`); hash-at-rest via `TOKEN_HASH` (Argon2id)
+<hr>
+
+<h2 align="center" id="security">🛡️ Security</h2>
+
+<details>
+<summary><strong>Security model summary</strong></summary>
+
+- **Authentication**: Token-based with timing-safe comparison (`crypto/subtle`); hash-at-rest via `TOKEN_HASH` (Argon2id); Ed25519 per-client keypairs with per-request signatures and replay protection
 - **Rate Limiting**: 10 failed auth attempts per IP per minute
 - **TLS**: TLS 1.2+ with modern AEAD cipher suites
 - **Compose Security**: Path traversal protection, env var denylist, service name injection prevention
@@ -520,7 +670,14 @@ checksums file.
 
 See [docs/security-model.md](docs/security-model.md) for the full citable spec and CVE mapping.
 
-## Audit Logging
+</details>
+
+<hr>
+
+<h2 align="center" id="audit-logging">📋 Audit Logging</h2>
+
+<details>
+<summary><strong>Structured JSON audit trail for every security-relevant action</strong></summary>
 
 Lookout ships structured JSON audit logging for every security-relevant action — a feature that commercial container management platforms lock behind paid tiers.
 
@@ -546,7 +703,7 @@ Auditing is disabled by default (`AUDIT_LOG` unset). When disabled the overhead 
 | `compose_op` | A Docker Compose operation runs |
 | `exec_start` | An interactive exec tunnel opens |
 
-### Sample JSON line
+### Sample JSON lines
 
 ```json
 {"time":"2026-01-15T10:23:45.123456789Z","level":"INFO","msg":"","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_lookout/compose","outcome":"allowed","status":200,"duration_ms":3.14}
@@ -564,20 +721,71 @@ Exec tunnel events:
 {"time":"2026-01-15T10:24:01.500Z","level":"INFO","msg":"","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
 ```
 
-## Contributing
+</details>
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop and PR
-guidelines, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards,
-and [SECURITY.md](SECURITY.md) for vulnerability reporting. Release process:
-[RELEASING.md](RELEASING.md). Deployment templates live in
-[examples/](examples/).
+<hr>
 
-## Building from Source
+<h2 align="center" id="documentation">📖 Documentation</h2>
 
-```bash
-go build -trimpath -ldflags="-s -w" -o lookout ./cmd/lookout
-```
+| Resource | Link |
+| --- | --- |
+| Security Model | [`docs/security-model.md`](docs/security-model.md) |
+| Ed25519 Auth Design | [`docs/design/ed25519-auth.md`](docs/design/ed25519-auth.md) |
+| Watchtower Migration | [`docs/migrating-from-watchtower.md`](docs/migrating-from-watchtower.md) |
+| Drydock Integration | [`docs/drydock-integration.md`](docs/drydock-integration.md) |
+| OpenAPI Spec | [`api/openapi.yaml`](api/openapi.yaml) |
+| Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
+| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Code of Conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
+| Security Policy | [`SECURITY.md`](SECURITY.md) |
+| Releasing | [`RELEASING.md`](RELEASING.md) |
+| Examples | [`examples/`](examples/) |
+| Issues | [GitHub Issues](https://github.com/CodesWhat/lookout/issues) |
+| Discussions | [GitHub Discussions](https://github.com/CodesWhat/lookout/discussions) |
 
-## License
+<hr>
 
-[AGPL-3.0](LICENSE)
+<a id="star-history"></a>
+
+<div align="center">
+  <a href="https://star-history.com/#CodesWhat/lookout&Date">
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=CodesWhat/lookout&type=Date" />
+  </a>
+</div>
+
+---
+
+<div align="center">
+
+[![SemVer](https://img.shields.io/badge/semver-2.0.0-blue)](https://semver.org/)
+[![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=fff)](https://www.conventionalcommits.org/)
+[![Keep a Changelog](https://img.shields.io/badge/changelog-Keep%20a%20Changelog-E05735)](https://keepachangelog.com/)
+
+### Built With
+
+[![Go 1.26](https://img.shields.io/badge/Go_1.26-00ADD8?logo=go&logoColor=fff)](https://go.dev/)
+[![gorilla/websocket](https://img.shields.io/badge/gorilla%2Fwebsocket-00ADD8?logo=go&logoColor=fff)](https://github.com/gorilla/websocket)
+[![google/uuid](https://img.shields.io/badge/google%2Fuuid-00ADD8?logo=go&logoColor=fff)](https://github.com/google/uuid)
+[![golang.org/x/crypto](https://img.shields.io/badge/x%2Fcrypto-00ADD8?logo=go&logoColor=fff)](https://pkg.go.dev/golang.org/x/crypto)
+[![Sigstore](https://img.shields.io/badge/Sigstore-FFC107?logo=sigstore&logoColor=000)](https://www.sigstore.dev/)
+[![Wolfi](https://img.shields.io/badge/Wolfi-4A4A55?logo=chainguard&logoColor=fff)](https://edu.chainguard.dev/open-source/wolfi/overview/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=fff)](https://www.docker.com/)
+[![GoReleaser](https://img.shields.io/badge/GoReleaser-00ADD8?logo=go&logoColor=fff)](https://goreleaser.com/)
+
+### Community & Support
+
+Issues, ideas, and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for private vulnerability disclosure, and use [GitHub Discussions](https://github.com/CodesWhat/lookout/discussions) for design questions.
+
+Every release image is cosign-signed via GitHub Actions OIDC. Before running a Lookout image in production, verify it with the canonical invocation in the [Verify a Release](#verify-a-release) section above.
+
+**[AGPL-3.0 License](LICENSE)**
+
+Built by <a href="https://codeswhat.com">CodesWhat</a>
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-ff5e5b?logo=kofi&logoColor=white)](https://ko-fi.com/codeswhat)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/codeswhat)
+[![Sponsor](https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/CodesWhat)
+
+<a href="#lookout">Back to top</a>
+
+</div>

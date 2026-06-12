@@ -32,3 +32,9 @@ Thumbs.db
 
 # Local agent worktrees
 .claude/
+
+# Playwright MCP session artifacts
+.playwright-mcp/
+
+# Internal strategy / competitive analysis — not for public release
+/ROADMAP.md
