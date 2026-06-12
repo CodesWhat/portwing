@@ -2,6 +2,7 @@ package edge
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -15,12 +16,13 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/lookout/internal/audit"
+	"github.com/codeswhat/lookout/internal/auth"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
 	"github.com/codeswhat/lookout/internal/metrics"
@@ -52,25 +54,26 @@ type Client struct {
 	adapter      adapter.EdgeAdapter
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
+	auditor      *audit.Logger
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
 
 	execSessions sync.Map
-	streamCount  atomic.Int64
 
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
 }
 
 // NewClient creates a new edge-mode Client.
-func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAdapter) *Client {
+func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAdapter, auditor *audit.Logger) *Client {
 	return &Client{
 		cfg:          cfg,
 		dockerClient: dockerClient,
 		adapter:      a,
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
+		auditor:      auditor,
 	}
 }
 
@@ -82,7 +85,9 @@ func (c *Client) Run(ctx context.Context) error {
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		c.healthServer.Shutdown(shutdownCtx)
+		if err := c.healthServer.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("health server shutdown error", "error", err)
+		}
 	}()
 
 	delay := time.Duration(c.cfg.ReconnectDelay) * time.Second
@@ -98,7 +103,8 @@ func (c *Client) Run(ctx context.Context) error {
 			// Shutting down - send close frame if we still have a connection.
 			c.connMu.Lock()
 			if c.conn != nil {
-				c.conn.WriteMessage(
+				// Best-effort close frame on shutdown; ignore send errors.
+				_ = c.conn.WriteMessage(
 					websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shutdown"),
 				)
@@ -247,12 +253,10 @@ func (c *Client) connect(ctx context.Context) error {
 	return readErr
 }
 
-// sendHello sends the hello handshake message.
+// sendHello sends the hello handshake message. When PRIVATE_KEY_FILE is
+// configured, the hello is signed with Ed25519 and the signature fields are
+// populated (tokenHash is left empty). Otherwise, tokenHash is set as before.
 func (c *Client) sendHello(ctx context.Context) error {
-	// Hash the token.
-	hash := sha256.Sum256([]byte(c.cfg.Token))
-	tokenHash := fmt.Sprintf("%x", hash)
-
 	dockerVersion, err := c.dockerClient.GetVersion(ctx)
 	if err != nil {
 		dockerVersion = "unknown"
@@ -273,10 +277,19 @@ func (c *Client) sendHello(ctx context.Context) error {
 		Protocol:      protocol.ProtocolString,
 		AgentID:       c.cfg.AgentID,
 		AgentName:     c.cfg.AgentName,
-		TokenHash:     tokenHash,
 		DockerVersion: dockerVersion,
 		Hostname:      hostname,
 		Capabilities:  capabilities,
+	}
+
+	// Attempt Ed25519 signing if a private key is configured.
+	if c.cfg.PrivateKeyFile != "" {
+		if err := c.signHello(ctx, &hello); err != nil {
+			slog.Warn("ed25519 hello signing failed, falling back to token hash", "error", err)
+			c.setTokenHash(&hello)
+		}
+	} else {
+		c.setTokenHash(&hello)
 	}
 
 	// Merge adapter-specific hello extension fields.
@@ -287,6 +300,48 @@ func (c *Client) sendHello(ctx context.Context) error {
 	}
 
 	return c.sendTypedMessage(protocol.TypeHello, hello)
+}
+
+// setTokenHash sets the TokenHash field from cfg.Token.
+func (c *Client) setTokenHash(hello *protocol.HelloMessage) {
+	if c.cfg.Token != "" {
+		hash := sha256.Sum256([]byte(c.cfg.Token))
+		hello.TokenHash = fmt.Sprintf("%x", hash)
+	}
+}
+
+// signHello signs the hello message with the configured Ed25519 private key.
+// The WebSocket upgrade path is used as the "path" in the canonical string,
+// with the empty-body hash.
+func (c *Client) signHello(_ context.Context, hello *protocol.HelloMessage) error {
+	priv, err := auth.LoadPrivateKey(c.cfg.PrivateKeyFile)
+	if err != nil {
+		return fmt.Errorf("loading private key: %w", err)
+	}
+
+	pub := priv.Public().(ed25519.PublicKey)
+	keyID := auth.KeyIDForPublicKey(pub)
+
+	nonce, err := auth.NewNonce()
+	if err != nil {
+		return fmt.Errorf("generating nonce: %w", err)
+	}
+
+	tsUnix := time.Now().Unix()
+
+	// The canonical path is the WebSocket upgrade URL path.
+	wsPath := "/api/lookout/ws"
+	msg := auth.CanonicalMessage("GET", wsPath, auth.BodyHashHex(nil), tsUnix, nonce)
+	sig := ed25519.Sign(priv, msg)
+
+	hello.PubKeyID = keyID
+	hello.Timestamp = tsUnix
+	hello.Nonce = nonce
+	hello.Signature = base64.RawURLEncoding.EncodeToString(sig)
+	// Do not set TokenHash when using Ed25519 auth.
+	hello.TokenHash = ""
+
+	return nil
 }
 
 // readPump reads messages from the WebSocket and dispatches them.
@@ -324,6 +379,7 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Warn("invalid exec_start message", "error", err)
 				continue
 			}
+			c.auditor.ExecStart(c.cfg.DrydockURL, msg.ContainerID, msg.ExecID)
 			go c.StartExec(ctx, msg)
 
 		case protocol.TypeExecInput:
@@ -356,9 +412,8 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Debug("invalid ping message", "error", err)
 				continue
 			}
-			c.sendTypedMessage(protocol.TypePong, protocol.PongMessage{
-				Timestamp: ping.Timestamp,
-			})
+			// Best-effort pong reply; connection loss will surface on next read.
+			_ = c.sendTypedMessage(protocol.TypePong, protocol.PongMessage(ping))
 
 		default:
 			// Delegate to adapter for unrecognized message types.
@@ -372,6 +427,7 @@ func (c *Client) readPump(ctx context.Context) error {
 // handleRequest executes a Docker API request locally and sends the response
 // back over the WebSocket.
 func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage) {
+	start := time.Now()
 	isStream := docker.IsStreamingPath(req.Path)
 
 	var bodyReader io.Reader
@@ -389,13 +445,16 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 	}
 
 	if err != nil {
-		c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, 0, msEdge(start))
+		// Best-effort error reply; connection loss will surface on the read pump.
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
 		})
 		return
 	}
 	defer resp.Body.Close()
+	c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeAllowed, resp.StatusCode, msEdge(start))
 
 	// Build response headers.
 	headers := make(map[string]string)
@@ -404,8 +463,8 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 	}
 
 	if isStream {
-		// Send initial response header.
-		c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		// Send initial response header; best-effort — connection loss surfaces on the read pump.
+		_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
 			RequestID:   req.RequestID,
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
@@ -419,7 +478,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			n, readErr := resp.Body.Read(buf)
 			if n > 0 {
 				encoded := base64.StdEncoding.EncodeToString(buf[:n])
-				c.sendTypedMessage(protocol.TypeStream, protocol.StreamMessage{
+				_ = c.sendTypedMessage(protocol.TypeStream, protocol.StreamMessage{
 					RequestID: req.RequestID,
 					Data:      encoded,
 				})
@@ -429,7 +488,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			}
 		}
 
-		c.sendTypedMessage(protocol.TypeStreamEnd, protocol.StreamEndMessage{
+		_ = c.sendTypedMessage(protocol.TypeStreamEnd, protocol.StreamEndMessage{
 			RequestID: req.RequestID,
 			Reason:    "complete",
 		})
@@ -437,7 +496,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 		// Read body (capped).
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 
-		c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
 			RequestID:   req.RequestID,
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
@@ -475,8 +534,8 @@ func (c *Client) writePump(ctx context.Context) {
 			// Send metrics.
 			c.sendMetrics()
 
-			// Send keepalive ping.
-			c.sendTypedMessage(protocol.TypePing, protocol.PingMessage{
+			// Send keepalive ping; best-effort — connection loss surfaces on the read pump.
+			_ = c.sendTypedMessage(protocol.TypePing, protocol.PingMessage{
 				Timestamp: time.Now().UnixMilli(),
 			})
 
@@ -487,7 +546,9 @@ func (c *Client) writePump(ctx context.Context) {
 				slog.Warn("container refresh failed", "error", err)
 				continue
 			}
-			c.adapter.OnContainerRefresh(ctx, sender, added, updated, removed)
+			if err := c.adapter.OnContainerRefresh(ctx, sender, added, updated, removed); err != nil {
+				slog.Warn("container refresh notify failed", "error", err)
+			}
 		}
 	}
 }
@@ -499,7 +560,8 @@ func (c *Client) sendMetrics() {
 		slog.Debug("metrics collection failed", "error", err)
 		return
 	}
-	c.sendTypedMessage(protocol.TypeMetrics, m)
+	// Best-effort metrics send; connection loss surfaces on the read pump.
+	_ = c.sendTypedMessage(protocol.TypeMetrics, m)
 }
 
 // sendTypedMessage wraps data in an Envelope and sends it over the WebSocket.
@@ -532,12 +594,17 @@ func (c *Client) sendMessage(env protocol.Envelope) {
 	}
 }
 
+// msEdge returns elapsed milliseconds since start as a float64.
+func msEdge(start time.Time) float64 {
+	return float64(time.Since(start).Nanoseconds()) / 1e6
+}
+
 // startHealthServer starts a minimal HTTP server for Docker HEALTHCHECK.
 func (c *Client) startHealthServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_lookout/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "healthy",
 		})
 	})

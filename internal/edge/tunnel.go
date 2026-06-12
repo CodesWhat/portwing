@@ -35,7 +35,8 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	})
 	if count >= maxExecSessions {
 		slog.Warn("exec session limit reached", "max", maxExecSessions)
-		c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+		// Best-effort error reply; connection loss will surface on the read pump.
+		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
 			ExecID: msg.ExecID,
 			Reason: "session limit reached",
 		})
@@ -46,7 +47,8 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	execID, err := c.dockerClient.CreateExec(ctx, msg.ContainerID, msg.Cmd, msg.User, true)
 	if err != nil {
 		slog.Error("failed to create exec", "container", msg.ContainerID, "error", err)
-		c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+		// Best-effort error reply; connection loss will surface on the read pump.
+		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
 			ExecID: msg.ExecID,
 			Reason: fmt.Sprintf("create exec failed: %v", err),
 		})
@@ -57,7 +59,8 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	conn, err := c.dockerClient.StartExec(ctx, execID, true)
 	if err != nil {
 		slog.Error("failed to start exec", "execID", execID, "error", err)
-		c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+		// Best-effort error reply; connection loss will surface on the read pump.
+		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
 			ExecID: msg.ExecID,
 			Reason: fmt.Sprintf("start exec failed: %v", err),
 		})
@@ -81,8 +84,8 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 
 	c.execSessions.Store(msg.ExecID, session)
 
-	// Send exec_ready.
-	c.sendTypedMessage(protocol.TypeExecReady, protocol.ExecReadyMessage{
+	// Send exec_ready; best-effort — connection loss will surface on the read pump.
+	_ = c.sendTypedMessage(protocol.TypeExecReady, protocol.ExecReadyMessage{
 		ExecID: msg.ExecID,
 	})
 

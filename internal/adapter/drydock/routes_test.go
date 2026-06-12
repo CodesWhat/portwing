@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -16,6 +17,21 @@ import (
 	adapterpkg "github.com/codeswhat/lookout/internal/adapter"
 	"github.com/codeswhat/lookout/internal/docker"
 )
+
+// shortSocketPath returns a temp socket path short enough for the unix
+// socket path limit (104 bytes on darwin); t.TempDir() embeds the full
+// test name and overflows it.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "lk")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return filepath.Join(dir, "d.sock")
+}
 
 func TestHandleContainersUsesCachedInventory(t *testing.T) {
 	t.Parallel()
@@ -126,6 +142,89 @@ func TestHandleContainerLogsAcceptsPositiveTail(t *testing.T) {
 	}
 }
 
+func TestHandleWatcherGetReturnsKnownWatcher(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	a := NewAdapter(client, "test-agent")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/watchers/docker/docker", nil)
+	req.SetPathValue("type", "docker")
+	req.SetPathValue("name", "docker")
+	rec := httptest.NewRecorder()
+
+	a.handleWatcherGet(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusOK)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("unexpected content-type: got %q", ct)
+	}
+
+	var desc map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&desc); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if desc["type"] != "docker" {
+		t.Fatalf("unexpected type: got %v want docker", desc["type"])
+	}
+	if desc["name"] != "docker" {
+		t.Fatalf("unexpected name: got %v want docker", desc["name"])
+	}
+}
+
+func TestHandleWatcherGetReturns404ForUnknown(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	a := NewAdapter(client, "test-agent")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/watchers/unknown/missing", nil)
+	req.SetPathValue("type", "unknown")
+	req.SetPathValue("name", "missing")
+	rec := httptest.NewRecorder()
+
+	a.handleWatcherGet(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleLogEntriesReturnsEmptyArray(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	a := NewAdapter(client, "test-agent")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/log/entries", nil)
+	rec := httptest.NewRecorder()
+
+	a.handleLogEntries(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusOK)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("unexpected content-type: got %q", ct)
+	}
+
+	var entries []interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected empty array, got %d entries", len(entries))
+	}
+}
+
 type routeTestDockerCalls struct {
 	listCalls    atomic.Int64
 	inspectCalls atomic.Int64
@@ -135,7 +234,7 @@ type routeTestDockerCalls struct {
 func newRouteTestDockerClient(t *testing.T) (*docker.Client, *routeTestDockerCalls, func()) {
 	t.Helper()
 
-	socketPath := filepath.Join(t.TempDir(), "docker.sock")
+	socketPath := shortSocketPath(t)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatalf("listen on unix socket: %v", err)

@@ -1,0 +1,42 @@
+# Lookout — standard mode (inbound HTTP on :3000), hardened defaults.
+#
+# Generate a token first:
+#   openssl rand -hex 32 > lookout_token.txt
+#
+# The image ships a built-in HEALTHCHECK against /_lookout/health.
+# To run non-root, uncomment `user:` and add your docker socket's numeric
+# group ID via group_add — see SECURITY.md ("container runtime identity").
+
+services:
+  lookout:
+    image: ghcr.io/codeswhat/lookout:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    # user: "65532:65532"
+    # group_add:
+    #   - "999"   # $(stat -c '%g' /var/run/docker.sock)
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - lookout-stacks:/data/stacks
+    environment:
+      - TOKEN_FILE=/run/secrets/lookout_token
+      # Stronger at-rest posture: replace TOKEN_FILE with an Argon2id hash
+      # (no plaintext credential anywhere on the agent host):
+      #   lookout hash-token  →  TOKEN_HASH=$argon2id$...
+    secrets:
+      - lookout_token
+
+secrets:
+  lookout_token:
+    file: ./lookout_token.txt
+
+volumes:
+  lookout-stacks:

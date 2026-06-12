@@ -532,3 +532,40 @@ func (c *Client) GetAPIVersion() string {
 func (c *Client) GetSocketPath() string {
 	return c.socketPath
 }
+
+// ContainerStatsResponse holds the subset of Docker stats we expose via Prometheus.
+type ContainerStatsResponse struct {
+	CPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+	} `json:"cpu_stats"`
+	MemoryStats struct {
+		Usage uint64 `json:"usage"`
+		Limit uint64 `json:"limit"`
+	} `json:"memory_stats"`
+	Networks map[string]struct {
+		RxBytes uint64 `json:"rx_bytes"`
+		TxBytes uint64 `json:"tx_bytes"`
+	} `json:"networks"`
+}
+
+// ContainerStats fetches a single-shot stats snapshot for the given container ID.
+func (c *Client) ContainerStats(ctx context.Context, id string) (*ContainerStatsResponse, error) {
+	resp, err := c.Do(ctx, http.MethodGet, "/containers/"+id+"/stats?stream=false&one-shot=true", nil)
+	if err != nil {
+		return nil, fmt.Errorf("container stats %s: %w", id, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("container stats %s: status %d: %s", id, resp.StatusCode, string(body))
+	}
+
+	var stats ContainerStatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("decoding container stats %s: %w", id, err)
+	}
+	return &stats, nil
+}

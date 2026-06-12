@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/subtle"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -10,7 +13,25 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codeswhat/lookout/internal/audit"
+	"github.com/codeswhat/lookout/internal/auth"
 )
+
+// tokenVerifier is the interface used by AuthMiddleware to verify a presented
+// token. It abstracts over plain-text and Argon2id verification.
+type tokenVerifier interface {
+	Verify(token string) bool
+}
+
+// rawTokenVerifier performs timing-safe comparison against a plain-text token.
+type rawTokenVerifier struct {
+	token string
+}
+
+func (v *rawTokenVerifier) Verify(token string) bool {
+	return subtle.ConstantTimeCompare([]byte(token), []byte(v.token)) == 1
+}
 
 // RateLimiter tracks failed authentication attempts by IP address and blocks
 // IPs that exceed the failure threshold within a rolling window.
@@ -20,6 +41,8 @@ type RateLimiter struct {
 	maxFails int
 	window   time.Duration
 	maxIPs   int
+
+	trustedProxies []*net.IPNet
 }
 
 type ipAttempts struct {
@@ -106,41 +129,231 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 }
 
 // AuthMiddleware returns an http.Handler that validates the authentication
-// token before calling next. If token is empty, authentication is disabled
+// token before calling next. If verifier is nil, authentication is disabled
 // and all requests are passed through.
 //
-// The middleware checks the X-Lookout-Token header first, then falls back to
-// X-Dd-Agent-Secret for Drydock backwards compatibility.
-func (rl *RateLimiter) AuthMiddleware(token string, next http.Handler) http.Handler {
+// The middleware checks Authorization: Bearer first, then X-Lookout-Token,
+// then X-Dd-Agent-Secret for Drydock backwards compatibility.
+//
+// Rate limiting is applied before verification, so failed attempts are always
+// counted regardless of whether the verifier uses a raw token or Argon2id.
+//
+// auditor receives auth_failure and rate_limited events, and an api_request
+// event (with outcome and duration) for every request that reaches next.
+func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
 		// No authentication configured - pass through.
-		if token == "" {
-			next.ServeHTTP(w, r)
+		if verifier == nil {
+			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
 			return
 		}
 
-		clientIP := getClientIP(r)
+		clientIP := rl.clientIP(r)
 
+		// Rate-limit check happens BEFORE verification. This ensures that failed
+		// attempts accumulate in the limiter even for expensive Argon2id paths,
+		// and that blocked IPs never reach the verifier.
 		if rl.IsRateLimited(clientIP) {
+			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 			return
 		}
 
-		// Check X-Lookout-Token first, then fall back to X-Dd-Agent-Secret.
-		provided := r.Header.Get("X-Lookout-Token")
+		// Check Authorization: Bearer first, then X-Lookout-Token, then the
+		// Drydock-compatible X-Dd-Agent-Secret.
+		provided := bearerToken(r)
+		if provided == "" {
+			provided = r.Header.Get("X-Lookout-Token")
+		}
 		if provided == "" {
 			provided = r.Header.Get("X-Dd-Agent-Secret")
 		}
 
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+		if !verifier.Verify(provided) {
 			rl.RecordFailure(clientIP)
 			slog.Warn("authentication failed", "ip", clientIP)
+			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
 	})
+}
+
+// rateLimitOnly wraps a handler with rate limiting (by IP) but no auth check.
+// This is used for the enrollment endpoint which does its own credential
+// check. Downstream 401 responses are recorded as failures so the endpoint
+// cannot be brute-forced past the limiter.
+func (rl *RateLimiter) rateLimitOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clientIP := rl.clientIP(r)
+		if rl.IsRateLimited(clientIP) {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		if rw.code == http.StatusUnauthorized {
+			rl.RecordFailure(clientIP)
+		}
+	})
+}
+
+// Ed25519Config holds the optional Ed25519 verifier parameters for
+// AuthMiddlewareWithEd25519. When Registry is nil the Ed25519 path is skipped
+// and the middleware behaves identically to AuthMiddleware.
+type Ed25519Config struct {
+	Registry       *auth.KeyRegistry
+	Nonces         *auth.NonceLRU
+	MaxSkewSeconds int
+}
+
+// AuthMiddlewareWithEd25519 is AuthMiddleware extended with an optional Ed25519
+// verification path. When an incoming request carries X-Lookout-Signature it
+// is verified via Ed25519; otherwise the request falls through to the token
+// verifier. Either path (ed25519 or token) must succeed for the request to
+// proceed.
+//
+// The body is consumed and buffered for signature verification; the downstream
+// handler sees a fresh reader.
+func (rl *RateLimiter) AuthMiddlewareWithEd25519(
+	verifier tokenVerifier,
+	ed Ed25519Config,
+	auditor *audit.Logger,
+	next http.Handler,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// No authentication configured - pass through.
+		if verifier == nil && ed.Registry == nil {
+			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			return
+		}
+
+		clientIP := rl.clientIP(r)
+
+		if rl.IsRateLimited(clientIP) {
+			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+			return
+		}
+
+		// If Ed25519 is configured and the request carries a signature, use
+		// that path exclusively. Reading the body first is required because
+		// VerifyRequest needs it for the canonical message.
+		if ed.Registry != nil && r.Header.Get(auth.HeaderSignature) != "" {
+			// Buffer the body.
+			var body []byte
+			if r.Body != nil {
+				var err error
+				body, err = io.ReadAll(io.LimitReader(r.Body, 64*1024*1024))
+				r.Body.Close()
+				if err != nil {
+					http.Error(w, "reading request body", http.StatusBadRequest)
+					return
+				}
+				// Restore for downstream handlers.
+				r.Body = io.NopCloser(bytes.NewReader(body))
+			}
+
+			skew := ed.MaxSkewSeconds
+			if skew <= 0 {
+				skew = 60
+			}
+			keyID, err := auth.VerifyRequest(r, body, ed.Registry, ed.Nonces, skew)
+			if err != nil {
+				rl.RecordFailure(clientIP)
+				slog.Warn("ed25519 authentication failed",
+					"ip", clientIP, "reason", auth.ReasonFor(err))
+				auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+				w.Header().Set(auth.HeaderReason, auth.ReasonFor(err))
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			slog.Debug("ed25519 authentication succeeded", "key_id", keyID, "ip", clientIP)
+			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			next.ServeHTTP(rw, r)
+			auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			return
+		}
+
+		// Fall through to token verifier.
+		if verifier == nil {
+			// Ed25519 was configured but request had no signature, and there
+			// is no token verifier — authentication required but none presented.
+			rl.RecordFailure(clientIP)
+			slog.Warn("authentication failed: no credentials presented", "ip", clientIP)
+			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		provided := bearerToken(r)
+		if provided == "" {
+			provided = r.Header.Get("X-Lookout-Token")
+		}
+		if provided == "" {
+			provided = r.Header.Get("X-Dd-Agent-Secret")
+		}
+
+		if !verifier.Verify(provided) {
+			rl.RecordFailure(clientIP)
+			slog.Warn("authentication failed", "ip", clientIP)
+			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+	})
+}
+
+// statusRecorder wraps ResponseWriter to capture the status code. It must
+// forward Flush and Hijack so SSE streaming and Docker exec/attach hijacking
+// keep working through the middleware chain.
+type statusRecorder struct {
+	http.ResponseWriter
+	code int
+}
+
+func (sr *statusRecorder) WriteHeader(code int) {
+	sr.code = code
+	sr.ResponseWriter.WriteHeader(code)
+}
+
+func (sr *statusRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := sr.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+// Unwrap supports http.ResponseController.
+func (sr *statusRecorder) Unwrap() http.ResponseWriter {
+	return sr.ResponseWriter
+}
+
+// ms returns elapsed milliseconds since start as a float64.
+func ms(start time.Time) float64 {
+	return float64(time.Since(start).Nanoseconds()) / 1e6
 }
 
 // RecoveryMiddleware catches panics in downstream handlers, logs the stack
@@ -163,24 +376,89 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// getClientIP extracts the client IP address from the request, checking
-// X-Forwarded-For and X-Real-IP headers before falling back to RemoteAddr.
-func getClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For can contain multiple IPs; the first is the client.
-		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
+// bearerToken extracts a token from the Authorization header if it uses the
+// Bearer scheme.
+func bearerToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
+		return strings.TrimSpace(auth[7:])
+	}
+	return ""
+}
+
+// SetTrustedProxies configures the CIDR ranges whose forwarding headers are
+// trusted when extracting the client IP. It must be called before the server
+// starts handling requests. With no trusted proxies (the default),
+// X-Forwarded-For and X-Real-IP are ignored so spoofed headers cannot evade
+// rate limiting.
+func (rl *RateLimiter) SetTrustedProxies(nets []*net.IPNet) {
+	rl.trustedProxies = nets
+}
+
+// ParseTrustedProxies parses CIDR strings into networks for
+// SetTrustedProxies. Bare IPs are treated as /32 (or /128 for IPv6).
+func ParseTrustedProxies(entries []string) ([]*net.IPNet, error) {
+	nets := make([]*net.IPNet, 0, len(entries))
+	for _, e := range entries {
+		s := strings.TrimSpace(e)
+		if s == "" {
+			continue
 		}
-		return strings.TrimSpace(xff)
+		if !strings.Contains(s, "/") {
+			if ip := net.ParseIP(s); ip != nil {
+				if ip.To4() != nil {
+					s += "/32"
+				} else {
+					s += "/128"
+				}
+			}
+		}
+		_, n, err := net.ParseCIDR(s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy %q: %w", e, err)
+		}
+		nets = append(nets, n)
+	}
+	return nets, nil
+}
+
+// clientIP extracts the client IP for rate-limiting purposes. Forwarding
+// headers are only consulted when the direct peer is a trusted proxy; the
+// X-Forwarded-For chain is then walked right to left and the first hop that
+// is not itself a trusted proxy wins.
+func (rl *RateLimiter) clientIP(r *http.Request) string {
+	remote := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		remote = host
 	}
 
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
+	remoteIP := net.ParseIP(remote)
+	if remoteIP == nil || !ipInNets(remoteIP, rl.trustedProxies) {
+		return remote
 	}
 
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		hops := strings.Split(xff, ",")
+		for i := len(hops) - 1; i >= 0; i-- {
+			hop := strings.TrimSpace(hops[i])
+			if ip := net.ParseIP(hop); ip != nil && !ipInNets(ip, rl.trustedProxies) {
+				return hop
+			}
+		}
 	}
-	return host
+
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
+	}
+
+	return remote
+}
+
+func ipInNets(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

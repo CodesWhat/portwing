@@ -1,0 +1,1276 @@
+openapi: 3.1.0
+info:
+  title: Lookout Agent API
+  version: 0.1.0
+  description: |
+    Lookout is a lightweight remote Docker agent for the Drydock container
+    monitoring platform. This specification covers the **Standard Mode** HTTP API
+    only (Edge Mode communicates over a WebSocket multiplexed protocol documented
+    separately in SPEC.md §3).
+
+    ## Authentication
+
+    All protected endpoints require the agent token, supplied via one of:
+
+    - `Authorization: Bearer <token>` (standard, checked first)
+    - `X-Lookout-Token` header
+    - `X-Dd-Agent-Secret` header (Drydock backward-compat alias)
+
+    Token comparison uses `crypto/subtle.ConstantTimeCompare` (timing-safe).
+    If no token is configured, authentication is disabled and all requests pass
+    through unauthenticated.
+
+    **Rate limiting:** 10 failed attempts per IP per rolling minute. Exceeding
+    the threshold returns HTTP 429 until the window expires.
+
+    ## Docker Engine API Proxy
+
+    Any path not matched by a named route is transparently proxied to the local
+    Docker daemon (Unix socket). This includes every endpoint in the
+    [Docker Engine API](https://docs.docker.com/engine/api/) — streaming
+    endpoints (`/logs`, `/attach`, `/exec/*/start`, `/events`, `/build`,
+    `/images/create`, `/images/push`), interactive exec hijacking
+    (`Upgrade: tcp`), and binary responses. Paths are forwarded verbatim; the
+    agent negotiates the API version on startup (fallback: `v1.44`).
+
+    A representative proxy path is shown below under `/v1.44/{path}`.
+
+  contact:
+    email: security@codeswhat.com
+  license:
+    name: AGPL-3.0
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+
+servers:
+  - url: http://{host}:{port}
+    description: Standard mode (HTTP)
+    variables:
+      host:
+        default: localhost
+      port:
+        default: "3000"
+  - url: https://{host}:{port}
+    description: Standard mode (HTTPS/TLS 1.2+)
+    variables:
+      host:
+        default: localhost
+      port:
+        default: "3000"
+
+components:
+  securitySchemes:
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: >
+        Agent token via Authorization: Bearer. Also accepted in the
+        `X-Lookout-Token` header, or `X-Dd-Agent-Secret` for Drydock
+        backward compatibility.
+    lookoutToken:
+      type: apiKey
+      in: header
+      name: X-Lookout-Token
+      description: Agent token via the X-Lookout-Token header.
+    ed25519Signature:
+      type: apiKey
+      in: header
+      name: X-Lookout-Signature
+      description: |
+        Ed25519 per-request signature (base64url, no padding). When this header
+        is present the agent verifies the request via Ed25519 instead of the
+        shared token.
+
+        Four headers are required together:
+
+        | Header | Format | Example |
+        |--------|--------|---------|
+        | `X-Lookout-Key-ID` | hex(SHA-256(raw 32-byte pubkey)[:8]) | `4a3f2b1c9d8e7f6a` |
+        | `X-Lookout-Timestamp` | Unix epoch, seconds, decimal | `1749600000` |
+        | `X-Lookout-Nonce` | 32 random hex chars (128-bit) | `a1b2c3d4e5f6...` |
+        | `X-Lookout-Signature` | base64url (no padding) Ed25519 signature | `d2hh...` |
+
+        The signed canonical string is:
+        ```
+        METHOD\nPATH\nbody-sha256-hex\nunix-timestamp\nnonce
+        ```
+        For an empty body, `body-sha256-hex` is the full SHA-256 of the empty
+        string: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+        On failure, the response includes `X-Lookout-Reason` with one of:
+        `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`.
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, docker]
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          example: healthy
+        docker:
+          type: string
+          enum: [connected, disconnected]
+          example: connected
+
+    SimpleHealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          example: ok
+
+    InfoResponse:
+      type: object
+      required: [version, dockerVersion, mode, uptime, hostname, agentId, agentName, capabilities]
+      properties:
+        version:
+          type: string
+          description: Lookout agent version
+          example: "0.1.0"
+        dockerVersion:
+          type: string
+          description: Docker Engine version string
+          example: "27.0.3"
+        mode:
+          type: string
+          enum: [standard]
+          description: Connection mode (always "standard" in HTTP API)
+        uptime:
+          type: string
+          description: Agent uptime as a Go duration string
+          example: "2h34m56.789s"
+        hostname:
+          type: string
+          example: "my-server"
+        agentId:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        agentName:
+          type: string
+          example: "my-server"
+        capabilities:
+          type: array
+          items:
+            type: string
+          example: ["compose", "exec", "metrics", "events", "dd:watch", "dd:trigger"]
+
+    ComposeRequest:
+      type: object
+      required: [operation, stackName]
+      properties:
+        operation:
+          type: string
+          enum: [up, down, pull, ps, logs, restart, stop, start]
+          description: Compose sub-command to execute.
+        stackName:
+          type: string
+          description: >
+            Stack name. Used as the subdirectory under `STACKS_DIR`
+            when `stackDir` is not supplied.
+          example: "myapp"
+        stackDir:
+          type: string
+          description: >
+            Explicit subdirectory within `STACKS_DIR`. Overrides the
+            `stackName`-derived path. Must not escape the stacks directory
+            (path-traversal protected).
+          example: "myapp/v2"
+        services:
+          type: array
+          items:
+            type: string
+          description: >
+            Optional list of service names to scope the operation.
+            Names starting with `-` are rejected (flag-injection guard).
+          example: ["web", "worker"]
+        build:
+          type: boolean
+          description: Pass `--build` to `compose up`.
+          default: false
+        forceRecreate:
+          type: boolean
+          description: Pass `--force-recreate` to `compose up`.
+          default: false
+        removeVolumes:
+          type: boolean
+          description: Pass `--volumes` to `compose down`.
+          default: false
+        noDeps:
+          type: boolean
+          description: Pass `--no-deps` to `compose up`.
+          default: false
+        tail:
+          type: integer
+          minimum: 1
+          description: Number of log lines to tail (`logs` operation only).
+          example: 100
+        envVars:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Environment variables written to `.env.drydock` before execution.
+            Keys must match `^[a-zA-Z_][a-zA-Z0-9_]*$`. The following keys
+            are denied: `LD_PRELOAD`, `LD_LIBRARY_PATH`, `PATH`,
+            `DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_CERT_PATH`,
+            `DOCKER_TLS_VERIFY`, `DOCKER_CONTEXT`, `HOME`, `SHELL`,
+            `BASH_ENV`, `ENV`, `CDPATH`, `IFS`.
+          example:
+            DATABASE_URL: "postgres://..."
+            APP_PORT: "8080"
+        files:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Files to write into the stack directory before execution.
+            Keys are paths relative to the stack directory; values are
+            file content (plain text) or base64-encoded content prefixed
+            with `base64:`. Paths are resolved and verified within the
+            stacks directory (path-traversal protected).
+          example:
+            "docker-compose.yml": "version: '3'\nservices:\n  web:\n    image: nginx\n"
+        registryAuth:
+          $ref: '#/components/schemas/RegistryAuth'
+
+    RegistryAuth:
+      type: object
+      required: [server, username, password]
+      properties:
+        server:
+          type: string
+          description: Registry hostname (e.g. `ghcr.io`).
+          example: "ghcr.io"
+        username:
+          type: string
+          example: "myuser"
+        password:
+          type: string
+          format: password
+          description: >
+            Registry password or token. Passed via `--password-stdin`
+            to `docker login`; never appears in process argument list.
+          example: "ghp_..."
+
+    ComposeResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        output:
+          type: string
+          description: Combined stdout + stderr from the Compose command.
+          example: "Container myapp-web-1  Started\n"
+        error:
+          type: string
+          description: Error message if `success` is false.
+          example: "exit status 1"
+
+    Container:
+      type: object
+      description: Drydock container model with update metadata.
+      properties:
+        id:
+          type: string
+          example: "abc123def456"
+        name:
+          type: string
+          example: "myapp-web-1"
+        displayName:
+          type: string
+          example: "My App Web"
+        displayIcon:
+          type: string
+          example: "docker"
+        status:
+          type: string
+          example: "running"
+        watcher:
+          type: string
+          example: "docker"
+        agent:
+          type: string
+        image:
+          $ref: '#/components/schemas/ContainerImage'
+        result:
+          $ref: '#/components/schemas/ContainerResult'
+        error:
+          $ref: '#/components/schemas/ContainerError'
+        updateAvailable:
+          type: boolean
+        updateKind:
+          type: string
+          example: "tag"
+        includeTags:
+          type: string
+        excludeTags:
+          type: string
+        transformTags:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        details:
+          $ref: '#/components/schemas/RuntimeDetails'
+
+    ContainerImage:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tag:
+          type: string
+
+    ContainerResult:
+      type: object
+      properties:
+        tag:
+          type: string
+        created:
+          type: string
+          format: date-time
+
+    ContainerError:
+      type: object
+      properties:
+        message:
+          type: string
+
+    RuntimeDetails:
+      type: object
+      description: Runtime container details (ports, mounts, environment, etc.).
+      additionalProperties: true
+
+    WatcherComponent:
+      type: object
+      description: Drydock watcher component descriptor.
+      additionalProperties: true
+
+    TriggerComponent:
+      type: object
+      description: Drydock trigger component descriptor.
+      additionalProperties: true
+
+    NotImplementedResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          example: "not implemented in v1.0"
+        message:
+          type: string
+          example: "registry checking is performed by the Drydock controller"
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+
+    GenericVersionResponse:
+      type: object
+      required: [agentVersion, protocolName, protocolVersion, adapter]
+      description: Generic adapter version and protocol metadata.
+      properties:
+        agentVersion:
+          type: string
+          example: "0.1.0"
+        protocolName:
+          type: string
+          example: "lookout"
+        protocolVersion:
+          type: string
+          example: "1.0"
+        adapter:
+          type: string
+          example: "generic"
+
+    GenericEvent:
+      type: object
+      required: [ts, type, action, containerId, name, image]
+      description: Generic Docker lifecycle event envelope (ADAPTER=generic SSE stream).
+      properties:
+        ts:
+          type: string
+          format: date-time
+          description: Event timestamp in RFC 3339 UTC.
+          example: "2026-06-11T10:00:00Z"
+        type:
+          type: string
+          description: Docker object type (always "container" for this stream).
+          example: "container"
+        action:
+          type: string
+          description: Docker event action (create, start, stop, die, kill, etc.).
+          example: "start"
+        containerId:
+          type: string
+          description: Container ID from the Docker actor.
+          example: "abc123def456"
+        name:
+          type: string
+          description: Container name from event attributes.
+          example: "my-container"
+        image:
+          type: string
+          description: Image name from event attributes.
+          example: "nginx:latest"
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            User-defined container labels from event attributes. Synthetic
+            Docker keys (name, image, exitCode, etc.) are stripped.
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Simple health check
+      description: >
+        Returns HTTP 200 with `{"status":"ok"}`. No auth required. Intended
+        for Docker HEALTHCHECK and load-balancer probes.
+      tags: [Health]
+      responses:
+        "200":
+          description: Agent is running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleHealthResponse'
+
+  /_lookout/health:
+    get:
+      operationId: getLookoutHealth
+      summary: Agent health check with Docker connectivity
+      description: >
+        Returns agent status and Docker daemon connectivity. No auth required.
+        Returns HTTP 503 when Docker is unreachable.
+      tags: [Health]
+      responses:
+        "200":
+          description: Agent healthy and Docker connected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: healthy
+                docker: connected
+        "503":
+          description: Docker daemon unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: unhealthy
+                docker: disconnected
+
+  /_lookout/info:
+    get:
+      operationId: getLookoutInfo
+      summary: Agent metadata
+      description: >
+        Returns agent version, Docker version, connection mode, uptime,
+        hostname, and capability list. Bearer auth required.
+      tags: [Agent]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Agent metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InfoResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded (10 failures/min/IP).
+
+  /_lookout/metrics:
+    get:
+      operationId: getLookoutMetrics
+      summary: Prometheus metrics (namespaced)
+      description: >
+        Exposes Lookout agent metrics in Prometheus text exposition format
+        (version 0.0.4). Metrics are prefixed with `lookout_`. Bearer auth
+        required.
+
+        Scrape this endpoint rather than `/metrics` when you want only
+        agent-specific metrics without Docker daemon metrics.
+      tags: [Metrics]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Prometheus text format metrics.
+          content:
+            text/plain; version=0.0.4:
+              schema:
+                type: string
+              example: |
+                # HELP lookout_cpu_usage_percent Host CPU usage percentage.
+                # TYPE lookout_cpu_usage_percent gauge
+                lookout_cpu_usage_percent 23.5
+                # HELP lookout_memory_used_bytes Host memory used in bytes.
+                # TYPE lookout_memory_used_bytes gauge
+                lookout_memory_used_bytes 4294967296
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus metrics (root)
+      description: >
+        Alias for `/_lookout/metrics`. Exposes Lookout agent metrics in
+        Prometheus text exposition format (version 0.0.4). Bearer auth
+        required.
+
+        Provided for compatibility with default Prometheus scrape configs
+        that expect metrics at `/metrics`.
+      tags: [Metrics]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Prometheus text format metrics.
+          content:
+            text/plain; version=0.0.4:
+              schema:
+                type: string
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /_lookout/compose:
+    post:
+      operationId: postLookoutCompose
+      summary: Docker Compose operations
+      description: >
+        Executes a Docker Compose sub-command within the managed stacks
+        directory (`STACKS_DIR`, default `/data/stacks`). The request body
+        specifies the operation, stack, optional files to write, and optional
+        env vars.
+
+        **Security controls applied before execution:**
+        - Stack path resolved to absolute and verified within `STACKS_DIR`
+          (path-traversal protection).
+        - Env var keys validated against `^[a-zA-Z_][a-zA-Z0-9_]*$` and
+          checked against the denylist.
+        - Service names must not start with `-` (flag-injection prevention).
+        - Registry auth passed via `--password-stdin` (never in argv).
+      tags: [Compose]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComposeRequest'
+            examples:
+              up:
+                summary: Bring up a stack
+                value:
+                  operation: up
+                  stackName: myapp
+                  build: false
+                  forceRecreate: false
+              down-with-volumes:
+                summary: Remove a stack including volumes
+                value:
+                  operation: down
+                  stackName: myapp
+                  removeVolumes: true
+              deploy-with-files:
+                summary: Write compose file then bring up
+                value:
+                  operation: up
+                  stackName: myapp
+                  files:
+                    "docker-compose.yml": "version: '3'\nservices:\n  web:\n    image: nginx:latest\n"
+                  envVars:
+                    APP_PORT: "8080"
+      responses:
+        "200":
+          description: Compose command executed (check `success` field for result).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComposeResponse'
+              examples:
+                success:
+                  value:
+                    success: true
+                    output: "Container myapp-web-1  Started\n"
+                failure:
+                  value:
+                    success: false
+                    output: "Error response from daemon: ..."
+                    error: "exit status 1"
+        "400":
+          description: Invalid or malformed request body.
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Internal server error.
+
+  /api/events:
+    get:
+      operationId: getApiEvents
+      summary: SSE container event stream
+      description: >
+        Server-Sent Events stream of container lifecycle events. Immediately
+        emits a `dd:ack` event with agent metadata and current container
+        counts, then streams `dd:container-added`, `dd:container-updated`,
+        and `dd:container-removed` events as Docker reports them.
+
+        The connection is held open until the client disconnects. Each event
+        is a JSON object on a `data:` line followed by a blank line (standard
+        SSE format).
+
+        **Event types:**
+
+        | Type | Description |
+        |------|-------------|
+        | `dd:ack` | Initial handshake; agent metadata + container counts |
+        | `dd:container-added` | New container discovered |
+        | `dd:container-updated` | Container state or metadata changed |
+        | `dd:container-removed` | Container removed |
+
+        **Example stream:**
+        ```
+        data: {"type":"dd:ack","data":{"version":"0.1.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+
+        data: {"type":"dd:container-added","data":{...Container...}}
+
+        data: {"type":"dd:container-removed","data":{"id":"abc123","name":"old-container"}}
+        ```
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: SSE stream opened.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited SSE frames.
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Streaming not supported by server.
+
+  /api/containers:
+    get:
+      operationId: getApiContainers
+      summary: Container inventory
+      description: >
+        Returns the full container inventory as parsed from Docker with
+        `dd.*` label metadata applied. This is the same data set sent via
+        the `dd:container_sync` WebSocket message in Edge mode.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Array of containers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Container'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/containers/{id}/logs:
+    get:
+      operationId: getApiContainerLogs
+      summary: Container logs
+      description: >
+        Returns demuxed container logs (Docker's 8-byte stream multiplexing
+        header is stripped). Supports optional tailing, time filtering, and
+        live following.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Container ID or name.
+          example: "abc123def456"
+        - name: tail
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          description: Number of lines from the end to return.
+          example: 100
+        - name: since
+          in: query
+          schema:
+            type: string
+          description: >
+            Show logs since this timestamp (RFC3339) or relative duration
+            (e.g., `1h`). Passed directly to Docker API.
+          example: "2024-07-23T10:00:00Z"
+        - name: until
+          in: query
+          schema:
+            type: string
+          description: Show logs before this timestamp or duration.
+        - name: follow
+          in: query
+          schema:
+            type: string
+            enum: ["0", "1", "true", "false"]
+          description: >
+            Stream logs in real time. Response uses chunked transfer
+            encoding when `follow=1` or `follow=true`.
+      responses:
+        "200":
+          description: Log output (plain text, demuxed).
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Invalid `tail` value.
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Error retrieving logs from Docker.
+
+  /api/containers/{id}:
+    delete:
+      operationId: deleteApiContainer
+      summary: Remove a container
+      description: Removes a container (force=true). Returns 204 on success.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Container ID or name.
+      responses:
+        "204":
+          description: Container removed.
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Error removing container.
+
+  /api/watchers:
+    get:
+      operationId: getApiWatchers
+      summary: Watcher component descriptors
+      description: >
+        Returns the list of watcher component descriptors registered with
+        this agent. In v1.0, Lookout reports a single `docker` watcher;
+        registry checks are delegated to the Drydock controller.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Array of watcher components.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WatcherComponent'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/triggers:
+    get:
+      operationId: getApiTriggers
+      summary: Trigger component descriptors
+      description: Returns the list of trigger component descriptors.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Array of trigger components.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TriggerComponent'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/watchers/{type}/{name}:
+    post:
+      operationId: postApiWatcherPoll
+      summary: Trigger watcher poll
+      description: >
+        Not implemented in v1.0. Registry checking is performed by the
+        Drydock controller. Returns HTTP 501.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "docker"
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "my-watcher"
+      responses:
+        "501":
+          description: Not implemented.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotImplementedResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/watchers/{type}/{name}/container/{id}:
+    post:
+      operationId: postApiWatcherContainer
+      summary: Check single container
+      description: >
+        Not implemented in v1.0. Registry checking is performed by the
+        Drydock controller. Returns HTTP 501.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "501":
+          description: Not implemented.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotImplementedResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/triggers/{type}/{name}:
+    post:
+      operationId: postApiTriggerExec
+      summary: Execute trigger
+      description: >
+        Not implemented in v1.0. Returns HTTP 501.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "501":
+          description: Not implemented.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotImplementedResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/triggers/{type}/{name}/batch:
+    post:
+      operationId: postApiTriggerBatch
+      summary: Execute batch trigger
+      description: >
+        Not implemented in v1.0. Returns HTTP 501.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "501":
+          description: Not implemented.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotImplementedResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/v1/version:
+    get:
+      operationId: getGenericVersion
+      summary: Agent version and protocol info (generic adapter)
+      description: >
+        Returns agent version, protocol name/version, and the active adapter
+        name. Available when `ADAPTER=generic`. No platform integration required.
+      tags: [Generic]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Version metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericVersionResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/v1/containers:
+    get:
+      operationId: getGenericContainers
+      summary: Container inventory (generic adapter)
+      description: >
+        Returns the cached container inventory built from the Docker daemon.
+        Available when `ADAPTER=generic`. The response shape is the same
+        `Container` model used by the Drydock-compatible endpoints.
+      tags: [Generic]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: Array of containers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Container'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/v1/containers/{id}/logs:
+    get:
+      operationId: getGenericContainerLogs
+      summary: Container logs (generic adapter)
+      description: >
+        Returns demuxed container logs (Docker's 8-byte stream multiplexing
+        header is stripped). Supports optional tailing, time filtering, and
+        live following. Available when `ADAPTER=generic`.
+      tags: [Generic]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Container ID or name.
+          example: "abc123def456"
+        - name: tail
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          description: Number of lines from the end to return.
+          example: 100
+        - name: since
+          in: query
+          schema:
+            type: string
+          description: Show logs since this timestamp (RFC3339) or relative duration.
+          example: "2026-01-01T00:00:00Z"
+        - name: until
+          in: query
+          schema:
+            type: string
+          description: Show logs before this timestamp or duration.
+        - name: follow
+          in: query
+          schema:
+            type: string
+            enum: ["0", "1", "true", "false"]
+          description: Stream logs in real time with chunked transfer encoding.
+      responses:
+        "200":
+          description: Log output (plain text, demuxed).
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Invalid `tail` value.
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Error retrieving logs from Docker.
+
+  /api/v1/events:
+    get:
+      operationId: getGenericEvents
+      summary: Docker lifecycle event stream (generic adapter)
+      description: >
+        Server-Sent Events stream of Docker container lifecycle events in a
+        stable generic envelope. Available when `ADAPTER=generic`.
+
+        Each event is a JSON object on a `data:` line followed by a blank line
+        (standard SSE format). A comment heartbeat (`": heartbeat"`) is sent
+        every 30 seconds to keep the connection alive. The stream reconnects
+        internally with exponential backoff if Docker becomes unavailable.
+
+        Client disconnect cleanly terminates the stream.
+
+        **Event actions** (from `allowedActions` in `internal/docker/events.go`):
+        `create`, `start`, `stop`, `die`, `kill`, `restart`, `pause`,
+        `unpause`, `destroy`, `rename`, `update`, `oom`, `health_status`.
+
+        **Example stream:**
+        ```
+        data: {"ts":"2026-06-11T10:00:00Z","type":"container","action":"start","containerId":"abc123","name":"my-app","image":"nginx:latest"}
+
+        : heartbeat
+
+        data: {"ts":"2026-06-11T10:00:30Z","type":"container","action":"die","containerId":"abc123","name":"my-app","image":"nginx:latest","labels":{"app":"web"}}
+        ```
+      tags: [Generic]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      responses:
+        "200":
+          description: SSE stream opened.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >
+                  Newline-delimited SSE frames. Each `data:` frame contains a
+                  `GenericEvent` JSON object.
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Streaming not supported by server.
+
+  /v1.44/{path}:
+    x-docker-proxy: true
+    get:
+      operationId: dockerProxyGet
+      summary: Docker Engine API proxy (representative entry)
+      description: >
+        **All paths not matched by a named route above are transparently
+        proxied to the local Docker daemon.** This entry is representative;
+        the full API surface is the Docker Engine API at
+        https://docs.docker.com/engine/api/v1.44/.
+
+        The agent negotiates the API version on startup (e.g., `v1.47`);
+        `v1.44` is the fallback. Clients may omit the version prefix — the
+        agent prepends it automatically.
+
+        Streaming endpoints (`/logs`, `/attach`, `/exec/*/start`, `/events`,
+        `/build`, `/images/create`, `/images/push`) are detected by path and
+        forwarded with flush-on-read streaming. Interactive exec sessions
+        using `Upgrade: tcp` or `Upgrade: websocket` are handled via HTTP
+        hijacking. Bearer auth is required for all proxy paths.
+      tags: [Docker Proxy]
+      security:
+        - bearerToken: []
+        - lookoutToken: []
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "containers/json"
+      responses:
+        "200":
+          description: Response from Docker daemon (format varies by endpoint).
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+        "502":
+          description: Docker daemon unreachable or returned an error.
+
+  /api/lookout/enroll:
+    post:
+      operationId: enrollPublicKey
+      summary: Register an Ed25519 public key (Model C enrollment)
+      description: |
+        One-shot bootstrap endpoint that registers an Ed25519 public key using
+        a pre-configured enrollment token. The token is burned after first
+        successful use; subsequent calls are rejected until the agent restarts
+        with a new `ENROLLMENT_TOKEN`.
+
+        This endpoint is **only available** when `ENROLLMENT_TOKEN` (and
+        `AUTHORIZED_KEYS`) are configured. It is reachable without prior
+        authentication — the enrollment token IS the credential — but it is
+        rate-limited via the same IP-based rate limiter as auth failures.
+
+        On success the public key is appended to the authorized-keys file and
+        the key registry is hot-reloaded. The new key is immediately active.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enrollment_token, public_key]
+              properties:
+                enrollment_token:
+                  type: string
+                  description: The pre-configured enrollment token.
+                  example: "a3f2b1c9d8e7f6a4b5c6d7e8f9a0b1c2"
+                public_key:
+                  type: string
+                  description: >
+                    Base64 (standard encoding) of the raw 32-byte Ed25519
+                    public key to register.
+                  example: "AAAAC3NzaC1lZDI1NTE5AAAAIB3..."
+      responses:
+        "200":
+          description: Key enrolled successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key_id]
+                properties:
+                  key_id:
+                    type: string
+                    description: hex(SHA-256(pubkey)[:8]) — the Key-ID for subsequent requests.
+                    example: "4a3f2b1c9d8e7f6a"
+                  comment:
+                    type: string
+                    description: Comment assigned to the enrolled key.
+                    example: "enrolled:4a3f2b1c9d8e7f6a"
+        "400":
+          description: Invalid request body, bad base64, or wrong key length.
+        "401":
+          description: Wrong enrollment token, or token already burned.
+        "405":
+          description: Method not allowed (POST required).
+        "429":
+          description: Rate limit exceeded.
+        "500":
+          description: Could not write to the authorized_keys file.
+
+tags:
+  - name: Health
+    description: Health check endpoints (no auth).
+  - name: Agent
+    description: Lookout agent metadata endpoints.
+  - name: Auth
+    description: Ed25519 key enrollment (Model C bootstrap).
+  - name: Compose
+    description: Docker Compose lifecycle management.
+  - name: Metrics
+    description: Prometheus-format host and agent metrics.
+  - name: Drydock Compat
+    description: Drydock-compatible REST and SSE endpoints (`/api/*`).
+  - name: Generic
+    description: >
+      Standalone headless management API (`/api/v1/*`). Active when
+      `ADAPTER=generic`. No external controller required.
+  - name: Docker Proxy
+    description: Transparent proxy to the local Docker Engine API.
