@@ -20,6 +20,10 @@ on:
       - 'internal/docker/**'
       - 'internal/adapter/**'
       - 'internal/server/**'
+      - 'internal/auth/**'
+      - 'internal/config/**'
+      - 'internal/integration/**'
+      - 'cmd/**'
       - '.github/workflows/quality-integration.yml'
 
 permissions:
