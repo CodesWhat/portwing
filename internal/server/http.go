@@ -61,6 +61,11 @@ func stripLookoutAuthHeaders(h http.Header) {
 	}
 }
 
+// maxExecBodyBytes caps the exec-start request body read during a hijack so a
+// hostile client can't force an unbounded in-memory read. Matches the
+// "exec body (10 MB)" limit documented in SECURITY.md.
+const maxExecBodyBytes = 10 * 1024 * 1024 // 10 MB
+
 // Server is the standard-mode HTTP server that exposes Docker API proxy
 // endpoints, adapter-specific routes, and health checks.
 type Server struct {
@@ -422,7 +427,7 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 		"%s %s HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Type: application/json\r\n",
 		r.Method, r.URL.RequestURI(),
 	)
-	body, _ := io.ReadAll(r.Body)
+	body, _ := io.ReadAll(io.LimitReader(r.Body, maxExecBodyBytes))
 	rawReq += fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), string(body))
 
 	if _, err := dockerConn.Write([]byte(rawReq)); err != nil {
