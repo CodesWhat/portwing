@@ -10,4 +10,4 @@ const (
 // AgentVersion is the agent build version. It must be a var, not a const:
 // releases override it via
 // -ldflags "-X github.com/codeswhat/lookout/internal/protocol.AgentVersion=...".
-var AgentVersion = "0.1.0"
+var AgentVersion = "0.0.0-dev"
