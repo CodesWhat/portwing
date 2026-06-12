@@ -1,0 +1,158 @@
+name: "🏷️ Release: Cut"
+run-name: "🏷️ Release: Cut — manual by ${{ github.actor }}"
+
+# Requires RELEASE_PAT secret (fine-grained PAT, Contents: RW on this repo).
+# GITHUB_TOKEN-pushed tags do not trigger downstream workflows under
+# default_workflow_permissions; the PAT is needed so the v* tag push
+# fires release.yml automatically.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-cut
+  cancel-in-progress: false
+
+env:
+  CI_WORKFLOW_FILE: ci.yml
+
+jobs:
+  cut:
+    name: "🏷️ Release: Cut Tag"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Resolve target SHA
+        id: target
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "Target SHA: ${sha}"
+
+      - name: Verify successful CI on target SHA
+        uses: ./.github/actions/verify-ci-success
+        with:
+          workflow-file: ${{ env.CI_WORKFLOW_FILE }}
+          target-sha: ${{ steps.target.outputs.sha }}
+          max-attempts: "20"
+          github-token: ${{ github.token }}
+
+      - name: Find latest release tag
+        id: base
+        run: |
+          set -euo pipefail
+          latest_tag="$(git tag --list 'v*' --sort=-v:refname | awk '!/-/' | head -n1)"
+          if [ -z "${latest_tag}" ]; then
+            latest_tag="v0.0.0"
+          fi
+          echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
+          echo "current_version=${latest_tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next version from commit history
+        id: next
+        env:
+          LATEST_TAG: ${{ steps.base.outputs.latest_tag }}
+          CURRENT_VERSION: ${{ steps.base.outputs.current_version }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          # Determine bump level from conventional commits since last tag.
+          # feat = minor bump, fix/anything else = patch bump.
+          # A "!" suffix or BREAKING CHANGE in body = major bump.
+          bump="patch"
+          while IFS= read -r subject; do
+            if echo "${subject}" | grep -qP '^.+!\s*:'; then
+              bump="major"
+              break
+            elif echo "${subject}" | grep -qP '^✨\s+feat'; then
+              if [ "${bump}" != "major" ]; then
+                bump="minor"
+              fi
+            fi
+          done < <(git log --format=%s "${LATEST_TAG}..${TARGET_SHA}" 2>/dev/null || true)
+
+          IFS='.' read -r major minor patch <<< "${CURRENT_VERSION:-0.0.0}"
+          case "${bump}" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+          esac
+
+          next_version="${major}.${minor}.${patch}"
+          release_tag="v${next_version}"
+
+          if git rev-parse -q --verify "refs/tags/${release_tag}" >/dev/null; then
+            echo "::error::Tag already exists: ${release_tag}"
+            exit 1
+          fi
+
+          {
+            echo "release_level=${bump}"
+            echo "next_version=${next_version}"
+            echo "release_tag=${release_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate CHANGELOG entry for release tag
+        env:
+          RELEASE_TAG: ${{ steps.next.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if ! grep -q "## \[${RELEASE_TAG}\]\|## \[${RELEASE_TAG#v}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG has no entry for ${RELEASE_TAG}. Add release notes before cutting a tag."
+            exit 1
+          fi
+          # Verify the entry is non-empty (has at least one non-heading line after it)
+          awk "/## \[${RELEASE_TAG}\]|## \[${RELEASE_TAG#v}\]/{found=1; next} found && /^## /{exit} found && /\S/{ok=1; exit} END{exit ok ? 0 : 1}" CHANGELOG.md || {
+            echo "::error::CHANGELOG entry for ${RELEASE_TAG} appears empty. Add content before cutting a tag."
+            exit 1
+          }
+          echo "Validated CHANGELOG entry for ${RELEASE_TAG}."
+
+      - name: Create and push release tag
+        env:
+          RELEASE_TAG: ${{ steps.next.outputs.release_tag }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "${RELEASE_TAG}" "${TARGET_SHA}" -m "release: ${RELEASE_TAG}"
+          git push origin "${RELEASE_TAG}"
+
+      - name: Release summary
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RELEASE_LEVEL: ${{ steps.next.outputs.release_level }}
+          NEXT_VERSION: ${{ steps.next.outputs.next_version }}
+          RELEASE_TAG: ${{ steps.next.outputs.release_tag }}
+        run: |
+          {
+            echo "### 🏷️ Release Cut Summary"
+            echo "- Target SHA: \`${TARGET_SHA}\`"
+            echo "- Bump level: \`${RELEASE_LEVEL}\`"
+            echo "- Next version: \`${NEXT_VERSION}\`"
+            echo "- Tag: \`${RELEASE_TAG}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

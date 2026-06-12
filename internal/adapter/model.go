@@ -11,13 +11,13 @@ const (
 )
 
 type Container struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	DisplayName string            `json:"displayName"`
-	DisplayIcon string            `json:"displayIcon,omitempty"`
-	Status      string            `json:"status"`
-	Watcher     string            `json:"watcher"`
-	Agent       string            `json:"agent,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	DisplayIcon string `json:"displayIcon,omitempty"`
+	Status      string `json:"status"`
+	Watcher     string `json:"watcher"`
+	Agent       string `json:"agent,omitempty"`
 
 	Image  ContainerImage   `json:"image"`
 	Result *ContainerResult `json:"result,omitempty"`

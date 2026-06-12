@@ -11,14 +11,18 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
-	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/lookout/internal/audit"
+	"github.com/codeswhat/lookout/internal/auth"
 	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
+	"github.com/codeswhat/lookout/internal/mcp"
 	"github.com/codeswhat/lookout/internal/metrics"
 	"github.com/codeswhat/lookout/internal/protocol"
 )
@@ -44,15 +48,75 @@ type Server struct {
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
 	rateLimiter  *RateLimiter
+	verifier     tokenVerifier
+	ed25519      Ed25519Config
+	enroller     *auth.Enroller
+	auditor      *audit.Logger
 	httpServer   *http.Server
 	startTime    time.Time
-
-	execSessions sync.Map
-	streamCount  atomic.Int64
 }
 
 // NewServer creates and configures a new standard-mode Server.
-func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.ServerAdapter) *Server {
+// It returns an error if the TokenHash is set but cannot be parsed; the PHC
+// string is validated at startup so malformed configuration is caught early.
+func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.ServerAdapter) (*Server, error) {
+	var verifier tokenVerifier
+	switch {
+	case cfg.Token != "":
+		verifier = &rawTokenVerifier{token: cfg.Token}
+	case cfg.TokenHash != "":
+		params, err := ParsePHC(cfg.TokenHash)
+		if err != nil {
+			return nil, fmt.Errorf("parsing TOKEN_HASH: %w", err)
+		}
+		verifier = newArgon2Verifier(params)
+	}
+	// verifier == nil means no auth configured.
+
+	auditor, auditClose, err := audit.New(cfg.AuditLog)
+	if err != nil {
+		return nil, fmt.Errorf("opening audit log: %w", err)
+	}
+	_ = auditClose // closed when process exits; file is append-only
+
+	// Set up Ed25519 key registry if configured.
+	var ed25519Cfg Ed25519Config
+	if cfg.AuthorizedKeysFile != "" {
+		reg := auth.NewKeyRegistry(cfg.AuthorizedKeysFile)
+		if err := reg.Load(); err != nil {
+			return nil, fmt.Errorf("loading authorized_keys: %w", err)
+		}
+		ed25519Cfg = Ed25519Config{
+			Registry:       reg,
+			Nonces:         auth.NewNonceLRU(cfg.NonceLRUSize, cfg.MaxClockSkewSeconds),
+			MaxSkewSeconds: cfg.MaxClockSkewSeconds,
+		}
+
+		// Reload authorized_keys on SIGHUP so keys can be rotated or revoked
+		// without a restart. The nonce LRU is preserved across reloads.
+		hup := make(chan os.Signal, 1)
+		signal.Notify(hup, syscall.SIGHUP)
+		go func() {
+			for range hup {
+				if err := reg.Load(); err != nil {
+					slog.Error("SIGHUP: authorized_keys reload failed", "error", err)
+					continue
+				}
+				slog.Info("SIGHUP: authorized_keys reloaded", "keys", reg.Len())
+			}
+		}()
+	}
+
+	// Set up enrollment handler if ENROLLMENT_TOKEN is configured.
+	var enroller *auth.Enroller
+	if cfg.EnrollmentToken != "" {
+		if ed25519Cfg.Registry == nil {
+			return nil, fmt.Errorf("ENROLLMENT_TOKEN requires AUTHORIZED_KEYS to be set")
+		}
+		enroller = auth.NewEnroller(cfg.EnrollmentToken, cfg.AuthorizedKeysFile, ed25519Cfg.Registry)
+		enroller.OnResult = auditor.Enrollment
+	}
+
 	s := &Server{
 		cfg:          cfg,
 		dockerClient: dockerClient,
@@ -60,7 +124,19 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
 		rateLimiter:  NewRateLimiter(),
+		verifier:     verifier,
+		ed25519:      ed25519Cfg,
+		enroller:     enroller,
+		auditor:      auditor,
 		startTime:    time.Now(),
+	}
+
+	if len(cfg.TrustedProxies) > 0 {
+		nets, err := ParseTrustedProxies(cfg.TrustedProxies)
+		if err != nil {
+			return nil, fmt.Errorf("parsing TRUSTED_PROXIES: %w", err)
+		}
+		s.rateLimiter.SetTrustedProxies(nets)
 	}
 
 	mux := http.NewServeMux()
@@ -92,7 +168,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		}
 	}
 
-	return s
+	return s, nil
 }
 
 // registerRoutes wires up all HTTP endpoints. Routes requiring authentication
@@ -102,19 +178,31 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /_lookout/health", s.handleHealth)
 	mux.HandleFunc("GET /health", s.handleSimpleHealth)
 
-	// Auth required - wrap with auth middleware.
-	auth := func(h http.HandlerFunc) http.Handler {
-		return s.rateLimiter.AuthMiddleware(s.cfg.Token, http.HandlerFunc(h))
+	// Enrollment endpoint: reachable WITHOUT auth (it IS the bootstrap), but
+	// rate-limited. Registered only when ENROLLMENT_TOKEN is configured.
+	if s.enroller != nil {
+		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller)
+		mux.Handle("POST /api/lookout/enroll", enrollHandler)
 	}
 
-	mux.Handle("GET /_lookout/info", auth(s.handleInfo))
-	mux.Handle("POST /_lookout/compose", auth(s.handleCompose))
+	// Auth required - wrap with audit-aware auth middleware (with Ed25519 support).
+	authWrap := func(h http.HandlerFunc) http.Handler {
+		return s.rateLimiter.AuthMiddlewareWithEd25519(s.verifier, s.ed25519, s.auditor, http.HandlerFunc(h))
+	}
+
+	mux.Handle("GET /_lookout/info", authWrap(s.handleInfo))
+	mux.Handle("POST /_lookout/compose", authWrap(s.handleCompose))
+	mux.Handle("GET /_lookout/metrics", authWrap(s.handleMetrics))
+	mux.Handle("GET /metrics", authWrap(s.handleMetrics))
+	mux.Handle("/_lookout/mcp", authWrap(func(w http.ResponseWriter, r *http.Request) {
+		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
+	}))
 
 	// Adapter-specific routes.
-	s.adapter.RegisterRoutes(mux, auth)
+	s.adapter.RegisterRoutes(mux, authWrap)
 
 	// Docker API proxy - catch-all (must be last).
-	mux.Handle("/", auth(s.handleDockerProxy))
+	mux.Handle("/", authWrap(s.handleDockerProxy))
 }
 
 // handleHealth returns the agent health status including Docker connectivity.
@@ -133,7 +221,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": status,
 		"docker": dockerStatus,
 	})
@@ -143,7 +231,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": "ok",
 	})
 }
@@ -179,11 +267,13 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	_ = json.NewEncoder(w).Encode(info)
 }
 
 // handleCompose dispatches Docker Compose operations.
 func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
+	actor := s.rateLimiter.clientIP(r)
+
 	var req docker.ComposeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
@@ -192,12 +282,19 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.compose.Execute(r.Context(), req)
 	if err != nil {
+		s.auditor.ComposeOp(actor, req.Operation, req.StackName, audit.OutcomeError)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	outcome := audit.OutcomeAllowed
+	if !resp.Success {
+		outcome = audit.OutcomeError
+	}
+	s.auditor.ComposeOp(actor, req.Operation, req.StackName, outcome)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // handleDockerProxy is the transparent Docker API proxy. It forwards requests
@@ -244,13 +341,22 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	if isStream {
 		s.streamResponse(w, resp.Body)
 	} else {
-		io.Copy(w, resp.Body)
+		// io.Copy to a ResponseWriter: errors indicate a dropped client connection.
+		_, _ = io.Copy(w, resp.Body)
 	}
 }
 
 // handleExecHijack handles WebSocket-upgraded exec connections by hijacking
 // the HTTP connection and proxying bidirectionally to the Docker daemon.
 func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
+	actor := s.rateLimiter.clientIP(r)
+	// Extract exec resource ID from the path: /exec/<id>/start
+	execID := ""
+	if parts := strings.Split(r.URL.Path, "/"); len(parts) >= 3 {
+		execID = parts[len(parts)-2]
+	}
+	s.auditor.ExecStart(actor, r.URL.Path, execID)
+
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
@@ -267,7 +373,8 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 	// Connect to Docker daemon.
 	dockerConn, err := net.Dial("unix", s.dockerClient.GetSocketPath())
 	if err != nil {
-		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		// Best-effort 502 write; client may have already gone.
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 	defer dockerConn.Close()
@@ -281,7 +388,7 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 	rawReq += fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), string(body))
 
 	if _, err := dockerConn.Write([]byte(rawReq)); err != nil {
-		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 
@@ -289,29 +396,29 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 	dockerBuf := bufio.NewReader(dockerConn)
 	resp, err := http.ReadResponse(dockerBuf, nil)
 	if err != nil {
-		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 
 	// Forward the response status to the client.
-	resp.Write(clientConn)
+	_ = resp.Write(clientConn)
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		return
 	}
 
-	// Bidirectional proxy.
+	// Bidirectional proxy; io.Copy errors just mean one side closed.
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		io.Copy(dockerConn, clientBuf)
+		_, _ = io.Copy(dockerConn, clientBuf)
 	}()
 
 	go func() {
 		defer wg.Done()
-		io.Copy(clientConn, dockerBuf)
+		_, _ = io.Copy(clientConn, dockerBuf)
 	}()
 
 	wg.Wait()
@@ -345,7 +452,8 @@ func (s *Server) streamResponse(w http.ResponseWriter, body io.Reader) {
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
-			w.Write(buf[:n])
+			// Write to ResponseWriter: errors indicate a dropped client connection.
+			_, _ = w.Write(buf[:n])
 			if canFlush {
 				flusher.Flush()
 			}
@@ -397,6 +505,8 @@ func (s *Server) pollContainers() {
 			continue
 		}
 		// In standard mode, sender is nil — adapter handles SSE internally.
-		s.adapter.OnContainerRefresh(ctx, nil, added, updated, removed)
+		if err := s.adapter.OnContainerRefresh(ctx, nil, added, updated, removed); err != nil {
+			slog.Error("container refresh notify failed", "error", err)
+		}
 	}
 }

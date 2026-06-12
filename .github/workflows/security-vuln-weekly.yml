@@ -1,0 +1,180 @@
+name: "🛡️ Security: Vuln Scan"
+run-name: >-
+  ${{
+    github.event_name == 'schedule' && '🛡️ Security: Vuln Scan — Weekly run' ||
+    format('🛡️ Security: Vuln Scan — Manual by {0}', github.actor)
+  }}
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 7 * * 1'  # Weekly on Monday at 07:15 UTC
+
+permissions:
+  contents: read
+
+env:
+  GOVULNCHECK_VERSION: v1.2.0
+
+concurrency:
+  group: security-weekly-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    name: "🔍 Security: Govulncheck"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: "1.26"
+
+      - name: Install govulncheck
+        run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+      - name: Summarize
+        if: always()
+        run: |
+          {
+            echo "### Govulncheck"
+            echo "- Scanned Go dependencies for known vulnerabilities"
+            echo "- Tool version: ${GOVULNCHECK_VERSION}"
+            echo "- Database: Go Vulnerability Database (vuln.go.dev)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  grype-image:
+    name: "🐳 Security: Grype Container Scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: lookout:grype-scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Grype vulnerability scanner
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
+        id: grype
+        with:
+          image: lookout:grype-scan
+          severity-cutoff: high
+          fail-build: true
+          output-format: sarif
+
+      - name: Upload Grype SARIF to code scanning
+        # Code scanning uploads require GHAS, not available on free private repos.
+        if: always() && github.event.repository.visibility == 'public'
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+
+      - name: Summarize
+        if: always()
+        run: |
+          {
+            echo "### Grype Container Scan"
+            echo "- Scanned container image for HIGH and CRITICAL CVEs"
+            echo "- Base image: Wolfi (Chainguard) via apko"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  grype-source:
+    name: "📦 Security: Grype Source Scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Run Grype on source directory
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
+        id: grype-src
+        with:
+          path: .
+          severity-cutoff: high
+          fail-build: true
+          output-format: sarif
+
+      - name: Upload Grype source SARIF
+        if: always() && github.event.repository.visibility == 'public'
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+        with:
+          sarif_file: ${{ steps.grype-src.outputs.sarif }}
+
+  gosec:
+    name: "🔐 Security: Gosec SAST"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Run Gosec
+        uses: securego/gosec@9e6a9843d7a4a6e3e9a8539b02612c8a4aa3f889  # v2.27.1
+        with:
+          args: -fmt sarif -out gosec-results.sarif ./...
+
+      - name: Upload Gosec SARIF
+        if: always() && github.event.repository.visibility == 'public'
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+        with:
+          sarif_file: gosec-results.sarif
+
+  # NOTE: testssl job omitted — Lookout does not operate a TLS listener of its own
+  # (TLS is handled by a reverse proxy in front). Re-add if Lookout gains direct
+  # TLS termination.

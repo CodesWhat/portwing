@@ -79,6 +79,16 @@ func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
+	// Follow with the current watcher snapshot so the client immediately
+	// has the authoritative inventory without waiting for a poll cycle.
+	if snap, err := b.buildWatcherSnapshotPayload(); err == nil {
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", snap); err != nil {
+			b.removeClient(client.id)
+			return
+		}
+		flusher.Flush()
+	}
+
 	// Stream events until client disconnects.
 	ctx := r.Context()
 	for {
@@ -168,6 +178,38 @@ func (b *SSEBroadcaster) buildAckPayload() []byte {
 		return []byte(`{"type":"dd:ack","data":{}}`)
 	}
 	return data
+}
+
+// buildWatcherSnapshotPayload builds the dd:watcher-snapshot event carrying
+// the watcher descriptor and the full authoritative container inventory.
+// Drydock prunes containers absent from this snapshot (AgentClient.ts
+// handleWatcherSnapshotEvent), so it must always contain the complete
+// current inventory.
+func (b *SSEBroadcaster) buildWatcherSnapshotPayload() ([]byte, error) {
+	containers := b.manager.GetContainers()
+	if containers == nil {
+		containers = []adapter.Container{}
+	}
+
+	event := map[string]interface{}{
+		"type": "dd:watcher-snapshot",
+		"data": map[string]interface{}{
+			"watcher":    GetWatcherComponents()[0],
+			"containers": containers,
+		},
+	}
+	return json.Marshal(event)
+}
+
+// BroadcastWatcherSnapshot sends a dd:watcher-snapshot event to all clients.
+// Called after each container poll cycle.
+func (b *SSEBroadcaster) BroadcastWatcherSnapshot() {
+	data, err := b.buildWatcherSnapshotPayload()
+	if err != nil {
+		slog.Error("failed to marshal watcher-snapshot event", "error", err)
+		return
+	}
+	b.broadcast(data)
 }
 
 // BroadcastContainerAdded sends a dd:container-added event to all clients.
