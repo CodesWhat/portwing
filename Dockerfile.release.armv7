@@ -3,7 +3,7 @@
 # from Alpine; the same staging-rootfs → FROM scratch approach keeps the apk
 # binary out of the final image while retaining the package database for
 # scanners. (For a from-source build use the top-level Dockerfile.armv7.)
-FROM alpine:3.21 AS rootfs
+FROM alpine:3.24 AS rootfs
 RUN apk add --no-cache --initdb --root /out \
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.21/main \
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.21/community \

@@ -3,7 +3,7 @@
 # (Release images are built by GoReleaser via Dockerfile.release.armv7.)
 
 # Stage 1: Build the binary from source.
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26.4-alpine AS builder
 RUN apk add --no-cache git
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o /loo
 
 # Stage 2: Assemble the Alpine runtime rootfs (no package manager in the final
 # image; the apk database is retained for scanners/SBOM).
-FROM alpine:3.21 AS rootfs
+FROM alpine:3.24 AS rootfs
 RUN apk add --no-cache --initdb --root /out \
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.21/main \
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.21/community \
