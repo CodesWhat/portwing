@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`dd:watcher-snapshot` SSE event**: full watcher + container inventory payload emitted immediately after `dd:ack` on SSE connect and after every poll cycle, so Drydock can prune stale containers.
 - **OpenAPI 3.1 spec**: `api/openapi.yaml` documenting all endpoints, request/response schemas, and security schemes.
 - **Security model doc**: `docs/security-model.md` describing the defense-in-depth posture.
-- **Watchtower migration guide**: `docs/watchtower-migration.md` for teams migrating from Watchtower.
+- **Watchtower migration guide**: `docs/migrating-from-watchtower.md` for teams migrating from Watchtower.
 
 ### Fixed
 

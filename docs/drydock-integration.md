@@ -106,7 +106,7 @@ All `/api/*` endpoints require `X-Dd-Agent-Secret` or `X-Lookout-Token` header.
 | `AgentClient.runRemoteTrigger()` L1421 | `POST /api/triggers/{type}/{name}` | POST | 501 (no agent-side triggers in v1) |
 | `AgentClient.runRemoteTriggerBatch()` L1469 | `POST /api/triggers/{type}/{name}/batch` | POST | 501 |
 | `AgentClient.getLogEntries()` L1503 | `GET /api/log/entries` | GET | `[]` (no in-memory buffer) |
-| Drydock probes | `GET /health` | GET | `{"uptime":...}` (no auth) |
+| Drydock probes | `GET /health` | GET | `{"status":"ok"}` (no auth) |
 
 ---
 

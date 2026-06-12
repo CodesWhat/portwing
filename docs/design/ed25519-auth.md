@@ -35,10 +35,12 @@ Three enrollment models are considered. A recommendation follows the threat anal
 
 ### 2.1 Model A — First-Claim TOFU (Trust On First Use)
 
+> **Not implemented.** Model A is described here for design completeness only. It is not implemented in Lookout. The env vars referenced below (`TOFU_ENROLLMENT`, `ENROLLMENT_TIMEOUT`, `LOOKOUT_DEV_TOFU`) are hypothetical and have no effect on the running agent. See the recommendation at the end of this section.
+
 The agent exposes a one-time enrollment endpoint. The first caller presents an Ed25519 public key; the agent accepts and persists it. Subsequent calls to the enrollment endpoint are rejected.
 
-**Flow:**
-1. Operator starts Lookout with `TOFU_ENROLLMENT=1` and `ENROLLMENT_TIMEOUT=300` (seconds).
+**Flow (hypothetical):**
+1. Operator starts Lookout with `TOFU_ENROLLMENT=1` (hypothetical) and `ENROLLMENT_TIMEOUT=300` (hypothetical, seconds).
 2. Within the timeout window, the caller `POST /api/lookout/enroll` with `{"public_key": "<base64url ed25519 pubkey>"}`.
 3. Agent writes the key to the authorized-keys file and disables the enrollment endpoint.
 4. All subsequent requests must carry an Ed25519 signature.
@@ -100,7 +102,7 @@ The agent is pre-configured with a short-lived `ENROLLMENT_TOKEN` (a random secr
 
 **Implement Model B (authorized_keys file) as the primary path**, with Model C (enrollment token) as an optional convenience for automated/cloud deployments.
 
-Model A (bare TOFU) is explicitly *not recommended* for production use. It is described here for completeness and may be documented as a developer-only shortcut gated behind `LOOKOUT_DEV_TOFU=1`.
+Model A (bare TOFU) is explicitly *not recommended* for production use and is **not implemented**. It is described here for completeness only; the hypothetical `LOOKOUT_DEV_TOFU=1` gate does not exist in the codebase.
 
 ---
 
@@ -224,7 +226,7 @@ Implementation: a `sync.Mutex`-protected `map[string]time.Time` with a backgroun
 
 #### Clock skew handling
 
-Agent and caller clocks may differ. The 60-second window accommodates NTP drift. Operators with >30s expected drift should set `LOOKOUT_MAX_CLOCK_SKEW_SECONDS` (default 60). Agents operating in environments without NTP should document this and operators may widen the window, accepting a corresponding replay window expansion.
+Agent and caller clocks may differ. The 60-second window accommodates NTP drift. Operators with >30s expected drift should set `MAX_CLOCK_SKEW_SECONDS` (default 60). Agents operating in environments without NTP should document this and operators may widen the window, accepting a corresponding replay window expansion.
 
 The agent logs a warning when a valid request arrives with timestamp skew >30s: `"clock skew warning", "skew_seconds", N, "key_id", K`.
 
