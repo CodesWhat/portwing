@@ -35,7 +35,7 @@ func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 		tail = strconv.Itoa(n)
 	}
 
-	body, err := a.dockerClient.GetContainerLogs(r.Context(), containerID, tail, since, until, follow)
+	body, err := a.dockerClient.GetContainerLogs(r.Context(), containerID, tail, since, until, follow, false)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("getting logs: %v", err), http.StatusInternalServerError)
 		return

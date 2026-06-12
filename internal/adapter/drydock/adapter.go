@@ -251,7 +251,7 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 		tail = fmt.Sprintf("%d", msg.Tail)
 	}
 
-	body, err := a.dockerClient.GetContainerLogs(ctx, msg.ContainerID, tail, msg.Since, msg.Until, false)
+	body, err := a.dockerClient.GetContainerLogs(ctx, msg.ContainerID, tail, msg.Since, msg.Until, false, false)
 	if err != nil {
 		slog.Warn("failed to get container logs", "container", msg.ContainerID, "error", err)
 		a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{

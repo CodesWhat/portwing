@@ -359,7 +359,7 @@ func (h *Handler) toolContainerLogs(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	tailStr := fmt.Sprintf("%d", tail)
-	rc, err := h.docker.GetContainerLogs(ctx, p.ID, tailStr, "", "", false)
+	rc, err := h.docker.GetContainerLogs(ctx, p.ID, tailStr, "", "", false, false)
 	if err != nil {
 		writeToolError(w, id, fmt.Sprintf("container logs: %v", err))
 		return

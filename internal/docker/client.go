@@ -333,7 +333,7 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force bool) err
 
 // GetContainerLogs returns a stream of container logs. The caller is
 // responsible for closing the returned ReadCloser.
-func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until string, follow bool) (io.ReadCloser, error) {
+func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until string, follow, timestamps bool) (io.ReadCloser, error) {
 	params := "stdout=1&stderr=1"
 	if tail != "" {
 		params += "&tail=" + tail
@@ -346,6 +346,9 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 	}
 	if follow {
 		params += "&follow=1"
+	}
+	if timestamps {
+		params += "&timestamps=1"
 	}
 
 	path := "/containers/" + id + "/logs?" + params
