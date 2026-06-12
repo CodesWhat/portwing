@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="lookout.png" alt="Lookout" width="200" height="200">
+
 <h1>Lookout</h1>
 
 **Security-first remote Docker agent — control your containers from anywhere, safely.**
