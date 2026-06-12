@@ -78,7 +78,7 @@ dockers:
   - image_templates:
       - "ghcr.io/codeswhat/lookout:{{ .Version }}-amd64"
       - "ghcr.io/codeswhat/lookout:latest-amd64"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.release
     use: buildx
     build_flag_templates:
       - "--platform=linux/amd64"
@@ -86,7 +86,7 @@ dockers:
   - image_templates:
       - "ghcr.io/codeswhat/lookout:{{ .Version }}-arm64"
       - "ghcr.io/codeswhat/lookout:latest-arm64"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.release
     use: buildx
     build_flag_templates:
       - "--platform=linux/arm64"
@@ -95,7 +95,7 @@ dockers:
   - image_templates:
       - "ghcr.io/codeswhat/lookout:{{ .Version }}-armv7"
       - "ghcr.io/codeswhat/lookout:latest-armv7"
-    dockerfile: Dockerfile.armv7
+    dockerfile: Dockerfile.release.armv7
     use: buildx
     build_flag_templates:
       - "--platform=linux/arm/v7"
