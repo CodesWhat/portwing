@@ -30,6 +30,7 @@
   <a href="https://github.com/CodesWhat/lookout/commits/main"><img src="https://img.shields.io/github/last-commit/CodesWhat/lookout?style=flat" alt="Last commit"></a>
   <a href="https://github.com/CodesWhat/lookout/commits/main"><img src="https://img.shields.io/github/commit-activity/m/CodesWhat/lookout?style=flat" alt="Commit activity"></a>
   <br>
+  <a href="https://github.com/CodesWhat/lookout/discussions"><img src="https://img.shields.io/github/discussions/CodesWhat/lookout?style=flat" alt="Discussions"></a>
   <a href="https://github.com/CodesWhat/lookout"><img src="https://img.shields.io/github/repo-size/CodesWhat/lookout?style=flat" alt="Repo size"></a>
   <img src="https://komarev.com/ghpvc/?username=CodesWhat-lookout&label=repo+views&style=flat" alt="Repo views">
 </p>
@@ -42,8 +43,6 @@
   <a href="https://goreportcard.com/report/github.com/codeswhat/lookout"><img src="https://goreportcard.com/badge/github.com/codeswhat/lookout" alt="Go Report Card"></a>
   <a href="https://pkg.go.dev/github.com/codeswhat/lookout"><img src="https://pkg.go.dev/badge/github.com/codeswhat/lookout.svg" alt="Go Reference"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/lookout"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/lookout?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
-  <!-- PLACEHOLDER: Snyk is not yet wired up for this repo — replace with a real monitored badge once onboarded -->
-  <a href="https://app.snyk.io/org/codeswhat/projects"><img src="https://img.shields.io/badge/Snyk-monitored-4C4A73?logo=snyk&logoColor=white" alt="Monitored by Snyk (placeholder)"></a>
 </p>
 
 <hr>
@@ -895,6 +894,16 @@ Exec tunnel events:
 Issues, ideas, and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for private vulnerability disclosure, and use [GitHub Discussions](https://github.com/CodesWhat/lookout/discussions) for design questions.
 
 Every release image is cosign-signed via GitHub Actions OIDC. Before running a Lookout image in production, verify it with the canonical invocation in the [Verify a Release](#verify-a-release) section above.
+
+### Part of the CodesWhat ecosystem
+
+| Tool | Role |
+|---|---|
+| [**drydock**](https://github.com/CodesWhat/drydock) | Container update monitoring — web UI and notification engine |
+| **lookout** | Remote Docker agent — secure socket-level access from Drydock or standalone |
+| [**sockguard**](https://github.com/CodesWhat/sockguard) | Docker socket proxy — default-deny allowlist filter protecting the socket |
+
+These three tools are designed to layer: sockguard filters the socket, lookout exposes it remotely, and drydock monitors and acts on container state.
 
 **[AGPL-3.0 License](LICENSE)**
 
