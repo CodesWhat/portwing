@@ -23,18 +23,18 @@ equivalent capability in the Drydock ecosystem:
 
 ## Architecture Comparison
 
-```
-Watchtower (legacy)             Drydock + Lookout (replacement)
-┌──────────────────────┐        ┌────────────────┐   ┌─────────────────┐
-│   Watchtower         │        │   Lookout      │   │   Drydock       │
-│   (on each host)     │        │   (on each     │──>│   (central)     │
-│                      │        │    host)       │   │                 │
-│  polls registry      │        │  exposes       │   │  polls registry │
-│  pulls new image     │        │  Docker API    │   │  decides update │
-│  recreates container │        │  via auth'd    │   │  orchestrates   │
-└──────────────────────┘        │  HTTP proxy    │   │  pulls + recre- │
-                                └────────────────┘   │  ate containers │
-                                                     └─────────────────┘
+```mermaid
+flowchart LR
+    subgraph legacy ["Watchtower (legacy)"]
+        W["Watchtower — on each host<br/>polls registry · pulls image · recreates container"]
+    end
+
+    subgraph repl ["Drydock + Lookout (replacement)"]
+        direction LR
+        DD["Drydock — central<br/>polls registry · decides updates · orchestrates"]
+        LK["Lookout — on each host<br/>exposes Docker API via auth'd HTTP"]
+        DD -- "connects inbound" --> LK
+    end
 ```
 
 Key differences:

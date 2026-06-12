@@ -6,37 +6,28 @@
 
 Drydock supports two agent connectivity patterns. Lookout implements both.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                     STANDARD MODE (inbound HTTP)             │
-│                                                              │
-│  Drydock Controller                        Lookout           │
-│  ┌──────────────────┐    HTTP / SSE    ┌──────────────┐     │
-│  │  AgentClient.ts  │ ──────────────→  │  HTTP server │     │
-│  │  (polls /api/*)  │ ←───────────────  │  /api/*      │     │
-│  └──────────────────┘  X-Dd-Agent-Secret └──────────────┘   │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph std ["Standard mode — inbound HTTP (implemented)"]
+        direction LR
+        SC["Drydock controller<br/>AgentClient.ts (polls /api/*)"]
+        SL["Lookout<br/>HTTP server /api/*"]
+        SC -- "HTTP / SSE · X-Dd-Agent-Secret" --> SL
+    end
 
-┌──────────────────────────────────────────────────────────────┐
-│                     EDGE MODE (outbound WebSocket)           │
-│                                                              │
-│  Drydock controller (planned)              Lookout           │
-│  ┌──────────────────┐      WSS         ┌──────────────┐     │
-│  │  WebSocket srv   │ ←────────────── │  edge/client │     │
-│  │  /api/lookout/ws │  hello→welcome   │  (outbound)  │     │
-│  │  (not yet impl.) │                  └──────────────┘     │
-│  └──────────────────┘                                        │
-└──────────────────────────────────────────────────────────────┘
+    subgraph edge ["Edge mode — outbound WebSocket (planned)"]
+        direction LR
+        EL["Lookout<br/>edge/client (outbound)"]
+        EC["Drydock controller<br/>WebSocket srv /api/lookout/ws<br/>(not yet impl.)"]
+        EL -- "WSS · hello → welcome" --> EC
+    end
 
-┌──────────────────────────────────────────────────────────────┐
-│               LEGACY SSE AGENT (original Drydock Node.js)    │
-│                                                              │
-│  Drydock Controller      HTTP/SSE    original Node.js agent  │
-│  ┌──────────────────┐               ┌──────────────────────┐ │
-│  │  AgentClient.ts  │ ────────────→ │  express /api/*      │ │
-│  │                  │ ←──────────── │  dd:ack on connect   │ │
-│  └──────────────────┘               └──────────────────────┘ │
-└──────────────────────────────────────────────────────────────┘
+    subgraph legacy ["Legacy SSE agent — original Drydock Node.js"]
+        direction LR
+        LC["Drydock controller<br/>AgentClient.ts"]
+        LL["original Node.js agent<br/>express /api/* · dd:ack on connect"]
+        LC -- "HTTP / SSE" --> LL
+    end
 ```
 
 Lookout Standard Mode replaces the Legacy SSE Agent. Edge Mode has Lookout dial outbound to the Drydock controller's `/api/lookout/ws` endpoint using the Lookout-specific protocol (controller-side endpoint is planned; not yet implemented end-to-end).
@@ -47,39 +38,24 @@ Lookout Standard Mode replaces the Legacy SSE Agent. Edge Mode has Lookout dial 
 
 Source: `app/agent/AgentClient.ts:506–579`
 
-```
-Drydock Controller (AgentClient)             Lookout Standard Mode
-        │                                           │
-        │  GET /api/events                          │
-        │  X-Dd-Agent-Secret: <secret>              │
-        │ ──────────────────────────────────────→   │
-        │                                           │  text/event-stream
-        │ ←──────────────────────────────────────   │
-        │  data: {"type":"dd:ack","data":{...}}     │  (immediate on connect)
-        │                                           │
-        │  [AgentClient.handleAckEvent called]       │
-        │  [AgentClient.handshake() called]          │
-        │                                           │
-        │  GET /api/containers                      │
-        │ ──────────────────────────────────────→   │
-        │ ←──────────────────────────────────────   │
-        │  200 [Container, ...]                     │
-        │                                           │
-        │  GET /api/watchers                        │
-        │ ──────────────────────────────────────→   │
-        │ ←──────────────────────────────────────   │
-        │  200 [ComponentDescriptor, ...]           │
-        │                                           │
-        │  GET /api/triggers                        │
-        │ ──────────────────────────────────────→   │
-        │ ←──────────────────────────────────────   │
-        │  200 [ComponentDescriptor, ...]           │
-        │                                           │
-        │  [Connection established, SSE stays open] │
-        │                                           │
-        │  ← data: {"type":"dd:container-added"...} │  (on container change)
-        │  ← data: {"type":"dd:container-updated"...}│
-        │  ← data: {"type":"dd:container-removed"...}│
+```mermaid
+sequenceDiagram
+    participant D as Drydock controller (AgentClient)
+    participant L as Lookout (standard mode)
+    D->>L: GET /api/events · X-Dd-Agent-Secret
+    L-->>D: text/event-stream
+    L->>D: data: dd:ack (immediate on connect)
+    Note over D: handleAckEvent() → handshake()
+    D->>L: GET /api/containers
+    L-->>D: 200 [Container, ...]
+    D->>L: GET /api/watchers
+    L-->>D: 200 [ComponentDescriptor, ...]
+    D->>L: GET /api/triggers
+    L-->>D: 200 [ComponentDescriptor, ...]
+    Note over D,L: connection established, SSE stays open
+    L->>D: data: dd:container-added (on change)
+    L->>D: data: dd:container-updated
+    L->>D: data: dd:container-removed
 ```
 
 Source citation:
@@ -96,46 +72,19 @@ Source citation:
 
 Source: `internal/edge/client.go`, `internal/protocol/messages.go`
 
+```mermaid
+sequenceDiagram
+    participant L as Lookout (edge client)
+    participant D as Drydock controller
+    L->>D: WSS /api/lookout/ws
+    L->>D: hello {version, protocol, agentId, agentName, tokenHash,<br/>dockerVersion, capabilities, drydockCompat, watcherTypes}
+    D->>L: welcome {pollInterval: 300}
+    L->>D: dd:container_sync {containers: [...]}
+    L->>D: dd:component_sync {watchers: [...], triggers: []}
+    L->>D: metrics {...}
 ```
-Lookout (edge client)                    Drydock controller
-        │                                           │
-        │  WSS /api/lookout/ws                      │
-        │ ──────────────────────────────────────→   │
-        │                                           │
-        │  {"type":"hello","data":{                 │
-        │    "version":"0.1.0",                     │
-        │    "protocol":"lookout/1.0",              │
-        │    "agentId":"<uuid>",                    │
-        │    "agentName":"<hostname>",              │
-        │    "tokenHash":"<sha256hex>",             │
-        │    "dockerVersion":"27.x",                │
-        │    "hostname":"<hostname>",               │
-        │    "capabilities":["compose","exec",      │
-        │      "metrics","events","dd:watch",       │
-        │      "dd:trigger","dd:container-sync",    │
-        │      "dd:logs"],                          │
-        │    "drydockCompat":"1.4.0",               │
-        │    "watcherTypes":["docker"],             │
-        │    "triggerTypes":[]                      │
-        │  }}                                       │
-        │ ──────────────────────────────────────→   │
-        │                                           │
-        │  {"type":"welcome","data":{               │
-        │    "pollInterval":300                     │
-        │  }}                                       │
-        │ ←──────────────────────────────────────   │
-        │                                           │
-        │  {"type":"dd:container_sync","data":      │
-        │    {"containers":[...]}}                  │
-        │ ──────────────────────────────────────→   │
-        │                                           │
-        │  {"type":"dd:component_sync","data":      │
-        │    {"watchers":[...],"triggers":[]}}      │
-        │ ──────────────────────────────────────→   │
-        │                                           │
-        │  {"type":"metrics","data":{...}}          │
-        │ ──────────────────────────────────────→   │
-```
+
+The full `hello` payload (exact field set) is in [SPEC.md §3.2](../SPEC.md#32-hello-message).
 
 ---
 

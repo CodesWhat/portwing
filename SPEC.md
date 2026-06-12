@@ -6,22 +6,27 @@
 
 Lookout is a standalone Go binary that runs on remote Docker hosts, providing Drydock with secure access to the Docker Engine API, container inventory with update metadata, host metrics, interactive exec sessions, and Docker Compose operations. It communicates directly with the Drydock controller.
 
-```
-      Your Server                       Remote host  (× N)
-+------------------+                +----------------------------+
-|                  |   HTTP + SSE   | Lookout (agent)            |
-|     Drydock      | =============> |    |                       |
-|     controller   |  (controller   |    | DOCKER_SOCKET         |
-|                  |   initiates    |    v                       |
-|                  |   inbound)     | sockguard ---> Docker      |
-+------------------+                | (socket filter)    Engine  |
-                                    +----------------------------+
+```mermaid
+flowchart LR
+    subgraph server ["Your server"]
+        DD["Drydock<br/>(controller + UI)"]
+    end
 
-The Drydock controller opens an inbound HTTP connection to each remote
-host's Lookout independently (handshake on /api/containers, then a
-long-lived SSE stream on /api/events). sockguard is the recommended
-socket filter between Lookout and the Docker Engine.
+    subgraph host ["Remote host (× N)"]
+        direction LR
+        LO["Lookout<br/>(agent)"]
+        SG["sockguard<br/>(socket filter)"]
+        DE["Docker Engine"]
+        LO -- "DOCKER_SOCKET" --> SG --> DE
+    end
+
+    DD -- "HTTP + SSE · X-Dd-Agent-Secret<br/>(controller initiates inbound)" --> LO
 ```
+
+The Drydock controller opens an inbound HTTP connection to each remote host's
+Lookout independently — handshake on `/api/containers`, then a long-lived SSE
+stream on `/api/events`. sockguard is the recommended socket filter between
+Lookout and the Docker Engine.
 
 **Language:** Go 1.22+ (module), built with Go 1.24 (CI)
 **Dependencies:** `gorilla/websocket`, `google/uuid` -- zero Docker SDK dependency (raw HTTP over Unix socket)
@@ -58,20 +63,18 @@ Lookout initiates an outbound WebSocket connection to the Drydock controller's e
 
 ### 3.1 Handshake
 
-```
-Lookout                            Drydock controller
-  |                                    |
-  |-- WSS CONNECT /api/lookout/ws ---->|
-  |                                    |
-  |-- hello ----->                     |  (token, caps, docker version)
-  |                                    |  [verify token, register agent]
-  |<-- welcome ---                     |  (poll interval, config)
-  |                                    |
-  |-- dd:container_sync -------------->|  (full container inventory)
-  |-- dd:component_sync -------------->|  (watcher/trigger descriptors)
-  |-- metrics ----->                   |  (initial host metrics)
-  |                                    |
-  |  [connection established]          |
+```mermaid
+sequenceDiagram
+    participant L as Lookout
+    participant D as Drydock controller
+    L->>D: WSS CONNECT /api/lookout/ws
+    L->>D: hello (token, caps, docker version)
+    Note over D: verify token, register agent
+    D->>L: welcome (poll interval, config)
+    L->>D: dd:container_sync (full container inventory)
+    L->>D: dd:component_sync (watcher/trigger descriptors)
+    L->>D: metrics (initial host metrics)
+    Note over L,D: connection established
 ```
 
 ### 3.2 Hello Message
@@ -221,15 +224,20 @@ type DockerClient struct {
 
 ### 7.1 Edge Mode (WebSocket)
 
-```
-Drydock -> exec_start {execId, containerId, cmd, user, cols, rows}
-    Lookout: POST /containers/{id}/exec
-    Lookout: POST /exec/{id}/start (hijack -> 101 Switching Protocols)
-Lookout -> exec_ready {execId}
-    Lookout: POST /exec/{id}/resize?h={rows}&w={cols}
-Drydock -> exec_input {execId, data}  <->  Lookout -> exec_output {execId, data}
-    (bidirectional, base64-encoded, 4096-byte pooled buffers)
-Either -> exec_end {execId, reason}
+```mermaid
+sequenceDiagram
+    participant D as Drydock controller
+    participant L as Lookout
+    participant E as Docker Engine
+    D->>L: exec_start {execId, containerId, cmd, user, cols, rows}
+    L->>E: POST /containers/{id}/exec
+    L->>E: POST /exec/{id}/start (hijack → 101 Switching Protocols)
+    L->>D: exec_ready {execId}
+    L->>E: POST /exec/{id}/resize?h={rows}&w={cols}
+    D->>L: exec_input {execId, data}
+    L->>D: exec_output {execId, data}
+    Note over D,L: bidirectional, base64-encoded, 4096-byte pooled buffers
+    L-->>D: exec_end {execId, reason} (either side may send)
 ```
 
 ### 7.2 Standard Mode (HTTP Hijack)
