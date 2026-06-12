@@ -110,7 +110,7 @@ jobs:
           {
             echo "### Grype Container Scan"
             echo "- Scanned container image for HIGH and CRITICAL CVEs"
-            echo "- Base image: Wolfi (Chainguard) via apko"
+            echo "- Base image: Wolfi (Chainguard) packages on FROM scratch"
           } >> "$GITHUB_STEP_SUMMARY"
 
   grype-source:
