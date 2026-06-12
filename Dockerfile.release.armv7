@@ -3,7 +3,7 @@
 # from Alpine; the same staging-rootfs → FROM scratch approach keeps the apk
 # binary out of the final image while retaining the package database for
 # scanners. (For a from-source build use the top-level Dockerfile.armv7.)
-FROM alpine:3.21 AS rootfs
+FROM alpine:3.24 AS rootfs
 # Derive the repo branch (vMAJOR.MINOR) from the base image itself so the `FROM`
 # tag above is the single source of truth for the Alpine version: Dependabot
 # bumps the tag and the repositories follow, with no repository-URL drift.
