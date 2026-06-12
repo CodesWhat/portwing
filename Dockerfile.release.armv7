@@ -4,9 +4,13 @@
 # binary out of the final image while retaining the package database for
 # scanners. (For a from-source build use the top-level Dockerfile.armv7.)
 FROM alpine:3.21 AS rootfs
-RUN apk add --no-cache --initdb --root /out \
-      --repository https://dl-cdn.alpinelinux.org/alpine/v3.21/main \
-      --repository https://dl-cdn.alpinelinux.org/alpine/v3.21/community \
+# Derive the repo branch (vMAJOR.MINOR) from the base image itself so the `FROM`
+# tag above is the single source of truth for the Alpine version: Dependabot
+# bumps the tag and the repositories follow, with no repository-URL drift.
+RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
+ && apk add --no-cache --initdb --root /out \
+      --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
+      --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community" \
       --keys-dir /etc/apk/keys \
       ca-certificates busybox docker-cli docker-cli-compose wget \
  && echo 'lookout:x:65532:65532:lookout:/home/lookout:/sbin/nologin' >> /out/etc/passwd \
