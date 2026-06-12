@@ -85,6 +85,9 @@ jobs:
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
         with:
           subject-checksums: dist/checksums.txt
+          # We don't consume GitHub's artifact-metadata catalog; the Sigstore
+          # attestation (Rekor + gh attestation verify) is the source of truth.
+          create-storage-record: false
 
       # Container images (per-arch AND manifest lists) are cosign keyless-signed
       # by GoReleaser docker_signs; the version-tag manifest additionally gets
@@ -96,6 +99,10 @@ jobs:
           subject-name: ghcr.io/codeswhat/lookout
           subject-digest: ${{ steps.manifest-digest.outputs.digest }}
           push-to-registry: true
+          # OCI digest subjects have no file artifacts to catalog, so the
+          # artifact-metadata storage record always errors "no artifacts found".
+          # The attestation is pushed to the registry and gh-verifiable regardless.
+          create-storage-record: false
 
   verify-published:
     name: "✅ Verify Published"
