@@ -7,22 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-06-12
-
-### Fixed
-
-- **Multi-arch image signatures**: cosign now signs the manifest lists (`ghcr.io/codeswhat/lookout:<version>` and `:latest`) in addition to the per-arch images, so `cosign verify` succeeds on the index digest users actually pull — not just the `-amd64`/`-arm64`/`-armv7` tags (GoReleaser `docker_signs` `artifacts: all`).
-- **Release pipeline on private repositories**: the GitHub build-provenance attestation steps are gated on public repository visibility, so the release workflow no longer hard-fails on plans where artifact attestation is unavailable. Cosign keyless signatures (image manifests + `checksums.txt.bundle`) and CycloneDX SBOMs still cover every artifact regardless of visibility; attestations activate automatically when the repository is public.
-
-### Changed
-
-- **Alpine runtime rootfs (armv7)**: packages are pulled from the base image's own main+community repositories instead of hardcoded `v3.21` URLs, making the `FROM` tag the single source of truth so Dependabot base-image bumps apply cleanly without repository-URL drift.
-- **README**: restructured to match the sibling drydock/sockguard layout — centered header, grouped badge rows, collapsible sections, Star History, and a prominent alpha status banner.
-
-### Dependencies
-
-- Bump the `golang` builder image to `1.26.4-alpine` (Dependabot `docker-minor` group).
-
 ## [0.2.0] - 2026-06-12
 
 ### Added
@@ -33,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Community and policy docs**: CONTRIBUTING, CODE_OF_CONDUCT, SECURITY (threat model + private advisory reporting), RELEASING, AGENTS, issue templates, CODEOWNERS.
 - **Deployment examples**: hardened Docker Compose files for standard, edge, and sockguard-layered deployments (`examples/`), all `read_only` + `cap_drop: [ALL]` + `no-new-privileges` with secrets-based tokens.
 - **Git hooks**: lefthook pipeline (lint, race tests, govulncheck, fuzz smoke, goreleaser dry-run, workflow checks) and an emoji-conventional-commit message validator.
-- **Supply-chain pipeline**: cosign keyless signing of container images, SBOM generation via syft, SLSA build provenance attestation via `actions/attest-build-provenance`.
+- **Supply-chain pipeline**: cosign keyless signing of release archives (`checksums.txt.bundle`) and container images — both the per-arch images and the multi-arch manifest lists — CycloneDX SBOM generation via syft, and SLSA build provenance attestation via `actions/attest-build-provenance` (activated on public repositories).
 - **Prometheus metrics**: `/metrics` and `/_lookout/metrics` endpoints exposing `lookout_build_info`, container count, and host resource metrics (CPU, memory, disk, network).
 - **Argon2id token hashing**: `TOKEN_HASH` environment variable accepts an Argon2id PHC string (OWASP-recommended parameters: m=19456 KiB, t=2, p=1). `TOKEN_HASH_FILE` for Docker secrets support. A SHA-256 success cache keeps per-request cost flat after first verification. `lookout hash-token` CLI subcommand generates PHC strings.
 - **Bearer auth**: `Authorization: Bearer <token>` header supported in addition to the `X-Lookout-Token` scheme.
