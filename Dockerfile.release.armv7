@@ -1,18 +1,8 @@
-# From-source build for linux/arm/v7: `docker build -f Dockerfile.armv7 .`
-# Wolfi does not support armv7, so the runtime packages come from Alpine.
-# (Release images are built by GoReleaser via Dockerfile.release.armv7.)
-
-# Stage 1: Build the binary from source.
-FROM golang:1.26-alpine AS builder
-RUN apk add --no-cache git
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o /lookout ./cmd/lookout
-
-# Stage 2: Assemble the Alpine runtime rootfs (no package manager in the final
-# image; the apk database is retained for scanners/SBOM).
+# Release image (linux/arm/v7) assembled by GoReleaser from the prebuilt
+# `lookout` binary. Wolfi does not support armv7, so the runtime packages come
+# from Alpine; the same staging-rootfs → FROM scratch approach keeps the apk
+# binary out of the final image while retaining the package database for
+# scanners. (For a from-source build use the top-level Dockerfile.armv7.)
 FROM alpine:3.21 AS rootfs
 RUN apk add --no-cache --initdb --root /out \
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.21/main \
@@ -23,10 +13,9 @@ RUN apk add --no-cache --initdb --root /out \
  && echo 'lookout:x:65532:' >> /out/etc/group \
  && rm -rf /out/var/cache/apk/*
 
-# Stage 3: Final image.
 FROM scratch
 COPY --from=rootfs /out /
-COPY --from=builder /lookout /usr/bin/lookout
+COPY lookout /usr/bin/lookout
 
 VOLUME /data/stacks
 EXPOSE 3000

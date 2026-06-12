@@ -1,5 +1,5 @@
 # Keep the build context to what the Dockerfile actually needs:
-# Go sources, go.mod/go.sum, and apko.yaml.
+# Go sources and go.mod/go.sum.
 .git/
 .github/
 .claude/
