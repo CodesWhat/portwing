@@ -421,9 +421,9 @@ On success: reset backoff to 1s
 
 ### 14.2 Docker Image
 
-Chainguard Wolfi OS base, built with apko. Minimal, reproducible OCI image.
+Chainguard Wolfi OS packages assembled into a `FROM scratch` image (Alpine on armv7). Minimal OCI image with no package manager in the runtime — packages are installed into a staging rootfs and copied into the final scratch stage, retaining the package database for scanners.
 
-Packages: `wolfi-base`, `ca-certificates`, `busybox`, `docker-cli`, `docker-compose`, `wget`
+Packages: `ca-certificates`, `busybox`, `docker-cli`, `docker-compose`, `wget`
 
 ## 15. Migration Strategy
 

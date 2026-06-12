@@ -1,18 +1,12 @@
-# From-source build: `docker build -t lookout .`
-# (Release images are built by GoReleaser from prebuilt binaries via
-# Dockerfile.release; this file is the standalone equivalent.)
-
-# Stage 1: Build the binary from source.
-FROM golang:1.26-alpine AS builder
-RUN apk add --no-cache git
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /lookout ./cmd/lookout
-
-# Stage 2: Assemble the Wolfi runtime rootfs (CVE-minimal, no package manager
-# in the final image; the apk database is retained for scanners/SBOM).
+# Release image assembled by GoReleaser from the prebuilt `lookout` binary.
+# (For a from-source build use the top-level Dockerfile instead.)
+#
+# Wolfi (Chainguard) packages are installed into a staging rootfs, then copied
+# into a FROM scratch final image: CVE-minimal, no package manager in the
+# runtime (the apk *binary* never reaches the final stage), yet the apk
+# database is retained so vulnerability scanners and SBOM tools can still
+# inventory the OS packages. GoReleaser provides the per-arch `lookout` binary
+# in the build context; buildx selects the target arch via --platform.
 FROM cgr.dev/chainguard/wolfi-base:latest AS rootfs
 RUN apk add --no-cache --initdb --root /out \
       --repository https://packages.wolfi.dev/os \
@@ -22,12 +16,12 @@ RUN apk add --no-cache --initdb --root /out \
  && echo 'lookout:x:65532:' >> /out/etc/group \
  && rm -rf /out/var/cache/apk/*
 
-# Stage 3: Final image — Wolfi rootfs plus the binary. No USER directive — the
+# Final image: Wolfi rootfs plus the prebuilt binary. No USER directive — the
 # agent runs as root by default so it can reach the host Docker socket; drop to
 # UID 65532 at deploy time (see examples/ and SECURITY.md).
 FROM scratch
 COPY --from=rootfs /out /
-COPY --from=builder /lookout /usr/bin/lookout
+COPY lookout /usr/bin/lookout
 
 VOLUME /data/stacks
 EXPOSE 3000
