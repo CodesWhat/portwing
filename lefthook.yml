@@ -85,16 +85,16 @@ pre-push:
     # Cap worker count below the core count: Go fuzzing defaults to one worker
     # per GOMAXPROCS, and on a many-core machine that pins every core, starving
     # the coordinator goroutine until a worker misses its sync deadline and the
-    # run dies with a spurious "context deadline exceeded". Leaving headroom
-    # keeps the smoke deterministic (it only needs to catch broken drivers /
-    # stale corpora — coverage tiers live in CI). See ci.yml / fuzz-nightly.
+    # run dies with a spurious "context deadline exceeded". Always leave at
+    # least one core for the coordinator — max(1, min(4, cores-1)) — which holds
+    # even at 4 cores; cap at 4 since a 5 s smoke needs no more. It only has to
+    # catch broken drivers / stale corpora; coverage tiers live in CI/nightly.
     go-fuzz:
       run: |
         set -e
         cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
-        workers=4
-        [ "$cores" -lt 4 ] && workers="$cores"
-        [ "$workers" -lt 1 ] && workers=1
+        workers=$(( cores > 1 ? cores - 1 : 1 ))
+        [ "$workers" -gt 4 ] && workers=4
         for entry in \
           "FuzzParsePHC ./internal/server/" \
           "FuzzParseTrustedProxies ./internal/server/" \
