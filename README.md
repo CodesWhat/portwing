@@ -62,6 +62,7 @@
 - [🛡️ Security](#security)
 - [📋 Audit Logging](#audit-logging)
 - [⭐ Star History](#star-history)
+- [🤖 Works With](#works-with)
 - [🛠️ Built With](#built-with)
 - [🤝 Community & Support](#community--support)
 
@@ -878,16 +879,23 @@ Exec tunnel events:
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=fff)](https://www.conventionalcommits.org/)
 [![Keep a Changelog](https://img.shields.io/badge/changelog-Keep%20a%20Changelog-E05735)](https://keepachangelog.com/)
 
+### Works With
+
+Lookout serves a read-only **[Model Context Protocol](https://modelcontextprotocol.io)** endpoint and a **Prometheus** metrics endpoint — so any MCP-speaking agent can list containers, inspect them, and read logs and host metrics straight from your Docker host. No SDK, no glue code.
+
+[![Model Context Protocol](https://img.shields.io/badge/Model_Context_Protocol-000000?logo=modelcontextprotocol&logoColor=fff)](https://modelcontextprotocol.io)
+[![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](https://claude.ai)
+[![OpenAI](https://img.shields.io/badge/OpenAI-412991?logo=openai&logoColor=fff)](https://openai.com)
+[![Cursor](https://img.shields.io/badge/Cursor-000000?logo=cursor&logoColor=fff)](https://www.cursor.com/)
+[![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?logo=prometheus&logoColor=fff)](https://prometheus.io/)
+
 ### Built With
 
 [![Go 1.26](https://img.shields.io/badge/Go_1.26-00ADD8?logo=go&logoColor=fff)](https://go.dev/)
-[![gorilla/websocket](https://img.shields.io/badge/gorilla%2Fwebsocket-00ADD8?logo=go&logoColor=fff)](https://github.com/gorilla/websocket)
-[![google/uuid](https://img.shields.io/badge/google%2Fuuid-00ADD8?logo=go&logoColor=fff)](https://github.com/google/uuid)
-[![golang.org/x/crypto](https://img.shields.io/badge/x%2Fcrypto-00ADD8?logo=go&logoColor=fff)](https://pkg.go.dev/golang.org/x/crypto)
-[![Sigstore](https://img.shields.io/badge/Sigstore-FFC107?logo=sigstore&logoColor=000)](https://www.sigstore.dev/)
-[![Wolfi](https://img.shields.io/badge/Wolfi-4A4A55?logo=chainguard&logoColor=fff)](https://edu.chainguard.dev/open-source/wolfi/overview/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=fff)](https://www.docker.com/)
-[![GoReleaser](https://img.shields.io/badge/GoReleaser-00ADD8?logo=go&logoColor=fff)](https://goreleaser.com/)
+[![Wolfi](https://img.shields.io/badge/Wolfi-4A4A55?logo=chainguard&logoColor=fff)](https://edu.chainguard.dev/open-source/wolfi/overview/)
+[![cosign](https://img.shields.io/badge/cosign-FFC107?logo=sigstore&logoColor=000)](https://www.sigstore.dev/)
+[![GoReleaser](https://img.shields.io/badge/GoReleaser-317FE0?logo=goreleaser&logoColor=fff)](https://goreleaser.com/)
 
 ### Community & Support
 
