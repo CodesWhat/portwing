@@ -124,9 +124,8 @@ func TestNonceLRU_ReplayConcurrent(t *testing.T) {
 		}
 	}
 	// Exactly one goroutine should win (first Add returns true, all subsequent
-	// see the nonce already and return false). Note: due to the fail-open
-	// overflow behavior at cap we only assert >= 1 winner.
-	if count < 1 {
-		t.Error("expected at least one goroutine to win the nonce Add race")
+	// see the nonce already and return false).
+	if count != 1 {
+		t.Errorf("expected exactly one goroutine to win the nonce Add race, got %d", count)
 	}
 }

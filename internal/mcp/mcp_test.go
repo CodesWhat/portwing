@@ -451,6 +451,149 @@ func TestNotificationsInitialized(t *testing.T) {
 	}
 }
 
+// TestToolsCallContainerLogs verifies container_logs against the stub.
+func TestToolsCallContainerLogs(t *testing.T) {
+	h, shutdown := newTestHandler(t)
+	defer shutdown()
+
+	rr := postMCP(t, h, map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      6,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      "container_logs",
+			"arguments": map[string]interface{}{"id": "abc123", "tail": 50},
+		},
+	})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rr.Code)
+	}
+
+	resp := decodeResponse(t, rr)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+
+	result, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result is not an object")
+	}
+	if isErr, _ := result["isError"].(bool); isErr {
+		content, _ := result["content"].([]interface{})
+		if len(content) > 0 {
+			msg, _ := content[0].(map[string]interface{})
+			t.Fatalf("tool returned error: %v", msg["text"])
+		}
+		t.Fatal("tool returned error (no content)")
+	}
+
+	content, ok := result["content"].([]interface{})
+	if !ok || len(content) == 0 {
+		t.Fatal("content is empty")
+	}
+
+	block, _ := content[0].(map[string]interface{})
+	text, _ := block["text"].(string)
+
+	var out map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatalf("unmarshal container_logs result: %v\ntext: %s", err, text)
+	}
+	if out["id"] != "abc123" {
+		t.Errorf("id = %v, want abc123", out["id"])
+	}
+}
+
+// TestToolsCallContainerStats verifies container_stats against the stub.
+func TestToolsCallContainerStats(t *testing.T) {
+	h, shutdown := newTestHandler(t)
+	defer shutdown()
+
+	rr := postMCP(t, h, map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      7,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      "container_stats",
+			"arguments": map[string]interface{}{"id": "abc123"},
+		},
+	})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rr.Code)
+	}
+
+	resp := decodeResponse(t, rr)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+
+	result, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result is not an object")
+	}
+	if isErr, _ := result["isError"].(bool); isErr {
+		content, _ := result["content"].([]interface{})
+		if len(content) > 0 {
+			msg, _ := content[0].(map[string]interface{})
+			t.Fatalf("tool returned error: %v", msg["text"])
+		}
+		t.Fatal("tool returned error (no content)")
+	}
+
+	content, ok := result["content"].([]interface{})
+	if !ok || len(content) == 0 {
+		t.Fatal("content is empty")
+	}
+
+	block, _ := content[0].(map[string]interface{})
+	text, _ := block["text"].(string)
+
+	var out map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatalf("unmarshal container_stats result: %v\ntext: %s", err, text)
+	}
+	if out["id"] != "abc123" {
+		t.Errorf("id = %v, want abc123", out["id"])
+	}
+}
+
+// TestToolsCallHostMetrics verifies host_metrics returns a non-error response.
+func TestToolsCallHostMetrics(t *testing.T) {
+	h, shutdown := newTestHandler(t)
+	defer shutdown()
+
+	rr := postMCP(t, h, map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      8,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      "host_metrics",
+			"arguments": map[string]interface{}{},
+		},
+	})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rr.Code)
+	}
+
+	resp := decodeResponse(t, rr)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+
+	result, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result is not an object")
+	}
+	// host_metrics may return isError:true when /proc is unavailable (e.g. macOS CI).
+	// We only assert that the response is a valid tools/call envelope.
+	if _, hasContent := result["content"]; !hasContent {
+		t.Error("host_metrics result missing content field")
+	}
+}
+
 // TestDemuxLogs verifies that the Docker log multiplexing decoder works correctly.
 func TestDemuxLogs(t *testing.T) {
 	line1 := "hello stdout\n"

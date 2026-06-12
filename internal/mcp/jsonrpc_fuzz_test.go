@@ -21,6 +21,9 @@ func FuzzMCPHandler(f *testing.F) {
 	f.Add(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	f.Add(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_containers","arguments":{}}}`)
 	f.Add(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"inspect_container","arguments":{"id":"abc"}}}`)
+	f.Add(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"container_logs","arguments":{"id":"abc","tail":100}}}`)
+	f.Add(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"container_stats","arguments":{"id":"abc"}}}`)
+	f.Add(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"host_metrics","arguments":{}}}`)
 	// Seed: hostile inputs.
 	f.Add(``)
 	f.Add(`{}`)
