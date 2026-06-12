@@ -30,17 +30,6 @@ const (
 	testImage  = "alpine:3.20"
 )
 
-// serverAddr returns the base URL of the integration test server.
-func serverAddr(t *testing.T) string {
-	t.Helper()
-	addr := os.Getenv("LOOKOUT_INTEGRATION_ADDR")
-	if addr != "" {
-		return addr
-	}
-	t.Fatal("LOOKOUT_INTEGRATION_ADDR not set; the test harness should set it")
-	return ""
-}
-
 // startServer launches lookout as a subprocess and returns its base URL.
 // It blocks until the health endpoint returns 200 or the deadline is hit.
 func startServer(t *testing.T) (baseURL string, cleanup func()) {
@@ -79,6 +68,7 @@ func startServer(t *testing.T) (baseURL string, cleanup func()) {
 		"ADAPTER=drydock",
 		"LOG_LEVEL=error",      // keep integration test output quiet
 		"SKIP_DF_COLLECTION=1", // /proc/df not available in CI
+		"DD_POLL_INTERVAL=1",   // refresh inventory every 1s so a freshly started container appears promptly (default is 300s)
 	)
 
 	cmd := exec.Command(binPath)
@@ -221,28 +211,45 @@ func TestContainerListWithAuth(t *testing.T) {
 	defer cleanup()
 
 	// Start a real container so the list is non-trivial.
-	_, cleanupCtr := startAlpineContainer(t)
+	ctrID, cleanupCtr := startAlpineContainer(t)
 	defer cleanupCtr()
 
-	// Wait a moment for the server's background poller to pick it up.
-	time.Sleep(500 * time.Millisecond)
-
-	resp := get(t, base, "/api/containers")
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET /api/containers: got %d, want 200\nbody: %s", resp.StatusCode, body)
-	}
-
+	// The drydock adapter serves /api/containers from a cached snapshot that a
+	// background poller refreshes; the container we just started only becomes
+	// visible after the next poll cycle. Poll with a deadline rather than relying
+	// on a fixed delay, whose adequacy varies with load on CI runners.
+	deadline := time.Now().Add(startupMax)
 	var containers []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
-		t.Fatalf("decoding containers: %v", err)
+	var found bool
+	for time.Now().Before(deadline) {
+		resp := get(t, base, "/api/containers")
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("GET /api/containers: got %d, want 200\nbody: %s", resp.StatusCode, body)
+		}
+		containers = nil
+		err := json.NewDecoder(resp.Body).Decode(&containers)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("decoding containers: %v", err)
+		}
+		for _, c := range containers {
+			if id, _ := c["id"].(string); id == ctrID {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 
-	// At minimum we should see the container we just started.
-	if len(containers) == 0 {
-		t.Error("expected at least one container in the list, got 0")
+	// We must at least see the container we just started.
+	if !found {
+		t.Errorf("container %s not found in /api/containers within %s (saw %d containers)",
+			ctrID[:min(12, len(ctrID))], startupMax, len(containers))
 	}
 }
 
@@ -365,25 +372,38 @@ func TestSSEEventsFirstEventIsAck(t *testing.T) {
 		t.Errorf("Content-Type: got %q, want text/event-stream", ct)
 	}
 
-	// Read SSE events until we see dd:ack and dd:watcher-snapshot, or timeout.
+	// The drydock SSE protocol frames every event as `data: <json>` with no
+	// `event:` line; the discriminator is the JSON payload's "type" field
+	// (so EventSource clients read JSON.parse(e.data).type). Accumulate each
+	// event's data payload and inspect its type. Read until we see dd:ack and
+	// dd:watcher-snapshot, or the context times out.
 	scanner := bufio.NewScanner(resp.Body)
+	// Watcher-snapshot payloads carry the full container inventory and can
+	// exceed the scanner's default 64 KiB token cap on busy hosts.
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var gotAck, gotSnapshot bool
-	var eventType string
+	var data strings.Builder
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "event:") {
-			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		if strings.HasPrefix(line, "data:") {
+			data.WriteString(strings.TrimPrefix(line, "data:"))
+			continue
 		}
-		if line == "" {
-			// Blank line = end of event.
-			switch eventType {
-			case "dd:ack":
-				gotAck = true
-			case "dd:watcher-snapshot":
-				gotSnapshot = true
+		if line == "" && data.Len() > 0 {
+			// Blank line = end of event: parse the accumulated data payload.
+			var evt struct {
+				Type string `json:"type"`
 			}
-			eventType = ""
+			if err := json.Unmarshal([]byte(strings.TrimSpace(data.String())), &evt); err == nil {
+				switch evt.Type {
+				case "dd:ack":
+					gotAck = true
+				case "dd:watcher-snapshot":
+					gotSnapshot = true
+				}
+			}
+			data.Reset()
 		}
 		if gotAck && gotSnapshot {
 			break
