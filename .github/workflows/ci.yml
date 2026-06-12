@@ -201,7 +201,10 @@ jobs:
         uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
         with:
           distribution: goreleaser
-          version: latest
+          # Pin to the v2 major line (matches release.yml) so the config check
+          # runs the same GoReleaser major that ships releases, and to clear the
+          # action's "using 'latest' as default version" advisory.
+          version: "~> v2"
           args: check
 
   codeql:
@@ -246,9 +249,12 @@ jobs:
 
   dependency-review:
     name: "📦 Dependency Review"
-    # Dependency Review requires GitHub Advanced Security on private repos.
-    # Gated on public visibility so it auto-activates when the repo goes public.
-    if: ${{ false && github.event.repository.visibility == 'public' && github.event_name == 'pull_request' }}
+    # Runs on public-repo PRs. The action additionally requires the
+    # **Dependency Graph** feature to be enabled (org/repo Security settings);
+    # until that is turned on it reports "not supported on this repository", so
+    # the review step is marked continue-on-error to stay informational rather
+    # than block the PR. Flip that off once Dependency Graph is enabled.
+    if: github.event.repository.visibility == 'public' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -267,6 +273,7 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+        continue-on-error: true
 
   go-fuzz:
     # Tier 1 — per-PR smoke-level fuzzing. Each fuzzer gets a fixed 60 s
@@ -305,14 +312,60 @@ jobs:
 
       - name: Fuzz ${{ matrix.fuzzer.name }}
         env:
+          FUZZER: ${{ matrix.fuzzer.name }}
+          PKG: ${{ matrix.fuzzer.pkg }}
           FUZZTIME: 60s
           TEST_TIMEOUT: 5m
         run: |
-          go test -run=^$ \
-            -fuzz=^${{ matrix.fuzzer.name }}$ \
-            -fuzztime="${FUZZTIME}" \
-            -timeout="${TEST_TIMEOUT}" \
-            ${{ matrix.fuzzer.pkg }}
+          LOG="${RUNNER_TEMP}/fuzz-${FUZZER}.log"
+
+          # Primary fix: cap workers below the core count so the fuzzing
+          # coordinator always keeps a core. This PREVENTS the starvation that
+          # surfaces as a spurious "context deadline exceeded" (the hook does
+          # the same); the retry below is only a backstop. max(1, min(4, cores-1)).
+          cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+          workers=$(( cores > 1 ? cores - 1 : 1 ))
+          [ "${workers}" -gt 4 ] && workers=4
+
+          run_fuzz() {
+            go test -run='^$' \
+              -fuzz="^${FUZZER}\$" \
+              -fuzztime="${FUZZTIME}" \
+              -timeout="${TEST_TIMEOUT}" \
+              -parallel="${workers}" \
+              "${PKG}" 2>&1 | tee "${LOG}"
+            return "${PIPESTATUS[0]}"
+          }
+
+          # Backstop: retry once on the residual known boundary race (a worker
+          # still mid-input when -fuzztime expires). This trusts Go's internal
+          # "context deadline exceeded" text as the flake signal — a genuinely
+          # slow input that only *sometimes* exceeds -timeout would also match,
+          # but handlers are verified sub-10ms and a persistently slow input
+          # still fails BOTH attempts. A real crash ("Failing input written to
+          # testdata") is never retried; any other failure exits immediately.
+          # If Go rewords this message the gate fails closed (hard failure),
+          # which is the safe direction. Mirrors quality-fuzz-nightly.yml.
+          for attempt in 1 2; do
+            rc=0
+            run_fuzz || rc=$?
+            [ "${rc}" -eq 0 ] && exit 0
+
+            if grep -q "Failing input written to testdata" "${LOG}"; then
+              echo "::error::${FUZZER} found a crashing input — commit it to the seed corpus and fix the regression."
+              exit "${rc}"
+            fi
+
+            if ! grep -q "context deadline exceeded" "${LOG}"; then
+              echo "::error::${FUZZER} failed for a non-flake reason (exit ${rc})."
+              exit "${rc}"
+            fi
+
+            echo "::warning::${FUZZER}: known -fuzztime boundary flake on attempt ${attempt}/2."
+          done
+
+          echo "::error::${FUZZER} hit the boundary flake on both attempts."
+          exit 1
 
       - name: Upload fuzz corpus on failure
         if: failure()

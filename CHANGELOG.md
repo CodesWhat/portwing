@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Release pipeline**: pin GoReleaser to the `~> v2` major line (was `latest`) in both the release workflow and the CI config-check job, so neither can silently jump to a future GoReleaser v3 and to clear the action's "using 'latest' as default version" advisory.
+
+### Fixed
+
+- **Flaky fuzz smoke / gating CI**: the Go fuzzing harness intermittently failed with a spurious `context deadline exceeded` (no crash, no slow input — verified handlers stay sub-10ms on adversarial inputs). On many-core machines Go fuzzing's default one-worker-per-core saturates every core and starves the coordinator goroutine until a worker misses its sync deadline. Both the pre-push hook and the gating CI fuzz job now cap fuzz worker count to `max(1, min(4, cores-1))` so the coordinator always keeps a core, which *prevents* the starvation; CI additionally retries the residual known `-fuzztime` boundary race once as a backstop (never retrying a real crash).
+
 ## [0.2.0] - 2026-06-12
 
 ### Added
@@ -29,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`dd:watcher-snapshot` SSE event**: full watcher + container inventory payload emitted immediately after `dd:ack` on SSE connect and after every poll cycle, so Drydock can prune stale containers.
 - **OpenAPI 3.1 spec**: `api/openapi.yaml` documenting all endpoints, request/response schemas, and security schemes.
 - **Security model doc**: `docs/security-model.md` describing the defense-in-depth posture.
-- **Watchtower migration guide**: `docs/watchtower-migration.md` for teams migrating from Watchtower.
+- **Watchtower migration guide**: `docs/migrating-from-watchtower.md` for teams migrating from Watchtower.
 
 ### Fixed
 

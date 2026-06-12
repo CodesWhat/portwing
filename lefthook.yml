@@ -81,9 +81,38 @@ pre-push:
     # Fuzz smoke — 5 s per fuzzer, all 5 in series. Keep a finite Go
     # watchdog above the tiny smoke budget so a hung input fails with a
     # stack dump instead of consuming the hook timeout.
+    #
+    # Cap worker count below the core count: Go fuzzing defaults to one worker
+    # per GOMAXPROCS, and on a many-core machine that pins every core, starving
+    # the coordinator goroutine until a worker misses its sync deadline and the
+    # run dies with a spurious "context deadline exceeded". Always leave at
+    # least one core for the coordinator — max(1, min(4, cores-1)) — which holds
+    # even at 4 cores; cap at 4 since a 5 s smoke needs no more. It only has to
+    # catch broken drivers / stale corpora; coverage tiers live in CI/nightly.
     go-fuzz:
       run: |
         set -e
+        cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+        workers=$(( cores > 1 ? cores - 1 : 1 ))
+        [ "$workers" -gt 4 ] && workers=4
+        # Retry once on the coordinator-starvation flake ("context deadline
+        # exceeded" with no failing input) — mirrors the backstop in
+        # ci.yml. Never retry a real crash ("Failing input written").
+        run_fuzz() {
+          fuzzer="$1"; pkg="$2"; attempt=1
+          while [ "$attempt" -le 2 ]; do
+            if out="$(go test -run='^$' -fuzz="^${fuzzer}\$" -fuzztime=5s -timeout=1m -parallel="$workers" "$pkg" 2>&1)"; then
+              echo "$out"; return 0
+            fi
+            echo "$out"
+            echo "$out" | grep -q "Failing input written" && return 1
+            if [ "$attempt" -eq 1 ] && echo "$out" | grep -q "context deadline exceeded"; then
+              echo "fuzz ${fuzzer}: coordinator-starvation flake — retrying once"
+              attempt=2; continue
+            fi
+            return 1
+          done
+        }
         for entry in \
           "FuzzParsePHC ./internal/server/" \
           "FuzzParseTrustedProxies ./internal/server/" \
@@ -91,7 +120,7 @@ pre-push:
           "FuzzParseLabels ./internal/adapter/drydock/" \
           "FuzzMCPHandler ./internal/mcp/"; do
           set -- $entry
-          go test -run='^$' -fuzz="^$1\$" -fuzztime=5s -timeout=1m "$2"
+          run_fuzz "$1" "$2"
         done
       priority: 5
       timeout: 3m

@@ -28,7 +28,7 @@ Lookout independently — handshake on `/api/containers`, then a long-lived SSE
 stream on `/api/events`. sockguard is the recommended socket filter between
 Lookout and the Docker Engine.
 
-**Language:** Go 1.22+ (module), built with Go 1.24 (CI)
+**Language:** Go 1.26+ (module), built with Go 1.26 (CI)
 **Dependencies:** `gorilla/websocket`, `google/uuid` -- zero Docker SDK dependency (raw HTTP over Unix socket)
 
 ## 2. Connection Modes
@@ -36,8 +36,8 @@ Lookout and the Docker Engine.
 ### 2.1 Mode Detection
 
 ```
-DRYDOCK_URL set + TOKEN set  ->  Edge Mode (outbound WebSocket)
-Otherwise                    ->  Standard Mode (inbound HTTP server)
+DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set  ->  Edge Mode (outbound WebSocket)
+Otherwise                                                              ->  Standard Mode (inbound HTTP server)
 ```
 
 ### 2.2 Standard Mode
@@ -175,7 +175,7 @@ sequenceDiagram
 
 ### 4.4 Authentication
 
-- **Header:** `X-Lookout-Token` (primary), `X-Dd-Agent-Secret` (backward compat)
+- **Header:** `Authorization: Bearer` (primary), `X-Lookout-Token`, `X-Dd-Agent-Secret` (backward compat)
 - **Comparison:** `crypto/subtle.ConstantTimeCompare` (timing-safe)
 - **Rate limiting:** 10 failed attempts per IP per minute, 10K IP cap, background cleanup every 5min
 - Token is optional in Standard mode (if not configured, no auth required)

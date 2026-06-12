@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -58,7 +62,10 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
         with:
-          version: latest
+          # Pin to the v2 major line: gets patch/minor fixes but won't silently
+          # jump to a v3 that could break the release. Also clears GoReleaser's
+          # "using 'latest' as default version" advisory.
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

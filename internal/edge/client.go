@@ -30,11 +30,10 @@ import (
 )
 
 const (
-	maxReadSize     = 16 * 1024 * 1024  // 16 MB
-	maxResponseBody = 100 * 1024 * 1024 // 100 MB
-	maxExecBody     = 10 * 1024 * 1024  // 10 MB
-	maxExecSessions = 100
-	maxStreams      = 100
+	maxReadSize     = 16 * 1024 * 1024  // 16 MB — WebSocket read limit
+	maxResponseBody = 100 * 1024 * 1024 // 100 MB — proxied response body cap
+	maxExecSessions = 100               // concurrent exec sessions
+	maxStreams      = 100               // concurrent in-flight tunneled requests
 )
 
 // edgeMessageSender wraps the edge Client to implement adapter.MessageSender.
@@ -61,6 +60,9 @@ type Client struct {
 
 	execSessions sync.Map
 
+	// streamSem bounds concurrent in-flight request handlers (maxStreams).
+	streamSem chan struct{}
+
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
 }
@@ -74,6 +76,7 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
 		auditor:      auditor,
+		streamSem:    make(chan struct{}, maxStreams),
 	}
 }
 
@@ -371,7 +374,21 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Warn("invalid request message", "error", err)
 				continue
 			}
-			go c.handleRequest(ctx, req)
+			// Bound concurrent request handlers (maxStreams). Reject rather than
+			// block the read loop, which must keep servicing pings and exec I/O.
+			select {
+			case c.streamSem <- struct{}{}:
+				go func() {
+					defer func() { <-c.streamSem }()
+					c.handleRequest(ctx, req)
+				}()
+			default:
+				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", req.RequestID)
+				_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+					Message:   "agent busy: too many concurrent requests",
+					RequestID: req.RequestID,
+				})
+			}
 
 		case protocol.TypeExecStart:
 			var msg protocol.ExecStartMessage

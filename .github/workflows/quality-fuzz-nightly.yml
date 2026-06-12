@@ -66,8 +66,16 @@ jobs:
         run: |
           FUZZTIME="${INPUT_FUZZTIME:-5m}"
           echo "fuzztime=${FUZZTIME}" >> "$GITHUB_OUTPUT"
-          # Add 2-minute watchdog cushion on top of budget
-          echo "test_timeout=10m" >> "$GITHUB_OUTPUT"
+          # Parse the trailing unit (m or s) and convert to seconds, then add a
+          # 120-second cushion so the go test -timeout always outlasts -fuzztime.
+          if [[ "${FUZZTIME}" =~ ^([0-9]+)m$ ]]; then
+            budget_s=$(( BASH_REMATCH[1] * 60 ))
+          elif [[ "${FUZZTIME}" =~ ^([0-9]+)s$ ]]; then
+            budget_s=${BASH_REMATCH[1]}
+          else
+            budget_s=300
+          fi
+          echo "test_timeout=$(( budget_s + 120 ))s" >> "$GITHUB_OUTPUT"
 
       - name: Fuzz ${{ matrix.fuzzer.name }}
         id: fuzz

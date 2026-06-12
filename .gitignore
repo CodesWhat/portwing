@@ -36,5 +36,6 @@ Thumbs.db
 # Playwright MCP session artifacts
 .playwright-mcp/
 
-# Internal strategy / competitive analysis — not for public release
-/ROADMAP.md
+# Internal strategy / competitive analysis / unpatched-finding tracker —
+# not for public release. The public-facing roadmap lives in /ROADMAP.md.
+/.roadmap/

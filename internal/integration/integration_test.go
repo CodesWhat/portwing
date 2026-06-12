@@ -13,12 +13,20 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +42,16 @@ const (
 // It blocks until the health endpoint returns 200 or the deadline is hit.
 func startServer(t *testing.T) (baseURL string, cleanup func()) {
 	t.Helper()
+	return startServerWithEnv(t, nil, testToken)
+}
+
+// startServerWithEnv launches lookout with extra env vars appended and a
+// specific bearer token. Pass extraEnv as nil and token as testToken for the
+// standard TOKEN-auth harness; pass token as "" to start without TOKEN (e.g.
+// for Ed25519-only auth via an AUTHORIZED_KEYS entry in extraEnv). An ephemeral
+// port is obtained via net.Listen(:0) to avoid port conflicts.
+func startServerWithEnv(t *testing.T, extraEnv []string, token string) (baseURL string, cleanup func()) {
+	t.Helper()
 
 	dockerSocket := os.Getenv("LOOKOUT_TEST_DOCKER_SOCKET")
 	if dockerSocket == "" {
@@ -46,11 +64,14 @@ func startServer(t *testing.T) (baseURL string, cleanup func()) {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
 
-	// Pick a random free TCP port via net.Listen so we don't need to know it
-	// ahead of time — pass 0 and read the actual address back.
-	// However, for simplicity here we use a fixed high port and rely on the CI
-	// runner having it free.
-	port := "19301"
+	// Obtain an ephemeral port by binding on :0 and reading the resolved
+	// address, then close the listener so lookout can bind the same port.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen :0: %v", err)
+	}
+	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	ln.Close()
 
 	// Build the binary first (go build ./cmd/lookout -o <tmpdir>/lookout).
 	binPath := tmpDir + "/lookout"
@@ -61,7 +82,6 @@ func startServer(t *testing.T) (baseURL string, cleanup func()) {
 	}
 
 	env := append(os.Environ(),
-		"TOKEN="+testToken,
 		"PORT="+port,
 		"BIND_ADDRESS=127.0.0.1",
 		"DOCKER_SOCKET="+dockerSocket,
@@ -70,6 +90,10 @@ func startServer(t *testing.T) (baseURL string, cleanup func()) {
 		"SKIP_DF_COLLECTION=1", // /proc/df not available in CI
 		"DD_POLL_INTERVAL=1",   // refresh inventory every 1s so a freshly started container appears promptly (default is 300s)
 	)
+	if token != "" {
+		env = append(env, "TOKEN="+token)
+	}
+	env = append(env, extraEnv...)
 
 	cmd := exec.Command(binPath)
 	cmd.Env = env
@@ -419,5 +443,98 @@ func TestSSEEventsFirstEventIsAck(t *testing.T) {
 	}
 	if !gotSnapshot {
 		t.Error("SSE stream: did not receive dd:watcher-snapshot event")
+	}
+}
+
+// TestEd25519Auth verifies that lookout enforces Ed25519 signature auth on a
+// protected endpoint when started with AUTHORIZED_KEYS and no TOKEN: an
+// unsigned request is rejected with 401, and a properly signed request is
+// accepted with 200. It targets /_lookout/info (an auth-gated endpoint) rather
+// than /_lookout/health (which is intentionally unauthenticated), so the
+// signature path is actually exercised.
+func TestEd25519Auth(t *testing.T) {
+	// Generate a fresh Ed25519 keypair for this test.
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey: %v", err)
+	}
+
+	// Write the public key to a temp authorized_keys file (mode 0600 so the
+	// world-readable check in parseAuthorizedKeys passes). Format matches
+	// parseKeyLine: "ed25519 <base64-std-pubkey> <comment>".
+	keysDir, err := os.MkdirTemp("", "lk-keys")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer os.RemoveAll(keysDir)
+
+	b64 := base64.StdEncoding.EncodeToString(pub)
+	keysPath := filepath.Join(keysDir, "authorized_keys")
+	if err := os.WriteFile(keysPath, []byte("ed25519 "+b64+" integ-test\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile authorized_keys: %v", err)
+	}
+
+	// Start lookout with AUTHORIZED_KEYS set and no TOKEN (Ed25519-only auth).
+	base, cleanup := startServerWithEnv(t,
+		[]string{"AUTHORIZED_KEYS=" + keysPath},
+		"", // no bearer token
+	)
+	defer cleanup()
+
+	const target = "/_lookout/info" // auth-gated, unlike /_lookout/health
+
+	// Negative control: an unsigned request must be rejected with 401. This
+	// proves the endpoint is genuinely gated, so the positive case is meaningful.
+	unsigned, err := http.NewRequest(http.MethodGet, base+target, nil)
+	if err != nil {
+		t.Fatalf("NewRequest (unsigned): %v", err)
+	}
+	unResp, err := http.DefaultClient.Do(unsigned)
+	if err != nil {
+		t.Fatalf("unsigned GET %s: %v", target, err)
+	}
+	unResp.Body.Close()
+	if unResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unsigned request: got %d, want 401 (endpoint must be auth-gated)", unResp.StatusCode)
+	}
+
+	// Positive: a correctly signed request must be accepted with 200.
+	req, err := http.NewRequest(http.MethodGet, base+target, nil)
+	if err != nil {
+		t.Fatalf("NewRequest (signed): %v", err)
+	}
+
+	tsUnix := time.Now().Unix()
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	nonce := hex.EncodeToString(nonceBytes) // 32 hex characters
+
+	// Canonical message: METHOD\nPATH\nbody-sha256-hex\nunix-timestamp\nnonce.
+	emptyBodyHash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	msg := []byte(fmt.Sprintf("%s\n%s\n%s\n%d\n%s",
+		req.Method, req.URL.Path, emptyBodyHash, tsUnix, nonce))
+	sig := ed25519.Sign(priv, msg)
+
+	// Key ID: hex(SHA-256(pubkey)[:8]), matching auth.deriveKeyID.
+	h := sha256.Sum256(pub)
+	keyID := hex.EncodeToString(h[:8])
+
+	req.Header.Set("X-Lookout-Key-ID", keyID)
+	req.Header.Set("X-Lookout-Timestamp", strconv.FormatInt(tsUnix, 10))
+	req.Header.Set("X-Lookout-Nonce", nonce)
+	req.Header.Set("X-Lookout-Signature", base64.RawURLEncoding.EncodeToString(sig))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("signed GET %s: %v", target, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Ed25519 auth: got %d, want 200\nreason: %s\nbody: %s",
+			resp.StatusCode, resp.Header.Get("X-Lookout-Reason"), body)
 	}
 }

@@ -60,7 +60,7 @@ The controls that materially harden a deployment:
 Lookout implements the following:
 
 - **Authentication**: three mechanisms, all timing-safe — raw token (`TOKEN`, compared with `crypto/subtle`), Argon2id PHC hash (`TOKEN_HASH`, token never stored in clear), and Ed25519 per-request signatures (`AUTHORIZED_KEYS`) with replay protection (nonce LRU + ±60s timestamp window) and SIGHUP hot-reload of the key file. `TOKEN` and `TOKEN_HASH` are mutually exclusive.
-- **Enrollment**: optional single-use `ENROLLMENT_TOKEN` for bootstrapping the first Ed25519 key — burned on first use (success **or** failure), rate-limited, and audit-logged.
+- **Enrollment**: optional single-use `ENROLLMENT_TOKEN` for bootstrapping the first Ed25519 key — burned on first **successful** use, rate-limited (shares the 10-failed-attempts-per-IP-per-minute limiter), and audit-logged. The token is deliberately **not** burned on a failed attempt: doing so would let any unauthenticated caller disable enrollment with a single bad request. Use a high-entropy value (e.g. `openssl rand -hex 32`).
 - **Rate limiting**: 10 failed auth attempts per IP per minute, checked *before* credential verification; failed Argon2id attempts always traverse the full derivation.
 - **Audit log**: structured JSON audit trail (`AUDIT_LOG`) of auth failures, enrollment attempts, and mutating operations.
 - **TLS**: TLS 1.2+ with modern AEAD cipher suites only.

@@ -74,9 +74,10 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
+      - "^📝"
+      - "^🧪"
+      - "^🔧"
+      - "^🎨"
 
 dockers:
   - image_templates:
@@ -86,6 +87,7 @@ dockers:
     use: buildx
     build_flag_templates:
       - "--platform=linux/amd64"
+    goarch: amd64
 
   - image_templates:
       - "ghcr.io/codeswhat/lookout:{{ .Version }}-arm64"

@@ -121,7 +121,7 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 		}
 	}
 
-	cmd, err := cm.buildCommand(req)
+	cmd, err := cm.buildCommand(ctx, req)
 	if err != nil {
 		return &ComposeResponse{Success: false, Error: err.Error()}, nil
 	}
@@ -162,13 +162,16 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) error {
 		return fmt.Errorf("stack name is required")
 	}
 
-	// Validate env var keys.
-	for key := range req.EnvVars {
+	// Validate env var keys and values.
+	for key, val := range req.EnvVars {
 		if !envVarKeyPattern.MatchString(key) {
 			return fmt.Errorf("invalid env var key: %q", key)
 		}
 		if envVarDenylist[key] {
 			return fmt.Errorf("env var %q is not allowed", key)
+		}
+		if strings.ContainsAny(val, "\n\r\x00") {
+			return fmt.Errorf("env var %q value contains invalid characters (newline, carriage return, or null)", key)
 		}
 	}
 
@@ -247,7 +250,7 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 }
 
 // buildCommand constructs the exec.Cmd for the requested compose operation.
-func (cm *ComposeManager) buildCommand(req ComposeRequest) (*exec.Cmd, error) {
+func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) (*exec.Cmd, error) {
 	stackDir := req.StackDir
 	if stackDir == "" {
 		stackDir = req.StackName
@@ -323,7 +326,7 @@ func (cm *ComposeManager) buildCommand(req ComposeRequest) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("unsupported compose operation: %q", req.Operation)
 	}
 
-	cmd := exec.Command(cm.composeBin, args...)
+	cmd := exec.CommandContext(ctx, cm.composeBin, args...)
 	cmd.Dir = projectDir
 	return cmd, nil
 }

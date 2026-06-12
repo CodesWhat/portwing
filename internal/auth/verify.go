@@ -113,6 +113,9 @@ func VerifyRequest(
 	if len(nonceHeader) != 32 {
 		return "", ErrInvalidNonce
 	}
+	if _, err := hex.DecodeString(nonceHeader); err != nil {
+		return "", ErrInvalidNonce
+	}
 
 	// Look up key.
 	key, ok := registry.LookupByID(kidHeader)

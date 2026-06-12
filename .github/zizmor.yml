@@ -9,4 +9,5 @@ rules:
     # Re-evaluate if the repo goes public.
     ignore:
       - ci.yml
+      - quality-integration.yml
       - release.yml

@@ -39,6 +39,33 @@ var hopByHopHeaders = map[string]bool{
 	"Proxy-Authenticate":  true,
 }
 
+// lookoutAuthHeaders authenticate the client to Lookout itself. They must never
+// be forwarded to the Docker daemon (or the sockguard proxy sitting in front of
+// it) — doing so leaks Lookout's own credentials downstream. http.Header.Del
+// canonicalises the key, so "X-Lookout-Key-ID" matches correctly.
+var lookoutAuthHeaders = []string{
+	"Authorization",
+	"X-Lookout-Token",
+	"X-Dd-Agent-Secret",
+	auth.HeaderKeyID,
+	auth.HeaderTimestamp,
+	auth.HeaderNonce,
+	auth.HeaderSignature,
+}
+
+// stripLookoutAuthHeaders removes Lookout's own auth headers from a request
+// bound for the Docker daemon.
+func stripLookoutAuthHeaders(h http.Header) {
+	for _, name := range lookoutAuthHeaders {
+		h.Del(name)
+	}
+}
+
+// maxExecBodyBytes caps the exec-start request body read during a hijack so a
+// hostile client can't force an unbounded in-memory read. Matches the
+// "exec body (10 MB)" limit documented in SECURITY.md.
+const maxExecBodyBytes = 10 * 1024 * 1024 // 10 MB
+
 // Server is the standard-mode HTTP server that exposes Docker API proxy
 // endpoints, adapter-specific routes, and health checks.
 type Server struct {
@@ -107,6 +134,13 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		}()
 	}
 
+	// Loud warning if the agent is starting with no way to authenticate any
+	// request — it would operate as an open Docker proxy. Usually a missing or
+	// misnamed env var rather than an intentional choice.
+	if verifier == nil && ed25519Cfg.Registry == nil {
+		slog.Warn("no authentication configured: all requests will be accepted without credentials — set TOKEN, TOKEN_HASH, or AUTHORIZED_KEYS")
+	}
+
 	// Set up enrollment handler if ENROLLMENT_TOKEN is configured.
 	var enroller *auth.Enroller
 	if cfg.EnrollmentToken != "" {
@@ -147,6 +181,13 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	s.httpServer = &http.Server{
 		Addr:    cfg.BindAddress + ":" + cfg.Port,
 		Handler: handler,
+		// Bound the request-header read to mitigate slow-header (Slowloris)
+		// attacks. ReadTimeout/WriteTimeout are deliberately left zero so the
+		// streaming endpoints (logs, events, stats, exec) are not cut off;
+		// ReadHeaderTimeout covers only the header phase, IdleTimeout reaps
+		// idle keep-alive connections.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Configure TLS if certs provided.
@@ -318,8 +359,10 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy headers (strip hop-by-hop).
+	// Copy headers (strip hop-by-hop), then strip Lookout's own auth headers
+	// so they are never forwarded to the Docker socket.
 	copyHeaders(proxyReq.Header, r.Header)
+	stripLookoutAuthHeaders(proxyReq.Header)
 
 	var resp *http.Response
 	if isStream {
@@ -384,7 +427,7 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 		"%s %s HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Type: application/json\r\n",
 		r.Method, r.URL.RequestURI(),
 	)
-	body, _ := io.ReadAll(r.Body)
+	body, _ := io.ReadAll(io.LimitReader(r.Body, maxExecBodyBytes))
 	rawReq += fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), string(body))
 
 	if _, err := dockerConn.Write([]byte(rawReq)); err != nil {

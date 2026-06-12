@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="lookout.png" alt="Lookout" width="200" height="200">
+
 <h1>Lookout</h1>
 
 **Security-first remote Docker agent — control your containers from anywhere, safely.**
@@ -382,13 +384,13 @@ Lookout runs an HTTP(S) server; the **Drydock controller connects inbound** and 
 
 Lookout initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/lookout/ws`) for hosts with no inbound port. The **agent side is implemented; the matching controller-side endpoint in Drydock is still in progress**, so this mode is not yet usable end-to-end.
 
-- Set when both `DRYDOCK_URL` and `TOKEN` are configured
+- Set when `DRYDOCK_URL` is configured along with `TOKEN`, `AUTHORIZED_KEYS`, or `PRIVATE_KEY_FILE`
 - Targets hosts behind NAT, firewalls, and dynamic IPs
 - Auto-reconnect with exponential backoff + jitter; signed hello via `PRIVATE_KEY_FILE`
 
 ```
-DRYDOCK_URL set + TOKEN set  →  Edge Mode (outbound WebSocket)
-Otherwise                    →  Standard Mode (inbound HTTP server)
+DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set  →  Edge Mode (outbound WebSocket)
+Otherwise                                                              →  Standard Mode (inbound HTTP server)
 ```
 
 </details>
@@ -517,6 +519,7 @@ the connection alive through proxies.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HEARTBEAT_INTERVAL` | `30` | Ping interval (seconds) |
+| `WELCOME_TIMEOUT` | `30` | Seconds to await the Drydock welcome message in edge mode |
 | `REQUEST_TIMEOUT` | `30` | Docker API request timeout (seconds) |
 | `RECONNECT_DELAY` | `1` | Initial reconnect delay (seconds) |
 | `MAX_RECONNECT_DELAY` | `60` | Max reconnect delay (seconds) |
