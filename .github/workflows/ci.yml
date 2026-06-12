@@ -305,14 +305,47 @@ jobs:
 
       - name: Fuzz ${{ matrix.fuzzer.name }}
         env:
+          FUZZER: ${{ matrix.fuzzer.name }}
+          PKG: ${{ matrix.fuzzer.pkg }}
           FUZZTIME: 60s
           TEST_TIMEOUT: 5m
         run: |
-          go test -run=^$ \
-            -fuzz=^${{ matrix.fuzzer.name }}$ \
-            -fuzztime="${FUZZTIME}" \
-            -timeout="${TEST_TIMEOUT}" \
-            ${{ matrix.fuzzer.pkg }}
+          LOG="${RUNNER_TEMP}/fuzz-${FUZZER}.log"
+
+          run_fuzz() {
+            go test -run='^$' \
+              -fuzz="^${FUZZER}\$" \
+              -fuzztime="${FUZZTIME}" \
+              -timeout="${TEST_TIMEOUT}" \
+              "${PKG}" 2>&1 | tee "${LOG}"
+            return "${PIPESTATUS[0]}"
+          }
+
+          # Retry only the known Go-fuzzing "context deadline exceeded" boundary
+          # flake (a worker is still mid-input when -fuzztime expires). A real
+          # crash ("Failing input written to testdata") or any other failure is
+          # never retried. Mirrors quality-fuzz-nightly.yml so the gating CI
+          # doesn't block merges on a benign fuzzing-harness race.
+          for attempt in 1 2; do
+            rc=0
+            run_fuzz || rc=$?
+            [ "${rc}" -eq 0 ] && exit 0
+
+            if grep -q "Failing input written to testdata" "${LOG}"; then
+              echo "::error::${FUZZER} found a crashing input — commit it to the seed corpus and fix the regression."
+              exit "${rc}"
+            fi
+
+            if ! grep -q "context deadline exceeded" "${LOG}"; then
+              echo "::error::${FUZZER} failed for a non-flake reason (exit ${rc})."
+              exit "${rc}"
+            fi
+
+            echo "::warning::${FUZZER}: known -fuzztime boundary flake on attempt ${attempt}/2."
+          done
+
+          echo "::error::${FUZZER} hit the boundary flake on both attempts."
+          exit 1
 
       - name: Upload fuzz corpus on failure
         if: failure()

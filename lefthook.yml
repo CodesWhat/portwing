@@ -81,9 +81,20 @@ pre-push:
     # Fuzz smoke — 5 s per fuzzer, all 5 in series. Keep a finite Go
     # watchdog above the tiny smoke budget so a hung input fails with a
     # stack dump instead of consuming the hook timeout.
+    #
+    # Cap worker count below the core count: Go fuzzing defaults to one worker
+    # per GOMAXPROCS, and on a many-core machine that pins every core, starving
+    # the coordinator goroutine until a worker misses its sync deadline and the
+    # run dies with a spurious "context deadline exceeded". Leaving headroom
+    # keeps the smoke deterministic (it only needs to catch broken drivers /
+    # stale corpora — coverage tiers live in CI). See ci.yml / fuzz-nightly.
     go-fuzz:
       run: |
         set -e
+        cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+        workers=4
+        [ "$cores" -lt 4 ] && workers="$cores"
+        [ "$workers" -lt 1 ] && workers=1
         for entry in \
           "FuzzParsePHC ./internal/server/" \
           "FuzzParseTrustedProxies ./internal/server/" \
@@ -91,7 +102,7 @@ pre-push:
           "FuzzParseLabels ./internal/adapter/drydock/" \
           "FuzzMCPHandler ./internal/mcp/"; do
           set -- $entry
-          go test -run='^$' -fuzz="^$1\$" -fuzztime=5s -timeout=1m "$2"
+          go test -run='^$' -fuzz="^$1\$" -fuzztime=5s -timeout=1m -parallel="$workers" "$2"
         done
       priority: 5
       timeout: 3m
