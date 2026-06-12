@@ -897,11 +897,12 @@ Every release image is cosign-signed via GitHub Actions OIDC. Before running a L
 
 ### Part of the CodesWhat ecosystem
 
-| Tool | Role |
-|---|---|
-| [**drydock**](https://github.com/CodesWhat/drydock) | Container update monitoring — web UI and notification engine |
-| **lookout** | Remote Docker agent — secure socket-level access from Drydock or standalone |
-| [**sockguard**](https://github.com/CodesWhat/sockguard) | Docker socket proxy — default-deny allowlist filter protecting the socket |
+<table>
+  <tr><th>Tool</th><th>Role</th></tr>
+  <tr><td><a href="https://github.com/CodesWhat/drydock"><b>drydock</b></a></td><td>Container update monitoring — web UI and notification engine</td></tr>
+  <tr><td><b>lookout</b></td><td>Remote Docker agent — secure socket-level access from Drydock or standalone</td></tr>
+  <tr><td><a href="https://github.com/CodesWhat/sockguard"><b>sockguard</b></a></td><td>Docker socket proxy — default-deny allowlist filter protecting the socket</td></tr>
+</table>
 
 These three tools are designed to layer: sockguard filters the socket, lookout exposes it remotely, and drydock monitors and acts on container state.
 
