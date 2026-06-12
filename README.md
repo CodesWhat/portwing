@@ -71,33 +71,37 @@
 
 ```mermaid
 flowchart LR
-    subgraph hostA ["Remote Host A"]
-        LA["Lookout (agent)"]
+    subgraph server ["Your server"]
+        DD["Drydock<br/>(controller + UI)"]
+    end
+
+    subgraph hostA ["Remote host A"]
+        direction LR
+        LA["Lookout<br/>(agent)"]
+        SGA["sockguard<br/>(socket filter)"]
         DA["Docker Engine"]
-        LA --- DA
+        LA -- "filtered socket" --> SGA --> DA
     end
 
-    subgraph hostB ["Remote Host B"]
-        LB["Lookout (agent)"]
+    subgraph hostB ["Remote host B"]
+        direction LR
+        LB["Lookout<br/>(agent)"]
+        SGB["sockguard<br/>(socket filter)"]
         DB["Docker Engine"]
-        LB --- DB
+        LB -- "filtered socket" --> SGB --> DB
     end
 
-    subgraph server ["Your Server"]
-        GW["DockPilot (gateway)"]
-        PF["Drydock (platform)"]
-        GW --> PF
-    end
-
-    LA -- "WSS (outbound)" --> GW
-    LB -- "WSS (outbound)" --> GW
+    DD -- "HTTPS + SSE · X-Dd-Agent-Secret" --> LA
+    DD -- "HTTPS + SSE · X-Dd-Agent-Secret" --> LB
 ```
+
+> The Drydock controller connects **inbound** to each Lookout agent over HTTP/HTTPS (it initiates; Lookout serves). Each agent reaches the Docker Engine only through a sockguard socket filter. Outbound **edge mode** (the agent dialing the controller, for hosts with no inbound port) is implemented in Lookout but its controller-side endpoint is still in progress — see [Connection Modes](#connection-modes).
 
 <h2 align="center" id="quick-start">🚀 Quick Start</h2>
 
 ### Recommended deployment (hardened)
 
-The strongest posture combines three controls: **sockguard** (socket-level request filtering so Lookout never touches the raw Docker socket directly), **Ed25519 per-request authentication** (signed requests, replay protection, no shared secrets), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted tokens). Use **Edge mode** (outbound WebSocket, no inbound ports) when deploying behind NAT or a firewall, or Standard mode strictly behind a TLS reverse proxy.
+The strongest posture combines three controls: **sockguard** (socket-level request filtering so Lookout never touches the raw Docker socket directly), **Ed25519 per-request authentication** (signed requests, replay protection, no shared secrets), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted tokens). Run Lookout in **standard mode strictly behind a TLS reverse proxy** — the Drydock controller connects inbound to it. (Outbound [edge mode](#connection-modes) for hosts with no inbound port is implemented agent-side but its controller endpoint is still in progress.)
 
 **Step 1 — generate a token and pull the example:**
 
@@ -179,9 +183,11 @@ volumes:
 **Upgrade to Ed25519 key auth (zero shared secrets):** generate a keypair with `lookout keygen`, mount the `authorized_keys` file, and set `AUTHORIZED_KEYS=/etc/lookout/authorized_keys` — see [Authentication](#authentication). Use `PRIVATE_KEY_FILE` for signed edge-mode hellos.
 
 <details>
-<summary>Edge mode variant (outbound WebSocket — no inbound ports)</summary>
+<summary>Edge mode variant (outbound WebSocket — experimental)</summary>
 
-For hosts behind NAT or a firewall, use [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml). Lookout dials out to your DockPilot gateway; no port is published on the remote host.
+> **Experimental.** The agent side of edge mode is implemented, but Drydock does not yet expose the matching `/api/lookout/ws` endpoint, so this is not usable end-to-end today.
+
+For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml) has Lookout dial out to your Drydock controller's edge endpoint (`DRYDOCK_URL` + `/api/lookout/ws`); no port is published on the remote host.
 
 ```yaml
 services:
@@ -271,7 +277,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 | | Feature | Description |
 |---|---|---|
-| 🔄 | **Dual Connection Modes** | Standard (inbound HTTP) and Edge (outbound WebSocket) — works behind NAT, firewalls, and dynamic IPs with auto-reconnect and exponential backoff. |
+| 🔄 | **Connection Modes** | Standard mode (the Drydock controller connects inbound over HTTP/SSE) is the implemented integration. Edge mode (agent dials out over WebSocket, for NAT/firewalled hosts) is implemented agent-side; its controller endpoint is still in progress. |
 | 🐳 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
 | 🔑 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
 | 🔐 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
@@ -362,24 +368,23 @@ can be set simultaneously during migration. The middleware checks for
 <details>
 <summary><strong>Standard Mode and Edge Mode</strong></summary>
 
-### Standard Mode
+### Standard Mode — implemented
 
-Lookout runs an HTTP(S) server. Drydock/DockPilot connects inbound.
+Lookout runs an HTTP(S) server; the **Drydock controller connects inbound** and pulls from it. This is the integration that works today.
 
 - Set when `DRYDOCK_URL` is not configured
-- Transparent Docker API proxy on all paths
-- Agent endpoints under `/_lookout/*`
-- Drydock-compatible REST + SSE under `/api/*`
+- Drydock authenticates with the `X-Dd-Agent-Secret` shared secret (optional mTLS)
+- Handshake on `GET /api/containers` · `/api/watchers` · `/api/triggers`, then a long-lived **SSE** stream on `GET /api/events`
+- Transparent Docker API proxy on all paths; agent endpoints under `/_lookout/*`
 - Optional TLS with modern cipher suites (TLS 1.2+)
 
-### Edge Mode
+### Edge Mode — experimental
 
-Lookout initiates an outbound WebSocket connection to DockPilot.
+Lookout initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/lookout/ws`) for hosts with no inbound port. The **agent side is implemented; the matching controller-side endpoint in Drydock is still in progress**, so this mode is not yet usable end-to-end.
 
 - Set when both `DRYDOCK_URL` and `TOKEN` are configured
-- Works behind NAT, firewalls, and dynamic IPs
-- Auto-reconnect with exponential backoff + jitter
-- All communication multiplexed over a single WebSocket
+- Targets hosts behind NAT, firewalls, and dynamic IPs
+- Auto-reconnect with exponential backoff + jitter; signed hello via `PRIVATE_KEY_FILE`
 
 ```
 DRYDOCK_URL set + TOKEN set  →  Edge Mode (outbound WebSocket)

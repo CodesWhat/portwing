@@ -4,18 +4,23 @@
 
 ## 1. Overview
 
-Lookout is a standalone Go binary that runs on remote Docker hosts, providing Drydock with secure access to the Docker Engine API, container inventory with update metadata, host metrics, interactive exec sessions, and Docker Compose operations. It communicates with Drydock through **DockPilot** (the proxy/gateway layer).
+Lookout is a standalone Go binary that runs on remote Docker hosts, providing Drydock with secure access to the Docker Engine API, container inventory with update metadata, host metrics, interactive exec sessions, and Docker Compose operations. It communicates directly with the Drydock controller.
 
 ```
-Remote Host A        Remote Host B           Your Server
-+----------+        +----------+        +------------------+
-| Lookout  |--WSS-->|          |        |    DockPilot     |
-| (agent)  |        | Lookout  |--WSS-->|    (gateway)     |
-|          |        | (agent)  |        |        |         |
-| Docker   |        |          |        |    Drydock       |
-| Engine   |        | Docker   |        |    (platform)    |
-+----------+        | Engine   |        +------------------+
-                    +----------+
+      Your Server                       Remote host  (× N)
++------------------+                +----------------------------+
+|                  |   HTTP + SSE   | Lookout (agent)            |
+|     Drydock      | =============> |    |                       |
+|     controller   |  (controller   |    | DOCKER_SOCKET         |
+|                  |   initiates    |    v                       |
+|                  |   inbound)     | sockguard ---> Docker      |
++------------------+                | (socket filter)    Engine  |
+                                    +----------------------------+
+
+The Drydock controller opens an inbound HTTP connection to each remote
+host's Lookout independently (handshake on /api/containers, then a
+long-lived SSE stream on /api/events). sockguard is the recommended
+socket filter between Lookout and the Docker Engine.
 ```
 
 **Language:** Go 1.22+ (module), built with Go 1.24 (CI)
@@ -32,7 +37,7 @@ Otherwise                    ->  Standard Mode (inbound HTTP server)
 
 ### 2.2 Standard Mode
 
-Lookout runs an HTTP(S) server. Drydock/DockPilot connects inbound.
+Lookout runs an HTTP(S) server. The Drydock controller connects inbound.
 
 - Transparent Docker API proxy (all paths forwarded to Docker socket)
 - Dedicated agent endpoints under `/_lookout/*`
@@ -41,7 +46,7 @@ Lookout runs an HTTP(S) server. Drydock/DockPilot connects inbound.
 
 ### 2.3 Edge Mode
 
-Lookout initiates an outbound WebSocket connection to DockPilot. All communication multiplexed over this single connection.
+Lookout initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/lookout/ws`). All communication is multiplexed over this single connection. The agent-side implementation is complete; the controller-side endpoint is planned and not yet implemented end-to-end.
 
 - Works behind NAT, firewalls, dynamic IPs
 - Auto-reconnect with exponential backoff + jitter
@@ -54,7 +59,7 @@ Lookout initiates an outbound WebSocket connection to DockPilot. All communicati
 ### 3.1 Handshake
 
 ```
-Lookout                            DockPilot
+Lookout                            Drydock controller
   |                                    |
   |-- WSS CONNECT /api/lookout/ws ---->|
   |                                    |
@@ -217,12 +222,12 @@ type DockerClient struct {
 ### 7.1 Edge Mode (WebSocket)
 
 ```
-DockPilot -> exec_start {execId, containerId, cmd, user, cols, rows}
+Drydock -> exec_start {execId, containerId, cmd, user, cols, rows}
     Lookout: POST /containers/{id}/exec
     Lookout: POST /exec/{id}/start (hijack -> 101 Switching Protocols)
 Lookout -> exec_ready {execId}
     Lookout: POST /exec/{id}/resize?h={rows}&w={cols}
-DockPilot -> exec_input {execId, data}  <->  Lookout -> exec_output {execId, data}
+Drydock -> exec_input {execId, data}  <->  Lookout -> exec_output {execId, data}
     (bidirectional, base64-encoded, 4096-byte pooled buffers)
 Either -> exec_end {execId, reason}
 ```
@@ -428,6 +433,6 @@ Packages: `ca-certificates`, `busybox`, `docker-cli`, `docker-compose`, `wget`
 ## 15. Migration Strategy
 
 1. **Phase 1: Drop-in Standard Mode** -- Replace existing Node.js agent with Lookout binary
-2. **Phase 2: Edge Mode via DockPilot** -- DockPilot adds WebSocket endpoint for Lookout
+2. **Phase 2: Edge Mode** -- Drydock controller adds `/api/lookout/ws` WebSocket endpoint (planned; agent-side implementation complete)
 3. **Phase 3: Native WebSocket in Drydock** -- Replace AgentClient SSE with WebSocket
 4. **Phase 4: Deprecate SSE** -- Remove SSE endpoints after one release cycle

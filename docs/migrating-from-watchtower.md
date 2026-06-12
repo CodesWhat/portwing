@@ -53,7 +53,7 @@ Key differences:
 
 ## Standard Mode (inbound HTTP)
 
-Use this when Drydock/DockPilot can reach your host directly (no NAT).
+Use this when the Drydock controller can reach your host directly (no NAT).
 
 ```yaml
 # docker-compose.yml
@@ -102,7 +102,7 @@ Environment variables reference:
 ## Edge Mode (outbound WebSocket)
 
 Use this when your host is behind NAT, a firewall, or has a dynamic IP.
-Lookout initiates the connection to DockPilot; no inbound port is needed.
+Lookout initiates the outbound connection to the Drydock controller; no inbound port is needed. Note: the controller-side endpoint (`/api/lookout/ws`) is planned and not yet implemented end-to-end.
 
 ```yaml
 # docker-compose.yml
@@ -114,11 +114,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /data/stacks:/data/stacks
     environment:
-      DRYDOCK_URL: "wss://your-dockpilot.example.com:3001"
+      DRYDOCK_URL: "wss://your-drydock.example.com:3001"
       TOKEN: "${LOOKOUT_TOKEN}"
       AGENT_NAME: "my-server"
       STACKS_DIR: "/data/stacks"
-      # Optional: custom CA for self-signed DockPilot certs
+      # Optional: custom CA for self-signed Drydock controller certs
       # CA_CERT: /certs/ca.crt
       HEARTBEAT_INTERVAL: "30"
       RECONNECT_DELAY: "1"
@@ -129,13 +129,13 @@ Additional Edge Mode variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DRYDOCK_URL` | — | WebSocket URL (`wss://...`) — enables Edge mode |
-| `CA_CERT` | — | Custom CA certificate for DockPilot TLS verification |
+| `DRYDOCK_URL` | — | WebSocket URL (`wss://...`) — enables Edge mode (agent dials out to `/api/lookout/ws`) |
+| `CA_CERT` | — | Custom CA certificate for Drydock controller TLS verification |
 | `TLS_SKIP_VERIFY` | `false` | Skip TLS verification (testing only) |
 | `HEARTBEAT_INTERVAL` | `30` | Ping interval (seconds) |
 | `RECONNECT_DELAY` | `1` | Initial reconnect backoff (seconds) |
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff (seconds) |
-| `WELCOME_TIMEOUT` | `30` | Seconds to wait for DockPilot welcome message |
+| `WELCOME_TIMEOUT` | `30` | Seconds to wait for Drydock controller welcome message |
 
 Edge mode requires both `DRYDOCK_URL` **and** `TOKEN` to be set. If either is
 missing, Lookout falls back to Standard mode.

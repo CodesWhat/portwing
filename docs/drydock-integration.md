@@ -20,11 +20,12 @@ Drydock supports two agent connectivity patterns. Lookout implements both.
 ┌──────────────────────────────────────────────────────────────┐
 │                     EDGE MODE (outbound WebSocket)           │
 │                                                              │
-│  DockPilot / Drydock                       Lookout           │
+│  Drydock controller (planned)              Lookout           │
 │  ┌──────────────────┐      WSS         ┌──────────────┐     │
 │  │  WebSocket srv   │ ←────────────── │  edge/client │     │
 │  │  /api/lookout/ws │  hello→welcome   │  (outbound)  │     │
-│  └──────────────────┘                  └──────────────┘     │
+│  │  (not yet impl.) │                  └──────────────┘     │
+│  └──────────────────┘                                        │
 └──────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────┐
@@ -38,8 +39,7 @@ Drydock supports two agent connectivity patterns. Lookout implements both.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Lookout Standard Mode replaces the Legacy SSE Agent. Edge Mode goes through
-DockPilot (WebSocket reverse proxy layer) using the Lookout-specific protocol.
+Lookout Standard Mode replaces the Legacy SSE Agent. Edge Mode has Lookout dial outbound to the Drydock controller's `/api/lookout/ws` endpoint using the Lookout-specific protocol (controller-side endpoint is planned; not yet implemented end-to-end).
 
 ---
 
@@ -97,7 +97,7 @@ Source citation:
 Source: `internal/edge/client.go`, `internal/protocol/messages.go`
 
 ```
-Lookout (edge client)                    DockPilot / Drydock
+Lookout (edge client)                    Drydock controller
         │                                           │
         │  WSS /api/lookout/ws                      │
         │ ──────────────────────────────────────→   │
@@ -286,7 +286,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `TLS_CERT` / `TLS_KEY` | TLS certificate/key | Drydock agent `certfile`/`keyfile` |
 | `CA_CERT` | CA cert for edge mode TLS | Drydock agent `cafile` |
 | `TLS_SKIP_VERIFY` | Skip TLS verification in edge mode | n/a |
-| `DRYDOCK_URL` | Edge mode controller URL | n/a (DockPilot endpoint) |
+| `DRYDOCK_URL` | Edge mode controller URL (agent dials out to `/api/lookout/ws`) | n/a |
 | `AGENT_ID` | UUID for this agent | Drydock registers via `hello.agentId` |
 | `AGENT_NAME` | Display name (default: hostname) | Drydock agent component `name` |
 | `DD_POLL_INTERVAL` | Container refresh interval in s (default 300) | n/a |
@@ -326,7 +326,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `dd:update-operation-changed` SSE | N-A | Same |
 | `dd:batch-update-completed` SSE | N-A | Same |
 | `dd:security-alert` / `dd:security-scan-cycle-complete` SSE | N-A | Lookout does not perform security scanning |
-| Edge Mode WebSocket (`/api/lookout/ws`) | COMPATIBLE | Lookout: `edge/client.go`; requires DockPilot as intermediary |
+| Edge Mode WebSocket (`/api/lookout/ws`) | AGENT-SIDE ONLY | Lookout: `edge/client.go` implemented; Drydock controller endpoint planned, not yet implemented |
 
 ---
 
