@@ -1,7 +1,7 @@
 <div align="center">
 
-<!-- PLACEHOLDER: docs/lookout-logo.png does not exist yet — add the asset before shipping -->
-<img src="docs/lookout-logo.png" alt="lookout" width="180">
+<!-- Placeholder mark — swap docs/lookout-logo.svg for a final logo when ready -->
+<img src="docs/lookout-logo.svg" alt="Lookout" width="180" height="180">
 
 <h1>Lookout</h1>
 

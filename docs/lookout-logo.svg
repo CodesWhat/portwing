@@ -1,0 +1,18 @@
+<svg width="180" height="180" viewBox="0 0 240 240" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Lookout">
+  <title>Lookout</title>
+  <!-- Scope ring -->
+  <circle cx="120" cy="120" r="92" stroke="#C9A227" stroke-width="10"/>
+  <circle cx="120" cy="120" r="64" stroke="#C9A227" stroke-width="4" stroke-opacity="0.45"/>
+  <!-- Crosshair ticks -->
+  <g stroke="#C9A227" stroke-width="10" stroke-linecap="round">
+    <line x1="120" y1="8"  x2="120" y2="34"/>
+    <line x1="120" y1="206" x2="120" y2="232"/>
+    <line x1="8"  y1="120" x2="34"  y2="120"/>
+    <line x1="206" y1="120" x2="232" y2="120"/>
+  </g>
+  <!-- Watchful eye -->
+  <path d="M58 120 C58 120 86 84 120 84 C154 84 182 120 182 120 C182 120 154 156 120 156 C86 156 58 120 58 120 Z"
+        stroke="#C9A227" stroke-width="10" stroke-linejoin="round" fill="none"/>
+  <circle cx="120" cy="120" r="22" fill="#C9A227"/>
+  <circle cx="128" cy="112" r="6" fill="#0D1117"/>
+</svg>
