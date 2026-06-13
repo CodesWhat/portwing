@@ -156,8 +156,12 @@ func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 }
 
 // drainInput is the single goroutine that serialises conn.Write calls for one
-// exec session.  It exits when the session's done channel is closed.
+// exec session.  It exits when the session's done channel is closed, or after
+// consecutive write failures indicate a permanently broken connection.
 func (s *ExecSession) drainInput() {
+	const maxWriteErrors = 3
+
+	var writeErrors int
 	for {
 		select {
 		case <-s.done:
@@ -174,9 +178,20 @@ func (s *ExecSession) drainInput() {
 		case data := <-s.inputQ:
 			if _, err := s.conn.Write(data); err != nil {
 				slog.Debug("exec write error in drain loop", "execID", s.execID, "error", err)
-				// conn.Write failed — the connection is broken; Close() will
-				// clean up.  We keep looping: readLoop will call Close() when
-				// it sees the read error, which closes done and exits this goroutine.
+				writeErrors++
+				// Guard against asymmetric half-closed connections where
+				// conn.Write fails continuously but conn.Read never returns
+				// an error (e.g. a proxy that closes only the write path).
+				// After maxWriteErrors consecutive failures, call Close()
+				// directly so readLoop + drainInput both exit promptly.
+				if writeErrors >= maxWriteErrors {
+					slog.Warn("exec drain: too many consecutive write errors, closing session",
+						"execID", s.execID, "errors", writeErrors)
+					s.Close()
+					return
+				}
+			} else {
+				writeErrors = 0
 			}
 		}
 	}
