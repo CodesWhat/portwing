@@ -245,6 +245,16 @@ func (c *Client) connect(ctx context.Context) error {
 
 	wg.Wait()
 
+	// Close all surviving exec sessions before releasing the connection.
+	// Each session's readLoop and drainInput goroutines are blocked on
+	// s.conn.Read / s.conn.Write against the Docker hijacked net.Conn;
+	// calling Close() here ensures those goroutines exit and the Docker
+	// exec process is not left orphaned across reconnect cycles.
+	c.execSessions.Range(func(_, v any) bool {
+		v.(*ExecSession).Close()
+		return true
+	})
+
 	// Close connection.
 	c.connMu.Lock()
 	if c.conn != nil {
