@@ -51,7 +51,7 @@ Lookout runs an HTTP(S) server. The Drydock controller connects inbound.
 
 ### 2.3 Edge Mode
 
-Lookout initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/lookout/ws`). All communication is multiplexed over this single connection. The agent-side implementation is complete; the controller-side endpoint is planned and not yet implemented end-to-end.
+Lookout initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/lookout/ws`). All communication is multiplexed over this single connection. Both sides are implemented: Drydock 1.5 ships the controller endpoint (Ed25519-only, `lookout/1.0`) and Lookout signs its hello with Ed25519. Full exec robustness lands in Lookout 0.2.2; Drydock 1.5 and Lookout 0.2.2 are pre-release.
 
 - Works behind NAT, firewalls, dynamic IPs
 - Auto-reconnect with exponential backoff + jitter
@@ -68,8 +68,8 @@ sequenceDiagram
     participant L as Lookout
     participant D as Drydock controller
     L->>D: WSS CONNECT /api/lookout/ws
-    L->>D: hello (token, caps, docker version)
-    Note over D: verify token, register agent
+    L->>D: hello (Ed25519 signature, caps, docker version)
+    Note over D: verify Ed25519 signature, register agent
     D->>L: welcome (poll interval, config)
     L->>D: dd:container_sync (full container inventory)
     L->>D: dd:component_sync (watcher/trigger descriptors)
@@ -86,7 +86,10 @@ sequenceDiagram
   "protocol": "lookout/1.0",
   "agentId": "uuid",
   "agentName": "my-server",
-  "tokenHash": "sha256hex",
+  "pubKeyId": "a3f2b1c9d8e7f6a4",
+  "timestamp": 1749820800,
+  "nonce": "0123456789abcdef0123456789abcdef",
+  "signature": "<base64url-ed25519-signature>",
   "dockerVersion": "27.0.3",
   "hostname": "my-server",
   "capabilities": ["compose", "exec", "metrics", "events",
@@ -96,6 +99,8 @@ sequenceDiagram
   "triggerTypes": []
 }
 ```
+
+The Drydock `/api/lookout/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
 
 ### 3.3 Message Types
 
@@ -372,7 +377,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 | Layer | Mechanism |
 |-------|-----------|
 | Standard mode | `X-Lookout-Token` or `X-Dd-Agent-Secret` header, timing-safe |
-| Edge mode | SHA-256 token hash in `hello` message |
+| Edge mode | Ed25519 signed hello (`pubKeyId`/`timestamp`/`nonce`/`signature`) when `PRIVATE_KEY_FILE` is set; the Drydock `/api/lookout/ws` endpoint requires it and rejects token-hash hellos |
 | Rate limiting | 10 failures/min/IP, 10K IP cap, 5min cleanup |
 | Token source | `TOKEN` env var or `TOKEN_FILE` |
 
@@ -441,6 +446,6 @@ Packages: `ca-certificates`, `busybox`, `docker-cli`, `docker-compose`, `wget`
 ## 15. Migration Strategy
 
 1. **Phase 1: Drop-in Standard Mode** -- Replace existing Node.js agent with Lookout binary
-2. **Phase 2: Edge Mode** -- Drydock controller adds `/api/lookout/ws` WebSocket endpoint (planned; agent-side implementation complete)
+2. **Phase 2: Edge Mode** -- Drydock controller `/api/lookout/ws` WebSocket endpoint shipped in Drydock 1.5; end-to-end edge mode is functional (full exec robustness in Lookout 0.2.2)
 3. **Phase 3: Native WebSocket in Drydock** -- Replace AgentClient SSE with WebSocket
 4. **Phase 4: Deprecate SSE** -- Remove SSE endpoints after one release cycle

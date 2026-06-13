@@ -15,10 +15,10 @@ flowchart TB
         SC -- "HTTP / SSE · X-Dd-Agent-Secret" --> SL
     end
 
-    subgraph edge ["Edge mode — outbound WebSocket (planned)"]
+    subgraph edge ["Edge mode — outbound WebSocket (Drydock 1.5)"]
         direction LR
         EL["Lookout<br/>edge/client (outbound)"]
-        EC["Drydock controller<br/>WebSocket srv /api/lookout/ws<br/>(not yet impl.)"]
+        EC["Drydock controller<br/>WebSocket srv /api/lookout/ws<br/>(Drydock 1.5 — Ed25519)"]
         EL -- "WSS · hello → welcome" --> EC
     end
 
@@ -30,7 +30,7 @@ flowchart TB
     end
 ```
 
-Lookout Standard Mode replaces the Legacy SSE Agent. Edge Mode has Lookout dial outbound to the Drydock controller's `/api/lookout/ws` endpoint using the Lookout-specific protocol (controller-side endpoint is planned; not yet implemented end-to-end).
+Lookout Standard Mode replaces the Legacy SSE Agent. Edge Mode has Lookout dial outbound to the Drydock controller's `/api/lookout/ws` endpoint using the `lookout/1.0` protocol; the controller endpoint shipped in Drydock 1.5 and requires an Ed25519-signed hello.
 
 ---
 
@@ -138,7 +138,7 @@ Lookout sends:
 }
 ```
 
-Note: `memoryGb` is always 0 — Lookout omits cgo/sysinfo; Drydock accepts 0.
+Note: `memoryGb` is 0 on Lookout 0.2.1 and earlier (cgo/sysinfo omitted); Drydock accepts 0. A later release reports real memory on Linux via `/proc/meminfo` (still no cgo).
 
 ### `dd:container-added` / `dd:container-updated`
 
@@ -275,7 +275,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `dd:update-operation-changed` SSE | N-A | Same |
 | `dd:batch-update-completed` SSE | N-A | Same |
 | `dd:security-alert` / `dd:security-scan-cycle-complete` SSE | N-A | Lookout does not perform security scanning |
-| Edge Mode WebSocket (`/api/lookout/ws`) | AGENT-SIDE ONLY | Lookout: `edge/client.go` implemented; Drydock controller endpoint planned, not yet implemented |
+| Edge Mode WebSocket (`/api/lookout/ws`) | IMPLEMENTED (Drydock 1.5) | Lookout: `edge/client.go` + Ed25519 hello; Drydock: `app/api/lookout-ws.ts` (Ed25519-only). Requires Drydock 1.5 + Lookout 0.2.2 (pre-release) |
 
 ---
 
