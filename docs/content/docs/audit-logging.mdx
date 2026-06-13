@@ -1,0 +1,146 @@
+---
+title: Audit Logging
+description: Tamper-evident structured JSON audit trail for every security-relevant event in Lookout.
+---
+
+Lookout writes a structured JSON audit log — one event per line — that records every security-relevant action: authentication attempts, key enrollments, Compose operations, exec tunnel starts, and rate-limit blocks. The audit stream is intentionally separate from the operational log so records can be routed to a dedicated sink without mingling with debug noise.
+
+<Callout type="warn">
+  The audit event schema is marked stable in `internal/audit/audit.go`, but Lookout is currently in v0.2.x alpha. Field additions are non-breaking; field renames or removals will be announced in the changelog before they ship.
+</Callout>
+
+## Enabling audit logging
+
+Set the `AUDIT_LOG` environment variable when starting the container. Auditing is **disabled by default** — when unset the overhead is a single nil-pointer check per request.
+
+```bash
+# Append to a dedicated file (opened append-only, mode 0600)
+docker run -e AUDIT_LOG=/var/log/lookout-audit.log \
+  ghcr.io/codeswhat/lookout:latest
+
+# Write to stdout — useful when a log aggregator already captures container stdout
+docker run -e AUDIT_LOG=stdout \
+  ghcr.io/codeswhat/lookout:latest
+
+# Write to stderr
+docker run -e AUDIT_LOG=stderr \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+<Callout type="info">
+  File sinks are opened with mode `0600` (owner read/write only). On Linux you can bind-mount a host directory and use a tool like `logrotate` or forward with `filebeat`/`fluentd` without any additional configuration on Lookout's side.
+</Callout>
+
+See [Configuration](/configuration) for the full environment variable reference.
+
+## Output format
+
+Every audit record is a JSON object on a single line terminated by a newline (`\n`). The `time` field uses RFC 3339 with nanosecond precision, always in UTC. Records are flushed synchronously — no buffering is introduced between an event occurring and it being written.
+
+The `msg` field is always an empty string; all semantic content lives in the named fields described below.
+
+## Event schema
+
+### Core fields (all events)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `time` | string | RFC 3339 nanosecond timestamp in UTC |
+| `level` | string | Always `"INFO"` for audit records |
+| `msg` | string | Always `""` — use `event` for the record type |
+| `event` | string | Event type identifier — see the table below |
+| `actor` | string | Client IP address or edge peer URL |
+| `method` | string | HTTP method or message type |
+| `path` | string | HTTP path or message path |
+| `outcome` | string | One of `allowed`, `denied`, or `error` |
+| `status` | integer | HTTP status code; omitted when not applicable |
+| `duration_ms` | float | Request duration in milliseconds; omitted when not measured |
+
+### Event types
+
+| `event` value | Triggered when |
+|---------------|----------------|
+| `api_request` | Any authenticated HTTP API call completes |
+| `auth_failure` | An invalid or missing token is presented |
+| `rate_limited` | A request is blocked by the rate limiter |
+| `compose_op` | A Docker Compose lifecycle operation runs |
+| `exec_start` | An interactive exec tunnel opens |
+| `enrollment` | An Ed25519 key is enrolled via `/api/lookout/enroll` |
+
+### Additional fields by event type
+
+**`compose_op`** — Compose lifecycle events add:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `operation` | string | Compose subcommand: `up`, `down`, `pull`, etc. |
+| `stack` | string | Stack name as provided by the caller |
+
+**`exec_start`** — Exec tunnel events add:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `container` | string | Exec path or container ID |
+| `exec_id` | string | Exec resource ID assigned by the agent |
+
+**`enrollment`** — Key enrollment events add:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key_id` | string | The fingerprint or identifier of the enrolled Ed25519 public key |
+
+## Sample events
+
+Authenticated API request (success):
+
+```json
+{"time":"2026-01-15T10:23:45.123456789Z","level":"INFO","msg":"","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_lookout/compose","outcome":"allowed","status":200,"duration_ms":3.14}
+```
+
+Authentication failure:
+
+```json
+{"time":"2026-01-15T10:23:50.001000000Z","level":"INFO","msg":"","event":"auth_failure","actor":"203.0.113.9","method":"GET","path":"/_lookout/health","outcome":"denied"}
+```
+
+Rate-limited request:
+
+```json
+{"time":"2026-01-15T10:23:51.500000000Z","level":"INFO","msg":"","event":"rate_limited","actor":"203.0.113.9","method":"POST","path":"/_lookout/exec","outcome":"denied"}
+```
+
+Docker Compose operation:
+
+```json
+{"time":"2026-01-15T10:23:45.200000000Z","level":"INFO","msg":"","event":"compose_op","actor":"203.0.113.42","operation":"up","stack":"nginx-stack","outcome":"allowed"}
+```
+
+Exec tunnel opened:
+
+```json
+{"time":"2026-01-15T10:24:01.500000000Z","level":"INFO","msg":"","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
+```
+
+Ed25519 key enrolled:
+
+```json
+{"time":"2026-01-15T10:20:00.000000000Z","level":"INFO","msg":"","event":"enrollment","actor":"203.0.113.42","key_id":"SHA256:abc123...","outcome":"allowed"}
+```
+
+## Shipping the log
+
+Because audit records are plain newline-delimited JSON, they slot into any log pipeline that accepts structured text:
+
+- **Stdout/stderr sinks** — pass `AUDIT_LOG=stdout` and let your container runtime (Docker, Kubernetes) collect the stream. Point `fluentd`, `Fluent Bit`, or the AWS/GCP/Azure log drivers at it as normal.
+- **File sink** — bind-mount a host directory, write to a named file, and consume with `filebeat`, `promtail`, `vector`, or any sidecar that tails files.
+- **Immutable storage** — for tamper-evidence, ship records to an append-only destination (S3 Object Lock, AWS CloudTrail Lake, or a WORM-capable SIEM) immediately; Lookout itself does not provide on-disk integrity protection beyond the `0600` file mode.
+
+<Callout type="info">
+  The operational log (controlled by the `LOG_LEVEL` environment variable) is always written to stdout via `slog`. Setting `AUDIT_LOG=stdout` merges both streams into stdout, which is fine for log aggregators that parse JSON lines — each record's `event` field distinguishes audit entries from operational ones.
+</Callout>
+
+## Auth and key-enrollment events as first-class records
+
+`auth_failure` and `enrollment` events are emitted before any business logic runs, making them reliable indicators of credential probing and key-management activity regardless of request outcome. Every failed token presentation produces an `auth_failure` record with the actor IP, method, and path — no successful request is required to trigger logging.
+
+This means audit coverage begins at the perimeter: you can alert on `auth_failure` spikes or unexpected `enrollment` events without parsing application logs. See [Authentication](/authentication) for how Ed25519 keys are verified and [Security Model](/security-model) for the broader threat model these events are designed to surface.

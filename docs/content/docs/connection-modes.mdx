@@ -1,0 +1,170 @@
+---
+title: Connection Modes
+description: How Lookout connects to the Drydock controller — inbound Standard mode and outbound Edge mode for NAT/firewall-constrained hosts.
+---
+
+Lookout supports two connection modes. The active mode is determined at startup from your environment variables — no flag required.
+
+## Mode Detection
+
+```text
+DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set
+    → Edge Mode   (agent dials outbound WebSocket to controller)
+
+Otherwise
+    → Standard Mode   (agent runs an HTTP server; controller connects inbound)
+```
+
+---
+
+## Standard Mode
+
+**Status: fully implemented and production-ready.**
+
+Lookout runs a plain HTTP server on `PORT` (default `3000`). The Drydock controller connects inbound and drives the session: it calls `GET /api/containers`, `GET /api/watchers`, and `GET /api/triggers` during the handshake, then holds a long-lived SSE stream on `GET /api/events` for real-time container events. All Docker Engine API paths are transparently proxied through the agent.
+
+Standard mode is active whenever `DRYDOCK_URL` is **not** set.
+
+### Required networking
+
+The agent host must accept inbound TCP connections on `PORT`. Run Lookout behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik) — do not expose it on plain HTTP to the internet.
+
+### Key environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `3000` | Listening port |
+| `BIND_ADDRESS` | `0.0.0.0` | Listening address |
+| `TOKEN` | — | Shared secret; controller sends it as `X-Dd-Agent-Secret` |
+| `TOKEN_HASH` | — | Argon2id hash of the token (preferred over `TOKEN`) |
+| `TLS_CERT` / `TLS_KEY` | — | PEM files to enable built-in TLS (optional) |
+| `TRUSTED_PROXIES` | — | Comma-separated CIDRs for real-IP extraction |
+
+For Ed25519 key authentication (no shared secret on the wire), see [Authentication](/authentication).
+For the complete variable reference, see [Configuration](/configuration).
+
+### Compose snippet
+
+```yaml
+services:
+  lookout:
+    image: ghcr.io/codeswhat/lookout:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "3000:3000"
+    environment:
+      TOKEN_HASH: "${LOOKOUT_TOKEN_HASH}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+See [Getting Started](/getting-started) for the full Sockguard variant and TLS examples.
+
+---
+
+## Edge Mode
+
+**Status: implemented end-to-end — requires Drydock 1.5 and Lookout 0.2.2 (both currently pre-release).**
+
+<Callout type="warn">
+  Edge mode works end-to-end as of **Drydock 1.5** (which ships the `/api/lookout/ws`
+  endpoint) and **Lookout 0.2.2**. Both are pre-release as of this writing — the current
+  stable lines are Drydock 1.4.x and Lookout 0.2.0 — and full exec-session robustness
+  under load lands in Lookout 0.2.2, so prefer standard mode for production until the
+  stable releases ship. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and
+  register the public key with Drydock — token-only (`TOKEN` / `TOKEN_HASH`) connections
+  are rejected.
+</Callout>
+
+In Edge mode the agent initiates an outbound WebSocket connection to the Drydock controller at `DRYDOCK_URL + /api/lookout/ws`. No inbound port is required on the agent host, making it suitable for hosts behind NAT, firewalls, and dynamic IP addresses.
+
+Edge mode is active when **both** of the following are true:
+
+1. `DRYDOCK_URL` is set.
+2. At least one of `TOKEN`, `AUTHORIZED_KEYS` / `AUTHORIZED_KEYS_FILE`, or `PRIVATE_KEY_FILE` is set.
+
+Setting only `TOKEN_HASH` with `DRYDOCK_URL` is explicitly rejected at startup — the controller needs a verifiable credential, not a stored hash.
+
+### Key environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DRYDOCK_URL` | — | Controller base URL, e.g. `https://drydock.example.com` |
+| `AGENT_NAME` | hostname | Human-readable label sent in the hello message |
+| `AGENT_ID` | random UUID | Stable identity across reconnects (persist this) |
+| `TOKEN` | — | Shared secret hashed and sent in the hello |
+| `AUTHORIZED_KEYS` | — | Path to an authorized-keys file for Ed25519 auth |
+| `PRIVATE_KEY_FILE` | — | Ed25519 private key; hello is signed instead of hashed |
+| `RECONNECT_DELAY` | `1` | Initial reconnect delay in seconds |
+| `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect delay in seconds |
+| `HEARTBEAT_INTERVAL` | `30` | Ping interval in seconds |
+| `WELCOME_TIMEOUT` | `30` | Seconds to wait for the controller welcome message |
+| `TLS_SKIP_VERIFY` | `false` | Skip controller TLS verification (testing only) |
+| `CA_CERT` | — | Path to a PEM CA bundle for self-signed controller certs |
+
+### Handshake sequence
+
+On each connection attempt the agent:
+
+1. Opens a WebSocket to `DRYDOCK_URL/api/lookout/ws` using the `lookout/1.0` sub-protocol.
+2. Sends a `hello` message containing its agent ID, name, capabilities, Docker version, and a credential. When `PRIVATE_KEY_FILE` is configured the hello is Ed25519-signed (see [Authentication](/authentication)); otherwise the token SHA-256 hash is included.
+3. Waits up to `WELCOME_TIMEOUT` seconds for the controller's `welcome` response.
+4. On success, sends an initial container inventory (`dd:container_sync`), component descriptors (`dd:component_sync`), and host metrics.
+
+### Reconnection and keepalive
+
+The agent retries automatically on any connection failure using exponential backoff with ±25% jitter:
+
+```text
+Attempt 1: wait ~1s
+Attempt 2: wait ~2s
+Attempt N: wait min(2^N, MAX_RECONNECT_DELAY)s  (+/- 25% jitter)
+On success: backoff resets to RECONNECT_DELAY
+```
+
+During an established connection the agent sends a `ping` message every `HEARTBEAT_INTERVAL` seconds and expects a `pong` in return. The read deadline is set to `max(2 × HEARTBEAT_INTERVAL, 60s)`. A missing pong triggers an immediate close and reconnect cycle.
+
+A minimal HTTP server (`/_lookout/health`) remains running on the agent host throughout, so Docker HEALTHCHECK directives continue to work even when the WebSocket is down.
+
+On `SIGINT` or `SIGTERM` the agent closes all active exec sessions and sends a WebSocket close frame (code 1000, reason `shutdown`) before exiting.
+
+### Compose snippet
+
+```yaml
+services:
+  lookout:
+    image: ghcr.io/codeswhat/lookout:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      DRYDOCK_URL: "https://drydock.example.com"
+      AGENT_NAME: "my-host"
+      PRIVATE_KEY_FILE: "/run/secrets/lookout_key"
+    secrets:
+      - lookout_key
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+secrets:
+  lookout_key:
+    file: ./lookout_ed25519
+```
+
+---
+
+## Choosing a Mode
+
+| | Standard Mode | Edge Mode |
+|---|---|---|
+| Inbound port required | Yes | No |
+| Works behind NAT / firewall | No | Yes |
+| Agent-side implementation | Complete | Complete |
+| Controller-side support | Complete | Drydock 1.5+ (pre-release) |
+| Recommended for production | Yes | Early access (Drydock 1.5 + Lookout 0.2.2) |
+
+If your host is reachable from the internet or your Drydock server, use Standard mode today. Edge mode is the right answer for hosts with no inbound port and is functional now on Drydock 1.5 and Lookout 0.2.2 — both pre-release — so treat it as early access and wait for the stable releases before relying on it in production.

@@ -1,0 +1,191 @@
+---
+title: Authentication
+description: Configure token-based or Ed25519 per-client key authentication for the Lookout agent.
+---
+
+Lookout supports four authentication mechanisms, ordered below from weakest to strongest. All token options and Ed25519 keys can coexist during migration — the middleware checks for an `X-Lookout-Signature` header first and falls back to token verification when that header is absent.
+
+Requests authenticate via `Authorization: Bearer`, `X-Lookout-Token`, or `X-Dd-Agent-Secret` for token-based auth, and via a set of `X-Lookout-*` headers for Ed25519.
+
+See [Configuration](/configuration) for a complete environment variable reference, and [Connection Modes](/connection-modes) for how auth applies in edge (WebSocket) mode.
+
+---
+
+## 1. Plaintext token
+
+Set `TOKEN` to a random secret. Every request must supply it in one of the accepted headers.
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+docker run -d --name lookout \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TOKEN="$TOKEN" \
+  -p 3000:3000 \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+<Callout type="warn">
+`TOKEN` is visible in `docker inspect` output and process listings. Use this option for local evaluation only. For any network-exposed deployment, use `TOKEN_FILE`, `TOKEN_HASH`, or Ed25519 keys instead.
+</Callout>
+
+---
+
+## 2. File-based token
+
+`TOKEN_FILE` points to a file containing the plaintext token. Mount the file as a read-only secret so the token never appears in environment variable dumps.
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+printf '%s' "$TOKEN" > /run/secrets/lookout-token
+chmod 600 /run/secrets/lookout-token
+
+docker run -d --name lookout \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /run/secrets/lookout-token:/run/secrets/lookout-token:ro \
+  -e TOKEN_FILE=/run/secrets/lookout-token \
+  -p 3000:3000 \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+This is appropriate for Docker secrets, Kubernetes secret volumes, or any orchestrator that can inject files but not env vars safely.
+
+---
+
+## 3. Argon2id hash-at-rest
+
+`TOKEN_HASH` stores an Argon2id hash of the token so the plaintext never appears in environment variable dumps or config files. At runtime the agent performs a constant-time Argon2id comparison against the presented token.
+
+**Generate the hash with `lookout hash-token`.** The token is read from stdin — it is never passed as a command-line argument to avoid exposure in shell history and process listings.
+
+```bash
+# Generate a token and hash it
+TOKEN=$(openssl rand -hex 32)
+HASH=$(printf '%s' "$TOKEN" | lookout hash-token)
+# Output format: $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+
+# Start the agent with the hash
+docker run -d --name lookout \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TOKEN_HASH="$HASH" \
+  -p 3000:3000 \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+To keep the hash out of the environment entirely, write it to a file and use `TOKEN_HASH_FILE`:
+
+```bash
+printf '%s' "$TOKEN" | lookout hash-token > /run/secrets/lookout-token-hash
+chmod 600 /run/secrets/lookout-token-hash
+
+docker run -d --name lookout \
+  -v /run/secrets/lookout-token-hash:/run/secrets/lookout-token-hash:ro \
+  -e TOKEN_HASH_FILE=/run/secrets/lookout-token-hash \
+  ...
+```
+
+<Callout type="info">
+`TOKEN_HASH` is the recommended choice when you need shared-secret token auth. The plaintext token exists only on the caller side; the agent stores and compares only the Argon2id hash.
+</Callout>
+
+---
+
+## 4. Ed25519 per-client keys (recommended)
+
+Ed25519 keypairs give each client a distinct cryptographic identity. Every request carries a detached signature over the HTTP method, path, a SHA-256 body hash, a Unix timestamp, and a 128-bit random nonce. The agent verifies the signature, rejects requests with a timestamp skew greater than 60 seconds, and tracks nonces in an in-memory LRU to prevent replay within the timestamp window.
+
+No shared secret is involved. Compromising one client's private key does not affect other enrolled clients.
+
+### Generate a keypair
+
+```bash
+# Writes the private key (PEM PKCS#8) and the authorized_keys line to stdout.
+lookout keygen -comment "my-platform:prod"
+```
+
+Copy the `authorized_keys` output line to the agent host:
+
+```
+# /etc/lookout/authorized_keys  (mode 0600)
+ed25519 AAAA... my-platform:prod
+```
+
+The file format mirrors OpenSSH `authorized_keys`. Each non-blank, non-comment line is:
+
+```
+ed25519 <base64-public-key> [comment]
+```
+
+Comment out or remove a line to revoke that key. The agent refuses to start if the file is world-readable.
+
+### Start the agent with Ed25519 auth
+
+```bash
+docker run -d --name lookout \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /etc/lookout/authorized_keys:/etc/lookout/authorized_keys:ro \
+  -e AUTHORIZED_KEYS=/etc/lookout/authorized_keys \
+  -p 3000:3000 \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+### Request signing headers
+
+Clients must send four headers on every request:
+
+| Header | Format |
+|--------|--------|
+| `X-Lookout-Key-ID` | Hex-encoded first 8 bytes of SHA-256 of the raw public key |
+| `X-Lookout-Timestamp` | Unix epoch, seconds, decimal string |
+| `X-Lookout-Nonce` | 32 random hex characters (128-bit) |
+| `X-Lookout-Signature` | Base64url (no padding) Ed25519 signature over the canonical message |
+
+The canonical message is a newline-separated UTF-8 string:
+
+```
+METHOD
+/path/to/resource
+<sha256-hex-of-body>
+<unix-timestamp>
+<nonce-hex>
+```
+
+For an empty body, use the SHA-256 of the empty string: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+### Key rotation (zero-downtime)
+
+1. Generate a new keypair: `lookout keygen -comment "my-platform:prod:2026-07"`
+2. Append the new public key line to the authorized-keys file on the agent host.
+3. Send `SIGHUP` to reload: `kill -HUP $(pidof lookout)` or `docker kill --signal HUP lookout`. Both old and new keys are now active.
+4. Update the platform to sign with the new private key.
+5. Remove the old key from the file and send another `SIGHUP`.
+
+Hot reload rebuilds the in-memory key map and logs each added and removed key ID. The nonce LRU is preserved across reload.
+
+### Key revocation
+
+Comment out or remove the key line from the authorized-keys file, then send `SIGHUP`. The key is removed from the in-memory map immediately and any subsequent request signed with that key is rejected with 401.
+
+### Edge mode (WebSocket)
+
+In edge mode the agent initiates an outbound WebSocket connection to the platform. Authentication happens in a signed hello message before the `welcome` response is sent. `PRIVATE_KEY_FILE` is **required** for edge mode — the Drydock controller endpoint accepts only Ed25519-signed hellos and rejects token-hash authentication (`ed25519-required`). Set it to the agent's Ed25519 private key, and register the matching public key with Drydock:
+
+```yaml
+# docker-compose.yml (edge mode)
+environment:
+  DRYDOCK_URL: wss://platform.example.com
+  PRIVATE_KEY_FILE: /run/secrets/lookout-private-key
+```
+
+The hello carries `pubKeyId`, `timestamp`, `nonce`, and `signature` fields. The controller verifies the signature against its own copy of the agent's registered public key before sending `welcome`; if verification fails the connection is closed. Individual messages after the hello are not signed separately — they are implicitly authorized by the authenticated TLS+WebSocket session.
+
+See [Connection Modes](/connection-modes) for a full description of edge mode.
+
+<Callout type="info">
+Ed25519 auth is the recommended option for production. Per-request signatures with nonce replay protection remain strong even when TLS terminates at a load balancer the operator does not fully trust, because each request is independently bound to a timestamp and a one-time nonce.
+</Callout>
+
+---
+
+## Migrating from tokens to Ed25519
+
+Token auth and Ed25519 auth work simultaneously. Set both `TOKEN_HASH` and `AUTHORIZED_KEYS` during the transition period. The middleware checks for `X-Lookout-Signature` first; requests without that header fall through to token verification. Once all clients are sending signed requests, remove the token variables and restart.

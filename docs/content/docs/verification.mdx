@@ -1,0 +1,168 @@
+---
+title: Verifying Releases
+description: How to verify the authenticity and integrity of Lookout container images and binary releases using cosign, GitHub attestations, SBOM, and checksums.
+---
+
+<Callout type="info">
+  Always verify a release before deploying it to any environment. Verification
+  takes under a minute and confirms the artifact was produced by the official
+  Lookout release pipeline — not a tampered build.
+</Callout>
+
+<Callout type="warn">
+  Lookout is in alpha (v0.2.x). The signing identity regexp targets
+  `release.yml` specifically, but the workflow path may change between
+  pre-release milestones. If a verify command fails with a certificate mismatch,
+  check the [release notes](https://github.com/CodesWhat/lookout/releases) for
+  any signing-identity changes before assuming tampering.
+</Callout>
+
+All Lookout releases are signed via [Sigstore cosign](https://github.com/sigstore/cosign)
+using **keyless (OIDC) signing** from GitHub Actions — no static private key is
+stored anywhere. The signing certificate is issued by Fulcio against the
+GitHub Actions OIDC token, and the signature is recorded on the Rekor
+transparency log. The certificate identity is the URL of the release workflow
+itself:
+
+- **Certificate identity regexp:** `https://github.com/CodesWhat/lookout/.github/workflows/release.yml`
+- **OIDC issuer:** `https://token.actions.githubusercontent.com`
+
+This means verification is key-less: you authenticate the *workflow*, not a
+secret. See [Security Model](/security-model) for the broader trust
+hierarchy.
+
+---
+
+## Prerequisites
+
+Install `cosign` v2+ and the GitHub CLI (`gh`) v2.49+:
+
+```bash
+# cosign — via the official installer script or your package manager
+brew install cosign        # macOS
+go install github.com/sigstore/cosign/v2/cmd/cosign@latest  # any platform
+
+# GitHub CLI
+brew install gh            # macOS
+# or see https://cli.github.com/manual/installation
+```
+
+---
+
+## Verify the Container Image Signature
+
+Every image pushed to `ghcr.io/codeswhat/lookout` is cosign keyless-signed by
+the release workflow. Replace `TAG` with the version tag you are deploying
+(the tag is the semver without the leading `v`, matching GoReleaser's output —
+e.g. `0.2.1`, not `v0.2.1`):
+
+```bash
+TAG=0.2.1
+
+cosign verify \
+  --certificate-identity-regexp="https://github.com/CodesWhat/lookout/.github/workflows/release.yml" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  "ghcr.io/codeswhat/lookout:${TAG}"
+```
+
+A successful run prints the signing certificate details and exits `0`. Any
+non-zero exit or a `FAIL` line means the image was not produced by the official
+pipeline.
+
+### Verify via GitHub Attestation
+
+The release pipeline also attaches a GitHub-native build-provenance attestation
+to the container manifest. This uses the Sigstore Rekor ledger and is
+independently verifiable without cosign:
+
+```bash
+TAG=0.2.1
+
+gh attestation verify "oci://ghcr.io/codeswhat/lookout:${TAG}" \
+  --repo CodesWhat/lookout
+```
+
+Both `cosign verify` and `gh attestation verify` should pass for a release to
+be considered trusted.
+
+---
+
+## Verify Binary Release Archives
+
+Binary archives (`.tar.gz`, `.zip`) are listed in `checksums.txt` and attested
+with GitHub build provenance. Download both the archive and `checksums.txt`
+from the [Releases page](https://github.com/CodesWhat/lookout/releases), then:
+
+### 1. Verify the checksums file itself
+
+The `checksums.txt.bundle` file (also a release asset) contains the cosign
+keyless signature over `checksums.txt`:
+
+```bash
+TAG=v0.2.1
+
+cosign verify-blob \
+  --certificate-identity-regexp="https://github.com/CodesWhat/lookout/.github/workflows/release.yml" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  --bundle "checksums.txt.bundle" \
+  "checksums.txt"
+```
+
+### 2. Verify the archive checksum
+
+Once `checksums.txt` is proven authentic, verify the archive against it:
+
+```bash
+# Example for the Linux amd64 archive
+sha256sum --check --ignore-missing checksums.txt
+```
+
+On macOS, use `shasum -a 256 --check --ignore-missing checksums.txt`.
+
+### 3. Verify GitHub provenance attestation for archives
+
+```bash
+# Verify a specific downloaded archive
+gh attestation verify lookout_Linux_x86_64.tar.gz \
+  --repo CodesWhat/lookout
+```
+
+---
+
+## Download and Inspect the SBOM
+
+Each release ships a [CycloneDX](https://cyclonedx.org/) SBOM as a release
+asset named `lookout-${TAG}-sbom.cdx.json`. It enumerates every Go module
+dependency included in the binary.
+
+```bash
+TAG=v0.2.1
+
+# Download the SBOM asset
+gh release download "${TAG}" \
+  --repo CodesWhat/lookout \
+  --pattern "lookout-${TAG}-sbom.cdx.json"
+
+# Inspect with any CycloneDX-compatible tool, e.g. the CycloneDX CLI
+cyclonedx validate --input-file "lookout-${TAG}-sbom.cdx.json"
+```
+
+The SBOM does **not** currently ship a detached cosign signature of its own,
+but the archive provenance attestation covers the same dependency set. If your
+compliance workflow requires a signed SBOM, open an issue.
+
+---
+
+## Verification Summary
+
+| Artifact | Method | Command |
+|---|---|---|
+| Container image | cosign keyless | `cosign verify ... ghcr.io/codeswhat/lookout:TAG` |
+| Container image | GitHub attestation | `gh attestation verify oci://ghcr.io/codeswhat/lookout:TAG` |
+| `checksums.txt` | cosign blob | `cosign verify-blob ... --bundle checksums.txt.bundle checksums.txt` |
+| Binary archive | SHA-256 checksum | `sha256sum --check --ignore-missing checksums.txt` |
+| Binary archive | GitHub attestation | `gh attestation verify lookout_Linux_x86_64.tar.gz --repo CodesWhat/lookout` |
+| SBOM | Inspect manually | `cyclonedx validate --input-file lookout-TAG-sbom.cdx.json` |
+
+For the full security model — including authentication tokens, TLS configuration,
+and threat boundaries — see [Security Model](/security-model).

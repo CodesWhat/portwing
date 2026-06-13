@@ -1,0 +1,103 @@
+---
+title: Configuration
+description: Complete environment-variable reference for Lookout, grouped by category.
+---
+
+All configuration is done through environment variables — no config file is required. Variables with no default must be set explicitly; unmarked defaults are applied automatically at startup.
+
+For auth-method selection and key-enrollment flows, see [Authentication](/authentication). For mode-specific setup (Standard vs. Edge), see [Connection Modes](/connection-modes).
+
+---
+
+## Connection
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3000` | TCP port the HTTP server listens on. |
+| `BIND_ADDRESS` | `0.0.0.0` | IP address the server binds to. |
+| `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Lookout operates in Edge mode and connects outbound to Drydock. |
+| `TLS_CERT` | — | Path to server TLS certificate (Standard mode). |
+| `TLS_KEY` | — | Path to server TLS private key (Standard mode). |
+| `CA_CERT` | — | Path to a custom CA certificate used when verifying the Drydock server in Edge mode. |
+| `TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification on the outbound Edge connection. **Testing only.** |
+| `TRUSTED_PROXIES` | — | Comma-separated list of CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`) for reverse proxies whose `X-Forwarded-For` header Lookout will trust for real-IP resolution. When unset, forwarding headers are ignored entirely. |
+
+<Callout type="warn">
+`TRUSTED_PROXIES` affects rate-limiting and IP-based access controls. An over-broad CIDR (e.g. `0.0.0.0/0`) lets any client spoof its source IP, bypassing those controls. Set only the CIDRs of your actual proxy infrastructure.
+</Callout>
+
+### Authentication variables
+
+The following variables govern how Lookout authenticates incoming requests. `TOKEN` and `TOKEN_HASH` are mutually exclusive — setting both causes startup to fail.
+
+| Variable | Default | Description |
+|---|---|---|
+| `TOKEN` | — | Plaintext shared-secret token. Acceptable for local dev; prefer `TOKEN_HASH` in production. |
+| `TOKEN_FILE` | — | Path to a file whose trimmed contents are used as the token. Overrides `TOKEN`. |
+| `TOKEN_HASH` | — | Argon2id hash of the token (generate with `lookout hash-token`). Preferred over plaintext. |
+| `TOKEN_HASH_FILE` | — | Path to a file containing the Argon2id hash. Overrides `TOKEN_HASH`. |
+| `AUTHORIZED_KEYS` | — | Path to an Ed25519 `authorized_keys` file for per-client asymmetric authentication (Model B). `AUTHORIZED_KEYS_FILE` is an alias for this variable. |
+| `AUTHORIZED_KEYS_FILE` | — | Alias for `AUTHORIZED_KEYS`. |
+| `MAX_CLOCK_SKEW_SECONDS` | `60` | Maximum tolerated clock difference (seconds) between client and agent when validating Ed25519 request timestamps. |
+| `NONCE_LRU_SIZE` | `10000` | Capacity of the in-memory nonce cache used for replay protection. |
+| `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on first use. |
+| `ENROLLMENT_TOKEN_FILE` | — | Path to a file containing the enrollment token. |
+| `PRIVATE_KEY_FILE` | — | Path to an Ed25519 private key (PEM PKCS#8) used to sign the agent's Edge-mode hello message. |
+
+<Callout type="warn">
+`TOKEN` stores the secret in plaintext in the process environment. Use `TOKEN_HASH` (Argon2id) for any environment accessible to more than one person, or where secret scanning tools may read process state.
+</Callout>
+
+---
+
+## Docker
+
+| Variable | Default | Description |
+|---|---|---|
+| `DOCKER_SOCKET` | Auto-detect | Path to the Docker Unix socket. Lookout checks `/var/run/docker.sock`, `~/.docker/run/docker.sock`, `~/.orbstack/run/docker.sock`, and `/run/docker.sock` in that order; falls back to `/var/run/docker.sock` if none exist. |
+| `DOCKER_HOST` | — | Docker TCP host (e.g. `tcp://192.168.1.10:2375`). Alternative to socket-based access. |
+| `STACKS_DIR` | `/data/stacks` | Directory where Compose stack files are stored and managed. |
+
+---
+
+## Agent Identity
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_ID` | UUID v4 (generated) | Stable unique identifier for this agent instance. Set explicitly to preserve identity across restarts. |
+| `AGENT_NAME` | System hostname | Human-readable label shown in Drydock and audit logs. Falls back to `lookout` if the hostname cannot be read. |
+
+---
+
+## Operational
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOG_LEVEL` | `info` | Log verbosity. Accepted values: `debug`, `info`, `warn`, `error`. |
+| `HEARTBEAT_INTERVAL` | `30` | Seconds between WebSocket ping frames in Edge mode. The read deadline is `max(2 * HEARTBEAT_INTERVAL, 60)` seconds. |
+| `WELCOME_TIMEOUT` | `30` | Seconds to wait for the Drydock welcome message after the WebSocket handshake in Edge mode. |
+| `REQUEST_TIMEOUT` | `30` | Timeout in seconds for individual Docker API calls. |
+| `RECONNECT_DELAY` | `1` | Initial reconnect backoff delay in seconds (doubles on each failure, capped at `MAX_RECONNECT_DELAY`, with ±25% jitter). |
+| `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff delay in seconds. |
+| `SKIP_DF_COLLECTION` | `false` | Set to `true` (or `1`/`yes`) to disable disk-usage metric collection. Useful when the host filesystem is inaccessible or collection is slow. |
+| `AUDIT_LOG` | — | Audit log destination. Accepted values: `stdout`, `stderr`, or an absolute file path. When unset, audit logging is disabled. |
+
+---
+
+## Adapter
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADAPTER` | `drydock` | Wire protocol adapter. `drydock` enables the Drydock-compatible SSE/REST surface; `generic` exposes a standalone REST+SSE API without Drydock-specific extensions. |
+
+---
+
+## Drydock Compatibility
+
+These variables provide backward compatibility with the legacy Drydock Node.js agent naming conventions. Prefer the canonical names above for new deployments.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DD_AGENT_SECRET` | — | Backward-compatible alias for `TOKEN`. Read before `TOKEN` is applied; `TOKEN` takes precedence if both are set. |
+| `DD_AGENT_SECRET_FILE` | — | Backward-compatible alias for `TOKEN_FILE`. |
+| `DD_POLL_INTERVAL` | `300` | Container inventory refresh interval in seconds (Drydock-compatible polling mode). |

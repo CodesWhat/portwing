@@ -1,0 +1,166 @@
+---
+title: Observability
+description: Prometheus metrics, health checks, and the info endpoint exposed by the Lookout agent.
+---
+
+Lookout ships a zero-dependency Prometheus metrics endpoint and two health-check routes. No sidecar, no instrumentation library — the agent writes the exposition format directly.
+
+## Metrics endpoint
+
+Metrics are available at two paths; both serve identical output:
+
+| Path | Purpose |
+|------|---------|
+| `/_lookout/metrics` | Canonical path. Prefixed `lookout_` and `container_` metrics only. |
+| `/metrics` | Alias for compatibility with default Prometheus scrape configs. |
+
+Both paths require a valid Bearer token. The response content-type is `text/plain; version=0.0.4; charset=utf-8` (Prometheus text exposition format 0.0.4).
+
+## Prometheus scrape config
+
+```yaml
+scrape_configs:
+  - job_name: lookout
+    scheme: https          # use http if TLS is not configured
+    static_configs:
+      - targets: ["your-host:3000"]
+    authorization:
+      type: Bearer
+      credentials: YOUR_LOOKOUT_TOKEN
+    tls_config:
+      # ca_file: /etc/prometheus/lookout-ca.crt  # uncomment if using a custom CA
+      insecure_skip_verify: false
+```
+
+<Callout type="info">
+If you scrape multiple agents, give each a distinct `job_name` or add a `relabel_configs` block to attach a `host` label so time series from different agents stay identifiable in your dashboards.
+</Callout>
+
+## Exported metrics
+
+### Agent metrics
+
+These metrics are always present and use the `lookout_` prefix.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `lookout_build_info` | gauge | Always `1`. Carries a `version` label with the agent version string. |
+| `lookout_uptime_seconds` | gauge | Seconds elapsed since the agent process started. |
+| `lookout_host_cpu_usage_percent` | gauge | Host CPU usage percentage (delta between consecutive `/proc/stat` samples). Returns `0` on the first scrape — a second sample is needed for a meaningful value. |
+| `lookout_host_memory_total_bytes` | gauge | Total host memory in bytes (from `/proc/meminfo` `MemTotal`). |
+| `lookout_host_memory_used_bytes` | gauge | Used host memory in bytes (`MemTotal` minus available). |
+| `lookout_host_disk_total_bytes` | gauge | Total disk capacity in bytes on the Docker data-root filesystem. |
+| `lookout_host_disk_used_bytes` | gauge | Used disk space in bytes on the Docker data-root filesystem. |
+| `lookout_host_network_receive_bytes_total` | counter | Cumulative bytes received across all non-loopback host interfaces (from `/proc/net/dev`). |
+| `lookout_host_network_transmit_bytes_total` | counter | Cumulative bytes transmitted across all non-loopback host interfaces. |
+
+<Callout type="info">
+Disk metrics (`lookout_host_disk_total_bytes`, `lookout_host_disk_used_bytes`) reflect the filesystem that contains the Docker data root — typically `/var/lib/docker`. They are omitted when the agent is started with disk collection disabled.
+</Callout>
+
+### Per-container metrics
+
+These metrics are emitted once per running container and carry `id`, `name`, and `image` labels. They are absent from the output if no containers are running or if Docker is unreachable at scrape time.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `container_cpu_usage_seconds_total` | counter | `id`, `name`, `image` | Cumulative CPU time consumed by the container, in seconds (derived from the Docker stats `cpu_stats.cpu_usage.total_usage` nanosecond counter). |
+| `container_memory_usage_bytes` | gauge | `id`, `name`, `image` | Current memory usage of the container in bytes. |
+| `container_spec_memory_limit_bytes` | gauge | `id`, `name`, `image` | Memory limit configured for the container. Omitted for containers with no memory limit set. |
+| `container_network_receive_bytes_total` | counter | `id`, `name`, `image` | Cumulative bytes received by the container across all its network interfaces. |
+| `container_network_transmit_bytes_total` | counter | `id`, `name`, `image` | Cumulative bytes transmitted by the container across all its network interfaces. |
+
+The `container_` prefix is intentionally compatible with cAdvisor label conventions so the metrics slot into existing Grafana dashboards without relabelling.
+
+### Sample output
+
+```text
+# HELP lookout_build_info Lookout agent build metadata.
+# TYPE lookout_build_info gauge
+lookout_build_info{version="0.2.1"} 1
+# HELP lookout_uptime_seconds Seconds since the agent started.
+# TYPE lookout_uptime_seconds gauge
+lookout_uptime_seconds 3842.7
+# HELP lookout_host_cpu_usage_percent Host CPU usage percentage.
+# TYPE lookout_host_cpu_usage_percent gauge
+lookout_host_cpu_usage_percent 4.2
+# HELP lookout_host_memory_total_bytes Host total memory in bytes.
+# TYPE lookout_host_memory_total_bytes gauge
+lookout_host_memory_total_bytes 8589934592
+# HELP lookout_host_memory_used_bytes Host used memory in bytes.
+# TYPE lookout_host_memory_used_bytes gauge
+lookout_host_memory_used_bytes 3145728000
+# HELP lookout_host_disk_total_bytes Host total disk space in bytes.
+# TYPE lookout_host_disk_total_bytes gauge
+lookout_host_disk_total_bytes 107374182400
+# HELP lookout_host_disk_used_bytes Host used disk space in bytes.
+# TYPE lookout_host_disk_used_bytes gauge
+lookout_host_disk_used_bytes 32212254720
+# HELP lookout_host_network_receive_bytes_total Host network bytes received (all non-lo interfaces).
+# TYPE lookout_host_network_receive_bytes_total counter
+lookout_host_network_receive_bytes_total 1073741824
+# HELP lookout_host_network_transmit_bytes_total Host network bytes transmitted (all non-lo interfaces).
+# TYPE lookout_host_network_transmit_bytes_total counter
+lookout_host_network_transmit_bytes_total 536870912
+# HELP container_cpu_usage_seconds_total Cumulative CPU time consumed by the container in seconds.
+# TYPE container_cpu_usage_seconds_total counter
+container_cpu_usage_seconds_total{id="a1b2c3d4e5f6",name="myapp",image="myapp:latest"} 120.5
+# HELP container_memory_usage_bytes Current memory usage of the container in bytes.
+# TYPE container_memory_usage_bytes gauge
+container_memory_usage_bytes{id="a1b2c3d4e5f6",name="myapp",image="myapp:latest"} 134217728
+```
+
+## Health and info endpoints
+
+### GET /health
+
+No authentication required. Intended for Docker `HEALTHCHECK` directives and load-balancer probes.
+
+```bash
+curl http://your-host:3000/health
+```
+
+Returns HTTP 200 with:
+
+```text
+{"status":"ok"}
+```
+
+### GET /_lookout/health
+
+No authentication required. Returns agent status and Docker daemon connectivity. Returns HTTP 503 when Docker is unreachable.
+
+```bash
+curl http://your-host:3000/_lookout/health
+```
+
+Returns HTTP 200 when healthy:
+
+```text
+{"status":"healthy","docker":"connected"}
+```
+
+Returns HTTP 503 when Docker is unreachable:
+
+```text
+{"status":"unhealthy","docker":"disconnected"}
+```
+
+### GET /_lookout/info
+
+Bearer auth required. Returns agent version, Docker version, connection mode, uptime, hostname, and the capability list.
+
+```bash
+curl -H "Authorization: Bearer YOUR_LOOKOUT_TOKEN" \
+  https://your-host:3000/_lookout/info
+```
+
+<Callout type="info">
+`/_lookout/info` is useful for verifying that a newly deployed agent is running the expected version before wiring it into Drydock.
+</Callout>
+
+## Related
+
+- [Audit Logging](/audit-logging) — structured audit events complement these time-series metrics for the security side of observability.
+- [API Reference](/api-reference) — full OpenAPI spec for all endpoints including metrics and health.
+- [Configuration](/configuration) — token configuration options referenced in the scrape config above.

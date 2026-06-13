@@ -1,0 +1,223 @@
+---
+title: Standalone Mode
+description: Run Lookout as a hardened remote Docker API without a Drydock platform connection, using the generic REST adapter.
+---
+
+Lookout normally operates in one of two connection modes — edge (WebSocket to Drydock) or standard (Drydock-compatible HTTP server). **Standalone mode** is a third option: set `ADAPTER=generic` and Lookout becomes a self-contained, security-hardened remote Docker API with no external controller required.
+
+The generic adapter exposes a clean REST and SSE surface under `/api/v1/*`, backed directly by the local Docker daemon. Everything else — auth enforcement, rate limiting, TLS, the Docker API passthrough, the MCP server, health endpoints — works identically to the other modes.
+
+---
+
+## Enabling the generic adapter
+
+Pass `ADAPTER=generic` when starting the container. You must also configure at least one auth mechanism unless you are on an isolated private network.
+
+```bash
+docker run -d \
+  --name lookout \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e ADAPTER=generic \
+  -e TOKEN=my-secret \
+  -p 3000:3000 \
+  ghcr.io/codeswhat/lookout:latest
+```
+
+<Callout type="warn">
+Never expose Lookout directly on a public interface without TLS. Run it behind a reverse proxy that terminates TLS, or supply `TLS_CERT` and `TLS_KEY` to enable the built-in TLS listener. See [Configuration](/configuration).
+</Callout>
+
+The `ADAPTER` environment variable defaults to `drydock`. The only change needed to switch modes is setting it to `generic`. All other configuration — token auth, Ed25519 keys, TLS, bind address, port — is unchanged.
+
+---
+
+## REST endpoints
+
+The generic adapter registers four authenticated routes. All require a valid token or Ed25519 signature; see [Authentication](/authentication) for how to supply credentials.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/version` | GET | Agent version, protocol name/version, active adapter |
+| `/api/v1/containers` | GET | Cached container inventory |
+| `/api/v1/containers/{id}/logs` | GET | Demuxed container logs (tail, time-filter, live follow) |
+| `/api/v1/events` | GET | SSE stream of Docker container lifecycle events |
+
+### GET /api/v1/version
+
+Returns the running agent version, the protocol name and version, and the adapter name (`generic`).
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/version | jq .
+```
+
+```json
+{
+  "agentVersion": "0.2.1",
+  "protocolName": "lookout",
+  "protocolVersion": "1.0",
+  "adapter": "generic"
+}
+```
+
+### GET /api/v1/containers
+
+Returns the cached container inventory built from the Docker daemon. The response is an array of container objects with id, name, image, state, and label metadata.
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/containers | jq .
+```
+
+### GET `/api/v1/containers/{id}/logs`
+
+Returns demuxed container logs. Docker's 8-byte stream-multiplexing frame header is stripped before the response is written. The `id` parameter accepts a container ID or name.
+
+Query parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tail` | integer | Number of lines from the end to return |
+| `since` | string | Show logs since timestamp (RFC3339) or relative duration (e.g. `1h`) |
+| `until` | string | Show logs before timestamp or duration |
+| `follow` | `1` or `true` | Stream logs in real time with chunked transfer encoding |
+
+```bash
+# Last 50 lines
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?tail=50"
+
+# Live stream
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?follow=1"
+
+# Logs from the last hour
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?since=1h"
+```
+
+### GET /api/v1/events
+
+Opens a Server-Sent Events stream of Docker container lifecycle events. Each `data:` frame carries a JSON envelope. The connection stays open until the client disconnects; a comment heartbeat line is written every 30 seconds to keep the connection alive through proxies.
+
+```bash
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/events
+```
+
+Each event has this shape:
+
+```json
+{
+  "ts": "2026-06-11T10:00:00Z",
+  "type": "container",
+  "action": "start",
+  "containerId": "abc123def456",
+  "name": "my-container",
+  "image": "nginx:latest",
+  "labels": { "app": "web" }
+}
+```
+
+The `labels` field contains only user-defined container labels; synthetic Docker attributes (`name`, `image`, `exitCode`, etc.) are stripped before the event is written.
+
+**Event actions:** `create`, `start`, `stop`, `die`, `kill`, `restart`, `pause`, `unpause`, `destroy`, `rename`, `update`, `oom`, `health_status`.
+
+<Callout type="info">
+A comment heartbeat (`": heartbeat"`) is written every 30 seconds. Standard SSE clients ignore comment lines automatically. They are present solely to prevent idle-connection timeouts in load balancers and proxies.
+</Callout>
+
+---
+
+## Health endpoints
+
+These two endpoints are unauthenticated and are safe for load-balancer probes and Docker HEALTHCHECK instructions. They behave identically regardless of which adapter is active.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Returns `{"status":"ok"}` — HTTP 200 always |
+| `GET /_lookout/health` | Returns Docker connectivity status — HTTP 503 if daemon is unreachable |
+
+```bash
+# Simple liveness probe
+curl -sf http://localhost:3000/health
+
+# Readiness probe (includes Docker connectivity)
+curl -sf http://localhost:3000/_lookout/health
+```
+
+```json
+{
+  "status": "healthy",
+  "docker": "connected"
+}
+```
+
+---
+
+## Agent info endpoint
+
+`GET /_lookout/info` returns agent version, Docker version, connection mode, uptime, hostname, and the capability list. Auth required.
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/_lookout/info | jq .
+```
+
+The `capabilities` array for the generic adapter lists `containers`, `logs`, `events`, and `version`.
+
+---
+
+## Docker API passthrough
+
+Any path not matched by a named route is transparently proxied to the local Docker daemon over the Unix socket. This covers every endpoint in the Docker Engine API — including streaming endpoints (`/logs`, `/attach`, `/exec/*/start`, `/events`, `/build`), binary responses, and interactive exec sessions using `Upgrade: tcp`.
+
+The agent negotiates the API version on startup; `v1.44` is the fallback. You can address the proxy with or without the version prefix — the agent prepends it automatically when omitted.
+
+```bash
+# List running containers via the Docker proxy
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/v1.44/containers/json?filters=%7B%22status%22%3A%5B%22running%22%5D%7D" | jq .
+
+# Inspect a container
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/v1.44/containers/my-container/json | jq .
+```
+
+<Callout type="warn">
+The Docker proxy exposes the full Docker Engine API, including write operations (create, remove, exec). Always run with authentication configured, and restrict the `BIND_ADDRESS` or network rules to trusted clients only.
+</Callout>
+
+---
+
+## Authentication
+
+All `/api/v1/*` endpoints and the Docker proxy require a valid credential. Supply it in any of the accepted headers:
+
+| Header | Usage |
+|--------|-------|
+| `Authorization: Bearer TOKEN` | Standard bearer token (checked first) |
+| `X-Lookout-Token: TOKEN` | Alternate header |
+| `X-Lookout-Signature` + three companion headers | Ed25519 per-request signature |
+
+Ten failed attempts per IP per rolling minute result in HTTP 429 until the window expires.
+
+For full details on token options (`TOKEN`, `TOKEN_FILE`, `TOKEN_HASH`) and Ed25519 key setup, see [Authentication](/authentication).
+
+---
+
+## MCP server (read-only alternative)
+
+Lookout also exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_lookout/mcp`. It is available in all adapter modes, including `generic`. AI assistants (Claude, Cursor, Windsurf) can query live container state through this endpoint without issuing raw REST calls.
+
+Available tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`.
+
+See [MCP Server](/mcp-server) for configuration and client setup instructions.
+
+---
+
+## Further reading
+
+- [Authentication](/authentication) — token options, Ed25519 key enrollment, rate limiting
+- [Configuration](/configuration) — full environment variable reference including `TLS_CERT`, `TLS_KEY`, `BIND_ADDRESS`, `PORT`
+- [API Reference](/api-reference) — OpenAPI specification for all endpoints

@@ -1,0 +1,417 @@
+---
+title: API Reference
+description: Complete HTTP API reference for the Lookout agent, grouped by function with authentication requirements and curl examples.
+---
+
+<Callout type="info">
+The OpenAPI 3.1 specification at [`api/openapi.yaml`](https://github.com/CodesWhat/lookout/blob/main/api/openapi.yaml) in the repository is the authoritative source of truth. This page is derived from that spec. If anything conflicts, the spec wins.
+</Callout>
+
+Lookout exposes an HTTP API on port `3000` by default (configurable via `PORT`). All requests are served over plain HTTP or TLS 1.2+ depending on whether `TLS_CERT` / `TLS_KEY` are configured. See [Authentication](/authentication) for token and Ed25519 key setup, and [Connection Modes](/connection-modes) for how Standard mode and Edge mode differ.
+
+---
+
+## Authentication
+
+Protected endpoints require the agent token in one of these headers (checked in order):
+
+| Header | Notes |
+|--------|-------|
+| `Authorization: Bearer <token>` | Standard, preferred |
+| `X-Lookout-Token` | Alternative header |
+| `X-Dd-Agent-Secret` | Drydock backward-compatibility alias |
+
+Alternatively, per-request Ed25519 signatures are accepted when the `X-Lookout-Signature` header is present. See [Authentication](/authentication) for the full signing protocol.
+
+**Rate limiting:** 10 failed auth attempts per IP per rolling minute. Exceeding the limit returns HTTP `429` until the window resets.
+
+---
+
+## Health and Info
+
+No authentication is required for the health endpoints. Use them for Docker `HEALTHCHECK` instructions and load-balancer probes.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | None | Returns `{"status":"ok"}`. Always HTTP 200 while the agent is running. |
+| `GET` | `/_lookout/health` | None | Returns agent status and Docker daemon connectivity. Returns HTTP 503 when Docker is unreachable. |
+| `GET` | `/_lookout/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. |
+
+### Response shapes
+
+**`GET /health`**
+
+```json
+{ "status": "ok" }
+```
+
+**`GET /_lookout/health`**
+
+```json
+{ "status": "healthy", "docker": "connected" }
+```
+
+Returns HTTP `503` with `"status":"unhealthy","docker":"disconnected"` when Docker is unreachable.
+
+**`GET /_lookout/info`**
+
+```json
+{
+  "version": "0.1.0",
+  "dockerVersion": "27.0.3",
+  "mode": "standard",
+  "uptime": "2h34m56.789s",
+  "hostname": "my-server",
+  "agentId": "550e8400-e29b-41d4-a716-446655440000",
+  "agentName": "my-server",
+  "capabilities": ["compose", "exec", "metrics", "events", "dd:watch", "dd:trigger"]
+}
+```
+
+### curl example
+
+```bash
+# Quick liveness probe
+curl -s http://localhost:3000/health
+
+# Docker connectivity check
+curl -s http://localhost:3000/_lookout/health | jq .
+
+# Agent metadata
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/_lookout/info | jq .
+```
+
+---
+
+## Metrics
+
+Prometheus-format host and agent metrics. See [Observability](/observability) for scrape configuration guidance.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/_lookout/metrics` | Required | Agent metrics only, prefixed `lookout_`. Preferred for targeted scraping. |
+| `GET` | `/metrics` | Required | Alias for `/_lookout/metrics`. Provided for compatibility with default Prometheus scrape configs. |
+
+Both endpoints return `text/plain` in Prometheus exposition format 0.0.4.
+
+### curl example
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/_lookout/metrics
+```
+
+Sample output:
+
+```
+# HELP lookout_cpu_usage_percent Host CPU usage percentage.
+# TYPE lookout_cpu_usage_percent gauge
+lookout_cpu_usage_percent 23.5
+# HELP lookout_memory_used_bytes Host memory used in bytes.
+# TYPE lookout_memory_used_bytes gauge
+lookout_memory_used_bytes 4294967296
+```
+
+---
+
+## Containers and Events (Drydock-compatible)
+
+These endpoints are used by the Drydock controller when Lookout runs in Standard mode. They share the `/api/` prefix and all require authentication.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/containers` | Required | Full container inventory with `dd.*` label metadata applied. |
+| `GET` | `/api/containers/{id}/logs` | Required | Demuxed container logs. Supports `tail`, `since`, `until`, `follow` query params. |
+| `DELETE` | `/api/containers/{id}` | Required | Force-remove a container. Returns HTTP 204 on success. |
+| `GET` | `/api/events` | Required | SSE stream of container lifecycle events in Drydock envelope format. |
+| `GET` | `/api/watchers` | Required | Watcher component descriptors registered with this agent. |
+| `GET` | `/api/triggers` | Required | Trigger component descriptors registered with this agent. |
+| `POST` | `/api/watchers/{type}/{name}` | Required | Trigger watcher poll — **not implemented in v1.0**, returns HTTP 501. |
+| `POST` | `/api/watchers/{type}/{name}/container/{id}` | Required | Check single container — **not implemented in v1.0**, returns HTTP 501. |
+| `POST` | `/api/triggers/{type}/{name}` | Required | Execute trigger — **not implemented in v1.0**, returns HTTP 501. |
+| `POST` | `/api/triggers/{type}/{name}/batch` | Required | Execute batch trigger — **not implemented in v1.0**, returns HTTP 501. |
+
+<Callout type="info">
+Registry checks (`/api/watchers/.../container/...`) are performed by the Drydock controller, not the agent. The stub endpoints exist for API-compatibility and always return HTTP 501.
+</Callout>
+
+### Log query parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tail` | integer | Number of lines from the end to return. |
+| `since` | string | Show logs since this RFC 3339 timestamp or relative duration (e.g. `1h`). |
+| `until` | string | Show logs before this timestamp or duration. |
+| `follow` | string | `1` or `true` to stream logs in real time (chunked transfer encoding). |
+
+### SSE event types (`/api/events`)
+
+| Type | Description |
+|------|-------------|
+| `dd:ack` | Initial handshake — agent metadata and current container counts. |
+| `dd:container-added` | New container discovered. |
+| `dd:container-updated` | Container state or metadata changed. |
+| `dd:container-removed` | Container removed. |
+
+### curl examples
+
+```bash
+# Container inventory
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/containers | jq .
+
+# Last 100 lines of logs for a container
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/containers/my-container/logs?tail=100"
+
+# Follow logs live
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/containers/my-container/logs?follow=1"
+
+# SSE event stream
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/events
+```
+
+---
+
+## Generic Adapter (`/api/v1/`)
+
+Available when `ADAPTER=generic`. These endpoints expose container management without requiring a Drydock controller. See [Standalone Mode](/standalone-mode) for setup instructions.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/version` | Required | Agent version, protocol name/version, and active adapter name. |
+| `GET` | `/api/v1/containers` | Required | Cached container inventory from the Docker daemon. |
+| `GET` | `/api/v1/containers/{id}/logs` | Required | Demuxed container logs. Same query parameters as the Drydock-compatible endpoint. |
+| `GET` | `/api/v1/events` | Required | SSE stream of Docker container lifecycle events in a stable generic envelope. |
+
+### `/api/v1/version` response
+
+```json
+{
+  "agentVersion": "0.1.0",
+  "protocolName": "lookout",
+  "protocolVersion": "1.0",
+  "adapter": "generic"
+}
+```
+
+### Generic event envelope (`/api/v1/events`)
+
+Each SSE frame carries a JSON object:
+
+```json
+{
+  "ts": "2026-06-11T10:00:00Z",
+  "type": "container",
+  "action": "start",
+  "containerId": "abc123def456",
+  "name": "my-container",
+  "image": "nginx:latest",
+  "labels": { "app": "web" }
+}
+```
+
+Observed `action` values: `create`, `start`, `stop`, `die`, `kill`, `restart`, `pause`, `unpause`, `destroy`, `rename`, `update`, `oom`, `health_status`.
+
+A comment heartbeat line (`: heartbeat`) is written every 30 seconds to keep the connection alive through proxies.
+
+### curl examples
+
+```bash
+TOKEN=my-secret
+
+# Agent version
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/version | jq .
+
+# Container inventory
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/containers | jq .
+
+# Last 50 log lines
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?tail=50"
+
+# Stream live logs
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?follow=1"
+
+# SSE event stream
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/events
+```
+
+---
+
+## Compose
+
+Execute Docker Compose sub-commands within the managed stacks directory (`STACKS_DIR`, default `/data/stacks`).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/_lookout/compose` | Required | Run a Compose operation against a named stack. |
+
+### Request body
+
+```json
+{
+  "operation": "up",
+  "stackName": "myapp",
+  "stackDir": "myapp/v2",
+  "services": ["web", "worker"],
+  "build": false,
+  "forceRecreate": false,
+  "removeVolumes": false,
+  "noDeps": false,
+  "tail": 100,
+  "envVars": {
+    "APP_PORT": "8080"
+  },
+  "files": {
+    "docker-compose.yml": "version: '3'\nservices:\n  web:\n    image: nginx\n"
+  },
+  "registryAuth": {
+    "server": "ghcr.io",
+    "username": "myuser",
+    "password": "ghp_..."
+  }
+}
+```
+
+`operation` is required and must be one of: `up`, `down`, `pull`, `ps`, `logs`, `restart`, `stop`, `start`. `stackName` is required.
+
+### Response
+
+```json
+{
+  "success": true,
+  "output": "Container myapp-web-1  Started\n"
+}
+```
+
+On failure, `success` is `false` and the `error` field contains the exit message.
+
+### Security controls
+
+The agent applies these checks before running any Compose command:
+
+- Stack path is resolved to an absolute path and verified to stay within `STACKS_DIR` (path-traversal protection).
+- `envVars` keys must match `^[a-zA-Z_][a-zA-Z0-9_]*$` and are checked against a denylist that includes `LD_PRELOAD`, `PATH`, `DOCKER_HOST`, `HOME`, `SHELL`, and related variables.
+- Service names must not start with `-` (flag-injection prevention).
+- Registry credentials are passed via `--password-stdin` and never appear in the process argument list.
+- Files written into the stack directory are path-resolved and verified to remain within the stacks directory.
+
+### curl example
+
+```bash
+# Bring up a stack
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"operation":"up","stackName":"myapp"}' \
+  http://localhost:3000/_lookout/compose | jq .
+
+# Tear down a stack and remove volumes
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"operation":"down","stackName":"myapp","removeVolumes":true}' \
+  http://localhost:3000/_lookout/compose | jq .
+```
+
+---
+
+## Docker API Passthrough
+
+Any path not matched by a named Lookout route is transparently proxied to the local Docker daemon over its Unix socket. This gives Lookout clients the full Docker Engine API surface without additional tooling.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET / POST / DELETE / ...` | `/v1.44/{path}` (representative) | Required | Proxy to Docker Engine API. All HTTP methods are forwarded. |
+
+<Callout type="info">
+`v1.44` is the fallback API version. The agent negotiates the actual version with the Docker daemon on startup (e.g. `v1.47`). Clients may also omit the version prefix — the agent prepends it automatically.
+</Callout>
+
+Streaming endpoints (`/logs`, `/attach`, `/exec/.../start`, `/events`, `/build`, `/images/create`, `/images/push`) are detected by path and forwarded with flush-on-read streaming. Interactive exec sessions using `Upgrade: tcp` or `Upgrade: websocket` are handled via HTTP hijacking.
+
+The complete Docker Engine API is documented at [https://docs.docker.com/engine/api/v1.44/](https://docs.docker.com/engine/api/v1.44/).
+
+### curl example
+
+```bash
+# List running containers via Docker proxy
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/v1.44/containers/json" | jq .
+
+# Pull an image
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/v1.44/images/create?fromImage=nginx&tag=latest"
+```
+
+---
+
+## Enrollment
+
+One-shot bootstrap endpoint for registering an Ed25519 public key (Model C authentication). See [Authentication](/authentication) for the full key management workflow.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/lookout/enroll` | Enrollment token | Register an Ed25519 public key. Token is burned after first successful use. |
+
+<Callout type="info">
+This endpoint is only available when `ENROLLMENT_TOKEN` (and `AUTHORIZED_KEYS`) are configured. The endpoint is reachable without a prior agent token — the enrollment token is the credential. It is subject to the same IP-based rate limiter as auth failures.
+</Callout>
+
+### Request body
+
+```json
+{
+  "enrollment_token": "a3f2b1c9d8e7f6a4b5c6d7e8f9a0b1c2",
+  "public_key": "AAAAC3NzaC1lZDI1NTE5AAAAIB3..."
+}
+```
+
+`public_key` must be standard base64-encoded raw 32-byte Ed25519 public key material.
+
+### Response
+
+```json
+{
+  "key_id": "4a3f2b1c9d8e7f6a",
+  "comment": "enrolled:4a3f2b1c9d8e7f6a"
+}
+```
+
+`key_id` is `hex(SHA-256(pubkey)[:8])` — the value to supply in `X-Lookout-Key-ID` headers for subsequent signed requests.
+
+After enrollment, the key is immediately active. The enrollment token is burned; subsequent calls return HTTP `401` until the agent restarts with a new `ENROLLMENT_TOKEN`.
+
+### curl example
+
+```bash
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -d "{\"enrollment_token\":\"$ENROLL_TOKEN\",\"public_key\":\"$PUBKEY_B64\"}" \
+  http://localhost:3000/api/lookout/enroll | jq .
+```
+
+---
+
+## HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200` | Success |
+| `204` | Success, no body (container delete) |
+| `400` | Bad request — invalid body or parameters |
+| `401` | Missing, invalid, or burned token |
+| `405` | Method not allowed |
+| `429` | Rate limit exceeded (10 failures/min/IP) |
+| `500` | Internal error |
+| `501` | Not implemented (stub Drydock endpoints) |
+| `502` | Docker daemon unreachable or returned an error (proxy) |
+| `503` | Docker daemon unreachable (health check) |
