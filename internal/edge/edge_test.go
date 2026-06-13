@@ -206,7 +206,10 @@ func makePipeWS(t *testing.T) (cliConn, srvConn *websocket.Conn) {
 
 	wsURL := "ws" + ts.URL[len("http"):] + "/ws"
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
-	cli, _, err := dialer.Dial(wsURL, nil)
+	cli, resp, err := dialer.Dial(wsURL, nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("makePipeWS dial: %v", err)
 	}
@@ -294,16 +297,6 @@ func newTestClient(t *testing.T, cfg *config.Config) *Client {
 		collector:    metrics.NewCollector("/var/lib/docker", true), // skipDisk=true in tests
 		streamSem:    make(chan struct{}, maxStreams),
 	}
-}
-
-// newTestClientWithWS builds a Client and wires it to the provided WS conn.
-func newTestClientWithWS(t *testing.T, cfg *config.Config, conn *websocket.Conn) *Client {
-	t.Helper()
-	c := newTestClient(t, cfg)
-	c.connMu.Lock()
-	c.conn = conn
-	c.connMu.Unlock()
-	return c
 }
 
 // drainWS reads all frames from conn in a goroutine, returning them via the
@@ -416,7 +409,7 @@ func TestMaxStreams_ConcurrencyCap(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	go func() { c.connect(ctx) }()
+	go func() { _ = c.connect(ctx) }()
 
 	md.waitFrame(t, protocol.TypeHello)
 	time.Sleep(50 * time.Millisecond)
@@ -850,7 +843,7 @@ func TestPing_RoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	go func() { c.connect(ctx) }()
+	go func() { _ = c.connect(ctx) }()
 
 	md.waitFrame(t, protocol.TypeHello)
 	time.Sleep(50 * time.Millisecond)
@@ -893,7 +886,7 @@ func TestPing_UnderExecLoad(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	go func() { c.connect(ctx) }()
+	go func() { _ = c.connect(ctx) }()
 
 	md.waitFrame(t, protocol.TypeHello)
 	time.Sleep(50 * time.Millisecond)
@@ -971,7 +964,7 @@ func TestHandleResize_NonBlocking(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	go func() { c.connect(ctx) }()
+	go func() { _ = c.connect(ctx) }()
 
 	md.waitFrame(t, protocol.TypeHello)
 	time.Sleep(50 * time.Millisecond)
@@ -1060,7 +1053,7 @@ func TestExecSessions_TornDownOnDisconnect(t *testing.T) {
 		// Goroutine that signals when the exec conn is closed (i.e. session was torn down).
 		go func(conn net.Conn, done chan struct{}) {
 			buf := make([]byte, 1)
-			conn.Read(buf) // blocks until conn is closed
+			_, _ = conn.Read(buf) // blocks until conn is closed
 			close(done)
 		}(execDockerConn, done)
 	}
