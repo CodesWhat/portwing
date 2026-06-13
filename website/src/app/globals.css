@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+}
+
+/*
+ * Lookout's take on the shared CodesWhat family theme. Same warm-neutral
+ * base as sockguard/drydock, but the single brand accent is pulled from the
+ * mascot: a vermilion (~hsl(13 100% 60%)) that sits between the cap's red and
+ * the brand orange. Neutrals carry a faint violet cast (the pigeon's slate
+ * body) so the accent never feels bolted on.
+ */
+:root {
+  --background: 280 22% 99.2%;
+  --foreground: 265 25% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 265 25% 11%;
+  --primary: 13 100% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 280 16% 95.5%;
+  --secondary-foreground: 265 25% 11%;
+  --muted: 280 16% 95.5%;
+  --muted-foreground: 265 8% 42%;
+  --accent: 280 16% 95.5%;
+  --accent-foreground: 265 25% 11%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 275 16% 89%;
+  --input: 275 16% 89%;
+  --ring: 13 100% 60%;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: 265 24% 5.5%;
+  --foreground: 280 18% 96%;
+  --card: 265 24% 5.5%;
+  --card-foreground: 280 18% 96%;
+  --primary: 13 100% 63%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 264 16% 14%;
+  --secondary-foreground: 280 18% 96%;
+  --muted: 264 16% 14%;
+  --muted-foreground: 270 10% 64%;
+  --accent: 264 16% 14%;
+  --accent-foreground: 280 18% 96%;
+  --destructive: 0 62.8% 45%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 264 14% 16%;
+  --input: 264 14% 16%;
+  --ring: 13 100% 63%;
+}
+
+/* ── Lookout mascot: lean-in + blink ─────────────────────────────────
+ * Drives <LookoutMascot>. transform-origin is at the feet so scaling
+ * cranes the top up and brings the eyes toward the viewer; the two
+ * frames are stacked and cross-faded by the data-eyes attribute.
+ */
+.lookout-mascot {
+  position: relative;
+  transform-origin: 50% 100%;
+  transition:
+    transform 0.62s cubic-bezier(0.34, 1.32, 0.46, 1),
+    filter 0.62s ease;
+  will-change: transform, filter;
+  /* Shadow lives on the container, cast by the shared silhouette, so swapping
+   * the open/blink frame underneath never re-renders or doubles it. */
+  filter: drop-shadow(0 14px 24px rgb(0 0 0 / 0.16));
+}
+.dark .lookout-mascot {
+  filter: drop-shadow(0 16px 28px rgb(0 0 0 / 0.55));
+}
+.lookout-mascot.is-big {
+  /* crane up (translateY) + stretch the top (scaleY > scaleX) + lean toward viewer */
+  transform: translateY(-7%) scaleX(1.08) scaleY(1.2);
+  filter: drop-shadow(0 26px 40px rgb(0 0 0 / 0.26));
+}
+.dark .lookout-mascot.is-big {
+  filter: drop-shadow(0 30px 48px rgb(0 0 0 / 0.6));
+}
+.lookout-mascot .lk-frame {
+  display: block;
+}
+.lookout-mascot .lk-blink {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  /* Instant cut, no transition. The eyes-open body underneath stays rendered
+   * the whole time; this frame just drops on top to close the eyes, so only
+   * the eyes change and the silhouette/shadow never moves. */
+}
+.lookout-mascot[data-eyes="blink"] .lk-blink {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lookout-mascot,
+  .lookout-mascot.is-big {
+    transform: none;
+    transition: none;
+  }
+}
+
+@layer utilities {
+  .bg-grid-neutral-200\/50 {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(170 150 200 / 0.10)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e");
+  }
+  .dark\:bg-grid-neutral-800\/50 {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(120 110 150 / 0.16)'%3e%3cpath d='M0 .5H31.5V32'/%3e%3c/svg%3e");
+  }
+}
+
+@layer base {
+  * {
+    border-color: theme(colors.border);
+  }
+  html {
+    min-height: 100%;
+  }
+  body {
+    min-height: 100%;
+    background-color: theme(colors.background);
+    color: theme(colors.foreground);
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+}

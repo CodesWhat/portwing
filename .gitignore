@@ -39,3 +39,17 @@ Thumbs.db
 # Internal strategy / competitive analysis / unpatched-finding tracker —
 # not for public release. The public-facing roadmap lives in /ROADMAP.md.
 /.roadmap/
+
+# Web workspace (turbo: website + docs)
+node_modules/
+.next/
+out/
+.turbo/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+.source/
+website/public/docs/
+
+# Throwaway design mockups
+/.mockups/

@@ -1,0 +1,203 @@
+---
+title: MCP Server
+description: Lookout's built-in read-only Model Context Protocol endpoint lets MCP-aware AI agents query live Docker container and host state.
+---
+
+Lookout ships a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_lookout/mcp`. AI assistants — Claude Desktop, Cursor, Windsurf, or any MCP-compatible client — can call its tools to inspect containers and host metrics using their standard tool-call flow. No extra process or sidecar is needed; the endpoint is part of the main Lookout HTTP server.
+
+<Callout type="warn">
+The MCP server is available in Lookout v0.2.x (currently alpha). The tool surface is stable, but the endpoint should be treated as experimental until v1.0.
+</Callout>
+
+---
+
+## Protocol
+
+| Property | Value |
+|---|---|
+| Endpoint | `POST /_lookout/mcp` |
+| Protocol revision | MCP 2025-11-25 |
+| Transport | Streamable HTTP — stateless single-request mode |
+| Content-Type | `application/json` (request and response) |
+| Session management | None — no `Mcp-Session-Id` is issued or required |
+
+Every POST returns one JSON-RPC 2.0 response object. `GET /_lookout/mcp` returns `405 Method Not Allowed` to signal that no SSE stream is offered at this endpoint.
+
+Authentication follows the same bearer-token scheme used by all other Lookout endpoints. See [Authentication](/authentication).
+
+---
+
+## Enabling the endpoint
+
+The MCP endpoint is always active when Lookout is running — it is not gated by a separate flag or environment variable. Configure access using the standard token variables (`TOKEN`, `TOKEN_FILE`, or `TOKEN_HASH`). See [Configuration](/configuration) for the full variable reference.
+
+```bash
+# Minimal example: run Lookout with a token and connect an MCP client
+docker run -e TOKEN=mysecrettoken -p 3000:3000 ghcr.io/codeswhat/lookout:latest
+```
+
+---
+
+## Read-only by design
+
+<Callout type="info">
+The MCP server is strictly read-only. It can observe containers and host state, but it cannot start, stop, restart, remove, or mutate any container or resource. There is no write tool, and none will be added to this endpoint. Destructive operations must go through the authenticated REST API directly.
+
+This boundary is intentional: AI agents operate with broad autonomy, and a read-only observation channel limits the blast radius of a compromised or misbehaving agent to information disclosure rather than infrastructure change.
+</Callout>
+
+Additionally, `inspect_container` returns only the *count* of environment variables — values are never transmitted. This prevents accidental leakage of secrets, API keys, or credentials that are commonly passed to containers via environment variables. See [Security Model](/security-model) for more detail.
+
+---
+
+## Tools
+
+The server advertises five tools via `tools/list`. All are read-only.
+
+### `list_containers`
+
+Returns all Docker containers (running and stopped).
+
+**Parameters:** none
+
+**Response fields per container:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Full container ID |
+| `names` | string[] | Container name(s) |
+| `image` | string | Image reference |
+| `state` | string | Runtime state (e.g. `running`, `exited`) |
+| `status` | string | Human-readable status string |
+| `labels` | object | Container labels (omitted if empty) |
+
+---
+
+### `inspect_container`
+
+Returns detailed state for a single container.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Container ID or name |
+
+**Response fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Full container ID |
+| `name` | string | Container name |
+| `state` | object | Runtime state struct |
+| `image` | string | Image reference |
+| `envCount` | integer | Number of environment variables (values never returned) |
+| `mounts` | array | Each mount: `source`, `destination`, `readOnly` |
+| `networks` | string[] | Network names the container is attached to |
+| `restartPolicy` | string | Restart policy name |
+
+---
+
+### `container_logs`
+
+Returns the last N lines of stdout and stderr from a container. Each line is prefixed with `stdout:` or `stderr:`.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Container ID or name |
+| `tail` | integer | no | Lines to return (1–500, default 100) |
+
+**Response fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Container ID echoed back |
+| `lines` | string[] | Log lines, each prefixed `stdout:` or `stderr:` |
+
+---
+
+### `host_metrics`
+
+Returns a point-in-time snapshot of host-level resource metrics. No parameters.
+
+**Parameters:** none
+
+**Response:** a metrics snapshot including CPU, memory, disk, network I/O, and uptime. The exact shape matches the Prometheus collector used internally by Lookout.
+
+---
+
+### `container_stats`
+
+Returns a one-shot CPU, memory, and network stats snapshot for a single container.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Container ID or name |
+
+**Response fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Container ID echoed back |
+| `cpuTotalUsage` | integer | Cumulative CPU usage in nanoseconds |
+| `memUsage` | integer | Current memory usage in bytes |
+| `memLimit` | integer | Memory limit in bytes |
+| `networks` | object | Per-interface map of `rxBytes` and `txBytes` |
+
+---
+
+## Client configuration
+
+Replace `YOUR_LOOKOUT_TOKEN` with the value you set in `TOKEN`, `TOKEN_FILE`, or `TOKEN_HASH` (see [Configuration](/configuration)).
+
+### Claude Desktop (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "lookout": {
+      "type": "http",
+      "url": "http://your-host:3000/_lookout/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_LOOKOUT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+### Claude Code CLI
+
+```bash
+claude mcp add --transport http \
+  --header "Authorization: Bearer YOUR_LOOKOUT_TOKEN" \
+  lookout http://your-host:3000/_lookout/mcp
+```
+
+### Project-level `.mcp.json` (Cursor, Windsurf, or any MCP client)
+
+```json
+{
+  "mcpServers": {
+    "lookout": {
+      "type": "http",
+      "url": "http://your-host:3000/_lookout/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_LOOKOUT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Related pages
+
+- [Configuration](/configuration) — all environment variables including token setup
+- [Authentication](/authentication) — token enrollment and key management
+- [Security Model](/security-model) — why env values are withheld and the read-only boundary

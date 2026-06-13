@@ -19,15 +19,15 @@ over new surface area.
 - **Documentation** — keep `SPEC.md`, `README.md`, and the design docs in sync
   with the code as behavior settles.
 
-## Next — completing edge mode
+## Next — hardening edge mode
 
-- **End-to-end edge mode** — the agent dials out over WebSocket today; the
-  matching controller-side endpoint in the Drydock controller is still in
-  progress. Finishing it makes NAT'd / firewalled hosts manageable with no
-  inbound port.
+- **End-to-end edge mode** — *shipped.* Drydock 1.5 added the matching
+  `/api/lookout/ws` controller endpoint (Ed25519-only), so the agent can dial
+  out and manage NAT'd / firewalled hosts with no inbound port. Both Drydock 1.5
+  and the paired Lookout release are pre-release.
 - **Edge tunnel robustness** — ordered exec I/O, backpressure under load, and a
   dedicated test harness for the tunnel (auth hello, request fan-out, exec
-  sessions).
+  sessions). Lands in v0.2.2.
 - **Reproducible base images** — pin runtime base images by digest with
   automated update tracking.
 

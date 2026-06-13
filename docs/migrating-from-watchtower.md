@@ -102,7 +102,7 @@ Environment variables reference:
 ## Edge Mode (outbound WebSocket)
 
 Use this when your host is behind NAT, a firewall, or has a dynamic IP.
-Lookout initiates the outbound connection to the Drydock controller; no inbound port is needed. Note: the controller-side endpoint (`/api/lookout/ws`) is planned and not yet implemented end-to-end.
+Lookout initiates the outbound connection to the Drydock controller; no inbound port is needed. The controller-side endpoint (`/api/lookout/ws`) shipped in Drydock 1.5 — edge mode is functional end-to-end (Ed25519 key required; both Drydock 1.5 and Lookout 0.2.2 are pre-release).
 
 ```yaml
 # docker-compose.yml

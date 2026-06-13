@@ -1,0 +1,19 @@
+{
+  "title": "Lookout",
+  "pages": [
+    "index",
+    "getting-started",
+    "connection-modes",
+    "authentication",
+    "configuration",
+    "security-model",
+    "drydock-integration",
+    "standalone-mode",
+    "mcp-server",
+    "observability",
+    "audit-logging",
+    "api-reference",
+    "verification",
+    "migrating-from-watchtower"
+  ]
+}
