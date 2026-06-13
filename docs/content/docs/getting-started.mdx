@@ -169,7 +169,8 @@ Edge mode lets Lookout dial **out** to your Drydock controller over a WebSocket 
 </Callout>
 
 ```bash
-openssl rand -hex 32 > lookout_token.txt
+lookout keygen -comment "edge-host-01" > lookout_ed25519.pem
+# Register the printed public key with your Drydock controller, then:
 curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/docker-compose.edge.yml
 # Edit DRYDOCK_URL and AGENT_NAME, then:
 docker compose -f docker-compose.edge.yml up -d
@@ -181,8 +182,11 @@ docker compose -f docker-compose.edge.yml up -d
 # behind NAT and firewalls. The built-in HEALTHCHECK still works
 # (the health endpoint listens container-locally in edge mode too).
 #
-# Generate a token first (must match the token Drydock expects):
-#   openssl rand -hex 32 > lookout_token.txt
+# Edge mode against Drydock 1.5 is Ed25519-only: the controller's
+# /api/lookout/ws endpoint rejects token-based hellos. Generate a
+# keypair and register its public key with Drydock before starting:
+#   lookout keygen -comment "edge-host-01" > lookout_ed25519.pem
+# Register the printed public key (POST /api/v1/lookout/keys).
 
 services:
   lookout:
@@ -200,16 +204,14 @@ services:
       - lookout-stacks:/data/stacks
     environment:
       - DRYDOCK_URL=https://drydock.example.com
-      - TOKEN_FILE=/run/secrets/lookout_token
+      - PRIVATE_KEY_FILE=/run/secrets/lookout_key
       - AGENT_NAME=edge-host-01
-      # Key-based hello instead of a shared token:
-      #   lookout keygen  →  PRIVATE_KEY_FILE=/run/secrets/lookout_key
     secrets:
-      - lookout_token
+      - lookout_key
 
 secrets:
-  lookout_token:
-    file: ./lookout_token.txt
+  lookout_key:
+    file: ./lookout_ed25519.pem
 
 volumes:
   lookout-stacks:
