@@ -1,17 +1,22 @@
 package drydock
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/lookout/internal/config"
 )
 
 type SSEClient struct {
@@ -30,14 +35,16 @@ type SSEBroadcaster struct {
 	clients      map[string]*SSEClient
 	manager      ContainerProvider
 	agentVersion string
+	cfg          *config.Config
 	startTime    time.Time
 }
 
-func NewSSEBroadcaster(manager ContainerProvider, agentVersion string) *SSEBroadcaster {
+func NewSSEBroadcaster(manager ContainerProvider, agentVersion string, cfg *config.Config) *SSEBroadcaster {
 	return &SSEBroadcaster{
 		clients:      make(map[string]*SSEClient),
 		manager:      manager,
 		agentVersion: agentVersion,
+		cfg:          cfg,
 		startTime:    time.Now(),
 	}
 }
@@ -122,9 +129,11 @@ type ackDataBody struct {
 	OS            string        `json:"os"`
 	Arch          string        `json:"arch"`
 	CPUs          int           `json:"cpus"`
-	MemoryGB      int           `json:"memoryGb"`
+	MemoryGB      float64       `json:"memoryGb"`
 	UptimeSeconds int64         `json:"uptimeSeconds"`
 	LastSeen      string        `json:"lastSeen"`
+	LogLevel      string        `json:"logLevel"`
+	PollInterval  string        `json:"pollInterval"`
 	Containers    ackContainers `json:"containers"`
 	Images        int           `json:"images"`
 }
@@ -153,6 +162,13 @@ func (b *SSEBroadcaster) buildAckPayload() []byte {
 
 	uptimeSeconds := int64(time.Since(b.startTime).Seconds())
 
+	logLevel := ""
+	pollInterval := ""
+	if b.cfg != nil {
+		logLevel = b.cfg.LogLevel
+		pollInterval = strconv.Itoa(b.cfg.DDPollInterval)
+	}
+
 	payload := ackPayload{
 		Type: "dd:ack",
 		Data: ackDataBody{
@@ -160,9 +176,11 @@ func (b *SSEBroadcaster) buildAckPayload() []byte {
 			OS:            runtime.GOOS,
 			Arch:          runtime.GOARCH,
 			CPUs:          runtime.NumCPU(),
-			MemoryGB:      0, // Memory not easily available without cgo/sysinfo
+			MemoryGB:      readTotalMemoryGB(),
 			UptimeSeconds: uptimeSeconds,
 			LastSeen:      time.Now().UTC().Format(time.RFC3339),
+			LogLevel:      logLevel,
+			PollInterval:  pollInterval,
 			Containers: ackContainers{
 				Total:   len(containers),
 				Running: running,
@@ -178,6 +196,49 @@ func (b *SSEBroadcaster) buildAckPayload() []byte {
 		return []byte(`{"type":"dd:ack","data":{}}`)
 	}
 	return data
+}
+
+// readTotalMemoryGB returns the total physical memory in gibibytes, rounded to
+// one decimal place. On Linux it parses /proc/meminfo (MemTotal, in kB). On
+// all other platforms it returns 0 because no cgo-free sysinfo is available
+// without importing additional packages.
+func readTotalMemoryGB() float64 {
+	if runtime.GOOS != "linux" {
+		return 0
+	}
+	return parseProcMeminfo("/proc/meminfo")
+}
+
+// parseProcMeminfo reads a /proc/meminfo-formatted file and returns total
+// memory in GiB (one decimal place). Exported for testing.
+func parseProcMeminfo(path string) float64 {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "MemTotal:") {
+			continue
+		}
+		// Format: "MemTotal:       16384000 kB"
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return 0
+		}
+		kb, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return 0
+		}
+		gb := float64(kb) / (1024 * 1024)
+		// Round to one decimal place.
+		rounded, _ := strconv.ParseFloat(strconv.FormatFloat(gb, 'f', 1, 64), 64)
+		return rounded
+	}
+	return 0
 }
 
 // buildWatcherSnapshotPayload builds the dd:watcher-snapshot event carrying

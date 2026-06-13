@@ -120,10 +120,10 @@ func selectAdapter(cfg *config.Config, dockerClient *docker.Client) adapter.Adap
 	case "generic":
 		return generic.New(dockerClient, cfg.AgentName)
 	case "drydock":
-		return drydock.NewAdapter(dockerClient, cfg.AgentName)
+		return drydock.NewAdapter(dockerClient, cfg.AgentName, cfg)
 	default:
 		slog.Warn("unknown adapter, falling back to drydock", "adapter", cfg.Adapter)
-		return drydock.NewAdapter(dockerClient, cfg.AgentName)
+		return drydock.NewAdapter(dockerClient, cfg.AgentName, cfg)
 	}
 }
 
