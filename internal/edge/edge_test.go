@@ -583,16 +583,17 @@ func TestExecSession_Lifecycle(t *testing.T) {
 
 // ---- #30 regression: ordered exec input queue tests ------------------------
 
-// TestExecInputQueue_OrderPreserved is the primary regression test for #30.
+// TestExecInputQueue_OrderPreserved verifies that the drainInput goroutine
+// serialises concurrent HandleInput calls: every byte arrives at the Docker
+// side intact with no interleaving.
 //
-// It fires N stdin messages concurrently at one exec session and asserts that
-// every frame's byte payload arrives at the Docker-side sink intact (not
-// interleaved at the byte level by concurrent writes) — the drainInput
-// goroutine is the single serialising writer, so ordering within the session
-// is strictly preserved.
-//
-// The test also verifies readPump responsiveness: a ping round-trip must
-// complete during the burst (see TestPing_UnderExecLoad for that guarantee).
+// NOTE: This test calls HandleInput directly from N goroutines and does NOT
+// run a live readPump.  It confirms that drainInput is the sole writer and
+// produces no byte-level interleaving, but it cannot detect the old
+// readPump-blocking bug (the bug stalled readPump with time.Sleep, which this
+// test bypasses).  TestPing_UnderExecLoad is the primary regression test for
+// the readPump-blocking anti-pattern fixed in #30 — see that test's doc
+// comment.
 func TestExecInputQueue_OrderPreserved(t *testing.T) {
 	t.Parallel()
 
@@ -869,13 +870,19 @@ func TestPing_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestPing_UnderExecLoad is the readPump responsiveness assertion from #30:
-// a ping round-trip must complete within 500 ms while a burst of exec_input
-// frames is simultaneously being delivered to a session.
+// TestPing_UnderExecLoad is the PRIMARY regression test for the readPump-blocking
+// anti-pattern fixed in #30.  A ping round-trip must complete within 500 ms
+// while a burst of exec_input frames is being delivered through the live
+// readPump goroutine (connect() is running in the background).
 //
-// Before the fix (blocking retry loop in HandleInput), this test would fail
-// because readPump would be stalled on conn.Write retries for up to 500 ms
-// per exec_input frame.  With the ordered queue, readPump never waits.
+// Before the fix (blocking retry loop called synchronously on readPump),
+// readPump was stalled for up to 500 ms per exec_input burst, causing this
+// test to time out.  With the ordered queue, HandleInput is non-blocking and
+// readPump processes the ping immediately.
+//
+// This is the only test in this file that exercises the full readPump dispatch
+// path; TestExecInputQueue_OrderPreserved calls HandleInput directly and cannot
+// detect readPump stalls.
 func TestPing_UnderExecLoad(t *testing.T) {
 	t.Parallel()
 
@@ -941,6 +948,206 @@ func TestPing_UnderExecLoad(t *testing.T) {
 		case <-pongTimer.C:
 			t.Fatal("ping round-trip exceeded 500 ms during exec_input burst: readPump is blocking")
 		}
+	}
+}
+
+// ---- HandleResize non-blocking regression test --------------------------------
+
+// TestHandleResize_NonBlocking is the primary regression test for the
+// readPump-blocking anti-pattern in HandleResize (mirror of #30 for resize).
+//
+// HandleResize used to run a blocking retry loop (up to 10×50 ms = 500 ms) on
+// readPump.  The fix dispatches it with `go`, so readPump returns immediately.
+// This test verifies that a ping round-trip completes within 500 ms while
+// HandleResize is invoked for an unknown exec session (which previously caused
+// the full retry wait).
+func TestHandleResize_NonBlocking(t *testing.T) {
+	t.Parallel()
+
+	md := newMockDrydock(t)
+	cfg := newTestConfig(md.wsURL())
+	c := newTestClient(t, cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	go func() { c.connect(ctx) }()
+
+	md.waitFrame(t, protocol.TypeHello)
+	time.Sleep(50 * time.Millisecond)
+
+	// Send a burst of resize frames for a non-existent session.
+	// Under the old code each would block readPump for up to 500 ms.
+	const bursts = 5
+	go func() {
+		for i := 0; i < bursts; i++ {
+			resizeMsg := protocol.ExecResizeMessage{ExecID: "no-such-exec", Cols: 80, Rows: 24}
+			raw, _ := json.Marshal(resizeMsg)
+			_ = md.send(protocol.Envelope{Type: protocol.TypeExecResize, Data: json.RawMessage(raw)})
+		}
+	}()
+
+	time.Sleep(5 * time.Millisecond) // let bursts start
+
+	ts := time.Now().UnixMilli()
+	if err := md.sendTyped(protocol.TypePing, protocol.PingMessage{Timestamp: ts}); err != nil {
+		t.Fatalf("send ping: %v", err)
+	}
+
+	pongTimer := time.NewTimer(500 * time.Millisecond)
+	defer pongTimer.Stop()
+	for {
+		select {
+		case env := <-md.frameC:
+			if env.Type == protocol.TypePong {
+				var pong protocol.PongMessage
+				if err := json.Unmarshal(env.Data, &pong); err == nil && pong.Timestamp == ts {
+					elapsed := time.Now().UnixMilli() - ts
+					t.Logf("pong in %d ms during HandleResize burst — readPump non-blocking OK", elapsed)
+					return
+				}
+			}
+		case <-pongTimer.C:
+			t.Fatal("ping round-trip exceeded 500 ms during exec_resize burst: HandleResize is blocking readPump")
+		}
+	}
+}
+
+// ---- exec session teardown on disconnect test --------------------------------
+
+// TestExecSessions_TornDownOnDisconnect verifies that all active exec sessions
+// are closed when the WebSocket tunnel drops (connect() returns).  Before the
+// fix, sessions' readLoop and drainInput goroutines were orphaned on every
+// unclean disconnect, leaking goroutines and Docker exec processes.
+func TestExecSessions_TornDownOnDisconnect(t *testing.T) {
+	t.Parallel()
+
+	md := newMockDrydock(t)
+	cfg := newTestConfig(md.wsURL())
+	c := newTestClient(t, cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	connectDone := make(chan error, 1)
+	go func() {
+		connectDone <- c.connect(ctx)
+	}()
+
+	md.waitFrame(t, protocol.TypeHello)
+	time.Sleep(50 * time.Millisecond)
+
+	// Inject two fake exec sessions with net.Pipe conns.
+	const numSessions = 2
+	sessionDones := make([]chan struct{}, numSessions)
+	for i := 0; i < numSessions; i++ {
+		execClientConn, execDockerConn := net.Pipe()
+		t.Cleanup(func() { execClientConn.Close(); execDockerConn.Close() })
+
+		done := make(chan struct{})
+		sessionDones[i] = done
+
+		sess := &ExecSession{
+			execID: fmt.Sprintf("teardown-exec-%d", i),
+			conn:   execClientConn,
+			client: c,
+			done:   make(chan struct{}),
+			inputQ: make(chan []byte, execInputQueueDepth),
+		}
+		c.execSessions.Store(sess.execID, sess)
+		go sess.drainInput()
+
+		// Goroutine that signals when the exec conn is closed (i.e. session was torn down).
+		go func(conn net.Conn, done chan struct{}) {
+			buf := make([]byte, 1)
+			conn.Read(buf) // blocks until conn is closed
+			close(done)
+		}(execDockerConn, done)
+	}
+
+	// Drop the server connection to trigger a disconnect.
+	md.mu.Lock()
+	if md.conn != nil {
+		md.conn.Close()
+	}
+	md.mu.Unlock()
+
+	// connect() must return.
+	select {
+	case <-connectDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("connect() did not return after server-side disconnect")
+	}
+
+	// Every session's Docker conn must have been closed by the teardown loop.
+	for i, done := range sessionDones {
+		select {
+		case <-done:
+			// Good — session i was torn down.
+		case <-time.After(time.Second):
+			t.Errorf("exec session %d was not closed after tunnel disconnect (goroutine leak)", i)
+		}
+	}
+}
+
+// ---- drainInput write-error exit test -----------------------------------------
+
+// TestDrainInput_ExitsOnWriteErrors verifies that drainInput calls Close() and
+// exits after maxWriteErrors consecutive conn.Write failures, guarding against
+// the asymmetric half-close scenario where conn.Read never errors.
+func TestDrainInput_ExitsOnWriteErrors(t *testing.T) {
+	t.Parallel()
+
+	// Use a net.Pipe but close only the write-side (execClientConn) from the
+	// test's perspective: we call execClientConn.Close() so writes fail but we
+	// control when the "read" side sees an EOF.
+	execClientConn, execDockerConn := net.Pipe()
+	t.Cleanup(func() { execDockerConn.Close() })
+
+	auditor, _, _ := audit.New("")
+	c := &Client{
+		cfg:       newTestConfig("ws://unused"),
+		adapter:   noopEdgeAdapter{},
+		auditor:   auditor,
+		streamSem: make(chan struct{}, maxStreams),
+	}
+
+	session := &ExecSession{
+		execID: "write-err-test",
+		conn:   execClientConn,
+		client: c,
+		done:   make(chan struct{}),
+		inputQ: make(chan []byte, execInputQueueDepth),
+	}
+	c.execSessions.Store(session.execID, session)
+
+	drainExited := make(chan struct{})
+	go func() {
+		session.drainInput()
+		close(drainExited)
+	}()
+
+	// Close the conn so all writes will fail.
+	execClientConn.Close()
+
+	// Send enough frames to trigger the consecutive-error threshold (maxWriteErrors = 3).
+	for i := 0; i < 5; i++ {
+		session.inputQ <- []byte("ping")
+	}
+
+	select {
+	case <-drainExited:
+		// drainInput exited after consecutive write errors — correct.
+	case <-time.After(2 * time.Second):
+		t.Fatal("drainInput did not exit after consecutive write errors (potential goroutine leak)")
+	}
+
+	// session.done must be closed (Close() was called).
+	select {
+	case <-session.done:
+		// Good.
+	default:
+		t.Error("session.done is not closed: session.Close() was not called by drainInput")
 	}
 }
 
