@@ -2,10 +2,13 @@ package drydock
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/lookout/internal/config"
 )
 
 type fakeContainerProvider struct {
@@ -37,7 +40,7 @@ func TestBuildAckPayloadWithContainerProvider(t *testing.T) {
 		},
 	}
 
-	b := NewSSEBroadcaster(provider, "v-test")
+	b := NewSSEBroadcaster(provider, "v-test", nil)
 	b.startTime = time.Now().Add(-3 * time.Second)
 
 	var payload ackPayload
@@ -79,7 +82,7 @@ func TestBuildWatcherSnapshotPayload(t *testing.T) {
 		},
 	}
 
-	b := NewSSEBroadcaster(provider, "v-test")
+	b := NewSSEBroadcaster(provider, "v-test", nil)
 
 	raw, err := b.buildWatcherSnapshotPayload()
 	if err != nil {
@@ -115,7 +118,7 @@ func TestBuildWatcherSnapshotPayload(t *testing.T) {
 }
 
 func TestBuildWatcherSnapshotPayloadEmptyInventory(t *testing.T) {
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", nil)
 
 	raw, err := b.buildWatcherSnapshotPayload()
 	if err != nil {
@@ -134,5 +137,109 @@ func TestBuildWatcherSnapshotPayloadEmptyInventory(t *testing.T) {
 	// Drydock expects a JSON array, never null.
 	if string(payload.Data.Containers) != "[]" {
 		t.Fatalf("expected empty containers array, got %s", payload.Data.Containers)
+	}
+}
+
+func TestParseProcMeminfo(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantGB  float64
+	}{
+		{
+			name: "16 GiB",
+			content: `MemTotal:       16777216 kB
+MemFree:         1234567 kB
+MemAvailable:    9876543 kB
+`,
+			wantGB: 16.0,
+		},
+		{
+			name: "8 GiB rounded",
+			content: `MemTotal:        8388608 kB
+MemFree:          500000 kB
+`,
+			wantGB: 8.0,
+		},
+		{
+			name: "fractional — 1.5 GiB",
+			content: `MemTotal:        1572864 kB
+MemFree:          100000 kB
+`,
+			wantGB: 1.5,
+		},
+		{
+			name:    "missing MemTotal",
+			content: "MemFree: 1234 kB\n",
+			wantGB:  0,
+		},
+		{
+			name:    "malformed value",
+			content: "MemTotal: NOTANUMBER kB\n",
+			wantGB:  0,
+		},
+		{
+			name:    "empty file",
+			content: "",
+			wantGB:  0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "meminfo")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatalf("write temp meminfo: %v", err)
+			}
+			got := parseProcMeminfo(path)
+			if got != tc.wantGB {
+				t.Fatalf("parseProcMeminfo(%q) = %v, want %v", tc.name, got, tc.wantGB)
+			}
+		})
+	}
+}
+
+func TestParseProcMeminfoMissingFile(t *testing.T) {
+	got := parseProcMeminfo("/nonexistent/path/meminfo")
+	if got != 0 {
+		t.Fatalf("expected 0 for missing file, got %v", got)
+	}
+}
+
+func TestBuildAckPayloadLogLevelAndPollInterval(t *testing.T) {
+	cfg := &config.Config{
+		LogLevel:       "debug",
+		DDPollInterval: 60,
+	}
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", cfg)
+
+	var payload ackPayload
+	if err := json.Unmarshal(b.buildAckPayload(), &payload); err != nil {
+		t.Fatalf("unmarshal ack payload: %v", err)
+	}
+
+	if payload.Data.LogLevel != "debug" {
+		t.Fatalf("unexpected logLevel: got %q want %q", payload.Data.LogLevel, "debug")
+	}
+	if payload.Data.PollInterval != "60" {
+		t.Fatalf("unexpected pollInterval: got %q want %q", payload.Data.PollInterval, "60")
+	}
+}
+
+func TestBuildAckPayloadNilConfigNoFields(t *testing.T) {
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", nil)
+
+	var payload ackPayload
+	if err := json.Unmarshal(b.buildAckPayload(), &payload); err != nil {
+		t.Fatalf("unmarshal ack payload: %v", err)
+	}
+
+	// nil config must produce empty strings, not a panic
+	if payload.Data.LogLevel != "" {
+		t.Fatalf("expected empty logLevel for nil config, got %q", payload.Data.LogLevel)
+	}
+	if payload.Data.PollInterval != "" {
+		t.Fatalf("expected empty pollInterval for nil config, got %q", payload.Data.PollInterval)
 	}
 }

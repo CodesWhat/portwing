@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/lookout/internal/config"
 	"github.com/codeswhat/lookout/internal/docker"
 	"github.com/codeswhat/lookout/internal/protocol"
 )
@@ -39,11 +40,11 @@ type Adapter struct {
 }
 
 // NewAdapter creates a Drydock adapter.
-func NewAdapter(dockerClient *docker.Client, agentName string) *Adapter {
+func NewAdapter(dockerClient *docker.Client, agentName string, cfg *config.Config) *Adapter {
 	cm := adapter.NewContainerManager(dockerClient, agentName, ParseLabels)
 	return &Adapter{
 		containers:   cm,
-		sse:          NewSSEBroadcaster(cm, protocol.AgentVersion),
+		sse:          NewSSEBroadcaster(cm, protocol.AgentVersion, cfg),
 		dockerClient: dockerClient,
 		messageSem:   make(chan struct{}, defaultMessageHandlerConcurrency),
 	}
