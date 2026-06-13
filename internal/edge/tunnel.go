@@ -14,6 +14,23 @@ import (
 	"github.com/codeswhat/lookout/internal/protocol"
 )
 
+// execInputQueueDepth is the capacity of the per-session stdin input channel.
+// Chosen to absorb normal type-ahead bursts without back-pressure reaching
+// readPump.  When the queue is full (i.e. the Docker exec connection cannot
+// drain bytes fast enough), incoming exec_input frames are dropped and an
+// exec_error frame is sent to the controller so the user sees feedback.
+// This "drop-with-error-frame" policy is intentional:
+//
+//   - readPump MUST NEVER block on exec I/O — it also services pings, request
+//     fan-out, and all other message types.  A stalled exec session must not
+//     freeze the entire tunnel.
+//   - Blocking with a timeout on readPump would introduce worst-case latency of
+//     up to N×timeout per session, multiplied by burst depth — unacceptable.
+//   - Dropping is safe: the TTY stream is already lossy when the client types
+//     faster than the exec target can drain; a short error frame is preferable
+//     to silently corrupting the stream or stalling the whole connection.
+const execInputQueueDepth = 64
+
 // ExecSession represents an active exec session tunneled over WebSocket.
 type ExecSession struct {
 	execID      string
@@ -22,6 +39,11 @@ type ExecSession struct {
 	client      *Client
 	done        chan struct{}
 	once        sync.Once
+
+	// inputQ is the ordered stdin delivery channel.  A single drainInput
+	// goroutine reads from it sequentially, preserving per-session ordering.
+	// readPump enqueues into this channel without blocking.
+	inputQ chan []byte
 }
 
 // StartExec creates and starts a Docker exec session, then begins streaming
@@ -80,6 +102,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		conn:        conn,
 		client:      c,
 		done:        make(chan struct{}),
+		inputQ:      make(chan []byte, execInputQueueDepth),
 	}
 
 	c.execSessions.Store(msg.ExecID, session)
@@ -89,11 +112,20 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		ExecID: msg.ExecID,
 	})
 
+	// drainInput serialises stdin writes to the exec connection.  It is the
+	// only writer, so ordering within the session is strictly preserved.  It
+	// exits when the session's done channel is closed (i.e. on Close()).
+	go session.drainInput()
+
 	// Start reading output from the exec session.
 	go session.readLoop()
 }
 
-// HandleInput writes decoded input data to an active exec session.
+// HandleInput enqueues decoded input data for an active exec session.
+//
+// readPump calls this directly; it MUST NOT block.  The decode step is done
+// here (on readPump) so the channel carries plain []byte and the drain goroutine
+// only calls conn.Write.
 func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 	val, ok := c.execSessions.Load(msg.ExecID)
 	if !ok {
@@ -109,18 +141,60 @@ func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 		return
 	}
 
-	// Write with retry (up to 10 attempts, 50ms intervals).
-	for attempt := 0; attempt < 10; attempt++ {
-		_, err := session.conn.Write(data)
-		if err == nil {
-			return
-		}
-		slog.Debug("exec write retry", "execID", msg.ExecID, "attempt", attempt+1, "error", err)
-		time.Sleep(50 * time.Millisecond)
+	// Non-blocking enqueue: if the queue is full, drop this frame and notify
+	// the controller.  This preserves ordering for all frames that do land,
+	// and never blocks readPump.
+	select {
+	case session.inputQ <- data:
+	default:
+		slog.Warn("exec input queue full, dropping frame", "execID", msg.ExecID)
+		// Best-effort error frame; connection loss surfaces on the read pump.
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message: fmt.Sprintf("exec input queue full for session %s: frame dropped", msg.ExecID),
+		})
 	}
+}
 
-	slog.Warn("failed to write exec input after retries", "execID", msg.ExecID)
-	session.Close()
+// drainInput is the single goroutine that serialises conn.Write calls for one
+// exec session.  It exits when the session's done channel is closed, or after
+// consecutive write failures indicate a permanently broken connection.
+func (s *ExecSession) drainInput() {
+	const maxWriteErrors = 3
+
+	var writeErrors int
+	for {
+		select {
+		case <-s.done:
+			// Drain remaining queued bytes before exiting so Close()
+			// callers don't need to worry about the channel.
+			for {
+				select {
+				case data := <-s.inputQ:
+					_, _ = s.conn.Write(data)
+				default:
+					return
+				}
+			}
+		case data := <-s.inputQ:
+			if _, err := s.conn.Write(data); err != nil {
+				slog.Debug("exec write error in drain loop", "execID", s.execID, "error", err)
+				writeErrors++
+				// Guard against asymmetric half-closed connections where
+				// conn.Write fails continuously but conn.Read never returns
+				// an error (e.g. a proxy that closes only the write path).
+				// After maxWriteErrors consecutive failures, call Close()
+				// directly so readLoop + drainInput both exit promptly.
+				if writeErrors >= maxWriteErrors {
+					slog.Warn("exec drain: too many consecutive write errors, closing session",
+						"execID", s.execID, "errors", writeErrors)
+					s.Close()
+					return
+				}
+			} else {
+				writeErrors = 0
+			}
+		}
+	}
 }
 
 // HandleResize changes the TTY dimensions for an active exec session.
