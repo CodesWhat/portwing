@@ -413,7 +413,10 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Warn("invalid exec_resize message", "error", err)
 				continue
 			}
-			c.HandleResize(ctx, msg)
+			// HandleResize may sleep on retries; run off readPump to avoid
+			// blocking ping handling and exec_input delivery (mirrors the
+			// fix applied to HandleInput in #30).
+			go c.HandleResize(ctx, msg)
 
 		case protocol.TypeExecEnd:
 			var msg protocol.ExecEndMessage
