@@ -1,0 +1,23 @@
+{
+  "name": "lookout-web",
+  "private": true,
+  "workspaces": [
+    "website",
+    "docs"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "biome check .",
+    "lint:fix": "biome check --fix .",
+    "format": "biome format --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "turbo": "^2.9.17"
+  },
+  "packageManager": "npm@11.13.0",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
