@@ -19,18 +19,18 @@ const description =
   "A security-first remote Docker agent. Control your containers from anywhere, safely — over a default-deny socket, with signed policy, Ed25519 auth, and a tamper-evident audit log. The remote agent for Drydock.";
 
 export const metadata: Metadata = {
-  title: "Lookout — Security-first remote Docker agent",
+  title: "Portwing — Security-first remote Docker agent",
   description,
-  metadataBase: new URL("https://getlookout.dev"),
+  metadataBase: new URL("https://getportwing.dev"),
   icons: {
-    icon: "/lookout.png",
-    apple: "/lookout.png",
+    icon: "/portwing.png",
+    apple: "/portwing.png",
   },
   openGraph: {
-    title: "Lookout — Security-first remote Docker agent",
+    title: "Portwing — Security-first remote Docker agent",
     description,
-    url: "https://getlookout.dev",
-    siteName: "Lookout",
+    url: "https://getportwing.dev",
+    siteName: "Portwing",
     locale: "en_US",
     type: "website",
   },

@@ -27,7 +27,7 @@
 }
 
 /*
- * Lookout docs share the website palette: warm-neutral with a faint violet
+ * Portwing docs share the website palette: warm-neutral with a faint violet
  * cast (the pigeon's slate body) and a single vermilion brand accent. The
  * --color-fd-* overrides retint Fumadocs' own chrome (active nav, links,
  * the search highlight) to vermilion so the docs match the marketing site.

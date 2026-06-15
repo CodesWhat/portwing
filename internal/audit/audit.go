@@ -52,7 +52,7 @@ const (
 	EventComposeOp   = "compose_op"   // Docker Compose operation
 	EventAuthFailure = "auth_failure" // invalid token presented
 	EventRateLimited = "rate_limited" // request blocked by rate limiter
-	EventEnrollment  = "enrollment"   // Ed25519 key enrolled via /api/lookout/enroll
+	EventEnrollment  = "enrollment"   // Ed25519 key enrolled via /api/portwing/enroll
 )
 
 // Outcome values for the "outcome" field.
@@ -85,6 +85,7 @@ func New(dest string) (*Logger, func(), error) {
 	case "stderr":
 		w = os.Stderr
 	default:
+		// #nosec G304 -- AUDIT_LOG is an explicit operator-configured destination.
 		f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			return nil, func() {}, err

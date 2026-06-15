@@ -1,11 +1,11 @@
 ---
 title: Authentication
-description: Configure token-based or Ed25519 per-client key authentication for the Lookout agent.
+description: Configure token-based or Ed25519 per-client key authentication for the Portwing agent.
 ---
 
-Lookout supports four authentication mechanisms, ordered below from weakest to strongest. All token options and Ed25519 keys can coexist during migration — the middleware checks for an `X-Lookout-Signature` header first and falls back to token verification when that header is absent.
+Portwing supports four authentication mechanisms, ordered below from weakest to strongest. All token options and Ed25519 keys can coexist during migration — the middleware checks for an `X-Portwing-Signature` header first and falls back to token verification when that header is absent.
 
-Requests authenticate via `Authorization: Bearer`, `X-Lookout-Token`, or `X-Dd-Agent-Secret` for token-based auth, and via a set of `X-Lookout-*` headers for Ed25519.
+Requests authenticate via `Authorization: Bearer`, `X-Portwing-Token`, or `X-Dd-Agent-Secret` for token-based auth, and via a set of `X-Portwing-*` headers for Ed25519.
 
 See [Configuration](/configuration) for a complete environment variable reference, and [Connection Modes](/connection-modes) for how auth applies in edge (WebSocket) mode.
 
@@ -17,11 +17,11 @@ Set `TOKEN` to a random secret. Every request must supply it in one of the accep
 
 ```bash
 TOKEN=$(openssl rand -hex 32)
-docker run -d --name lookout \
+docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 3000:3000 \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 <Callout type="warn">
@@ -36,15 +36,15 @@ docker run -d --name lookout \
 
 ```bash
 TOKEN=$(openssl rand -hex 32)
-printf '%s' "$TOKEN" > /run/secrets/lookout-token
-chmod 600 /run/secrets/lookout-token
+printf '%s' "$TOKEN" > /run/secrets/portwing-token
+chmod 600 /run/secrets/portwing-token
 
-docker run -d --name lookout \
+docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /run/secrets/lookout-token:/run/secrets/lookout-token:ro \
-  -e TOKEN_FILE=/run/secrets/lookout-token \
+  -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
+  -e TOKEN_FILE=/run/secrets/portwing-token \
   -p 3000:3000 \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 This is appropriate for Docker secrets, Kubernetes secret volumes, or any orchestrator that can inject files but not env vars safely.
@@ -55,31 +55,31 @@ This is appropriate for Docker secrets, Kubernetes secret volumes, or any orches
 
 `TOKEN_HASH` stores an Argon2id hash of the token so the plaintext never appears in environment variable dumps or config files. At runtime the agent performs a constant-time Argon2id comparison against the presented token.
 
-**Generate the hash with `lookout hash-token`.** The token is read from stdin — it is never passed as a command-line argument to avoid exposure in shell history and process listings.
+**Generate the hash with `portwing hash-token`.** The token is read from stdin — it is never passed as a command-line argument to avoid exposure in shell history and process listings.
 
 ```bash
 # Generate a token and hash it
 TOKEN=$(openssl rand -hex 32)
-HASH=$(printf '%s' "$TOKEN" | lookout hash-token)
+HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
 # Output format: $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 
 # Start the agent with the hash
-docker run -d --name lookout \
+docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN_HASH="$HASH" \
   -p 3000:3000 \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 To keep the hash out of the environment entirely, write it to a file and use `TOKEN_HASH_FILE`:
 
 ```bash
-printf '%s' "$TOKEN" | lookout hash-token > /run/secrets/lookout-token-hash
-chmod 600 /run/secrets/lookout-token-hash
+printf '%s' "$TOKEN" | portwing hash-token > /run/secrets/portwing-token-hash
+chmod 600 /run/secrets/portwing-token-hash
 
-docker run -d --name lookout \
-  -v /run/secrets/lookout-token-hash:/run/secrets/lookout-token-hash:ro \
-  -e TOKEN_HASH_FILE=/run/secrets/lookout-token-hash \
+docker run -d --name portwing \
+  -v /run/secrets/portwing-token-hash:/run/secrets/portwing-token-hash:ro \
+  -e TOKEN_HASH_FILE=/run/secrets/portwing-token-hash \
   ...
 ```
 
@@ -99,13 +99,13 @@ No shared secret is involved. Compromising one client's private key does not aff
 
 ```bash
 # Writes the private key (PEM PKCS#8) and the authorized_keys line to stdout.
-lookout keygen -comment "my-platform:prod"
+portwing keygen -comment "my-platform:prod"
 ```
 
 Copy the `authorized_keys` output line to the agent host:
 
 ```
-# /etc/lookout/authorized_keys  (mode 0600)
+# /etc/portwing/authorized_keys  (mode 0600)
 ed25519 AAAA... my-platform:prod
 ```
 
@@ -120,12 +120,12 @@ Comment out or remove a line to revoke that key. The agent refuses to start if t
 ### Start the agent with Ed25519 auth
 
 ```bash
-docker run -d --name lookout \
+docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /etc/lookout/authorized_keys:/etc/lookout/authorized_keys:ro \
-  -e AUTHORIZED_KEYS=/etc/lookout/authorized_keys \
+  -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
+  -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 3000:3000 \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 ### Request signing headers
@@ -134,10 +134,10 @@ Clients must send four headers on every request:
 
 | Header | Format |
 |--------|--------|
-| `X-Lookout-Key-ID` | Hex-encoded first 8 bytes of SHA-256 of the raw public key |
-| `X-Lookout-Timestamp` | Unix epoch, seconds, decimal string |
-| `X-Lookout-Nonce` | 32 random hex characters (128-bit) |
-| `X-Lookout-Signature` | Base64url (no padding) Ed25519 signature over the canonical message |
+| `X-Portwing-Key-ID` | Hex-encoded first 8 bytes of SHA-256 of the raw public key |
+| `X-Portwing-Timestamp` | Unix epoch, seconds, decimal string |
+| `X-Portwing-Nonce` | 32 random hex characters (128-bit) |
+| `X-Portwing-Signature` | Base64url (no padding) Ed25519 signature over the canonical message |
 
 The canonical message is a newline-separated UTF-8 string:
 
@@ -153,9 +153,9 @@ For an empty body, use the SHA-256 of the empty string: `e3b0c44298fc1c149afbf4c
 
 ### Key rotation (zero-downtime)
 
-1. Generate a new keypair: `lookout keygen -comment "my-platform:prod:2026-07"`
+1. Generate a new keypair: `portwing keygen -comment "my-platform:prod:2026-07"`
 2. Append the new public key line to the authorized-keys file on the agent host.
-3. Send `SIGHUP` to reload: `kill -HUP $(pidof lookout)` or `docker kill --signal HUP lookout`. Both old and new keys are now active.
+3. Send `SIGHUP` to reload: `kill -HUP $(pidof portwing)` or `docker kill --signal HUP portwing`. Both old and new keys are now active.
 4. Update the platform to sign with the new private key.
 5. Remove the old key from the file and send another `SIGHUP`.
 
@@ -173,7 +173,7 @@ In edge mode the agent initiates an outbound WebSocket connection to the platfor
 # docker-compose.yml (edge mode)
 environment:
   DRYDOCK_URL: wss://platform.example.com
-  PRIVATE_KEY_FILE: /run/secrets/lookout-private-key
+  PRIVATE_KEY_FILE: /run/secrets/portwing-private-key
 ```
 
 The hello carries `pubKeyId`, `timestamp`, `nonce`, and `signature` fields. The controller verifies the signature against its own copy of the agent's registered public key before sending `welcome`; if verification fails the connection is closed. Individual messages after the hello are not signed separately — they are implicitly authorized by the authenticated TLS+WebSocket session.
@@ -188,4 +188,4 @@ Ed25519 auth is the recommended option for production. Per-request signatures wi
 
 ## Migrating from tokens to Ed25519
 
-Token auth and Ed25519 auth work simultaneously. Set both `TOKEN_HASH` and `AUTHORIZED_KEYS` during the transition period. The middleware checks for `X-Lookout-Signature` first; requests without that header fall through to token verification. Once all clients are sending signed requests, remove the token variables and restart.
+Token auth and Ed25519 auth work simultaneously. Set both `TOKEN_HASH` and `AUTHORIZED_KEYS` during the transition period. The middleware checks for `X-Portwing-Signature` first; requests without that header fall through to token verification. Once all clients are sending signed requests, remove the token variables and restart.

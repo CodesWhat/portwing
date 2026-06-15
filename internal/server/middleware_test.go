@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/audit"
-	"github.com/codeswhat/lookout/internal/auth"
+	"github.com/codeswhat/portwing/internal/audit"
+	"github.com/codeswhat/portwing/internal/auth"
 )
 
 // noAudit returns a disabled audit.Logger for tests that only care about HTTP
@@ -44,7 +44,7 @@ func TestAuthMiddlewareRawTokenAccept(t *testing.T) {
 	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Lookout-Token", "correct")
+	req.Header.Set(headerPortwingToken, "correct")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -62,7 +62,7 @@ func TestAuthMiddlewareRawTokenReject(t *testing.T) {
 	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Lookout-Token", "wrong")
+	req.Header.Set(headerPortwingToken, "wrong")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -92,7 +92,7 @@ func TestAuthMiddlewareArgon2idAccept(t *testing.T) {
 	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Lookout-Token", token)
+	req.Header.Set(headerPortwingToken, token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -122,7 +122,7 @@ func TestAuthMiddlewareArgon2idReject(t *testing.T) {
 	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Lookout-Token", "wrongtoken")
+	req.Header.Set(headerPortwingToken, "wrongtoken")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -219,7 +219,7 @@ func TestRateLimiterNotBypassedBySpoofedXFF(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "192.0.2.1:50000"
 		req.Header.Set("X-Forwarded-For", fmt.Sprintf("203.0.113.%d", i))
-		req.Header.Set("X-Lookout-Token", "wrong")
+		req.Header.Set(headerPortwingToken, "wrong")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
@@ -230,7 +230,7 @@ func TestRateLimiterNotBypassedBySpoofedXFF(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.0.2.1:50000"
 	req.Header.Set("X-Forwarded-For", "203.0.113.250")
-	req.Header.Set("X-Lookout-Token", "wrong")
+	req.Header.Set(headerPortwingToken, "wrong")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -240,7 +240,7 @@ func TestRateLimiterNotBypassedBySpoofedXFF(t *testing.T) {
 }
 
 // TestAuthMiddlewareFallbackHeader verifies that X-Dd-Agent-Secret is accepted
-// when X-Lookout-Token is absent.
+// when Portwing token headers are absent.
 func TestAuthMiddlewareFallbackHeader(t *testing.T) {
 	t.Parallel()
 
@@ -274,8 +274,8 @@ func TestAuditMiddlewareEmitsAuthFailure(t *testing.T) {
 	verifier := &rawTokenVerifier{token: "correct"}
 	h := rl.AuthMiddleware(verifier, l, http.HandlerFunc(okHandler))
 
-	req := httptest.NewRequest(http.MethodGet, "/_lookout/info", nil)
-	req.Header.Set("X-Lookout-Token", "wrong")
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
+	req.Header.Set(headerPortwingToken, "wrong")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -309,15 +309,15 @@ func TestAuditMiddlewareEmitsRateLimited(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.1:1234"
-		req.Header.Set("X-Lookout-Token", "bad")
+		req.Header.Set(headerPortwingToken, "bad")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 	}
 
 	// This request should now be rate-limited.
-	req := httptest.NewRequest(http.MethodGet, "/_lookout/compose", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/compose", nil)
 	req.RemoteAddr = "10.0.0.1:1234"
-	req.Header.Set("X-Lookout-Token", "bad")
+	req.Header.Set(headerPortwingToken, "bad")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -347,8 +347,8 @@ func TestAuditMiddlewareEmitsAPIRequest(t *testing.T) {
 	verifier := &rawTokenVerifier{token: "correct"}
 	h := rl.AuthMiddleware(verifier, l, http.HandlerFunc(okHandler))
 
-	req := httptest.NewRequest(http.MethodGet, "/_lookout/info", nil)
-	req.Header.Set("X-Lookout-Token", "correct")
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
+	req.Header.Set(headerPortwingToken, "correct")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -381,7 +381,7 @@ func TestAuthMiddlewarePreservesStreamingInterfaces(t *testing.T) {
 	h := rl.AuthMiddleware(verifier, noAudit(t), inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
-	req.Header.Set("X-Lookout-Token", "correct")
+	req.Header.Set(headerPortwingToken, "correct")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -467,7 +467,7 @@ func TestEd25519MiddlewareAccept(t *testing.T) {
 	rl := NewRateLimiter()
 	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
 
-	req := httptest.NewRequest(http.MethodGet, "/_lookout/info", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
 	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -486,7 +486,7 @@ func TestEd25519MiddlewareTokenFallback(t *testing.T) {
 	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/path", nil)
-	req.Header.Set("X-Lookout-Token", "mysecret")
+	req.Header.Set(headerPortwingToken, "mysecret")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -516,7 +516,7 @@ func TestEd25519MiddlewareBothConfigured(t *testing.T) {
 }
 
 // TestEd25519MiddlewareBadTimestamp verifies that a skewed timestamp returns
-// 401 with X-Lookout-Reason: timestamp-skew.
+// 401 with X-Portwing-Reason: timestamp-skew.
 func TestEd25519MiddlewareBadTimestamp(t *testing.T) {
 	t.Parallel()
 	ed, priv := setupEd25519(t)
@@ -532,7 +532,7 @@ func TestEd25519MiddlewareBadTimestamp(t *testing.T) {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
 	if got := rec.Header().Get(auth.HeaderReason); got != "timestamp-skew" {
-		t.Errorf("X-Lookout-Reason: got %q want %q", got, "timestamp-skew")
+		t.Errorf("X-Portwing-Reason: got %q want %q", got, "timestamp-skew")
 	}
 }
 
@@ -562,7 +562,7 @@ func TestEd25519MiddlewareReplayedNonce(t *testing.T) {
 		t.Fatalf("replayed request: expected 401, got %d", rec2.Code)
 	}
 	if got := rec2.Header().Get(auth.HeaderReason); got != "replay" {
-		t.Errorf("X-Lookout-Reason: got %q want %q", got, "replay")
+		t.Errorf("X-Portwing-Reason: got %q want %q", got, "replay")
 	}
 }
 
@@ -588,7 +588,7 @@ func TestEd25519MiddlewareUnknownKey(t *testing.T) {
 		t.Fatalf("expected 401 for unknown key, got %d", rec.Code)
 	}
 	if got := rec.Header().Get(auth.HeaderReason); got != "unknown-key" {
-		t.Errorf("X-Lookout-Reason: got %q want %q", got, "unknown-key")
+		t.Errorf("X-Portwing-Reason: got %q want %q", got, "unknown-key")
 	}
 }
 
@@ -605,7 +605,7 @@ func TestRateLimitOnlyRecordsFailures(t *testing.T) {
 	h := rl.rateLimitOnly(deny)
 
 	for i := 0; i < 10; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", nil)
 		req.RemoteAddr = "192.0.2.9:40000"
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -614,7 +614,7 @@ func TestRateLimitOnlyRecordsFailures(t *testing.T) {
 		}
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", nil)
 	req.RemoteAddr = "192.0.2.9:40000"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

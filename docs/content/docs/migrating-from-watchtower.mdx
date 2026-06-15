@@ -1,6 +1,6 @@
 ---
 title: Migrating from Watchtower
-description: Replace an archived Watchtower installation with Drydock + Lookout — including architecture differences, label mapping, and a step-by-step cutover.
+description: Replace an archived Watchtower installation with Drydock + Portwing — including architecture differences, label mapping, and a step-by-step cutover.
 ---
 
 Watchtower (`containrrr/watchtower`) was archived on **17 December 2025**. The repository is now read-only. No future releases, bug fixes, or security updates are planned. The final release is v1.7.1 (November 2023).
@@ -8,7 +8,7 @@ Watchtower (`containrrr/watchtower`) was archived on **17 December 2025**. The r
 Running an archived, unpatched tool with full access to the Docker socket is a security liability. This guide shows how to replace Watchtower with the Drydock ecosystem:
 
 - **Drydock** — the central container monitoring and update platform (replaces Watchtower's registry-poll and auto-update logic).
-- **Lookout** — the lightweight remote Docker agent that gives Drydock secure access to your host's Docker daemon.
+- **Portwing** — the lightweight remote Docker agent that gives Drydock secure access to your host's Docker daemon.
 
 ---
 
@@ -16,23 +16,23 @@ Running an archived, unpatched tool with full access to the Docker socket is a s
 
 Watchtower runs as a container on every host. It polls the registry, decides whether to pull, and recreates containers — all autonomously on that one host with no coordination or visibility.
 
-Drydock + Lookout invert the model. Lookout runs on each host and exposes the Docker API over authenticated HTTP. The Drydock controller connects inbound to each agent, performs registry checks centrally, and orchestrates updates through its dashboard.
+Drydock + Portwing invert the model. Portwing runs on each host and exposes the Docker API over authenticated HTTP. The Drydock controller connects inbound to each agent, performs registry checks centrally, and orchestrates updates through its dashboard.
 
-| Aspect | Watchtower | Drydock + Lookout |
+| Aspect | Watchtower | Drydock + Portwing |
 |--------|------------|-------------------|
 | Update decision | On each host | Centralised in Drydock |
 | Registry polling | Each host independently | Drydock controller |
 | Visibility | Logs only | Full dashboard with history |
-| Multi-host | One instance per host, no coordination | Single Drydock, many Lookout agents |
+| Multi-host | One instance per host, no coordination | Single Drydock, many Portwing agents |
 | Authentication | None (Docker socket direct) | Token auth, TLS, rate limiting |
 | Compose support | Recreate only | Full lifecycle (`up`/`down`/`pull`/`ps`/`logs`) |
 | Container exec / terminal | No | Yes (WebSocket) |
 | Container filtering | Label `com.centurylinklabs.watchtower.enable` | Label `dd.watch=true` |
 | Self-hosted server required | No | Yes (Drydock) |
-| Image size | ~50 MB | ~10 MB (Lookout) + Drydock server |
+| Image size | ~50 MB | ~10 MB (Portwing) + Drydock server |
 
 <Callout type="warn">
-Lookout does **not** automatically pull and recreate containers on a schedule. That decision is made by the Drydock controller through its UI and notification pipeline — not by the agent. If you relied on Watchtower's fully autonomous update loop, you will need to configure update policies in Drydock.
+Portwing does **not** automatically pull and recreate containers on a schedule. That decision is made by the Drydock controller through its UI and notification pipeline — not by the agent. If you relied on Watchtower's fully autonomous update loop, you will need to configure update policies in Drydock.
 </Callout>
 
 ---
@@ -55,7 +55,7 @@ Containers **without** `dd.watch=true` appear in the Drydock inventory but are n
 
 ---
 
-## Deploy Lookout
+## Deploy Portwing
 
 Choose the connection mode that fits your network topology. See [Connection Modes](/connection-modes) for a full comparison.
 
@@ -66,8 +66,8 @@ Use this when the Drydock controller can reach your host directly — no NAT.
 ```yaml
 # docker-compose.yml
 services:
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -75,7 +75,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      TOKEN: "${LOOKOUT_TOKEN}"           # Set a strong secret
+      TOKEN: "${PORTWING_TOKEN}"           # Set a strong secret
       PORT: "3000"
       BIND_ADDRESS: "0.0.0.0"
       STACKS_DIR: "/data/stacks"
@@ -92,7 +92,7 @@ Key environment variables for Standard mode:
 |----------|---------|-------------|
 | `TOKEN` | — | Auth token (required; use `TOKEN_HASH` for hash-at-rest) |
 | `TOKEN_FILE` | — | Path to file containing the token |
-| `TOKEN_HASH` | — | Argon2id hash of the token (from `lookout hash-token`) |
+| `TOKEN_HASH` | — | Argon2id hash of the token (from `portwing hash-token`) |
 | `PORT` | `3000` | HTTP listen port |
 | `BIND_ADDRESS` | `0.0.0.0` | HTTP bind address |
 | `TLS_CERT` | — | Server TLS certificate path |
@@ -104,19 +104,19 @@ Key environment variables for Standard mode:
 | `DD_POLL_INTERVAL` | `300` | Container inventory refresh interval (seconds) |
 | `SKIP_DF_COLLECTION` | — | Set to `true` to disable disk metrics |
 
-### Edge mode (Lookout dials out)
+### Edge mode (Portwing dials out)
 
-Use this when your host is behind NAT, a firewall, or has a dynamic IP. Lookout initiates the outbound WebSocket connection to Drydock; no inbound port is required.
+Use this when your host is behind NAT, a firewall, or has a dynamic IP. Portwing initiates the outbound WebSocket connection to Drydock; no inbound port is required.
 
 <Callout type="warn">
-Edge mode is implemented end-to-end: Drydock 1.5 ships the `/api/lookout/ws` controller endpoint and Lookout's agent signs an Ed25519 hello. Drydock 1.5 and Lookout 0.2.2 are both pre-release (current stable: Drydock 1.4.x, Lookout 0.2.0), and full exec robustness under load lands in Lookout 0.2.2 — treat edge mode as early access and prefer standard mode for production until the stable releases ship. The endpoint is Ed25519-only: set `PRIVATE_KEY_FILE` (token-only connections are rejected).
+Edge mode is implemented end-to-end: Drydock 1.5 ships the `/api/portwing/ws` controller endpoint and Portwing's agent signs an Ed25519 hello. Drydock 1.5 and Portwing 0.2.2 are both pre-release (current stable: Drydock 1.4.x, Portwing 0.2.0), and full exec robustness under load lands in Portwing 0.2.2 — treat edge mode as early access and prefer standard mode for production until the stable releases ship. The endpoint is Ed25519-only: set `PRIVATE_KEY_FILE` (token-only connections are rejected).
 </Callout>
 
 ```yaml
 # docker-compose.yml
 services:
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -125,7 +125,7 @@ services:
       DRYDOCK_URL: "wss://your-drydock.example.com:3001"
       # Edge requires an Ed25519 key; mount it and set PRIVATE_KEY_FILE
       # (register the public key in Drydock). Token-only auth is rejected.
-      PRIVATE_KEY_FILE: "/run/secrets/lookout_key"
+      PRIVATE_KEY_FILE: "/run/secrets/portwing_key"
       AGENT_NAME: "my-server"
       STACKS_DIR: "/data/stacks"
       # Optional: custom CA for self-signed Drydock controller certs
@@ -147,7 +147,7 @@ Additional Edge mode variables:
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff (seconds) |
 | `WELCOME_TIMEOUT` | `30` | Seconds to wait for the Drydock welcome message |
 
-Edge mode requires `DRYDOCK_URL` and, for the Drydock 1.5 controller, an Ed25519 key via `PRIVATE_KEY_FILE` — the endpoint rejects token-only connections. If `DRYDOCK_URL` is missing, Lookout falls back to Standard mode.
+Edge mode requires `DRYDOCK_URL` and, for the Drydock 1.5 controller, an Ed25519 key via `PRIVATE_KEY_FILE` — the endpoint rejects token-only connections. If `DRYDOCK_URL` is missing, Portwing falls back to Standard mode.
 
 ---
 
@@ -159,16 +159,16 @@ Edge mode requires `DRYDOCK_URL` and, for the Drydock 1.5 controller, an Ed25519
 docker stop watchtower && docker rm watchtower
 ```
 
-2. **Deploy Lookout** using the Standard or Edge compose snippet above. See [Getting Started](/getting-started) for the hardened sockguard configuration.
+2. **Deploy Portwing** using the Standard or Edge compose snippet above. See [Getting Started](/getting-started) for the hardened sockguard configuration.
 
 3. **Update container labels** — replace `com.centurylinklabs.watchtower.*` labels with their `dd.*` equivalents from the mapping table above.
 
-4. **Add Lookout to Drydock** — configure the agent endpoint in the Drydock UI, or let Edge mode auto-register.
+4. **Add Portwing to Drydock** — configure the agent endpoint in the Drydock UI, or let Edge mode auto-register.
 
-5. **Verify** — check that `/_lookout/health` returns `{"status":"healthy"}` and the Drydock UI shows the host and its containers.
+5. **Verify** — check that `/_portwing/health` returns `{"status":"healthy"}` and the Drydock UI shows the host and its containers.
 
 ```bash
-curl http://your-host:3000/_lookout/health
+curl http://your-host:3000/_portwing/health
 ```
 
 6. **Remove the Watchtower image.**
@@ -181,7 +181,7 @@ docker rmi containrrr/watchtower
 
 ## Backward-compatible auth header
 
-If you are migrating from an existing Drydock agent (Node.js) that used `X-Dd-Agent-Secret`, Lookout accepts that header transparently alongside `X-Lookout-Token`. No client-side changes are required during a phased migration.
+If you are migrating from an existing Drydock agent (Node.js) that used `X-Dd-Agent-Secret`, Portwing accepts that header transparently alongside `X-Portwing-Token`. No client-side changes are required during a phased migration.
 
 <Callout type="info">
 For production deployments, upgrade to Ed25519 per-request signing after the initial cutover. See [Authentication](/authentication) and [Security Model](/security-model) for details.
@@ -191,10 +191,10 @@ For production deployments, upgrade to Ed25519 per-request signing after the ini
 
 ## Honest feature comparison
 
-| Feature | Watchtower (archived) | Drydock + Lookout |
+| Feature | Watchtower (archived) | Drydock + Portwing |
 |---------|-----------------------|-------------------|
 | Status | Archived Dec 2025; no security updates | Actively developed |
-| Setup complexity | Low (single container) | Medium (Lookout + Drydock) |
+| Setup complexity | Low (single container) | Medium (Portwing + Drydock) |
 | Multi-host | Poor — one instance per host, no coordination | First-class |
 | Security | No auth on Docker socket access | Token auth, TLS, rate limiting |
 | Automatic updates | Yes — pull and recreate autonomously | Controlled via Drydock UI |
@@ -203,8 +203,8 @@ For production deployments, upgrade to Ed25519 per-request signing after the ini
 | Compose support | Recreate only | Full lifecycle (`up`/`down`/`pull`/`ps`/`logs`) |
 | Exec / terminal | No | Yes (WebSocket) |
 | Self-hosted required | No | Yes (Drydock server) |
-| Resource footprint | ~50 MB image | ~10 MB Lookout + Drydock server |
+| Resource footprint | ~50 MB image | ~10 MB Portwing + Drydock server |
 
 <Callout type="info">
-See [Configuration](/configuration) for the full environment-variable reference and [Security Model](/security-model) for Lookout's default-deny socket filtering and rate-limiting details.
+See [Configuration](/configuration) for the full environment-variable reference and [Security Model](/security-model) for Portwing's default-deny socket filtering and rate-limiting details.
 </Callout>

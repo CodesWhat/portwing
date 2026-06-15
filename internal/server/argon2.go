@@ -98,8 +98,14 @@ func parseParams(s string) (*Argon2idParams, error) {
 		}
 		switch kv[0] {
 		case "m":
+			if v > uint64(^uint32(0)) {
+				return nil, fmt.Errorf("argon2id: memory parameter %d exceeds maximum uint32", v)
+			}
 			p.Memory = uint32(v)
 		case "t":
+			if v > uint64(^uint32(0)) {
+				return nil, fmt.Errorf("argon2id: time parameter %d exceeds maximum uint32", v)
+			}
 			p.Time = uint32(v)
 		case "p":
 			if v > 255 {
@@ -128,7 +134,12 @@ func parseParams(s string) (*Argon2idParams, error) {
 // Verify returns true if password matches the Argon2id hash encoded in p.
 // The comparison is constant-time.
 func (p *Argon2idParams) Verify(password string) bool {
-	derived := argon2.IDKey([]byte(password), p.Salt, p.Time, p.Memory, p.Parallelism, uint32(len(p.Hash)))
+	if uint64(len(p.Hash)) > uint64(^uint32(0)) {
+		return false
+	}
+	// #nosec G115 -- len(p.Hash) is checked against uint32 max immediately above.
+	keyLen := uint32(len(p.Hash))
+	derived := argon2.IDKey([]byte(password), p.Salt, p.Time, p.Memory, p.Parallelism, keyLen)
 	return subtle.ConstantTimeCompare(derived, p.Hash) == 1
 }
 

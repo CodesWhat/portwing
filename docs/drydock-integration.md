@@ -4,21 +4,21 @@
 
 ## Architecture
 
-Drydock supports two agent connectivity patterns. Lookout implements both.
+Drydock supports two agent connectivity patterns. Portwing implements both.
 
 ```mermaid
 flowchart TB
     subgraph std ["Standard mode — inbound HTTP (implemented)"]
         direction LR
         SC["Drydock controller<br/>AgentClient.ts (polls /api/*)"]
-        SL["Lookout<br/>HTTP server /api/*"]
+        SL["Portwing<br/>HTTP server /api/*"]
         SC -- "HTTP / SSE · X-Dd-Agent-Secret" --> SL
     end
 
     subgraph edge ["Edge mode — outbound WebSocket (Drydock 1.5)"]
         direction LR
-        EL["Lookout<br/>edge/client (outbound)"]
-        EC["Drydock controller<br/>WebSocket srv /api/lookout/ws<br/>(Drydock 1.5 — Ed25519)"]
+        EL["Portwing<br/>edge/client (outbound)"]
+        EC["Drydock controller<br/>WebSocket srv /api/portwing/ws<br/>(Drydock 1.5 — Ed25519)"]
         EL -- "WSS · hello → welcome" --> EC
     end
 
@@ -30,7 +30,7 @@ flowchart TB
     end
 ```
 
-Lookout Standard Mode replaces the Legacy SSE Agent. Edge Mode has Lookout dial outbound to the Drydock controller's `/api/lookout/ws` endpoint using the `lookout/1.0` protocol; the controller endpoint shipped in Drydock 1.5 and requires an Ed25519-signed hello.
+Portwing Standard Mode replaces the Legacy SSE Agent. Edge Mode has Portwing dial outbound to the Drydock controller's `/api/portwing/ws` endpoint using the `portwing/1.0` protocol; the controller endpoint shipped in Drydock 1.5 and requires an Ed25519-signed hello.
 
 ---
 
@@ -41,7 +41,7 @@ Source: `app/agent/AgentClient.ts:506–579`
 ```mermaid
 sequenceDiagram
     participant D as Drydock controller (AgentClient)
-    participant L as Lookout (standard mode)
+    participant L as Portwing (standard mode)
     D->>L: GET /api/events · X-Dd-Agent-Secret
     L-->>D: text/event-stream
     L->>D: data: dd:ack (immediate on connect)
@@ -68,15 +68,15 @@ Source citation:
 
 ---
 
-## Edge Mode: Lookout WebSocket Handshake
+## Edge Mode: Portwing WebSocket Handshake
 
 Source: `internal/edge/client.go`, `internal/protocol/messages.go`
 
 ```mermaid
 sequenceDiagram
-    participant L as Lookout (edge client)
+    participant L as Portwing (edge client)
     participant D as Drydock controller
-    L->>D: WSS /api/lookout/ws
+    L->>D: WSS /api/portwing/ws
     L->>D: hello {version, protocol, agentId, agentName, tokenHash,<br/>dockerVersion, capabilities, drydockCompat, watcherTypes}
     D->>L: welcome {pollInterval: 300}
     L->>D: dd:container_sync {containers: [...]}
@@ -88,11 +88,11 @@ The full `hello` payload (exact field set) is in [SPEC.md §3.2](../SPEC.md#32-h
 
 ---
 
-## Endpoints Lookout Serves (Standard Mode)
+## Endpoints Portwing Serves (Standard Mode)
 
-All `/api/*` endpoints require `X-Dd-Agent-Secret` or `X-Lookout-Token` header.
+All `/api/*` endpoints require `X-Dd-Agent-Secret` or `X-Portwing-Token` header.
 
-| Drydock Call | Lookout Endpoint | Method | Notes |
+| Drydock Call | Portwing Endpoint | Method | Notes |
 |---|---|---|---|
 | `AgentClient.startSse()` L717 | `GET /api/events` | GET | SSE stream; `dd:ack` on connect |
 | `AgentClient._doHandshake()` L519 | `GET /api/containers` | GET | `[]Container` JSON |
@@ -120,7 +120,7 @@ with `type` and `data` fields (`AgentClient.ts:659`).
 Drydock reads: `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, `lastSeen`
 (`AgentClient.ts:744–763`)
 
-Lookout sends:
+Portwing sends:
 ```json
 {
   "type": "dd:ack",
@@ -138,7 +138,7 @@ Lookout sends:
 }
 ```
 
-Note: `memoryGb` is 0 on Lookout 0.2.1 and earlier (cgo/sysinfo omitted); Drydock accepts 0. A later release reports real memory on Linux via `/proc/meminfo` (still no cgo).
+Note: `memoryGb` is 0 on Portwing 0.2.1 and earlier (cgo/sysinfo omitted); Drydock accepts 0. A later release reports real memory on Linux via `/proc/meminfo` (still no cgo).
 
 ### `dd:container-added` / `dd:container-updated`
 
@@ -148,7 +148,7 @@ Note: `memoryGb` is 0 on Lookout 0.2.1 and earlier (cgo/sysinfo omitted); Drydoc
 
 ### `dd:container-removed`
 
-Drydock reads only `.data.id` (`AgentClient.ts:782`). Lookout also sends `name`
+Drydock reads only `.data.id` (`AgentClient.ts:782`). Portwing also sends `name`
 (harmless extra field).
 
 ```json
@@ -170,7 +170,7 @@ Drydock expects these fields:
 | `displayName` | string | From `dd.display.name` label or falls back to `name` |
 | `displayIcon` | string? | From `dd.display.icon` label |
 | `status` | string | `running`, `stopped`, `paused`, `restarting`, `dead`, `created` |
-| `watcher` | string | Watcher name (Lookout: `"docker"` or from `dd.watch` label) |
+| `watcher` | string | Watcher name (Portwing: `"docker"` or from `dd.watch` label) |
 | `agent` | string? | Agent name (set by Drydock controller, stripped in agent responses) |
 | `image.id` | string | Image SHA |
 | `image.registry` | string | e.g. `"docker.io"` |
@@ -189,7 +189,7 @@ Drydock expects these fields:
 
 Drydock reads: `type`, `name`, `configuration`, `metadata` (`AgentClient.ts:489–503`).
 
-Lookout returns:
+Portwing returns:
 ```json
 [{
   "type": "docker",
@@ -208,12 +208,12 @@ required by the AgentClient — it never reads them from the remote agent respon
 
 ## Environment Variable Mapping
 
-### Drydock Controller Side (configures the connection to Lookout)
+### Drydock Controller Side (configures the connection to Portwing)
 
 | Drydock env var / config | Description |
 |---|---|
-| Agent `host` | Lookout hostname/IP (set in Drydock agent component config, no env var) |
-| Agent `port` | Lookout port (default 3000) |
+| Agent `host` | Portwing hostname/IP (set in Drydock agent component config, no env var) |
+| Agent `port` | Portwing port (default 3000) |
 | Agent `secret` | Shared secret → sent as `X-Dd-Agent-Secret` |
 | `DD_AGENT_ALLOW_INSECURE_SECRET=true` | Allow secret over plain HTTP |
 | Agent `cafile` | CA cert for TLS verification |
@@ -221,12 +221,12 @@ required by the AgentClient — it never reads them from the remote agent respon
 
 Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 
-### Lookout Side (agent binary)
+### Portwing Side (agent binary)
 
-| Lookout env var | Purpose | Drydock counterpart |
+| Portwing env var | Purpose | Drydock counterpart |
 |---|---|---|
 | `TOKEN` | Shared secret (preferred) | Drydock agent `secret` |
-| `DD_AGENT_SECRET` | Shared secret (compat alias) | Drydock agent `secret` |
+| `DD_AGENT_SECRET` | Shared secret (Drydock agent secret) | Drydock agent `secret` |
 | `TOKEN_FILE` | Path to file containing token | Drydock `DD_AGENT_SECRET_FILE` |
 | `DD_AGENT_SECRET_FILE` | Path to file containing token | Drydock `DD_AGENT_SECRET_FILE` |
 | `TOKEN_HASH` | Argon2id PHC hash of token (standard mode only) | n/a |
@@ -235,7 +235,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `TLS_CERT` / `TLS_KEY` | TLS certificate/key | Drydock agent `certfile`/`keyfile` |
 | `CA_CERT` | CA cert for edge mode TLS | Drydock agent `cafile` |
 | `TLS_SKIP_VERIFY` | Skip TLS verification in edge mode | n/a |
-| `DRYDOCK_URL` | Edge mode controller URL (agent dials out to `/api/lookout/ws`) | n/a |
+| `DRYDOCK_URL` | Edge mode controller URL (agent dials out to `/api/portwing/ws`) | n/a |
 | `AGENT_ID` | UUID for this agent | Drydock registers via `hello.agentId` |
 | `AGENT_NAME` | Display name (default: hostname) | Drydock agent component `name` |
 | `DD_POLL_INTERVAL` | Container refresh interval in s (default 300) | n/a |
@@ -249,44 +249,44 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 
 | Feature | Status | Evidence |
 |---|---|---|
-| `GET /api/events` SSE stream | COMPATIBLE | Lookout: `sse.go:48`; Drydock: `AgentClient.ts:717` |
-| `dd:ack` event on connect | COMPATIBLE | Lookout: `sse.go:74`; Drydock: `AgentClient.ts:1299` |
+| `GET /api/events` SSE stream | COMPATIBLE | Portwing: `sse.go:48`; Drydock: `AgentClient.ts:717` |
+| `dd:ack` event on connect | COMPATIBLE | Portwing: `sse.go:74`; Drydock: `AgentClient.ts:1299` |
 | `dd:ack` fields (version, os, arch, cpus, memoryGb, uptimeSeconds, lastSeen) | COMPATIBLE | Drydock `AgentClient.ts:744–763` reads exactly these fields |
 | `dd:ack memoryGb=0` | COMPATIBLE | Drydock treats 0 as valid (no assertion on non-zero) |
-| `dd:container-added` SSE | COMPATIBLE | Lookout: `sse.go:174`; Drydock: `AgentClient.ts:1303` |
-| `dd:container-updated` SSE | COMPATIBLE | Lookout: `sse.go:187`; Drydock: `AgentClient.ts:1303` |
+| `dd:container-added` SSE | COMPATIBLE | Portwing: `sse.go:174`; Drydock: `AgentClient.ts:1303` |
+| `dd:container-updated` SSE | COMPATIBLE | Portwing: `sse.go:187`; Drydock: `AgentClient.ts:1303` |
 | `dd:container-removed` SSE (`{id, name}`) | COMPATIBLE | Drydock only reads `.id` (`AgentClient.ts:782`); extra `name` is harmless |
-| `GET /api/containers` returns `[]Container` | COMPATIBLE | Lookout: `routes.go:27`; Drydock: `AgentClient.ts:519` |
-| Container shape (id, name, displayName, status, watcher, image, labels, details) | COMPATIBLE | Lookout `model.go`; Drydock `model/container.js` |
-| `GET /api/watchers` returns `[]ComponentDescriptor` | COMPATIBLE | Lookout: `routes.go:103`; Drydock: `AgentClient.ts:547` |
+| `GET /api/containers` returns `[]Container` | COMPATIBLE | Portwing: `routes.go:27`; Drydock: `AgentClient.ts:519` |
+| Container shape (id, name, displayName, status, watcher, image, labels, details) | COMPATIBLE | Portwing `model.go`; Drydock `model/container.js` |
+| `GET /api/watchers` returns `[]ComponentDescriptor` | COMPATIBLE | Portwing: `routes.go:103`; Drydock: `AgentClient.ts:547` |
 | `GET /api/watchers/{type}/{name}` (single watcher) | COMPATIBLE | Fixed in this PR: `routes.go:handleWatcherGet` |
-| `GET /api/triggers` returns `[]` | COMPATIBLE | Lookout: `routes.go:108`; Drydock: `AgentClient.ts:559` |
+| `GET /api/triggers` returns `[]` | COMPATIBLE | Portwing: `routes.go:108`; Drydock: `AgentClient.ts:559` |
 | `GET /api/containers/{id}/logs` plain text | COMPATIBLE | Drydock `logs.ts:134–145` accepts both plain text and `{logs:"..."}` |
-| `DELETE /api/containers/{id}` returns 204 | COMPATIBLE | Lookout: `routes.go:92`; Drydock: `AgentClient.ts:1543` |
+| `DELETE /api/containers/{id}` returns 204 | COMPATIBLE | Portwing: `routes.go:92`; Drydock: `AgentClient.ts:1543` |
 | `POST /api/watchers/{type}/{name}` | COMPATIBLE (501) | Drydock runs registry checks itself, not via this endpoint in v1 |
 | `POST /api/watchers/{type}/{name}/container/{id}` | COMPATIBLE (501) | Same as above |
-| `POST /api/triggers/{type}/{name}` | COMPATIBLE (501) | No agent-side triggers in Lookout v1 |
+| `POST /api/triggers/{type}/{name}` | COMPATIBLE (501) | No agent-side triggers in Portwing v1 |
 | `POST /api/triggers/{type}/{name}/batch` | COMPATIBLE (501) | Same |
 | `GET /api/log/entries` returns `[]` | COMPATIBLE | Fixed in this PR: `routes.go:handleLogEntries`; Drydock `AgentClient.ts:1503` |
-| Authentication via `X-Dd-Agent-Secret` | COMPATIBLE | Lookout: `server/http.go` auth middleware; Drydock: `api/index.ts:73` |
-| `/health` unauthenticated | COMPATIBLE | Lookout: `routes.go:handleSimpleHealth`; Drydock: `api/index.ts:152` |
+| Authentication via `X-Dd-Agent-Secret` | COMPATIBLE | Portwing: `server/http.go` auth middleware; Drydock: `api/index.ts:73` |
+| `/health` unauthenticated | COMPATIBLE | Portwing: `routes.go:handleSimpleHealth`; Drydock: `api/index.ts:152` |
 | `dd:watcher-snapshot` SSE event | COMPATIBLE | Emitted after every poll cycle and on SSE connect (after `dd:ack`); see below |
-| `dd:update-applied` / `dd:update-failed` SSE | N-A | Drydock emits these; Lookout does not participate in update operations |
+| `dd:update-applied` / `dd:update-failed` SSE | N-A | Drydock emits these; Portwing does not participate in update operations |
 | `dd:update-operation-changed` SSE | N-A | Same |
 | `dd:batch-update-completed` SSE | N-A | Same |
-| `dd:security-alert` / `dd:security-scan-cycle-complete` SSE | N-A | Lookout does not perform security scanning |
-| Edge Mode WebSocket (`/api/lookout/ws`) | IMPLEMENTED (Drydock 1.5) | Lookout: `edge/client.go` + Ed25519 hello; Drydock: `app/api/lookout-ws.ts` (Ed25519-only). Requires Drydock 1.5 + Lookout 0.2.2 (pre-release) |
+| `dd:security-alert` / `dd:security-scan-cycle-complete` SSE | N-A | Portwing does not perform security scanning |
+| Edge Mode WebSocket (`/api/portwing/ws`) | IMPLEMENTED (Drydock 1.5) | Portwing: `edge/client.go` + Ed25519 hello; Drydock: `app/api/portwing-ws.ts` (Ed25519-only). Requires Drydock 1.5 + Portwing 0.2.2 (pre-release) |
 
 ---
 
 ## Gaps Requiring Drydock-side Changes
 
 None. GAP-1 below was originally identified as requiring a Drydock-side
-tolerance change; it has since been resolved Lookout-side.
+tolerance change; it has since been resolved Portwing-side.
 
-### GAP-1 (RESOLVED): `dd:watcher-snapshot` SSE event not emitted by Lookout
+### GAP-1 (RESOLVED): `dd:watcher-snapshot` SSE event not emitted by Portwing
 
-**Resolution:** Lookout now emits `dd:watcher-snapshot` from `SSEBroadcaster`
+**Resolution:** Portwing now emits `dd:watcher-snapshot` from `SSEBroadcaster`
 after every container poll cycle (`Adapter.OnContainerRefresh`) and sends the
 current snapshot to each newly connected SSE client immediately after
 `dd:ack`. No Drydock-side change is needed.
@@ -310,7 +310,7 @@ removed). Additionally, `app/agent/api/event.ts:334` replays the last snapshot
 per watcher to newly connected SSE clients, so a reconnecting controller never
 misses the authoritative container list.
 
-**What Lookout does instead:** Lookout emits individual `dd:container-added`,
+**What Portwing does instead:** Portwing emits individual `dd:container-added`,
 `dd:container-updated`, and `dd:container-removed` events. The controller
 receives these incremental events and maintains its own store. Pruning after
 reconnects depends on the handshake `GET /api/containers` call (which Drydock
@@ -335,8 +335,8 @@ authoritative list without waiting up to one poll interval.
 
 ```yaml
 services:
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     environment:
       TOKEN: "${DD_AGENT_SECRET}"       # same secret Drydock agent config uses
       PORT: "3000"

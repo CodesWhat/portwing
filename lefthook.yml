@@ -1,5 +1,5 @@
 ---
-# Lefthook configuration for lookout.
+# Lefthook configuration for portwing.
 #
 # Pre-push pipeline (piped = sequential, fail-fast):
 #   1. Clean-tree check (no stray artifacts before push)

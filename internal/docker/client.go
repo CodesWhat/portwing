@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -224,11 +225,13 @@ func (c *Client) DoStream(ctx context.Context, method, path string, body io.Read
 // normal (timeout-bound) client. The caller must rewrite the URL before
 // calling this if the request was received from an external source.
 func (c *Client) DoRaw(req *http.Request) (*http.Response, error) {
+	// #nosec G704 -- caller rewrites requests to the fixed local Docker endpoint before forwarding.
 	return c.httpClient.Do(req)
 }
 
 // DoStreamRaw forwards an arbitrary *http.Request using the streaming client.
 func (c *Client) DoStreamRaw(req *http.Request) (*http.Response, error) {
+	// #nosec G704 -- caller rewrites requests to the fixed local Docker endpoint before forwarding.
 	return c.streamClient.Do(req)
 }
 
@@ -365,8 +368,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		body := readAndCloseBody(resp.Body)
 		return nil, fmt.Errorf("container logs: status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -437,19 +439,19 @@ func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Co
 	)
 
 	if _, err := conn.Write([]byte(raw)); err != nil {
-		conn.Close()
+		closeConn(conn, "exec start write failure")
 		return nil, fmt.Errorf("writing exec start request: %w", err)
 	}
 
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
-		conn.Close()
+		closeConn(conn, "exec start response failure")
 		return nil, fmt.Errorf("reading exec start response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		conn.Close()
+		closeConn(conn, "exec start unexpected status")
 		return nil, fmt.Errorf("expected 101 Switching Protocols, got %d", resp.StatusCode)
 	}
 
@@ -483,7 +485,10 @@ func (c *Client) ResizeExec(ctx context.Context, execID string, cols, rows int) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("resize exec: status %d: reading body: %w", resp.StatusCode, err)
+		}
 		return fmt.Errorf("resize exec: status %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
@@ -498,12 +503,32 @@ func (c *Client) GetEvents(ctx context.Context) (io.ReadCloser, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		body := readAndCloseBody(resp.Body)
 		return nil, fmt.Errorf("docker events: status %d: %s", resp.StatusCode, string(body))
 	}
 
 	return resp.Body, nil
+}
+
+func readAndCloseBody(body io.ReadCloser) string {
+	data, readErr := io.ReadAll(body)
+	closeErr := body.Close()
+	switch {
+	case readErr != nil && closeErr != nil:
+		return fmt.Sprintf("reading body: %v; closing body: %v", readErr, closeErr)
+	case readErr != nil:
+		return fmt.Sprintf("reading body: %v", readErr)
+	case closeErr != nil:
+		return fmt.Sprintf("%s; closing body: %v", string(data), closeErr)
+	default:
+		return string(data)
+	}
+}
+
+func closeConn(conn net.Conn, context string) {
+	if err := conn.Close(); err != nil {
+		slog.Debug("closing docker connection", "context", context, "error", err)
+	}
 }
 
 // GetDockerInfo returns system-wide Docker information (e.g. data root).

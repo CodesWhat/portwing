@@ -1,22 +1,22 @@
 ---
 title: Drydock Integration
-description: How Lookout serves as a Drydock agent — the Drydock-native container model, REST/SSE endpoints, the adapter that maps Drydock expectations onto Docker, and how a Drydock controller registers and communicates with the agent.
+description: How Portwing serves as a Drydock agent — the Drydock-native container model, REST/SSE endpoints, the adapter that maps Drydock expectations onto Docker, and how a Drydock controller registers and communicates with the agent.
 ---
 
-Lookout is designed to be a drop-in replacement for the original Drydock Node.js agent. It speaks the same REST and SSE protocol that [Drydock](https://github.com/CodesWhat/drydock)'s `AgentClient` expects, and adds an outbound WebSocket path (Edge Mode) for NAT/firewall-constrained hosts.
+Portwing is designed to be a drop-in replacement for the original Drydock Node.js agent. It speaks the same REST and SSE protocol that [Drydock](https://github.com/CodesWhat/drydock)'s `AgentClient` expects, and adds an outbound WebSocket path (Edge Mode) for NAT/firewall-constrained hosts.
 
 ---
 
 ## Architecture
 
-Drydock supports two agent connectivity patterns. Lookout implements both.
+Drydock supports two agent connectivity patterns. Portwing implements both.
 
-**Standard Mode** (fully implemented): The Drydock controller opens an inbound HTTP connection to each remote host's Lookout agent. Lookout runs an HTTP server; the controller polls `/api/*` and holds a long-lived SSE stream.
+**Standard Mode** (fully implemented): The Drydock controller opens an inbound HTTP connection to each remote host's Portwing agent. Portwing runs an HTTP server; the controller polls `/api/*` and holds a long-lived SSE stream.
 
-**Edge Mode** (implemented end-to-end; requires Drydock 1.5+ and Lookout 0.2.2+): Lookout dials outbound to the Drydock controller's `/api/lookout/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
+**Edge Mode** (implemented end-to-end; requires Drydock 1.5+ and Portwing 0.2.2+): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
 
 <Callout type="warn">
-Edge Mode is implemented on both sides: Drydock 1.5 ships the `/api/lookout/ws` controller endpoint (Ed25519-only, `lookout/1.0` protocol) and Lookout's agent (`internal/edge/client.go`) signs its hello with Ed25519. Drydock 1.5 and Lookout 0.2.2 are both pre-release — the current stable lines (Drydock 1.4.x, Lookout 0.2.0) do **not** include the endpoint — so treat Edge Mode as early access and prefer Standard Mode for production until the stable releases ship.
+Edge Mode is implemented on both sides: Drydock 1.5 ships the `/api/portwing/ws` controller endpoint (Ed25519-only, `portwing/1.0` protocol) and Portwing's agent (`internal/edge/client.go`) signs its hello with Ed25519. Drydock 1.5 and Portwing 0.2.2 are both pre-release — the current stable lines (Drydock 1.4.x, Portwing 0.2.0) do **not** include the endpoint — so treat Edge Mode as early access and prefer Standard Mode for production until the stable releases ship.
 </Callout>
 
 ---
@@ -25,21 +25,21 @@ Edge Mode is implemented on both sides: Drydock 1.5 ships the `/api/lookout/ws` 
 
 Verified against Drydock 1.5.x (`app/agent/AgentClient.ts`).
 
-When a Drydock controller connects to a Lookout agent in Standard Mode, the following sequence occurs:
+When a Drydock controller connects to a Portwing agent in Standard Mode, the following sequence occurs:
 
-1. The controller opens `GET /api/events` with the `X-Dd-Agent-Secret` header. Lookout responds with a `text/event-stream`.
-2. Lookout immediately emits `dd:ack` on the stream. The controller's `handleAckEvent()` triggers `handshake()`.
+1. The controller opens `GET /api/events` with the `X-Dd-Agent-Secret` header. Portwing responds with a `text/event-stream`.
+2. Portwing immediately emits `dd:ack` on the stream. The controller's `handleAckEvent()` triggers `handshake()`.
 3. The controller calls `GET /api/containers`, then `GET /api/watchers`, then `GET /api/triggers` in sequence.
-4. The SSE stream remains open. Lookout pushes `dd:container-added`, `dd:container-updated`, and `dd:container-removed` events as container state changes.
-5. After every poll cycle, Lookout also emits `dd:watcher-snapshot` so the controller can prune any stale entries. A reconnecting controller receives the current snapshot immediately after `dd:ack` — no waiting for the next poll interval.
+4. The SSE stream remains open. Portwing pushes `dd:container-added`, `dd:container-updated`, and `dd:container-removed` events as container state changes.
+5. After every poll cycle, Portwing also emits `dd:watcher-snapshot` so the controller can prune any stale entries. A reconnecting controller receives the current snapshot immediately after `dd:ack` — no waiting for the next poll interval.
 
 ---
 
-## Endpoints Lookout Serves (Standard Mode)
+## Endpoints Portwing Serves (Standard Mode)
 
-All `/api/*` endpoints require an `X-Dd-Agent-Secret` or `X-Lookout-Token` header. The `/health` endpoint is unauthenticated.
+All `/api/*` endpoints require an `X-Dd-Agent-Secret` or `X-Portwing-Token` header. The `/health` endpoint is unauthenticated.
 
-| Drydock Call | Lookout Endpoint | Method | Notes |
+| Drydock Call | Portwing Endpoint | Method | Notes |
 |---|---|---|---|
 | `AgentClient.startSse()` | `GET /api/events` | GET | SSE stream; emits `dd:ack` on connect |
 | `AgentClient._doHandshake()` | `GET /api/containers` | GET | Returns `[]Container` JSON |
@@ -56,7 +56,7 @@ All `/api/*` endpoints require an `X-Dd-Agent-Secret` or `X-Lookout-Token` heade
 | Drydock health probe | `GET /health` | GET | `{"status":"ok"}` — no auth |
 
 <Callout type="info">
-The 501 responses on `POST /api/watchers/*` and `POST /api/triggers/*` are intentional. In Drydock v1, the controller performs registry checks itself rather than delegating them to the agent via these endpoints. Lookout's role is container inventory and event streaming.
+The 501 responses on `POST /api/watchers/*` and `POST /api/triggers/*` are intentional. In Drydock v1, the controller performs registry checks itself rather than delegating them to the agent via these endpoints. Portwing's role is container inventory and event streaming.
 </Callout>
 
 ---
@@ -87,7 +87,7 @@ Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`,
 ```
 
 <Callout type="info">
-`memoryGb` is `0` on Lookout 0.2.1 and earlier — the current release keeps the binary cgo-free and does not read host memory. Drydock accepts `0` as valid. A later release reports real memory on Linux by reading `/proc/meminfo` (still no cgo).
+`memoryGb` is `0` on Portwing 0.2.1 and earlier — the current release keeps the binary cgo-free and does not read host memory. Drydock accepts `0` as valid. A later release reports real memory on Linux by reading `/proc/meminfo` (still no cgo).
 </Callout>
 
 ### `dd:container-added` / `dd:container-updated`
@@ -100,7 +100,7 @@ The `data` field is a full Container object (see [Container Object Shape](#conta
 
 ### `dd:container-removed`
 
-Drydock reads only `.data.id` from this event. Lookout also sends `name` as a harmless extra field.
+Drydock reads only `.data.id` from this event. Portwing also sends `name` as a harmless extra field.
 
 ```json
 {"type": "dd:container-removed", "data": {"id": "abc123", "name": "web"}}
@@ -124,7 +124,7 @@ Sent after every container poll cycle and immediately after `dd:ack` to each new
 
 ## Container Object Shape
 
-Lookout's `GET /api/containers` and all container events return objects in this shape. Drydock passes them directly to `storeContainer.insertContainer()` / `storeContainer.updateContainer()`.
+Portwing's `GET /api/containers` and all container events return objects in this shape. Drydock passes them directly to `storeContainer.insertContainer()` / `storeContainer.updateContainer()`.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -148,7 +148,7 @@ Lookout's `GET /api/containers` and all container events return objects in this 
 
 ## Drydock Container Labels
 
-Lookout reads `dd.*` labels from Docker containers to populate the Container object and configure watcher behaviour.
+Portwing reads `dd.*` labels from Docker containers to populate the Container object and configure watcher behaviour.
 
 | Label | Purpose |
 |---|---|
@@ -184,31 +184,31 @@ Drydock reads `type`, `name`, `configuration`, and `metadata` from each descript
 
 ## Watcher Delegation Model
 
-Lookout reports container inventory. The Drydock controller performs registry checks.
+Portwing reports container inventory. The Drydock controller performs registry checks.
 
-1. Lookout monitors Docker containers via the Docker Engine API.
+1. Portwing monitors Docker containers via the Docker Engine API.
 2. It reads `dd.*` labels and constructs Container objects with image metadata.
 3. It emits `dd:container_sync`, `dd:container_added`, `dd:container_updated`, and `dd:container_removed` events.
 4. The Drydock controller receives the inventory, runs registry checks independently, and writes the `Result` back.
 
-`updateAvailable` is always `false` and `updateKind` is always `"unknown"` in Lookout responses. Drydock sets these fields after its own registry check.
+`updateAvailable` is always `false` and `updateKind` is always `"unknown"` in Portwing responses. Drydock sets these fields after its own registry check.
 
 ---
 
 ## Edge Mode: WebSocket Handshake
 
-When `DRYDOCK_URL` is set, Lookout dials outbound to `DRYDOCK_URL/api/lookout/ws` using the `lookout/1.0` WebSocket protocol.
+When `DRYDOCK_URL` is set, Portwing dials outbound to `DRYDOCK_URL/api/portwing/ws` using the `portwing/1.0` WebSocket protocol.
 
 <Callout type="info">
-The sequence below is the production handshake, implemented on the agent side in `internal/edge/client.go` and `internal/protocol/messages.go` and on the controller side in Drydock 1.5's `/api/lookout/ws` endpoint. The controller requires an Ed25519-signed hello.
+The sequence below is the production handshake, implemented on the agent side in `internal/edge/client.go` and `internal/protocol/messages.go` and on the controller side in Drydock 1.5's `/api/portwing/ws` endpoint. The controller requires an Ed25519-signed hello.
 </Callout>
 
 Handshake sequence:
 
-1. Lookout connects via WSS to `/api/lookout/ws`.
-2. Lookout sends a `hello` message (see payload below).
+1. Portwing connects via WSS to `/api/portwing/ws`.
+2. Portwing sends a `hello` message (see payload below).
 3. Controller responds with `welcome` containing the poll interval.
-4. Lookout sends `dd:container_sync` (full container inventory) then `dd:component_sync` (watcher/trigger descriptors) then an initial `metrics` payload.
+4. Portwing sends `dd:container_sync` (full container inventory) then `dd:component_sync` (watcher/trigger descriptors) then an initial `metrics` payload.
 
 ### `hello` Message
 
@@ -216,7 +216,7 @@ Handshake sequence:
 {
   "type": "hello",
   "version": "1.0.0",
-  "protocol": "lookout/1.0",
+  "protocol": "portwing/1.0",
   "agentId": "uuid",
   "agentName": "my-server",
   "pubKeyId": "a3f2b1c9d8e7f6a4",
@@ -235,7 +235,7 @@ Handshake sequence:
 }
 ```
 
-When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `nonce`, and `signature` fields shown above, and Drydock verifies the signature against the agent's registered public key. The `tokenHash` field (SHA-256 of the shared token) is only a fallback for non-edge endpoints — the Drydock `/api/lookout/ws` endpoint rejects token-hash hellos with `ed25519-required`.
+When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `nonce`, and `signature` fields shown above, and Drydock verifies the signature against the agent's registered public key. The `tokenHash` field (SHA-256 of the shared token) is only a fallback for non-edge endpoints — the Drydock `/api/portwing/ws` endpoint rejects token-hash hellos with `ed25519-required`.
 
 ### Edge Mode Message Types
 
@@ -276,12 +276,12 @@ When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `
 
 ## Environment Variable Reference
 
-### Lookout Side (agent)
+### Portwing Side (agent)
 
 | Variable | Purpose | Drydock counterpart |
 |---|---|---|
 | `TOKEN` | Shared secret (preferred) | Drydock agent `secret` |
-| `DD_AGENT_SECRET` | Shared secret (compatibility alias) | Drydock agent `secret` |
+| `DD_AGENT_SECRET` | Drydock agent secret | Drydock agent `secret` |
 | `TOKEN_FILE` | Path to file containing token | Drydock `DD_AGENT_SECRET_FILE` |
 | `DD_AGENT_SECRET_FILE` | Path to file containing token | Drydock `DD_AGENT_SECRET_FILE` |
 | `TOKEN_HASH` | Argon2id PHC hash of token (Standard Mode only) | n/a |
@@ -290,7 +290,7 @@ When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `
 | `TLS_CERT` / `TLS_KEY` | TLS certificate/key | Drydock agent `certfile`/`keyfile` |
 | `CA_CERT` | CA cert for Edge Mode TLS | Drydock agent `cafile` |
 | `TLS_SKIP_VERIFY` | Skip TLS verification in Edge Mode | n/a |
-| `DRYDOCK_URL` | Edge Mode controller URL; agent dials out to `/api/lookout/ws` | n/a |
+| `DRYDOCK_URL` | Edge Mode controller URL; agent dials out to `/api/portwing/ws` | n/a |
 | `AGENT_ID` | UUID for this agent | Drydock registers via `hello.agentId` |
 | `AGENT_NAME` | Display name (default: hostname) | Drydock agent component `name` |
 | `DD_POLL_INTERVAL` | Container refresh interval in seconds (default `300`) | n/a |
@@ -300,12 +300,12 @@ For the full variable reference including Docker socket, metrics, and reconnect 
 
 ### Drydock Controller Side
 
-These are set in Drydock's agent component configuration, not environment variables on the Lookout host.
+These are set in Drydock's agent component configuration, not environment variables on the Portwing host.
 
 | Drydock config field | Description |
 |---|---|
-| `host` | Lookout hostname or IP |
-| `port` | Lookout port (default `3000`) |
+| `host` | Portwing hostname or IP |
+| `port` | Portwing port (default `3000`) |
 | `secret` | Shared secret — sent as `X-Dd-Agent-Secret` |
 | `cafile` | CA certificate for TLS verification |
 | `certfile` / `keyfile` | mTLS certificate pair |
@@ -319,8 +319,8 @@ These are set in Drydock's agent component configuration, not environment variab
 
 ```yaml
 services:
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     environment:
       TOKEN: "${DD_AGENT_SECRET}"
       PORT: "3000"
@@ -342,7 +342,7 @@ agent:
     secret: "${DD_AGENT_SECRET}"
 ```
 
-The `TOKEN` value on the Lookout side must match the `secret` value on the Drydock side.
+The `TOKEN` value on the Portwing side must match the `secret` value on the Drydock side.
 
 ---
 
@@ -374,7 +374,7 @@ Verified against Drydock 1.5.x (`app/agent/AgentClient.ts`, `app/agent/api/`).
 | `GET /api/log/entries` returns `[]` | Compatible | `routes.go:handleLogEntries`; `AgentClient.ts:1503` |
 | `X-Dd-Agent-Secret` authentication | Compatible | `server/http.go` auth middleware; `AgentClient.ts:73` |
 | `/health` unauthenticated | Compatible | `routes.go:handleSimpleHealth`; `AgentClient.ts:152` |
-| Edge Mode WebSocket `/api/lookout/ws` | Implemented (Drydock 1.5) | Ed25519-only, `lookout/1.0`; requires Drydock 1.5+ and Lookout 0.2.2+ (both pre-release) |
+| Edge Mode WebSocket `/api/portwing/ws` | Implemented (Drydock 1.5) | Ed25519-only, `portwing/1.0`; requires Drydock 1.5+ and Portwing 0.2.2+ (both pre-release) |
 
 ---
 

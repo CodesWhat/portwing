@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/docker"
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 type fixtureContainer struct {

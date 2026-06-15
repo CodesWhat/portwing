@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/portwing/internal/adapter"
 )
 
 type fakeContainerProvider struct {

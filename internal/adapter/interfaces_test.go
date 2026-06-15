@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/codeswhat/lookout/internal/adapter"
-	"github.com/codeswhat/lookout/internal/adapter/drydock"
-	"github.com/codeswhat/lookout/internal/generic"
+	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/adapter/drydock"
+	"github.com/codeswhat/portwing/internal/generic"
 )
 
 type fullAdapterStub struct{}

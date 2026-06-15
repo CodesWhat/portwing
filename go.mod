@@ -1,4 +1,4 @@
-module github.com/codeswhat/lookout
+module github.com/codeswhat/portwing
 
 go 1.26.0
 

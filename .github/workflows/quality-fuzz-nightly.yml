@@ -7,7 +7,7 @@ run-name: >-
 
 # Tier 2 fuzz strategy. Tier 1 lives in `ci.yml go-fuzz` and gives every
 # fuzzer a 60-second budget on every PR/push. This workflow gives each fuzzer
-# 5 minutes (lighter than sockguard's 15m — Lookout's corpus is young).
+# 5 minutes (lighter than sockguard's 15m — Portwing's corpus is young).
 # Matrix-parallelized so wall time stays near 5 minutes regardless of count.
 
 on:

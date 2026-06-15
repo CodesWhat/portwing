@@ -1,21 +1,21 @@
-# Lookout — edge mode: outbound WebSocket tunnel to Drydock.
+# Portwing — edge mode: outbound WebSocket tunnel to Drydock.
 # No inbound ports are published; the agent dials out, so it works
 # behind NAT and firewalls. The built-in HEALTHCHECK still works
 # (the health endpoint listens container-locally in edge mode too).
 #
 # Edge mode against Drydock 1.5 is Ed25519-only: the controller's
-# /api/lookout/ws endpoint rejects token-based hellos. Generate a
+# /api/portwing/ws endpoint rejects token-based hellos. Generate a
 # keypair and register its public key with Drydock before starting:
 #
-#   lookout keygen -comment "edge-host-01" > lookout_ed25519.pem
+#   portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
 #
 # keygen prints the PKCS#8 private key (used below as PRIVATE_KEY_FILE)
 # plus an authorized_keys line. Register that public key with your
-# Drydock controller (POST /api/v1/lookout/keys) so it trusts this agent.
+# Drydock controller (POST /api/v1/portwing/keys) so it trusts this agent.
 
 services:
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -26,17 +26,17 @@ services:
       - /tmp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
       - DRYDOCK_URL=https://drydock.example.com
-      - PRIVATE_KEY_FILE=/run/secrets/lookout_key
+      - PRIVATE_KEY_FILE=/run/secrets/portwing_key
       - AGENT_NAME=edge-host-01
     secrets:
-      - lookout_key
+      - portwing_key
 
 secrets:
-  lookout_key:
-    file: ./lookout_ed25519.pem
+  portwing_key:
+    file: ./portwing_ed25519.pem
 
 volumes:
-  lookout-stacks:
+  portwing-stacks:

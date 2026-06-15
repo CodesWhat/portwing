@@ -1,8 +1,8 @@
-# Contributing to Lookout
+# Contributing to Portwing
 
 Thanks for your interest in contributing! Whether it is a bug fix, new feature, documentation improvement, or something else — all contributions are welcome.
 
-Questions or help? Open an [issue](https://github.com/CodesWhat/lookout/issues).
+Questions or help? Open an [issue](https://github.com/CodesWhat/portwing/issues).
 
 ## Getting started
 
@@ -103,4 +103,4 @@ Multi-change commits: lead emoji+type on first line, bulleted sub-changes in bod
 
 ## Security
 
-Please report security vulnerabilities privately via [GitHub Security Advisories](https://github.com/CodesWhat/lookout/security/advisories/new) — **do NOT open a public issue**. See [SECURITY.md](SECURITY.md) for the full policy.
+Please report security vulnerabilities privately via [GitHub Security Advisories](https://github.com/CodesWhat/portwing/security/advisories/new) — **do NOT open a public issue**. See [SECURITY.md](SECURITY.md) for the full policy.

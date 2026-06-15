@@ -4,7 +4,7 @@
 rules:
   cache-poisoning:
     # Cache poisoning via setup-go cache steps requires attacker-controlled
-    # fork PRs with write access to the cache. Lookout is a private repo with
+    # fork PRs with write access to the cache. Portwing is a private repo with
     # no pull_request_target triggers, so untrusted PRs cannot poison the cache.
     # Re-evaluate if the repo goes public.
     ignore:

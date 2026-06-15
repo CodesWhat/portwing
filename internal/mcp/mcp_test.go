@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/docker"
-	"github.com/codeswhat/lookout/internal/metrics"
+	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/metrics"
 )
 
 // shortSocketPath returns a temp socket path short enough for the unix
@@ -145,7 +145,7 @@ func postMCP(t *testing.T, h *Handler, body interface{}) *httptest.ResponseRecor
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/_lookout/mcp", bytes.NewReader(b))
+	req := httptest.NewRequest(http.MethodPost, "/_portwing/mcp", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -201,6 +201,14 @@ func TestInitializeRoundTrip(t *testing.T) {
 	}
 	if _, hasTool := caps["tools"]; !hasTool {
 		t.Error("capabilities.tools missing")
+	}
+
+	serverInfo, ok := result["serverInfo"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("serverInfo is not an object")
+	}
+	if got, want := serverInfo["name"], "portwing"; got != want {
+		t.Errorf("serverInfo.name = %v, want %v", got, want)
 	}
 }
 
@@ -427,7 +435,7 @@ func TestGetMethodNotAllowed(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	req := httptest.NewRequest(http.MethodGet, "/_lookout/mcp", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/mcp", nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 

@@ -2,13 +2,13 @@
 
 Guidance for coding agents working in this repository.
 
-## What is Lookout?
+## What is Portwing?
 
-Lookout is a security-first remote Docker agent written in Go. It exposes a transparent Docker API proxy over the local Docker socket, plus higher-level endpoints for container lifecycle, compose stack management, exec, and events. It runs in two modes: **standard** (inbound HTTP/S server on `PORT`, default 3000) and **edge** (outbound WebSocket tunnel to `DRYDOCK_URL` — no inbound ports). Two adapters: **drydock** (native `dd:*` protocol + SSE compatibility for [drydock](https://github.com/CodesWhat/drydock)) and **generic** (clean REST API defined in `api/openapi.yaml`).
+Portwing is a security-first remote Docker agent written in Go. It exposes a transparent Docker API proxy over the local Docker socket, plus higher-level endpoints for container lifecycle, compose stack management, exec, and events. It runs in two modes: **standard** (inbound HTTP/S server on `PORT`, default 3000) and **edge** (outbound WebSocket tunnel to `DRYDOCK_URL` — no inbound ports). Two adapters: **drydock** (native `dd:*` protocol + SSE compatibility for [drydock](https://github.com/CodesWhat/drydock)) and **generic** (clean REST API defined in `api/openapi.yaml`).
 
 ## Repository structure
 
-- `cmd/lookout/` — entrypoint; subcommands: serve (default), `keygen`, `hash-token`, `version`
+- `cmd/portwing/` — entrypoint; subcommands: serve (default), `keygen`, `hash-token`, `version`
 - `internal/config/` — env-var configuration (no flags, no config files)
 - `internal/server/` — standard-mode HTTP server, auth middleware, rate limiting, audit log, metrics
 - `internal/auth/` — Ed25519 per-request auth: key registry (`authorized_keys` format), nonce LRU, request verification, keygen, enrollment
@@ -24,7 +24,7 @@ Lookout is a security-first remote Docker agent written in Go. It exposes a tran
 ## Build, test, lint
 
 ```bash
-go build ./cmd/lookout              # build
+go build ./cmd/portwing              # build
 go test -race ./...                 # all tests (race detector is mandatory)
 golangci-lint run                   # lint (config: .golangci.yml, v2 schema)
 go test -tags integration ./internal/integration/   # needs a real dockerd
@@ -50,7 +50,7 @@ go test -run='^$' -fuzz='^FuzzMCPHandler$' -fuzztime=5s ./internal/mcp/
 6. **`dd:watcher-snapshot` containers must serialize as a JSON array, never `null`** — drydock's `handleWatcherSnapshotEvent` prunes from it; `nil` slices must be normalized to `[]adapter.Container{}`.
 7. **macOS test sockets: unix socket paths are limited to 104 bytes on darwin.** Use `os.MkdirTemp("", "lk")` for socket dirs in tests, never `t.TempDir()` (its path is too long on macOS runners).
 8. **Shell scripts target bash 3.2** (macOS system bash). Under `set -u`, empty-array expansion must use `${arr[@]+"${arr[@]}"}`; command substitutions feeding a pipeline that may legitimately fail need `|| true` under `set -e`.
-9. **Auth failures return 401 with an `X-Lookout-Reason` header** (`timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`) — the compat script and drydock both key off these.
+9. **Auth failures return 401 with an `X-Portwing-Reason` header** (`timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`) — the compat script and drydock both key off these.
 
 ## Conventions
 

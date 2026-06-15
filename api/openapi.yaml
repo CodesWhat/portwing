@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Lookout Agent API
+  title: Portwing Agent API
   version: 0.1.0
   description: |
-    Lookout is a lightweight remote Docker agent for the Drydock container
+    Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
     only (Edge Mode communicates over a WebSocket multiplexed protocol documented
     separately in SPEC.md §3).
@@ -13,8 +13,8 @@ info:
     All protected endpoints require the agent token, supplied via one of:
 
     - `Authorization: Bearer <token>` (standard, checked first)
-    - `X-Lookout-Token` header
-    - `X-Dd-Agent-Secret` header (Drydock backward-compat alias)
+    - `X-Portwing-Token` header
+    - `X-Dd-Agent-Secret` header (Drydock agent secret header)
 
     Token comparison uses `crypto/subtle.ConstantTimeCompare` (timing-safe).
     If no token is configured, authentication is disabled and all requests pass
@@ -64,17 +64,16 @@ components:
       scheme: bearer
       description: >
         Agent token via Authorization: Bearer. Also accepted in the
-        `X-Lookout-Token` header, or `X-Dd-Agent-Secret` for Drydock
-        backward compatibility.
-    lookoutToken:
+        `X-Portwing-Token` header, or Drydock's `X-Dd-Agent-Secret` header.
+    portwingToken:
       type: apiKey
       in: header
-      name: X-Lookout-Token
-      description: Agent token via the X-Lookout-Token header.
+      name: X-Portwing-Token
+      description: Agent token via the X-Portwing-Token header.
     ed25519Signature:
       type: apiKey
       in: header
-      name: X-Lookout-Signature
+      name: X-Portwing-Signature
       description: |
         Ed25519 per-request signature (base64url, no padding). When this header
         is present the agent verifies the request via Ed25519 instead of the
@@ -84,10 +83,10 @@ components:
 
         | Header | Format | Example |
         |--------|--------|---------|
-        | `X-Lookout-Key-ID` | hex(SHA-256(raw 32-byte pubkey)[:8]) | `4a3f2b1c9d8e7f6a` |
-        | `X-Lookout-Timestamp` | Unix epoch, seconds, decimal | `1749600000` |
-        | `X-Lookout-Nonce` | 32 random hex chars (128-bit) | `a1b2c3d4e5f6...` |
-        | `X-Lookout-Signature` | base64url (no padding) Ed25519 signature | `d2hh...` |
+        | `X-Portwing-Key-ID` | hex(SHA-256(raw 32-byte pubkey)[:8]) | `4a3f2b1c9d8e7f6a` |
+        | `X-Portwing-Timestamp` | Unix epoch, seconds, decimal | `1749600000` |
+        | `X-Portwing-Nonce` | 32 random hex chars (128-bit) | `a1b2c3d4e5f6...` |
+        | `X-Portwing-Signature` | base64url (no padding) Ed25519 signature | `d2hh...` |
 
         The signed canonical string is:
         ```
@@ -96,7 +95,7 @@ components:
         For an empty body, `body-sha256-hex` is the full SHA-256 of the empty
         string: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
 
-        On failure, the response includes `X-Lookout-Reason` with one of:
+        On failure, the response includes `X-Portwing-Reason` with one of:
         `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`.
 
   schemas:
@@ -128,7 +127,7 @@ components:
       properties:
         version:
           type: string
-          description: Lookout agent version
+          description: Portwing agent version
           example: "0.1.0"
         dockerVersion:
           type: string
@@ -386,7 +385,7 @@ components:
           example: "0.1.0"
         protocolName:
           type: string
-          example: "lookout"
+          example: "portwing"
         protocolVersion:
           type: string
           example: "1.0"
@@ -449,9 +448,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/SimpleHealthResponse'
 
-  /_lookout/health:
+  /_portwing/health:
     get:
-      operationId: getLookoutHealth
+      operationId: getPortwingHealth
       summary: Agent health check with Docker connectivity
       description: >
         Returns agent status and Docker daemon connectivity. No auth required.
@@ -477,9 +476,9 @@ paths:
                 status: unhealthy
                 docker: disconnected
 
-  /_lookout/info:
+  /_portwing/info:
     get:
-      operationId: getLookoutInfo
+      operationId: getPortwingInfo
       summary: Agent metadata
       description: >
         Returns agent version, Docker version, connection mode, uptime,
@@ -487,7 +486,7 @@ paths:
       tags: [Agent]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: Agent metadata.
@@ -500,13 +499,13 @@ paths:
         "429":
           description: Rate limit exceeded (10 failures/min/IP).
 
-  /_lookout/metrics:
+  /_portwing/metrics:
     get:
-      operationId: getLookoutMetrics
+      operationId: getPortwingMetrics
       summary: Prometheus metrics (namespaced)
       description: >
-        Exposes Lookout agent metrics in Prometheus text exposition format
-        (version 0.0.4). Metrics are prefixed with `lookout_`. Bearer auth
+        Exposes Portwing agent metrics in Prometheus text exposition format
+        (version 0.0.4). Metrics are prefixed with `portwing_`. Bearer auth
         required.
 
         Scrape this endpoint rather than `/metrics` when you want only
@@ -514,7 +513,7 @@ paths:
       tags: [Metrics]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: Prometheus text format metrics.
@@ -523,12 +522,12 @@ paths:
               schema:
                 type: string
               example: |
-                # HELP lookout_cpu_usage_percent Host CPU usage percentage.
-                # TYPE lookout_cpu_usage_percent gauge
-                lookout_cpu_usage_percent 23.5
-                # HELP lookout_memory_used_bytes Host memory used in bytes.
-                # TYPE lookout_memory_used_bytes gauge
-                lookout_memory_used_bytes 4294967296
+                # HELP portwing_cpu_usage_percent Host CPU usage percentage.
+                # TYPE portwing_cpu_usage_percent gauge
+                portwing_cpu_usage_percent 23.5
+                # HELP portwing_memory_used_bytes Host memory used in bytes.
+                # TYPE portwing_memory_used_bytes gauge
+                portwing_memory_used_bytes 4294967296
         "401":
           description: Missing or invalid token.
         "429":
@@ -539,7 +538,7 @@ paths:
       operationId: getMetrics
       summary: Prometheus metrics (root)
       description: >
-        Alias for `/_lookout/metrics`. Exposes Lookout agent metrics in
+        Alias for `/_portwing/metrics`. Exposes Portwing agent metrics in
         Prometheus text exposition format (version 0.0.4). Bearer auth
         required.
 
@@ -548,7 +547,7 @@ paths:
       tags: [Metrics]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: Prometheus text format metrics.
@@ -561,9 +560,9 @@ paths:
         "429":
           description: Rate limit exceeded.
 
-  /_lookout/compose:
+  /_portwing/compose:
     post:
-      operationId: postLookoutCompose
+      operationId: postPortwingCompose
       summary: Docker Compose operations
       description: >
         Executes a Docker Compose sub-command within the managed stacks
@@ -581,7 +580,7 @@ paths:
       tags: [Compose]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       requestBody:
         required: true
         content:
@@ -671,7 +670,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: SSE stream opened.
@@ -698,7 +697,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: Array of containers.
@@ -724,7 +723,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       parameters:
         - name: id
           in: path
@@ -785,7 +784,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       parameters:
         - name: id
           in: path
@@ -809,12 +808,12 @@ paths:
       summary: Watcher component descriptors
       description: >
         Returns the list of watcher component descriptors registered with
-        this agent. In v1.0, Lookout reports a single `docker` watcher;
+        this agent. In v1.0, Portwing reports a single `docker` watcher;
         registry checks are delegated to the Drydock controller.
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: Array of watcher components.
@@ -837,7 +836,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: Array of trigger components.
@@ -862,7 +861,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       parameters:
         - name: type
           in: path
@@ -898,7 +897,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       parameters:
         - name: type
           in: path
@@ -936,7 +935,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       parameters:
         - name: type
           in: path
@@ -969,7 +968,7 @@ paths:
       tags: [Drydock Compat]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       parameters:
         - name: type
           in: path
@@ -1003,7 +1002,7 @@ paths:
       tags: [Generic]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: Version metadata.
@@ -1027,7 +1026,7 @@ paths:
       tags: [Generic]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: Array of containers.
@@ -1053,7 +1052,7 @@ paths:
       tags: [Generic]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       parameters:
         - name: id
           in: path
@@ -1132,7 +1131,7 @@ paths:
       tags: [Generic]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       responses:
         "200":
           description: SSE stream opened.
@@ -1173,7 +1172,7 @@ paths:
       tags: [Docker Proxy]
       security:
         - bearerToken: []
-        - lookoutToken: []
+        - portwingToken: []
       parameters:
         - name: path
           in: path
@@ -1191,7 +1190,7 @@ paths:
         "502":
           description: Docker daemon unreachable or returned an error.
 
-  /api/lookout/enroll:
+  /api/portwing/enroll:
     post:
       operationId: enrollPublicKey
       summary: Register an Ed25519 public key (Model C enrollment)
@@ -1259,7 +1258,7 @@ tags:
   - name: Health
     description: Health check endpoints (no auth).
   - name: Agent
-    description: Lookout agent metadata endpoints.
+    description: Portwing agent metadata endpoints.
   - name: Auth
     description: Ed25519 key enrollment (Model C bootstrap).
   - name: Compose

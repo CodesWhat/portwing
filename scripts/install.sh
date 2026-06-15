@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="codeswhat/lookout"
+REPO="codeswhat/portwing"
 INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/lookout"
-SERVICE_NAME="lookout"
+CONFIG_DIR="/etc/portwing"
+SERVICE_NAME="portwing"
 
 # Color output
 RED='\033[0;31m'
@@ -44,31 +44,31 @@ main() {
     arch=$(detect_arch)
     version="${1:-$(get_latest_version)}"
 
-    info "Installing Lookout ${version} for ${os}/${arch}"
+    info "Installing Portwing ${version} for ${os}/${arch}"
 
-    url="https://github.com/${REPO}/releases/download/${version}/lookout_${version#v}_${os}_${arch}.tar.gz"
+    url="https://github.com/${REPO}/releases/download/${version}/portwing_${version#v}_${os}_${arch}.tar.gz"
 
     info "Downloading from ${url}..."
     local tmpdir
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' EXIT
 
-    curl -fsSL "$url" -o "${tmpdir}/lookout.tar.gz"
-    tar -xzf "${tmpdir}/lookout.tar.gz" -C "$tmpdir"
+    curl -fsSL "$url" -o "${tmpdir}/portwing.tar.gz"
+    tar -xzf "${tmpdir}/portwing.tar.gz" -C "$tmpdir"
 
-    info "Installing to ${INSTALL_DIR}/lookout..."
-    sudo install -m 755 "${tmpdir}/lookout" "${INSTALL_DIR}/lookout"
+    info "Installing to ${INSTALL_DIR}/portwing..."
+    sudo install -m 755 "${tmpdir}/portwing" "${INSTALL_DIR}/portwing"
 
     # Create config directory and template
     if [ ! -d "$CONFIG_DIR" ]; then
         info "Creating config directory at ${CONFIG_DIR}..."
         sudo mkdir -p "$CONFIG_DIR"
         sudo tee "${CONFIG_DIR}/config" > /dev/null << 'CONF'
-# Lookout Configuration
-# See: https://github.com/codeswhat/lookout
+# Portwing Configuration
+# See: https://github.com/codeswhat/portwing
 
 # Connection mode: Set DRYDOCK_URL + TOKEN for Edge mode, or leave empty for Standard mode
-# DRYDOCK_URL=wss://your-server:3001/api/lookout/ws
+# DRYDOCK_URL=https://your-server:3001
 # TOKEN=your-secret-token
 
 # Standard mode settings
@@ -93,16 +93,16 @@ CONF
         info "Installing systemd service..."
         sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" > /dev/null << 'SERVICE'
 [Unit]
-Description=Lookout - Remote Docker Agent
-Documentation=https://github.com/codeswhat/lookout
+Description=Portwing - Remote Docker Agent
+Documentation=https://github.com/codeswhat/portwing
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
 
 [Service]
 Type=simple
-EnvironmentFile=-/etc/lookout/config
-ExecStart=/usr/local/bin/lookout
+EnvironmentFile=-/etc/portwing/config
+ExecStart=/usr/local/bin/portwing
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -111,7 +111,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 SERVICE
         sudo systemctl daemon-reload
-        info "Systemd service installed. Enable with: sudo systemctl enable --now lookout"
+        info "Systemd service installed. Enable with: sudo systemctl enable --now portwing"
 
     # OpenRC for Alpine
     elif [ "$os" = "linux" ] && command -v rc-service &> /dev/null; then
@@ -119,9 +119,9 @@ SERVICE
         sudo tee "/etc/init.d/${SERVICE_NAME}" > /dev/null << 'OPENRC'
 #!/sbin/openrc-run
 
-name="lookout"
-description="Lookout - Remote Docker Agent"
-command="/usr/local/bin/lookout"
+name="portwing"
+description="Portwing - Remote Docker Agent"
+command="/usr/local/bin/portwing"
 command_background=true
 pidfile="/run/${RC_SVCNAME}.pid"
 
@@ -131,16 +131,16 @@ depend() {
 }
 
 start_pre() {
-    [ -f /etc/lookout/config ] && . /etc/lookout/config
+    [ -f /etc/portwing/config ] && . /etc/portwing/config
     export PORT BIND_ADDRESS DRYDOCK_URL TOKEN LOG_LEVEL
 }
 OPENRC
         sudo chmod +x "/etc/init.d/${SERVICE_NAME}"
-        info "OpenRC service installed. Enable with: sudo rc-update add lookout default"
+        info "OpenRC service installed. Enable with: sudo rc-update add portwing default"
     fi
 
-    info "Lookout ${version} installed successfully!"
-    info "Run 'lookout' to start, or configure the service at ${CONFIG_DIR}/config"
+    info "Portwing ${version} installed successfully!"
+    info "Run 'portwing' to start, or configure the service at ${CONFIG_DIR}/config"
 }
 
 main "$@"

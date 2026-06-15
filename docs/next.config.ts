@@ -6,7 +6,7 @@ const withMDX = createMDX();
 // marketing site. `output: "export"` produces the static HTML that the
 // website's `build:docs-content` script copies into `website/public/docs/`.
 // `basePath: "/docs"` prefixes every internal link and asset URL so navigation
-// keeps working once the website serves the export at getlookout.dev/docs/...
+// keeps working once the website serves the export at getportwing.dev/docs/...
 export default withMDX({
   output: "export",
   basePath: "/docs",

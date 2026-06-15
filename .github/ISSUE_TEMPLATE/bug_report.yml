@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in Lookout
+description: Report a bug in Portwing
 labels: ["bug"]
 body:
   - type: markdown
@@ -10,8 +10,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Lookout version
-      description: Output of `lookout version`
+      label: Portwing version
+      description: Output of `portwing version`
       placeholder: "e.g. 0.2.0"
     validations:
       required: true
@@ -38,8 +38,8 @@ body:
       label: Steps to reproduce
       description: Minimal steps to trigger the bug
       placeholder: |
-        1. Configure Lookout with TOKEN=...
-        2. Start a container that calls the Lookout API
+        1. Configure Portwing with TOKEN=...
+        2. Start a container that calls the Portwing API
         3. See error in logs
     validations:
       required: true

@@ -1,4 +1,4 @@
-// Package auth implements Ed25519 per-client key authentication for Lookout.
+// Package auth implements Ed25519 per-client key authentication for Portwing.
 // It provides a key registry loaded from an authorized_keys file (Model B),
 // a nonce LRU for replay protection, and request verification helpers.
 package auth
@@ -100,6 +100,7 @@ func parseAuthorizedKeys(path string) (map[string]*AuthorizedKey, error) {
 		return nil, err
 	}
 
+	// #nosec G304 -- authorized_keys path is explicit operator configuration and permissions are checked above.
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening authorized_keys %q: %w", path, err)

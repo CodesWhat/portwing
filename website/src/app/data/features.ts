@@ -34,7 +34,7 @@ export const features: Feature[] = [
     color: "text-rose-500 dark:text-rose-400",
     bg: "bg-rose-100 dark:bg-rose-900/50",
     description:
-      "Lookout never has to touch the raw Docker socket. Bundle sibling project sockguard and the agent talks to a filtered unix socket instead — even a fully compromised agent is constrained to an explicit Docker API allowlist enforced at the socket level.",
+      "Portwing never has to touch the raw Docker socket. Bundle sibling project sockguard and the agent talks to a filtered unix socket instead — even a fully compromised agent is constrained to an explicit Docker API allowlist enforced at the socket level.",
     category: "security",
   },
   {
@@ -52,7 +52,7 @@ export const features: Feature[] = [
     color: "text-rose-500 dark:text-rose-400",
     bg: "bg-rose-100 dark:bg-rose-900/50",
     description:
-      "Prefer a shared secret? Store only its Argon2id hash via TOKEN_HASH. Generate one with `lookout hash-token`; comparison is constant-time. Plaintext TOKEN is supported for evaluation but the hash is the recommended posture.",
+      "Prefer a shared secret? Store only its Argon2id hash via TOKEN_HASH. Generate one with `portwing hash-token`; comparison is constant-time. Plaintext TOKEN is supported for evaluation but the hash is the recommended posture.",
     category: "security",
   },
   {
@@ -79,7 +79,7 @@ export const features: Feature[] = [
     color: "text-indigo-500 dark:text-indigo-400",
     bg: "bg-indigo-100 dark:bg-indigo-900/50",
     description:
-      "Speaks Drydock's `dd:*` WebSocket protocol with full SSE compatibility, including watcher-snapshot streaming. Lookout is the remote agent that lets one Drydock controller manage containers across every one of your hosts.",
+      "Speaks Drydock's `dd:*` WebSocket protocol with full SSE compatibility, including watcher-snapshot streaming. Portwing is the remote agent that lets one Drydock controller manage containers across every one of your hosts.",
     category: "control",
   },
   {
@@ -97,7 +97,7 @@ export const features: Feature[] = [
     color: "text-indigo-500 dark:text-indigo-400",
     bg: "bg-indigo-100 dark:bg-indigo-900/50",
     description:
-      "Don't run Drydock? Use Lookout standalone. A generic REST + Bearer-auth surface lets any client list, inspect, start, stop, and stream logs from containers — no controller required.",
+      "Don't run Drydock? Use Portwing standalone. A generic REST + Bearer-auth surface lets any client list, inspect, start, stop, and stream logs from containers — no controller required.",
     category: "control",
   },
   {
@@ -151,7 +151,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "Coming from Watchtower? A dedicated migration guide maps the update-on-a-host workflow onto Lookout + Drydock, so you trade a cron-like updater for an auditable, controllable agent.",
+      "Coming from Watchtower? A dedicated migration guide maps the update-on-a-host workflow onto Portwing + Drydock, so you trade a cron-like updater for an auditable, controllable agent.",
     category: "operations",
   },
 ];

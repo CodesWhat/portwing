@@ -3,6 +3,7 @@ package edge
 import (
 	"context"
 	"crypto/ed25519"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -11,7 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"os"
 	"strings"
@@ -20,13 +21,13 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/codeswhat/lookout/internal/adapter"
-	"github.com/codeswhat/lookout/internal/audit"
-	"github.com/codeswhat/lookout/internal/auth"
-	"github.com/codeswhat/lookout/internal/config"
-	"github.com/codeswhat/lookout/internal/docker"
-	"github.com/codeswhat/lookout/internal/metrics"
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/audit"
+	"github.com/codeswhat/portwing/internal/auth"
+	"github.com/codeswhat/portwing/internal/config"
+	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/metrics"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 const (
@@ -111,7 +112,7 @@ func (c *Client) Run(ctx context.Context) error {
 					websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shutdown"),
 				)
-				c.conn.Close()
+				closeWebSocket(c.conn, "shutdown")
 				c.conn = nil
 			}
 			c.connMu.Unlock()
@@ -122,9 +123,7 @@ func (c *Client) Run(ctx context.Context) error {
 			slog.Warn("connection lost", "error", err)
 		}
 
-		// Backoff with jitter: delay * (0.75 + rand*0.5).
-		jitter := 0.75 + rand.Float64()*0.5
-		waitDuration := time.Duration(float64(delay) * jitter)
+		waitDuration := jitteredDuration(delay)
 
 		slog.Info("reconnecting", "delay", waitDuration.Round(time.Millisecond))
 
@@ -147,6 +146,7 @@ func (c *Client) Run(ctx context.Context) error {
 func (c *Client) connect(ctx context.Context) error {
 	// Build TLS config.
 	tlsConfig := &tls.Config{
+		// #nosec G402 -- TLS_SKIP_VERIFY is an explicit test-only escape hatch documented as unsafe.
 		InsecureSkipVerify: c.cfg.TLSSkipVerify,
 	}
 
@@ -163,7 +163,7 @@ func (c *Client) connect(ctx context.Context) error {
 	}
 
 	// Build WebSocket URL.
-	wsURL := c.cfg.DrydockURL + "/api/lookout/ws"
+	wsURL := c.cfg.DrydockURL + "/api/portwing/ws"
 	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
 	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
 
@@ -186,32 +186,38 @@ func (c *Client) connect(ctx context.Context) error {
 
 	// Send hello.
 	if err := c.sendHello(ctx); err != nil {
-		conn.Close()
+		closeWebSocket(conn, "send hello failure")
 		return fmt.Errorf("sending hello: %w", err)
 	}
 
 	// Wait for welcome.
 	welcomeTimeout := time.Duration(c.cfg.WelcomeTimeout) * time.Second
-	conn.SetReadDeadline(time.Now().Add(welcomeTimeout))
+	if err := conn.SetReadDeadline(time.Now().Add(welcomeTimeout)); err != nil {
+		closeWebSocket(conn, "set welcome deadline failure")
+		return fmt.Errorf("setting welcome deadline: %w", err)
+	}
 
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
-		conn.Close()
+		closeWebSocket(conn, "read welcome failure")
 		return fmt.Errorf("reading welcome: %w", err)
 	}
 
 	var env protocol.Envelope
 	if err := json.Unmarshal(msg, &env); err != nil {
-		conn.Close()
+		closeWebSocket(conn, "parse welcome failure")
 		return fmt.Errorf("parsing welcome envelope: %w", err)
 	}
 	if env.Type != protocol.TypeWelcome {
-		conn.Close()
+		closeWebSocket(conn, "unexpected welcome type")
 		return fmt.Errorf("expected welcome, got %q", env.Type)
 	}
 
 	// Clear read deadline.
-	conn.SetReadDeadline(time.Time{})
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		closeWebSocket(conn, "clear welcome deadline failure")
+		return fmt.Errorf("clearing welcome deadline: %w", err)
+	}
 
 	slog.Info("connected to controller")
 
@@ -248,7 +254,7 @@ func (c *Client) connect(ctx context.Context) error {
 	// Close connection.
 	c.connMu.Lock()
 	if c.conn != nil {
-		c.conn.Close()
+		closeWebSocket(c.conn, "connection loop end")
 		c.conn = nil
 	}
 	c.connMu.Unlock()
@@ -333,7 +339,7 @@ func (c *Client) signHello(_ context.Context, hello *protocol.HelloMessage) erro
 	tsUnix := time.Now().Unix()
 
 	// The canonical path is the WebSocket upgrade URL path.
-	wsPath := "/api/lookout/ws"
+	wsPath := "/api/portwing/ws"
 	msg := auth.CanonicalMessage("GET", wsPath, auth.BodyHashHex(nil), tsUnix, nonce)
 	sig := ed25519.Sign(priv, msg)
 
@@ -616,19 +622,39 @@ func msEdge(start time.Time) float64 {
 	return float64(time.Since(start).Nanoseconds()) / 1e6
 }
 
+func jitteredDuration(delay time.Duration) time.Duration {
+	const (
+		minMillis = 750
+		span      = 500
+	)
+	n, err := crand.Int(crand.Reader, big.NewInt(span+1))
+	if err != nil {
+		slog.Warn("generating reconnect jitter", "error", err)
+		return delay
+	}
+	factorMillis := minMillis + n.Int64()
+	return time.Duration((int64(delay) * factorMillis) / 1000)
+}
+
+func closeWebSocket(conn *websocket.Conn, context string) {
+	if err := conn.Close(); err != nil {
+		slog.Debug("closing websocket", "context", context, "error", err)
+	}
+}
+
 // startHealthServer starts a minimal HTTP server for Docker HEALTHCHECK.
 func (c *Client) startHealthServer() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /_lookout/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /_portwing/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "healthy",
 		})
 	})
-
 	c.healthServer = &http.Server{
-		Addr:    c.cfg.BindAddress + ":" + c.cfg.Port,
-		Handler: mux,
+		Addr:              c.cfg.BindAddress + ":" + c.cfg.Port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	go func() {

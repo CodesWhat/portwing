@@ -1,23 +1,23 @@
 ---
 title: Security Model
-description: Lookout's layered defenses — from socket-level filtering and cryptographic auth to hardened runtime and tamper-evident audit logging.
+description: Portwing's layered defenses — from socket-level filtering and cryptographic auth to hardened runtime and tamper-evident audit logging.
 ---
 
 <Callout type="warn">
-Lookout is in **alpha** (v0.2.x). The controls documented here are implemented and tested, but the API surface, configuration keys, and deployment model may change before a stable release. Do not rely on this page as a compliance artifact for production systems until v1.0.
+Portwing is in **alpha** (v0.2.x). The controls documented here are implemented and tested, but the API surface, configuration keys, and deployment model may change before a stable release. Do not rely on this page as a compliance artifact for production systems until v1.0.
 </Callout>
 
-The Docker socket is root-equivalent on the host that runs it. Anything that can write to `/var/run/docker.sock` can create a privileged container, mount the host filesystem, and escape to the underlying machine. Lookout is a privileged agent: an **authenticated** caller has full Docker API access. The controls described here prevent *unauthenticated or improperly authorized* access and certain classes of injection attacks; they do not limit what an authenticated caller can do with the Docker API. Treat the Lookout token as a root-equivalent credential.
+The Docker socket is root-equivalent on the host that runs it. Anything that can write to `/var/run/docker.sock` can create a privileged container, mount the host filesystem, and escape to the underlying machine. Portwing is a privileged agent: an **authenticated** caller has full Docker API access. The controls described here prevent *unauthenticated or improperly authorized* access and certain classes of injection attacks; they do not limit what an authenticated caller can do with the Docker API. Treat the Portwing token as a root-equivalent credential.
 
 ---
 
 ## Defense in depth
 
-Lookout's security design layers independent controls so that a failure in any single layer does not immediately compromise the host:
+Portwing's security design layers independent controls so that a failure in any single layer does not immediately compromise the host:
 
 | Layer | Mechanism |
 |-------|-----------|
-| **Socket filter** | [Sockguard](https://github.com/codeswhat/sockguard) sits between Lookout and the Docker daemon; only explicitly allowlisted Docker API operations pass through |
+| **Socket filter** | [Sockguard](https://github.com/codeswhat/sockguard) sits between Portwing and the Docker daemon; only explicitly allowlisted Docker API operations pass through |
 | **Authentication** | Every request is authenticated before it reaches the proxy — per-client Ed25519 signatures or an Argon2id-hashed shared token |
 | **Transport** | TLS 1.2+ with AEAD-only cipher suites; ECDHE forward secrecy |
 | **Container hardening** | `read_only`, `cap_drop: ALL`, `no-new-privileges`, non-root user, secrets via mounted files |
@@ -30,7 +30,7 @@ Lookout's security design layers independent controls so that a failure in any s
 
 ## Control 1 — Proxy-first architecture
 
-Every byte that would reach the Docker socket passes through Lookout's HTTP server, which applies authentication before forwarding. There is no path by which an unauthenticated caller can reach the Docker daemon directly.
+Every byte that would reach the Docker socket passes through Portwing's HTTP server, which applies authentication before forwarding. There is no path by which an unauthenticated caller can reach the Docker daemon directly.
 
 The catch-all mux entry is registered last and is wrapped with the same auth middleware as every named route:
 
@@ -40,17 +40,17 @@ mux.Handle("/", auth(s.handleDockerProxy))
 
 A missing or misconfigured auth middleware causes a build-time or startup-time failure rather than a silent security gap — there is no per-path allowlist to misonfigure by omission.
 
-This architecture structurally prevents the class of Docker AuthZ plugin bypass vulnerabilities (CVE-2024-41110, CVE-2026-34040, CVE-2026-23944, CVE-2026-44848) where authentication is delegated to a plugin that can be bypassed by crafted requests. Lookout does not use Docker's AuthZ plugin mechanism at all.
+This architecture structurally prevents the class of Docker AuthZ plugin bypass vulnerabilities (CVE-2024-41110, CVE-2026-34040, CVE-2026-23944, CVE-2026-44848) where authentication is delegated to a plugin that can be bypassed by crafted requests. Portwing does not use Docker's AuthZ plugin mechanism at all.
 
 ---
 
 ## Control 2 — Sockguard socket filter
 
 <Callout type="info">
-Sockguard is the recommended pairing for production deployments. It provides a second independent enforcement point so that even a fully compromised Lookout process is limited to the operations the operator explicitly allows.
+Sockguard is the recommended pairing for production deployments. It provides a second independent enforcement point so that even a fully compromised Portwing process is limited to the operations the operator explicitly allows.
 </Callout>
 
-[Sockguard](https://github.com/codeswhat/sockguard) is a separate container that mounts the real `/var/run/docker.sock` read-only, applies an allowlist policy from `sockguard.yaml`, and exposes a filtered Unix socket on a shared named volume. Lookout points `DOCKER_SOCKET` at the filtered socket and never touches the raw socket directly.
+[Sockguard](https://github.com/codeswhat/sockguard) is a separate container that mounts the real `/var/run/docker.sock` read-only, applies an allowlist policy from `sockguard.yaml`, and exposes a filtered Unix socket on a shared named volume. Portwing points `DOCKER_SOCKET` at the filtered socket and never touches the raw socket directly.
 
 The hardened compose file (`examples/docker-compose.with-sockguard.yml`) demonstrates the two-container layout:
 
@@ -71,8 +71,8 @@ services:
     environment:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -87,20 +87,20 @@ services:
       - "3000:3000"
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
-      - TOKEN_FILE=/run/secrets/lookout_token
+      - TOKEN_FILE=/run/secrets/portwing_token
     secrets:
-      - lookout_token
+      - portwing_token
 
 secrets:
-  lookout_token:
-    file: ./lookout_token.txt
+  portwing_token:
+    file: ./portwing_token.txt
 
 volumes:
   sockguard-socket:
-  lookout-stacks:
+  portwing-stacks:
 ```
 
 ---
@@ -114,7 +114,7 @@ Both containers in the hardened stack run with the same security options:
 | `read_only: true` | The container filesystem is read-only; writes to unexpected paths fail at the kernel level |
 | `cap_drop: ALL` | All Linux capabilities are dropped; the process cannot perform privileged syscalls |
 | `no-new-privileges: true` | The process cannot regain capabilities via setuid binaries or `execve` |
-| Non-root user | The Lookout binary runs as a non-root UID inside the container |
+| Non-root user | The Portwing binary runs as a non-root UID inside the container |
 | Secrets via files | `TOKEN_FILE` / `TOKEN_HASH_FILE` / `PRIVATE_KEY_FILE` are mounted as Docker secrets; plaintext tokens never appear in environment variable dumps or `docker inspect` output |
 | `/tmp` via tmpfs | A writable tmpfs is mounted at `/tmp` so scratch space is available without a writable layer |
 
@@ -126,12 +126,12 @@ Both containers in the hardened stack run with the same security options:
 Ed25519 key auth is the recommended option for production. Per-request signatures with nonce replay protection remain strong even when TLS terminates at a load balancer the operator does not fully trust.
 </Callout>
 
-When `AUTHORIZED_KEYS` is configured, each client has a distinct Ed25519 keypair. Every authenticated request carries four headers (`X-Lookout-Key-ID`, `X-Lookout-Timestamp`, `X-Lookout-Nonce`, `X-Lookout-Signature`). The agent verifies the Ed25519 signature over a canonical string of `METHOD\nPATH\nbody-sha256-hex\ntimestamp\nnonce` using `crypto/ed25519.Verify` from the Go standard library.
+When `AUTHORIZED_KEYS` is configured, each client has a distinct Ed25519 keypair. Every authenticated request carries four headers (`X-Portwing-Key-ID`, `X-Portwing-Timestamp`, `X-Portwing-Nonce`, `X-Portwing-Signature`). The agent verifies the Ed25519 signature over a canonical string of `METHOD\nPATH\nbody-sha256-hex\ntimestamp\nnonce` using `crypto/ed25519.Verify` from the Go standard library.
 
 Replay protection uses two complementary mechanisms:
 
-1. **Timestamp window** — requests with a timestamp skew greater than `MAX_CLOCK_SKEW_SECONDS` (default 60 s) are rejected with `X-Lookout-Reason: timestamp-skew`.
-2. **Nonce LRU** — an in-memory cache (capacity `NONCE_LRU_SIZE`, default 10,000) tracks nonces within the timestamp window. Repeated nonces return `X-Lookout-Reason: replay`.
+1. **Timestamp window** — requests with a timestamp skew greater than `MAX_CLOCK_SKEW_SECONDS` (default 60 s) are rejected with `X-Portwing-Reason: timestamp-skew`.
+2. **Nonce LRU** — an in-memory cache (capacity `NONCE_LRU_SIZE`, default 10,000) tracks nonces within the timestamp window. Repeated nonces return `X-Portwing-Reason: replay`.
 
 The authorized-keys file is refused at startup if it is world-readable (`mode & 0004 != 0`). Hot reload on `SIGHUP` adds or removes keys from the in-memory map without restarting; the nonce LRU is preserved across reloads.
 
@@ -149,14 +149,14 @@ When a shared-secret token is necessary, `TOKEN_HASH` stores an Argon2id hash ra
 | Plaintext file | `TOKEN_FILE` / `DD_AGENT_SECRET_FILE` | Path to a file containing the token |
 | Hash | `TOKEN_HASH` / `TOKEN_HASH_FILE` | Argon2id PHC string |
 
-The `lookout hash-token` subcommand generates a hash using OWASP-recommended parameters (m=19456 KiB, t=2, p=1). The token is read from stdin so it never appears in shell history or process listings:
+The `portwing hash-token` subcommand generates a hash using OWASP-recommended parameters (m=19456 KiB, t=2, p=1). The token is read from stdin so it never appears in shell history or process listings:
 
 ```bash
-printf '%s' "$TOKEN" | lookout hash-token
+printf '%s' "$TOKEN" | portwing hash-token
 # $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 ```
 
-At runtime Lookout compares the incoming token against the stored hash using Argon2id verification, still wrapped with `crypto/subtle` for the final byte comparison to prevent timing leakage. A compromised environment variable dump or configuration file reveals only the hash.
+At runtime Portwing compares the incoming token against the stored hash using Argon2id verification, still wrapped with `crypto/subtle` for the final byte comparison to prevent timing leakage. A compromised environment variable dump or configuration file reveals only the hash.
 
 ---
 
@@ -164,13 +164,13 @@ At runtime Lookout compares the incoming token against the stored hash using Arg
 
 All credential comparisons use `crypto/subtle.ConstantTimeCompare` from the Go standard library. The comparison runs in constant time regardless of whether and where the provided token diverges from the configured secret, eliminating timing-oracle attacks that can leak token bytes one at a time.
 
-This applies to all accepted credential headers: `Authorization: Bearer`, `X-Lookout-Token`, and `X-Dd-Agent-Secret`.
+This applies to all accepted credential headers: `Authorization: Bearer`, `X-Portwing-Token`, and `X-Dd-Agent-Secret`.
 
 ---
 
 ## Control 7 — TLS 1.2+ AEAD-only
 
-When `TLS_CERT` and `TLS_KEY` are configured, Lookout presents TLS with:
+When `TLS_CERT` and `TLS_KEY` are configured, Portwing presents TLS with:
 
 | Setting | Value |
 |---------|-------|
@@ -181,7 +181,7 @@ When `TLS_CERT` and `TLS_KEY` are configured, Lookout presents TLS with:
 All TLS 1.2 suites are AEAD modes; CBC and RC4 suites are excluded. TLS 1.3 cipher suites are managed by Go's TLS stack, which selects only AEAD suites by design.
 
 <Callout type="info">
-In production, run Lookout in standard mode behind a TLS reverse proxy. This keeps the TLS termination responsibility with a well-maintained proxy (nginx, Caddy, Traefik) and simplifies certificate management.
+In production, run Portwing in standard mode behind a TLS reverse proxy. This keeps the TLS termination responsibility with a well-maintained proxy (nginx, Caddy, Traefik) and simplifies certificate management.
 </Callout>
 
 ---
@@ -259,7 +259,7 @@ Set `AUDIT_LOG` to `stdout`, `stderr`, or a file path to enable structured JSON 
 Example lines:
 
 ```json
-{"time":"2026-01-15T10:23:45.123Z","level":"INFO","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_lookout/compose","outcome":"allowed","status":200,"duration_ms":3.14}
+{"time":"2026-01-15T10:23:45.123Z","level":"INFO","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_portwing/compose","outcome":"allowed","status":200,"duration_ms":3.14}
 {"time":"2026-01-15T10:23:45.200Z","level":"INFO","event":"compose_op","actor":"203.0.113.42","operation":"up","stack":"nginx-stack","outcome":"allowed"}
 {"time":"2026-01-15T10:24:01.500Z","level":"INFO","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
 ```
@@ -275,7 +275,7 @@ See [Audit Logging](/audit-logging) for the full schema and aggregator integrati
 Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0 -trimpath -s -w`) and attested with:
 
 - **Cosign keyless signatures** — both the checksums file and the container image are signed via GitHub Actions OIDC. No operator-managed signing keys are required.
-- **CycloneDX SBOM** — a full software bill of materials (`lookout-${TAG}-sbom.cdx.json`) is attached as a release asset and can be verified with cosign.
+- **CycloneDX SBOM** — a full software bill of materials (`portwing-${TAG}-sbom.cdx.json`) is attached as a release asset and can be verified with cosign.
 - **SLSA provenance** — build provenance is generated and attached so the build inputs can be independently verified.
 
 Verify a release before running it:
@@ -285,16 +285,16 @@ TAG=v0.2.0
 
 # Verify the checksums file
 cosign verify-blob \
-  --certificate-identity-regexp "https://github.com/CodesWhat/lookout/.github/workflows/.*" \
+  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --bundle "checksums.txt.bundle" \
   "checksums.txt"
 
 # Verify the container image
 cosign verify \
-  --certificate-identity-regexp "https://github.com/CodesWhat/lookout/.github/workflows/.*" \
+  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  "ghcr.io/codeswhat/lookout:${TAG}"
+  "ghcr.io/codeswhat/portwing:${TAG}"
 ```
 
 See [Verification](/verification) for SBOM inspection and SLSA provenance verification.
@@ -303,18 +303,18 @@ See [Verification](/verification) for SBOM inspection and SLSA provenance verifi
 
 ## CVE mapping
 
-The table below maps publicly known vulnerability classes to the Lookout controls that structurally prevent them. "Structurally prevents" means the architecture makes exploitation impossible regardless of token or config values — not merely that a patch has been applied.
+The table below maps publicly known vulnerability classes to the Portwing controls that structurally prevent them. "Structurally prevents" means the architecture makes exploitation impossible regardless of token or config values — not merely that a patch has been applied.
 
-| CVE / Advisory | Vulnerability class | Lookout control | Why it cannot apply |
+| CVE / Advisory | Vulnerability class | Portwing control | Why it cannot apply |
 |----------------|---------------------|-----------------|----------------------|
-| CVE-2024-41110 | Docker AuthZ plugin bypass via zero-length `Content-Length` body (CVSS 9.9) | Control 1 — proxy-first | Lookout does not use Docker's AuthZ plugin mechanism; authentication is at the Lookout HTTP layer before the request reaches Docker |
-| CVE-2026-34040 | Docker AuthZ plugin bypass via oversized body silently dropped before the plugin sees it (CVSS 8.8) | Control 1 — proxy-first | Same as CVE-2024-41110; the body-stripping behaviour in Docker's plugin dispatch path is irrelevant because Lookout's auth decision is enforced upstream of it |
-| CVE-2026-23944 | Arcane Docker Manager: proxy forwards to remote agent before verifying the original request is authenticated (CVSS 9.8) | Control 1 — proxy-first | Lookout's auth middleware wraps the handler, not the other way around; it cannot be bypassed by ordering |
-| CVE-2026-44848 | Portainer: `/plugins/*` paths absent from the proxy authorization map, allowing non-admin users to install arbitrary Docker plugins (CVSS 9.4) | Control 1 — proxy-first | Lookout's catch-all handler authenticates all paths including `/plugins/*`; there is no per-path allowlist to misonfigure by omission |
+| CVE-2024-41110 | Docker AuthZ plugin bypass via zero-length `Content-Length` body (CVSS 9.9) | Control 1 — proxy-first | Portwing does not use Docker's AuthZ plugin mechanism; authentication is at the Portwing HTTP layer before the request reaches Docker |
+| CVE-2026-34040 | Docker AuthZ plugin bypass via oversized body silently dropped before the plugin sees it (CVSS 8.8) | Control 1 — proxy-first | Same as CVE-2024-41110; the body-stripping behaviour in Docker's plugin dispatch path is irrelevant because Portwing's auth decision is enforced upstream of it |
+| CVE-2026-23944 | Arcane Docker Manager: proxy forwards to remote agent before verifying the original request is authenticated (CVSS 9.8) | Control 1 — proxy-first | Portwing's auth middleware wraps the handler, not the other way around; it cannot be bypassed by ordering |
+| CVE-2026-44848 | Portainer: `/plugins/*` paths absent from the proxy authorization map, allowing non-admin users to install arbitrary Docker plugins (CVSS 9.4) | Control 1 — proxy-first | Portwing's catch-all handler authenticates all paths including `/plugins/*`; there is no per-path allowlist to misonfigure by omission |
 | CVE-2025-64419 / CVE-2025-66209–66213 | Coolify: command injection via docker-compose.yaml content allowing root RCE (CVSS up to 10.0) | Controls 4, 5, 6 — Compose guards | Path-traversal protection, env-var key/denylist validation, and service-name flag-injection filter cover this attack surface |
 
 <Callout type="warn">
-Lookout is a privileged agent: an authenticated caller has full Docker API access. The controls above prevent unauthenticated or improperly authorized access and certain classes of injection attacks. They do not restrict what a legitimately authenticated caller can do with the Docker API. Treat the Lookout token or private key as root-equivalent.
+Portwing is a privileged agent: an authenticated caller has full Docker API access. The controls above prevent unauthenticated or improperly authorized access and certain classes of injection attacks. They do not restrict what a legitimately authenticated caller can do with the Docker API. Treat the Portwing token or private key as root-equivalent.
 </Callout>
 
 ---

@@ -4,17 +4,17 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/codeswhat/lookout/internal/auth"
+	"github.com/codeswhat/portwing/internal/auth"
 )
 
-// TestStripLookoutAuthHeaders verifies that every Lookout credential header is
+// TestStripPortwingAuthHeaders verifies that every Portwing credential header is
 // removed before a request is proxied to the Docker socket, while unrelated
 // headers are preserved.
-func TestStripLookoutAuthHeaders(t *testing.T) {
+func TestStripPortwingAuthHeaders(t *testing.T) {
 	h := http.Header{}
 	stripped := []string{
 		"Authorization",
-		"X-Lookout-Token",
+		"X-Portwing-Token",
 		"X-Dd-Agent-Secret",
 		auth.HeaderKeyID,
 		auth.HeaderTimestamp,
@@ -27,7 +27,7 @@ func TestStripLookoutAuthHeaders(t *testing.T) {
 	h.Set("Content-Type", "application/json")
 	h.Set("X-Registry-Auth", "keep-me") // a legitimate Docker header
 
-	stripLookoutAuthHeaders(h)
+	stripPortwingAuthHeaders(h)
 
 	for _, name := range stripped {
 		if got := h.Get(name); got != "" {

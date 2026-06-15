@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          DIGEST=$(docker buildx imagetools inspect "ghcr.io/codeswhat/lookout:${VERSION}" \
+          DIGEST=$(docker buildx imagetools inspect "ghcr.io/codeswhat/portwing:${VERSION}" \
             --format '{{json .Manifest.Digest}}' | tr -d '"' || true)
           if [ -z "$DIGEST" ]; then
             echo "No manifest digest resolved, skipping image attestation."
@@ -83,7 +83,7 @@ jobs:
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
       # Attests every artifact listed in checksums.txt (all release archives).
-      # Verify with: gh attestation verify <archive> --repo CodesWhat/lookout
+      # Verify with: gh attestation verify <archive> --repo CodesWhat/portwing
       # Gated on public visibility: GitHub artifact attestation is not available
       # for private repos on this org's plan (cosign blob signatures in
       # checksums.txt.bundle still cover the archives either way).
@@ -103,7 +103,7 @@ jobs:
         if: github.event.repository.visibility == 'public' && steps.manifest-digest.outputs.digest != ''
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
         with:
-          subject-name: ghcr.io/codeswhat/lookout
+          subject-name: ghcr.io/codeswhat/portwing
           subject-digest: ${{ steps.manifest-digest.outputs.digest }}
           push-to-registry: true
           # OCI digest subjects have no file artifacts to catalog, so the
@@ -136,20 +136,20 @@ jobs:
       - name: Pull released image
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          docker pull "ghcr.io/codeswhat/lookout:${VERSION}"
+          docker pull "ghcr.io/codeswhat/portwing:${VERSION}"
 
       - name: Verify cosign signature
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cosign verify \
-            --certificate-identity-regexp="https://github.com/CodesWhat/lookout/.github/workflows/release.yml" \
+            --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
-            "ghcr.io/codeswhat/lookout:${VERSION}"
+            "ghcr.io/codeswhat/portwing:${VERSION}"
 
       - name: Verify gh attestation
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          gh attestation verify "oci://ghcr.io/codeswhat/lookout:${VERSION}" \
-            --repo CodesWhat/lookout
+          gh attestation verify "oci://ghcr.io/codeswhat/portwing:${VERSION}" \
+            --repo CodesWhat/portwing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

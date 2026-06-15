@@ -42,7 +42,7 @@ func FuzzMCPHandler(f *testing.F) {
 	h := &Handler{docker: nil, collector: nil}
 
 	f.Fuzz(func(t *testing.T, body string) {
-		req := httptest.NewRequest(http.MethodPost, "/_lookout/mcp", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/_portwing/mcp", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 

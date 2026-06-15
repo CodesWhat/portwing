@@ -4,12 +4,12 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /lookout ./cmd/lookout
+RUN CGO_ENABLED=0 go build -o /portwing ./cmd/portwing
 
 VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget -q --spider http://localhost:3000/_lookout/health
+  CMD wget -q --spider http://localhost:3000/_portwing/health
 
-ENTRYPOINT ["/lookout"]
+ENTRYPOINT ["/portwing"]

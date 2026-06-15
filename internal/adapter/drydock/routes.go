@@ -142,7 +142,7 @@ func (a *Adapter) handleTriggers(w http.ResponseWriter, r *http.Request) {
 
 // handleLogEntries returns an empty log entry array.
 // Drydock calls GET /api/log/entries (AgentClient.ts:1503) to populate the
-// agent log viewer. Lookout has no in-memory log buffer; returning [] is safe
+// agent log viewer. Portwing has no in-memory log buffer; returning [] is safe
 // and prevents 404 errors in Drydock's log panel.
 func (a *Adapter) handleLogEntries(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

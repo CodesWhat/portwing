@@ -17,14 +17,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/adapter"
-	"github.com/codeswhat/lookout/internal/audit"
-	"github.com/codeswhat/lookout/internal/auth"
-	"github.com/codeswhat/lookout/internal/config"
-	"github.com/codeswhat/lookout/internal/docker"
-	"github.com/codeswhat/lookout/internal/mcp"
-	"github.com/codeswhat/lookout/internal/metrics"
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/audit"
+	"github.com/codeswhat/portwing/internal/auth"
+	"github.com/codeswhat/portwing/internal/config"
+	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/mcp"
+	"github.com/codeswhat/portwing/internal/metrics"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // hopByHopHeaders are headers that must not be forwarded by proxies.
@@ -39,13 +39,13 @@ var hopByHopHeaders = map[string]bool{
 	"Proxy-Authenticate":  true,
 }
 
-// lookoutAuthHeaders authenticate the client to Lookout itself. They must never
+// portwingAuthHeaders authenticate the client to Portwing itself. They must never
 // be forwarded to the Docker daemon (or the sockguard proxy sitting in front of
-// it) — doing so leaks Lookout's own credentials downstream. http.Header.Del
-// canonicalises the key, so "X-Lookout-Key-ID" matches correctly.
-var lookoutAuthHeaders = []string{
+// it) — doing so leaks Portwing's own credentials downstream. http.Header.Del
+// canonicalises the key, so current and legacy auth headers match correctly.
+var portwingAuthHeaders = []string{
 	"Authorization",
-	"X-Lookout-Token",
+	"X-Portwing-Token",
 	"X-Dd-Agent-Secret",
 	auth.HeaderKeyID,
 	auth.HeaderTimestamp,
@@ -53,10 +53,10 @@ var lookoutAuthHeaders = []string{
 	auth.HeaderSignature,
 }
 
-// stripLookoutAuthHeaders removes Lookout's own auth headers from a request
+// stripPortwingAuthHeaders removes Portwing's own auth headers from a request
 // bound for the Docker daemon.
-func stripLookoutAuthHeaders(h http.Header) {
-	for _, name := range lookoutAuthHeaders {
+func stripPortwingAuthHeaders(h http.Header) {
+	for _, name := range portwingAuthHeaders {
 		h.Del(name)
 	}
 }
@@ -216,14 +216,14 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 // are wrapped with the auth middleware.
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// No auth required.
-	mux.HandleFunc("GET /_lookout/health", s.handleHealth)
+	mux.HandleFunc("GET /_portwing/health", s.handleHealth)
 	mux.HandleFunc("GET /health", s.handleSimpleHealth)
 
 	// Enrollment endpoint: reachable WITHOUT auth (it IS the bootstrap), but
 	// rate-limited. Registered only when ENROLLMENT_TOKEN is configured.
 	if s.enroller != nil {
 		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller)
-		mux.Handle("POST /api/lookout/enroll", enrollHandler)
+		mux.Handle("POST /api/portwing/enroll", enrollHandler)
 	}
 
 	// Auth required - wrap with audit-aware auth middleware (with Ed25519 support).
@@ -231,13 +231,14 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		return s.rateLimiter.AuthMiddlewareWithEd25519(s.verifier, s.ed25519, s.auditor, http.HandlerFunc(h))
 	}
 
-	mux.Handle("GET /_lookout/info", authWrap(s.handleInfo))
-	mux.Handle("POST /_lookout/compose", authWrap(s.handleCompose))
-	mux.Handle("GET /_lookout/metrics", authWrap(s.handleMetrics))
+	mux.Handle("GET /_portwing/info", authWrap(s.handleInfo))
+	mux.Handle("POST /_portwing/compose", authWrap(s.handleCompose))
+	mux.Handle("GET /_portwing/metrics", authWrap(s.handleMetrics))
 	mux.Handle("GET /metrics", authWrap(s.handleMetrics))
-	mux.Handle("/_lookout/mcp", authWrap(func(w http.ResponseWriter, r *http.Request) {
+	mcpHandler := authWrap(func(w http.ResponseWriter, r *http.Request) {
 		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
-	}))
+	})
+	mux.Handle("/_portwing/mcp", mcpHandler)
 
 	// Adapter-specific routes.
 	s.adapter.RegisterRoutes(mux, authWrap)
@@ -353,16 +354,17 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Build Docker API request.
 	dockerURL := fmt.Sprintf("http://localhost%s", r.URL.RequestURI())
+	// #nosec G704 -- URL is fixed to localhost for the Docker socket proxy; RequestURI only selects the Docker API path/query.
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, dockerURL, r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Copy headers (strip hop-by-hop), then strip Lookout's own auth headers
+	// Copy headers (strip hop-by-hop), then strip Portwing's own auth headers
 	// so they are never forwarded to the Docker socket.
 	copyHeaders(proxyReq.Header, r.Header)
-	stripLookoutAuthHeaders(proxyReq.Header)
+	stripPortwingAuthHeaders(proxyReq.Header)
 
 	var resp *http.Response
 	if isStream {

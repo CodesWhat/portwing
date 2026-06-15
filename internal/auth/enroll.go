@@ -13,7 +13,7 @@ import (
 	"sync"
 )
 
-// enrollRequest is the JSON body for POST /api/lookout/enroll.
+// enrollRequest is the JSON body for POST /api/portwing/enroll.
 type enrollRequest struct {
 	EnrollmentToken string `json:"enrollment_token"`
 	PublicKey       string `json:"public_key"` // base64 standard, raw 32-byte Ed25519 pubkey
@@ -50,7 +50,7 @@ func NewEnroller(token, authorizedFile string, registry *KeyRegistry) *Enroller 
 	}
 }
 
-// ServeHTTP implements http.Handler. It accepts POST /api/lookout/enroll,
+// ServeHTTP implements http.Handler. It accepts POST /api/portwing/enroll,
 // validates the enrollment token, appends the public key, reloads the registry,
 // and burns the token.
 //
@@ -151,6 +151,7 @@ func remoteHost(r *http.Request) string {
 // appendKeyLine appends a single key line to the authorized_keys file,
 // creating it (mode 0600) if it does not exist.
 func appendKeyLine(path, line string) error {
+	// #nosec G304 -- authorized_keys path is explicit operator configuration.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening authorized_keys for append: %w", err)

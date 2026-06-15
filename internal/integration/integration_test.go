@@ -1,9 +1,9 @@
 //go:build integration
 
-// Package integration runs the Lookout server against the runner's real
-// Docker daemon. Each test starts a Lookout server on a random port with
+// Package integration runs the Portwing server against the runner's real
+// Docker daemon. Each test starts a Portwing server on a random port with
 // TOKEN auth pointing at /var/run/docker.sock (or the socket specified by
-// LOOKOUT_TEST_DOCKER_SOCKET). Tests verify: health endpoints, auth
+// PORTWING_TEST_DOCKER_SOCKET). Tests verify: health endpoints, auth
 // enforcement, container list API, Prometheus metrics, MCP protocol, and
 // the SSE events stream. A real alpine container is started and cleaned up
 // so list assertions are non-trivial.
@@ -38,14 +38,14 @@ const (
 	testImage  = "alpine:3.20"
 )
 
-// startServer launches lookout as a subprocess and returns its base URL.
+// startServer launches portwing as a subprocess and returns its base URL.
 // It blocks until the health endpoint returns 200 or the deadline is hit.
 func startServer(t *testing.T) (baseURL string, cleanup func()) {
 	t.Helper()
 	return startServerWithEnv(t, nil, testToken)
 }
 
-// startServerWithEnv launches lookout with extra env vars appended and a
+// startServerWithEnv launches portwing with extra env vars appended and a
 // specific bearer token. Pass extraEnv as nil and token as testToken for the
 // standard TOKEN-auth harness; pass token as "" to start without TOKEN (e.g.
 // for Ed25519-only auth via an AUTHORIZED_KEYS entry in extraEnv). An ephemeral
@@ -53,7 +53,7 @@ func startServer(t *testing.T) (baseURL string, cleanup func()) {
 func startServerWithEnv(t *testing.T, extraEnv []string, token string) (baseURL string, cleanup func()) {
 	t.Helper()
 
-	dockerSocket := os.Getenv("LOOKOUT_TEST_DOCKER_SOCKET")
+	dockerSocket := os.Getenv("PORTWING_TEST_DOCKER_SOCKET")
 	if dockerSocket == "" {
 		dockerSocket = "/var/run/docker.sock"
 	}
@@ -65,7 +65,7 @@ func startServerWithEnv(t *testing.T, extraEnv []string, token string) (baseURL 
 	}
 
 	// Obtain an ephemeral port by binding on :0 and reading the resolved
-	// address, then close the listener so lookout can bind the same port.
+	// address, then close the listener so portwing can bind the same port.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("net.Listen :0: %v", err)
@@ -73,9 +73,9 @@ func startServerWithEnv(t *testing.T, extraEnv []string, token string) (baseURL 
 	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
 	ln.Close()
 
-	// Build the binary first (go build ./cmd/lookout -o <tmpdir>/lookout).
-	binPath := tmpDir + "/lookout"
-	build := exec.Command("go", "build", "-o", binPath, "./cmd/lookout")
+	// Build the binary first (go build ./cmd/portwing -o <tmpdir>/portwing).
+	binPath := tmpDir + "/portwing"
+	build := exec.Command("go", "build", "-o", binPath, "./cmd/portwing")
 	build.Dir = moduleRoot(t)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build failed: %v\n%s", err, out)
@@ -100,7 +100,7 @@ func startServerWithEnv(t *testing.T, extraEnv []string, token string) (baseURL 
 	cmd.Dir = tmpDir
 
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting lookout: %v", err)
+		t.Fatalf("starting portwing: %v", err)
 	}
 
 	base := "http://127.0.0.1:" + port
@@ -108,7 +108,7 @@ func startServerWithEnv(t *testing.T, extraEnv []string, token string) (baseURL 
 	// Wait for the server to become healthy.
 	deadline := time.Now().Add(startupMax)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(base + "/_lookout/health") //nolint:noctx
+		resp, err := http.Get(base + "/_portwing/health") //nolint:noctx
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -148,7 +148,7 @@ func moduleRoot(t *testing.T) string {
 // sleep container so the container list is non-trivial. Returns the container ID.
 func startAlpineContainer(t *testing.T) (id string, cleanupFn func()) {
 	t.Helper()
-	cmd := exec.Command("docker", "run", "-d", "--name", "lookout-integ-test", testImage, "sleep", "300")
+	cmd := exec.Command("docker", "run", "-d", "--name", "portwing-integ-test", testImage, "sleep", "300")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("docker run: %v\n%s", err, out)
@@ -180,7 +180,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "docker not found in PATH; skipping integration tests")
 		os.Exit(0)
 	}
-	socket := os.Getenv("LOOKOUT_TEST_DOCKER_SOCKET")
+	socket := os.Getenv("PORTWING_TEST_DOCKER_SOCKET")
 	if socket == "" {
 		socket = "/var/run/docker.sock"
 	}
@@ -195,7 +195,7 @@ func TestHealthEndpoint(t *testing.T) {
 	base, cleanup := startServer(t)
 	defer cleanup()
 
-	resp, err := http.Get(base + "/_lookout/health") //nolint:noctx
+	resp, err := http.Get(base + "/_portwing/health") //nolint:noctx
 	if err != nil {
 		t.Fatalf("GET /health: %v", err)
 	}
@@ -281,11 +281,11 @@ func TestMetricsContainsBuildInfo(t *testing.T) {
 	base, cleanup := startServer(t)
 	defer cleanup()
 
-	resp := get(t, base, "/_lookout/metrics")
+	resp := get(t, base, "/_portwing/metrics")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /_lookout/metrics: got %d, want 200", resp.StatusCode)
+		t.Fatalf("GET /_portwing/metrics: got %d, want 200", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -293,8 +293,8 @@ func TestMetricsContainsBuildInfo(t *testing.T) {
 		t.Fatalf("reading metrics body: %v", err)
 	}
 
-	if !bytes.Contains(body, []byte("lookout_build_info")) {
-		t.Errorf("metrics body does not contain lookout_build_info\nbody excerpt: %.500s", body)
+	if !bytes.Contains(body, []byte("portwing_build_info")) {
+		t.Errorf("metrics body does not contain portwing_build_info\nbody excerpt: %.500s", body)
 	}
 }
 
@@ -304,7 +304,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 
 	// initialize request.
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.0.1"}}}`
-	req, err := http.NewRequest(http.MethodPost, base+"/_lookout/mcp", strings.NewReader(initBody))
+	req, err := http.NewRequest(http.MethodPost, base+"/_portwing/mcp", strings.NewReader(initBody))
 	if err != nil {
 		t.Fatalf("NewRequest MCP: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("POST /_lookout/mcp initialize: %v", err)
+		t.Fatalf("POST /_portwing/mcp initialize: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -332,7 +332,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 
 	// tools/list request.
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
-	req2, err := http.NewRequest(http.MethodPost, base+"/_lookout/mcp", strings.NewReader(listBody))
+	req2, err := http.NewRequest(http.MethodPost, base+"/_portwing/mcp", strings.NewReader(listBody))
 	if err != nil {
 		t.Fatalf("NewRequest MCP tools/list: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 
 	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {
-		t.Fatalf("POST /_lookout/mcp tools/list: %v", err)
+		t.Fatalf("POST /_portwing/mcp tools/list: %v", err)
 	}
 	defer resp2.Body.Close()
 
@@ -446,11 +446,11 @@ func TestSSEEventsFirstEventIsAck(t *testing.T) {
 	}
 }
 
-// TestEd25519Auth verifies that lookout enforces Ed25519 signature auth on a
+// TestEd25519Auth verifies that portwing enforces Ed25519 signature auth on a
 // protected endpoint when started with AUTHORIZED_KEYS and no TOKEN: an
 // unsigned request is rejected with 401, and a properly signed request is
-// accepted with 200. It targets /_lookout/info (an auth-gated endpoint) rather
-// than /_lookout/health (which is intentionally unauthenticated), so the
+// accepted with 200. It targets /_portwing/info (an auth-gated endpoint) rather
+// than /_portwing/health (which is intentionally unauthenticated), so the
 // signature path is actually exercised.
 func TestEd25519Auth(t *testing.T) {
 	// Generate a fresh Ed25519 keypair for this test.
@@ -474,14 +474,14 @@ func TestEd25519Auth(t *testing.T) {
 		t.Fatalf("WriteFile authorized_keys: %v", err)
 	}
 
-	// Start lookout with AUTHORIZED_KEYS set and no TOKEN (Ed25519-only auth).
+	// Start portwing with AUTHORIZED_KEYS set and no TOKEN (Ed25519-only auth).
 	base, cleanup := startServerWithEnv(t,
 		[]string{"AUTHORIZED_KEYS=" + keysPath},
 		"", // no bearer token
 	)
 	defer cleanup()
 
-	const target = "/_lookout/info" // auth-gated, unlike /_lookout/health
+	const target = "/_portwing/info" // auth-gated, unlike /_portwing/health
 
 	// Negative control: an unsigned request must be rejected with 401. This
 	// proves the endpoint is genuinely gated, so the positive case is meaningful.
@@ -521,10 +521,10 @@ func TestEd25519Auth(t *testing.T) {
 	h := sha256.Sum256(pub)
 	keyID := hex.EncodeToString(h[:8])
 
-	req.Header.Set("X-Lookout-Key-ID", keyID)
-	req.Header.Set("X-Lookout-Timestamp", strconv.FormatInt(tsUnix, 10))
-	req.Header.Set("X-Lookout-Nonce", nonce)
-	req.Header.Set("X-Lookout-Signature", base64.RawURLEncoding.EncodeToString(sig))
+	req.Header.Set("X-Portwing-Key-ID", keyID)
+	req.Header.Set("X-Portwing-Timestamp", strconv.FormatInt(tsUnix, 10))
+	req.Header.Set("X-Portwing-Nonce", nonce)
+	req.Header.Set("X-Portwing-Signature", base64.RawURLEncoding.EncodeToString(sig))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -535,6 +535,6 @@ func TestEd25519Auth(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("Ed25519 auth: got %d, want 200\nreason: %s\nbody: %s",
-			resp.StatusCode, resp.Header.Get("X-Lookout-Reason"), body)
+			resp.StatusCode, resp.Header.Get("X-Portwing-Reason"), body)
 	}
 }

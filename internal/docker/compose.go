@@ -190,6 +190,11 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) error {
 	if _, err := cm.resolvePath(stackDir, "."); err != nil {
 		return fmt.Errorf("invalid stack path: %w", err)
 	}
+	for relPath := range req.Files {
+		if _, err := cm.resolvePath(stackDir, relPath); err != nil {
+			return fmt.Errorf("invalid stack file path %q: %w", relPath, err)
+		}
+	}
 
 	return nil
 }
@@ -209,7 +214,7 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 		}
 
 		dir := filepath.Dir(absPath)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("creating directory %q: %w", dir, err)
 		}
 
@@ -224,7 +229,7 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 			data = []byte(content)
 		}
 
-		if err := os.WriteFile(absPath, data, 0o644); err != nil {
+		if err := os.WriteFile(absPath, data, 0o600); err != nil {
 			return fmt.Errorf("writing %q: %w", absPath, err)
 		}
 	}
@@ -241,7 +246,7 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 			fmt.Fprintf(&buf, "%s=%s\n", key, val)
 		}
 
-		if err := os.WriteFile(envPath, buf.Bytes(), 0o644); err != nil {
+		if err := os.WriteFile(envPath, buf.Bytes(), 0o600); err != nil {
 			return fmt.Errorf("writing .env.drydock: %w", err)
 		}
 	}
@@ -326,6 +331,7 @@ func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) 
 		return nil, fmt.Errorf("unsupported compose operation: %q", req.Operation)
 	}
 
+	// #nosec G204 -- compose binary is detected locally and args are built from validated request fields without shell expansion.
 	cmd := exec.CommandContext(ctx, cm.composeBin, args...)
 	cmd.Dir = projectDir
 	return cmd, nil
@@ -333,6 +339,7 @@ func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) 
 
 // registryLogin performs a docker login using --password-stdin.
 func (cm *ComposeManager) registryLogin(ctx context.Context, auth *RegistryAuth) error {
+	// #nosec G204 -- arguments are passed directly to docker without a shell; password is sent on stdin.
 	cmd := exec.CommandContext(ctx, "docker", "login", "--username", auth.Username, "--password-stdin", auth.Server)
 	cmd.Stdin = strings.NewReader(auth.Password)
 	cmd.Env = cm.buildEnv()
@@ -346,26 +353,53 @@ func (cm *ComposeManager) registryLogin(ctx context.Context, auth *RegistryAuth)
 	return nil
 }
 
-// resolvePath resolves a relative path within the stack directory and
-// verifies it does not escape the stacks directory (path traversal protection).
+// resolvePath resolves a relative path within a single stack directory.
 func (cm *ComposeManager) resolvePath(stackDir, path string) (string, error) {
-	base := filepath.Join(cm.stacksDir, stackDir)
-	full := filepath.Join(base, path)
-	resolved, err := filepath.Abs(full)
+	base, err := cm.resolveStackRoot(stackDir)
+	if err != nil {
+		return "", err
+	}
+
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("path %q must be relative", path)
+	}
+	cleanPath := filepath.Clean(path)
+	full, err := filepath.Abs(filepath.Join(base, cleanPath))
 	if err != nil {
 		return "", fmt.Errorf("resolving absolute path: %w", err)
 	}
+	if !pathWithin(base, full) {
+		return "", fmt.Errorf("path %q escapes stack directory", path)
+	}
+	return full, nil
+}
 
+func (cm *ComposeManager) resolveStackRoot(stackDir string) (string, error) {
+	if filepath.IsAbs(stackDir) {
+		return "", fmt.Errorf("stack path %q must be relative", stackDir)
+	}
+	cleanStackDir := filepath.Clean(stackDir)
+	base := filepath.Join(cm.stacksDir, cleanStackDir)
+	resolved, err := filepath.Abs(base)
+	if err != nil {
+		return "", fmt.Errorf("resolving stack path: %w", err)
+	}
 	absBase, err := filepath.Abs(cm.stacksDir)
 	if err != nil {
 		return "", fmt.Errorf("resolving stacks dir: %w", err)
 	}
-
-	if !strings.HasPrefix(resolved, absBase+string(filepath.Separator)) && resolved != absBase {
-		return "", fmt.Errorf("path %q escapes stacks directory", path)
+	if !pathWithin(absBase, resolved) {
+		return "", fmt.Errorf("stack path %q escapes stacks directory", stackDir)
 	}
-
 	return resolved, nil
+}
+
+func pathWithin(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." && !filepath.IsAbs(rel))
 }
 
 // buildEnv constructs the subprocess environment, setting DOCKER_API_VERSION

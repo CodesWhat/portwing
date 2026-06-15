@@ -1,10 +1,10 @@
-# Lookout -- Technical Specification
+# Portwing -- Technical Specification
 
 > Lightweight remote Docker agent for the Drydock container monitoring platform.
 
 ## 1. Overview
 
-Lookout is a standalone Go binary that runs on remote Docker hosts, providing Drydock with secure access to the Docker Engine API, container inventory with update metadata, host metrics, interactive exec sessions, and Docker Compose operations. It communicates directly with the Drydock controller.
+Portwing is a standalone Go binary that runs on remote Docker hosts, providing Drydock with secure access to the Docker Engine API, container inventory with update metadata, host metrics, interactive exec sessions, and Docker Compose operations. It communicates directly with the Drydock controller.
 
 ```mermaid
 flowchart LR
@@ -14,7 +14,7 @@ flowchart LR
 
     subgraph host ["Remote host (× N)"]
         direction LR
-        LO["Lookout<br/>(agent)"]
+        LO["Portwing<br/>(agent)"]
         SG["sockguard<br/>(socket filter)"]
         DE["Docker Engine"]
         LO -- "DOCKER_SOCKET" --> SG --> DE
@@ -24,9 +24,9 @@ flowchart LR
 ```
 
 The Drydock controller opens an inbound HTTP connection to each remote host's
-Lookout independently — handshake on `/api/containers`, then a long-lived SSE
+Portwing independently — handshake on `/api/containers`, then a long-lived SSE
 stream on `/api/events`. sockguard is the recommended socket filter between
-Lookout and the Docker Engine.
+Portwing and the Docker Engine.
 
 **Language:** Go 1.26+ (module), built with Go 1.26 (CI)
 **Dependencies:** `gorilla/websocket`, `google/uuid` -- zero Docker SDK dependency (raw HTTP over Unix socket)
@@ -42,16 +42,16 @@ Otherwise                                                              ->  Stand
 
 ### 2.2 Standard Mode
 
-Lookout runs an HTTP(S) server. The Drydock controller connects inbound.
+Portwing runs an HTTP(S) server. The Drydock controller connects inbound.
 
 - Transparent Docker API proxy (all paths forwarded to Docker socket)
-- Dedicated agent endpoints under `/_lookout/*`
-- Drydock-compatible REST + SSE endpoints under `/api/*` (backward compat)
+- Dedicated agent endpoints under `/_portwing/*`
+- Drydock-compatible REST + SSE endpoints under `/api/*` (Drydock compatibility)
 - TLS 1.2+ with modern AEAD cipher suites
 
 ### 2.3 Edge Mode
 
-Lookout initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/lookout/ws`). All communication is multiplexed over this single connection. Both sides are implemented: Drydock 1.5 ships the controller endpoint (Ed25519-only, `lookout/1.0`) and Lookout signs its hello with Ed25519. Full exec robustness lands in Lookout 0.2.2; Drydock 1.5 and Lookout 0.2.2 are pre-release.
+Portwing initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/portwing/ws`). All communication is multiplexed over this single connection. Both sides are implemented: Drydock 1.5 ships the controller endpoint (Ed25519-only, `portwing/1.0`) and Portwing signs its hello with Ed25519. Full exec robustness lands in Portwing 0.2.2; Drydock 1.5 and Portwing 0.2.2 are pre-release.
 
 - Works behind NAT, firewalls, dynamic IPs
 - Auto-reconnect with exponential backoff + jitter
@@ -59,15 +59,15 @@ Lookout initiates an outbound WebSocket connection to the Drydock controller's e
 
 ## 3. WebSocket Protocol
 
-**Protocol identifier:** `lookout/1.0`
+**Protocol identifier:** `portwing/1.0`
 
 ### 3.1 Handshake
 
 ```mermaid
 sequenceDiagram
-    participant L as Lookout
+    participant L as Portwing
     participant D as Drydock controller
-    L->>D: WSS CONNECT /api/lookout/ws
+    L->>D: WSS CONNECT /api/portwing/ws
     L->>D: hello (Ed25519 signature, caps, docker version)
     Note over D: verify Ed25519 signature, register agent
     D->>L: welcome (poll interval, config)
@@ -83,7 +83,7 @@ sequenceDiagram
 {
   "type": "hello",
   "version": "1.0.0",
-  "protocol": "lookout/1.0",
+  "protocol": "portwing/1.0",
   "agentId": "uuid",
   "agentName": "my-server",
   "pubKeyId": "a3f2b1c9d8e7f6a4",
@@ -100,7 +100,7 @@ sequenceDiagram
 }
 ```
 
-The Drydock `/api/lookout/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
+The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
 
 ### 3.3 Message Types
 
@@ -149,9 +149,9 @@ The Drydock `/api/lookout/ws` endpoint requires the Ed25519 fields (`pubKeyId`, 
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/_lookout/health` | GET | No | `{"status":"healthy"}` + Docker connectivity |
-| `/_lookout/info` | GET | Yes | Agent version, Docker version, mode, uptime, caps |
-| `/_lookout/compose` | POST | Yes | Docker Compose operations |
+| `/_portwing/health` | GET | No | `{"status":"healthy"}` + Docker connectivity |
+| `/_portwing/info` | GET | Yes | Agent version, Docker version, mode, uptime, caps |
+| `/_portwing/compose` | POST | Yes | Docker Compose operations |
 
 ### 4.2 Docker API Proxy
 
@@ -180,7 +180,7 @@ The Drydock `/api/lookout/ws` endpoint requires the Ed25519 fields (`pubKeyId`, 
 
 ### 4.4 Authentication
 
-- **Header:** `Authorization: Bearer` (primary), `X-Lookout-Token`, `X-Dd-Agent-Secret` (backward compat)
+- **Header:** `Authorization: Bearer` (primary), `X-Portwing-Token`, `X-Dd-Agent-Secret` (Drydock compatibility)
 - **Comparison:** `crypto/subtle.ConstantTimeCompare` (timing-safe)
 - **Rate limiting:** 10 failed attempts per IP per minute, 10K IP cap, background cleanup every 5min
 - Token is optional in Standard mode (if not configured, no auth required)
@@ -232,7 +232,7 @@ type DockerClient struct {
 ```mermaid
 sequenceDiagram
     participant D as Drydock controller
-    participant L as Lookout
+    participant L as Portwing
     participant E as Docker Engine
     D->>L: exec_start {execId, containerId, cmd, user, cols, rows}
     L->>E: POST /containers/{id}/exec
@@ -351,9 +351,9 @@ type Container struct {
 
 ### 10.3 Watcher Delegation Model (v1.0)
 
-Lookout reports container inventory. Drydock controller performs registry checks.
+Portwing reports container inventory. Drydock controller performs registry checks.
 
-1. Lookout monitors Docker containers via Docker API
+1. Portwing monitors Docker containers via Docker API
 2. Reads `dd.*` labels, constructs Container objects with image metadata
 3. Sends `dd:container_sync` / `dd:container_added` / `dd:container_updated` / `dd:container_removed`
 4. Drydock controller receives inventory, runs registry checks, writes Result back
@@ -376,8 +376,8 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 
 | Layer | Mechanism |
 |-------|-----------|
-| Standard mode | `X-Lookout-Token` or `X-Dd-Agent-Secret` header, timing-safe |
-| Edge mode | Ed25519 signed hello (`pubKeyId`/`timestamp`/`nonce`/`signature`) when `PRIVATE_KEY_FILE` is set; the Drydock `/api/lookout/ws` endpoint requires it and rejects token-hash hellos |
+| Standard mode | `X-Portwing-Token` or `X-Dd-Agent-Secret` header, timing-safe |
+| Edge mode | Ed25519 signed hello (`pubKeyId`/`timestamp`/`nonce`/`signature`) when `PRIVATE_KEY_FILE` is set; the Drydock `/api/portwing/ws` endpoint requires it and rejects token-hash hellos |
 | Rate limiting | 10 failures/min/IP, 10K IP cap, 5min cleanup |
 | Token source | `TOKEN` env var or `TOKEN_FILE` |
 
@@ -434,7 +434,7 @@ On success: reset backoff to 1s
 
 - **Binaries:** `CGO_ENABLED=0`, `-trimpath`, `-s -w` (stripped)
 - **OS/Arch:** linux/amd64, linux/arm64, linux/arm/v7, darwin/amd64, darwin/arm64
-- **Docker:** Multi-arch manifest at `ghcr.io/codeswhat/lookout`
+- **Docker:** Multi-arch manifest at `ghcr.io/codeswhat/portwing`
 - **Base images:** Wolfi OS (amd64/arm64), Alpine (armv7)
 
 ### 14.2 Docker Image
@@ -445,7 +445,7 @@ Packages: `ca-certificates`, `busybox`, `docker-cli`, `docker-compose`, `wget`
 
 ## 15. Migration Strategy
 
-1. **Phase 1: Drop-in Standard Mode** -- Replace existing Node.js agent with Lookout binary
-2. **Phase 2: Edge Mode** -- Drydock controller `/api/lookout/ws` WebSocket endpoint shipped in Drydock 1.5; end-to-end edge mode is functional (full exec robustness in Lookout 0.2.2)
+1. **Phase 1: Drop-in Standard Mode** -- Replace existing Node.js agent with Portwing binary
+2. **Phase 2: Edge Mode** -- Drydock controller `/api/portwing/ws` WebSocket endpoint shipped in Drydock 1.5; end-to-end edge mode is functional (full exec robustness in Portwing 0.2.2)
 3. **Phase 3: Native WebSocket in Drydock** -- Replace AgentClient SSE with WebSocket
 4. **Phase 4: Deprecate SSE** -- Remove SSE endpoints after one release cycle

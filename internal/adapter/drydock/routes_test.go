@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	adapterpkg "github.com/codeswhat/lookout/internal/adapter"
-	"github.com/codeswhat/lookout/internal/docker"
+	adapterpkg "github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 // shortSocketPath returns a temp socket path short enough for the unix

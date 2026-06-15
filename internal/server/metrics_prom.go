@@ -8,57 +8,57 @@ import (
 	"sync"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // handleMetrics emits host and per-container metrics in Prometheus text
 // exposition format (version 0.0.4). It is registered at both
-// GET /_lookout/metrics and GET /metrics.
+// GET /_portwing/metrics and GET /metrics.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var b strings.Builder
 
 	// --- build info ---
-	fmt.Fprintf(&b, "# HELP lookout_build_info Lookout agent build metadata.\n")
-	fmt.Fprintf(&b, "# TYPE lookout_build_info gauge\n")
-	fmt.Fprintf(&b, "lookout_build_info{version=\"%s\"} 1\n", escapeLabelValue(protocol.AgentVersion))
+	fmt.Fprintf(&b, "# HELP portwing_build_info Portwing agent build metadata.\n")
+	fmt.Fprintf(&b, "# TYPE portwing_build_info gauge\n")
+	fmt.Fprintf(&b, "portwing_build_info{version=\"%s\"} 1\n", escapeLabelValue(protocol.AgentVersion))
 
 	// --- uptime ---
 	uptime := time.Since(s.startTime).Seconds()
-	fmt.Fprintf(&b, "# HELP lookout_uptime_seconds Seconds since the agent started.\n")
-	fmt.Fprintf(&b, "# TYPE lookout_uptime_seconds gauge\n")
-	fmt.Fprintf(&b, "lookout_uptime_seconds %g\n", uptime)
+	fmt.Fprintf(&b, "# HELP portwing_uptime_seconds Seconds since the agent started.\n")
+	fmt.Fprintf(&b, "# TYPE portwing_uptime_seconds gauge\n")
+	fmt.Fprintf(&b, "portwing_uptime_seconds %g\n", uptime)
 
 	// --- host metrics ---
 	host, err := s.collector.Collect()
 	if err == nil && host != nil {
-		fmt.Fprintf(&b, "# HELP lookout_host_cpu_usage_percent Host CPU usage percentage.\n")
-		fmt.Fprintf(&b, "# TYPE lookout_host_cpu_usage_percent gauge\n")
-		fmt.Fprintf(&b, "lookout_host_cpu_usage_percent %g\n", host.CPUUsage)
+		fmt.Fprintf(&b, "# HELP portwing_host_cpu_usage_percent Host CPU usage percentage.\n")
+		fmt.Fprintf(&b, "# TYPE portwing_host_cpu_usage_percent gauge\n")
+		fmt.Fprintf(&b, "portwing_host_cpu_usage_percent %g\n", host.CPUUsage)
 
-		fmt.Fprintf(&b, "# HELP lookout_host_memory_total_bytes Host total memory in bytes.\n")
-		fmt.Fprintf(&b, "# TYPE lookout_host_memory_total_bytes gauge\n")
-		fmt.Fprintf(&b, "lookout_host_memory_total_bytes %d\n", host.MemoryTotal)
+		fmt.Fprintf(&b, "# HELP portwing_host_memory_total_bytes Host total memory in bytes.\n")
+		fmt.Fprintf(&b, "# TYPE portwing_host_memory_total_bytes gauge\n")
+		fmt.Fprintf(&b, "portwing_host_memory_total_bytes %d\n", host.MemoryTotal)
 
-		fmt.Fprintf(&b, "# HELP lookout_host_memory_used_bytes Host used memory in bytes.\n")
-		fmt.Fprintf(&b, "# TYPE lookout_host_memory_used_bytes gauge\n")
-		fmt.Fprintf(&b, "lookout_host_memory_used_bytes %d\n", host.MemoryUsed)
+		fmt.Fprintf(&b, "# HELP portwing_host_memory_used_bytes Host used memory in bytes.\n")
+		fmt.Fprintf(&b, "# TYPE portwing_host_memory_used_bytes gauge\n")
+		fmt.Fprintf(&b, "portwing_host_memory_used_bytes %d\n", host.MemoryUsed)
 
-		fmt.Fprintf(&b, "# HELP lookout_host_disk_total_bytes Host total disk space in bytes.\n")
-		fmt.Fprintf(&b, "# TYPE lookout_host_disk_total_bytes gauge\n")
-		fmt.Fprintf(&b, "lookout_host_disk_total_bytes %d\n", host.DiskTotal)
+		fmt.Fprintf(&b, "# HELP portwing_host_disk_total_bytes Host total disk space in bytes.\n")
+		fmt.Fprintf(&b, "# TYPE portwing_host_disk_total_bytes gauge\n")
+		fmt.Fprintf(&b, "portwing_host_disk_total_bytes %d\n", host.DiskTotal)
 
-		fmt.Fprintf(&b, "# HELP lookout_host_disk_used_bytes Host used disk space in bytes.\n")
-		fmt.Fprintf(&b, "# TYPE lookout_host_disk_used_bytes gauge\n")
-		fmt.Fprintf(&b, "lookout_host_disk_used_bytes %d\n", host.DiskUsed)
+		fmt.Fprintf(&b, "# HELP portwing_host_disk_used_bytes Host used disk space in bytes.\n")
+		fmt.Fprintf(&b, "# TYPE portwing_host_disk_used_bytes gauge\n")
+		fmt.Fprintf(&b, "portwing_host_disk_used_bytes %d\n", host.DiskUsed)
 
-		fmt.Fprintf(&b, "# HELP lookout_host_network_receive_bytes_total Host network bytes received (all non-lo interfaces).\n")
-		fmt.Fprintf(&b, "# TYPE lookout_host_network_receive_bytes_total counter\n")
-		fmt.Fprintf(&b, "lookout_host_network_receive_bytes_total %d\n", host.NetworkRxBytes)
+		fmt.Fprintf(&b, "# HELP portwing_host_network_receive_bytes_total Host network bytes received (all non-lo interfaces).\n")
+		fmt.Fprintf(&b, "# TYPE portwing_host_network_receive_bytes_total counter\n")
+		fmt.Fprintf(&b, "portwing_host_network_receive_bytes_total %d\n", host.NetworkRxBytes)
 
-		fmt.Fprintf(&b, "# HELP lookout_host_network_transmit_bytes_total Host network bytes transmitted (all non-lo interfaces).\n")
-		fmt.Fprintf(&b, "# TYPE lookout_host_network_transmit_bytes_total counter\n")
-		fmt.Fprintf(&b, "lookout_host_network_transmit_bytes_total %d\n", host.NetworkTxBytes)
+		fmt.Fprintf(&b, "# HELP portwing_host_network_transmit_bytes_total Host network bytes transmitted (all non-lo interfaces).\n")
+		fmt.Fprintf(&b, "# TYPE portwing_host_network_transmit_bytes_total counter\n")
+		fmt.Fprintf(&b, "portwing_host_network_transmit_bytes_total %d\n", host.NetworkTxBytes)
 	}
 
 	// --- per-container metrics ---

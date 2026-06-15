@@ -1,4 +1,4 @@
-# Releasing Lookout
+# Releasing Portwing
 
 ## Before tagging
 
@@ -40,7 +40,7 @@
    - Add a fresh empty `## [Unreleased]` block above it
    - `release-cut.yml` validates that a non-empty CHANGELOG entry exists for the computed tag before pushing it; the cut fails if this step is skipped
 
-6. **No source version bump needed** — the binary's version is injected at build time via GoReleaser ldflags (`-X github.com/codeswhat/lookout/internal/protocol.AgentVersion={{.Version}}`). `AgentVersion` in `internal/protocol/version.go` must stay a `var`: `-X` silently does nothing to a `const`.
+6. **No source version bump needed** — the binary's version is injected at build time via GoReleaser ldflags (`-X github.com/codeswhat/portwing/internal/protocol.AgentVersion={{.Version}}`). `AgentVersion` in `internal/protocol/version.go` must stay a `var`: `-X` silently does nothing to a `const`.
 
 7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → goreleaser snapshot → lint → test (-race) → govulncheck → fuzz smoke → zizmor. The push is blocked if any step fails.
 
@@ -74,16 +74,16 @@ git push origin v<version>
 
 `release.yml` runs on the tag push:
 
-1. **GoReleaser** — builds all platform binaries, archives, and checksums; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/lookout`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
-2. **Attestations** — SLSA build provenance for every archive in `checksums.txt` and for the container manifest (`gh attestation verify <archive> --repo CodesWhat/lookout`)
+1. **GoReleaser** — builds all platform binaries, archives, and checksums; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
+2. **Attestations** — SLSA build provenance for every archive in `checksums.txt` and for the container manifest (`gh attestation verify <archive> --repo CodesWhat/portwing`)
 3. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.
 
 **Verify the release:**
 
 - GitHub Actions: the `release.yml` run is green
-- GHCR image exists: `docker pull ghcr.io/codeswhat/lookout:<version>`
+- GHCR image exists: `docker pull ghcr.io/codeswhat/portwing:<version>`
 - The release page has archives for every platform plus `checksums.txt`
-- `lookout version` (or `GET /api/v1/version`) on the new image reports the tagged version, not `0.1.0` — this catches ldflags injection regressions
+- `portwing version` (or `GET /api/v1/version`) on the new image reports the tagged version, not `0.1.0` — this catches ldflags injection regressions
 
 ---
 

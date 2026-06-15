@@ -1,5 +1,5 @@
 # Release image (linux/arm/v7) assembled by GoReleaser from the prebuilt
-# `lookout` binary. Wolfi does not support armv7, so the runtime packages come
+# `portwing` binary. Wolfi does not support armv7, so the runtime packages come
 # from Alpine; the same staging-rootfs → FROM scratch approach keeps the apk
 # binary out of the final image while retaining the package database for
 # scanners. (For a from-source build use the top-level Dockerfile.armv7.)
@@ -13,18 +13,18 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
       --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community" \
       --keys-dir /etc/apk/keys \
       ca-certificates busybox docker-cli docker-cli-compose wget \
- && echo 'lookout:x:65532:65532:lookout:/home/lookout:/sbin/nologin' >> /out/etc/passwd \
- && echo 'lookout:x:65532:' >> /out/etc/group \
+ && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >> /out/etc/passwd \
+ && echo 'portwing:x:65532:' >> /out/etc/group \
  && rm -rf /out/var/cache/apk/*
 
 FROM scratch
 COPY --from=rootfs /out /
-COPY lookout /usr/bin/lookout
+COPY portwing /usr/bin/portwing
 
 VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["wget", "-q", "--spider", "http://localhost:3000/_lookout/health"]
+  CMD ["wget", "-q", "--spider", "http://localhost:3000/_portwing/health"]
 
-ENTRYPOINT ["/usr/bin/lookout"]
+ENTRYPOINT ["/usr/bin/portwing"]

@@ -1,14 +1,14 @@
 [Unit]
-Description=Lookout - Remote Docker Agent
-Documentation=https://github.com/codeswhat/lookout
+Description=Portwing - Remote Docker Agent
+Documentation=https://github.com/codeswhat/portwing
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
 
 [Service]
 Type=simple
-EnvironmentFile=-/etc/lookout/config
-ExecStart=/usr/local/bin/lookout
+EnvironmentFile=-/etc/portwing/config
+ExecStart=/usr/local/bin/portwing
 Restart=always
 RestartSec=5
 LimitNOFILE=65536

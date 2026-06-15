@@ -7,7 +7,7 @@ run-name: >-
   }}
 
 # Runs the build-tagged integration suite against the Linux dockerd
-# preinstalled on the GitHub-hosted runner. Tests exercise a real Lookout
+# preinstalled on the GitHub-hosted runner. Tests exercise a real Portwing
 # server (TOKEN auth, drydock adapter) pointed at /var/run/docker.sock.
 # No dind — the runner's Docker is configured the way a production host would be.
 
@@ -65,5 +65,5 @@ jobs:
 
       - name: Run integration suite
         env:
-          LOOKOUT_TEST_DOCKER_SOCKET: /var/run/docker.sock
+          PORTWING_TEST_DOCKER_SOCKET: /var/run/docker.sock
         run: go test -tags=integration -count=1 -timeout=10m -race ./internal/integration/

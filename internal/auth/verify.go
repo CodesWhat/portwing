@@ -15,11 +15,11 @@ import (
 
 // Header names used in Ed25519 request authentication.
 const (
-	HeaderKeyID     = "X-Lookout-Key-ID"
-	HeaderTimestamp = "X-Lookout-Timestamp"
-	HeaderNonce     = "X-Lookout-Nonce"
-	HeaderSignature = "X-Lookout-Signature"
-	HeaderReason    = "X-Lookout-Reason"
+	HeaderKeyID     = "X-Portwing-Key-ID"
+	HeaderTimestamp = "X-Portwing-Timestamp"
+	HeaderNonce     = "X-Portwing-Nonce"
+	HeaderSignature = "X-Portwing-Signature"
+	HeaderReason    = "X-Portwing-Reason"
 )
 
 // Sentinel errors returned by VerifyRequest. Callers can use errors.Is.
@@ -33,7 +33,7 @@ var (
 	ErrInvalidSig     = errors.New("ed25519: signature is not valid base64url")
 )
 
-// ReasonFor maps a sentinel error to the value for the X-Lookout-Reason
+// ReasonFor maps a sentinel error to the value for the X-Portwing-Reason
 // header returned with 401 responses.
 func ReasonFor(err error) string {
 	switch {
@@ -46,6 +46,12 @@ func ReasonFor(err error) string {
 	default:
 		return "invalid-signature"
 	}
+}
+
+// HasSignature reports whether the request carries the Portwing signature
+// header.
+func HasSignature(h http.Header) bool {
+	return h.Get(HeaderSignature) != ""
 }
 
 // CanonicalMessage constructs the canonical byte string that is signed and
@@ -77,8 +83,8 @@ func BodyHashHex(b []byte) string {
 
 // VerifyRequest verifies an incoming HTTP request's Ed25519 signature.
 //
-// It reads the four Ed25519 headers (X-Lookout-Key-ID, X-Lookout-Timestamp,
-// X-Lookout-Nonce, X-Lookout-Signature) and:
+// It reads the four Ed25519 headers (X-Portwing-Key-ID, X-Portwing-Timestamp,
+// X-Portwing-Nonce, X-Portwing-Signature) and:
 //  1. Looks up the key in registry.
 //  2. Checks the timestamp against maxSkew.
 //  3. Checks the nonce LRU for replay.

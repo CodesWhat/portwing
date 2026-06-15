@@ -11,7 +11,7 @@ Ready-to-run Docker Compose files, hardened by default (`read_only`, `cap_drop: 
 Before starting any of them, generate a token:
 
 ```bash
-openssl rand -hex 32 > lookout_token.txt
+openssl rand -hex 32 > portwing_token.txt
 ```
 
 Validate a file without starting anything:

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/adapter"
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 type captureSender struct {

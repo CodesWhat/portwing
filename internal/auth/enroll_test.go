@@ -46,7 +46,7 @@ func TestEnroller_Success(t *testing.T) {
 	e, reg, _ := setupEnroller(t, "secrettok")
 	_, b64 := genPubKeyB64(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", enrollBody(t, "secrettok", b64))
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", enrollBody(t, "secrettok", b64))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -73,7 +73,7 @@ func TestEnroller_WrongToken(t *testing.T) {
 	e, _, _ := setupEnroller(t, "secrettok")
 	_, b64 := genPubKeyB64(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", enrollBody(t, "wrongtoken", b64))
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", enrollBody(t, "wrongtoken", b64))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -89,7 +89,7 @@ func TestEnroller_TokenBurnedAfterSuccess(t *testing.T) {
 	_, b64b := genPubKeyB64(t)
 
 	// First call succeeds.
-	req1 := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", enrollBody(t, "secrettok", b64))
+	req1 := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", enrollBody(t, "secrettok", b64))
 	rec1 := httptest.NewRecorder()
 	e.ServeHTTP(rec1, req1)
 	if rec1.Code != http.StatusOK {
@@ -97,7 +97,7 @@ func TestEnroller_TokenBurnedAfterSuccess(t *testing.T) {
 	}
 
 	// Second call with the same token must be rejected (burned).
-	req2 := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", enrollBody(t, "secrettok", b64b))
+	req2 := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", enrollBody(t, "secrettok", b64b))
 	rec2 := httptest.NewRecorder()
 	e.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusUnauthorized {
@@ -116,7 +116,7 @@ func TestEnroller_InvalidBase64PublicKey(t *testing.T) {
 		"enrollment_token": "secrettok",
 		"public_key":       "not!valid!base64",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", bytes.NewBuffer(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", bytes.NewBuffer(body))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -135,7 +135,7 @@ func TestEnroller_WrongKeyLength(t *testing.T) {
 		"enrollment_token": "secrettok",
 		"public_key":       short,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", bytes.NewBuffer(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", bytes.NewBuffer(body))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -148,7 +148,7 @@ func TestEnroller_InvalidJSON(t *testing.T) {
 	t.Parallel()
 	e, _, _ := setupEnroller(t, "secrettok")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/lookout/enroll", strings.NewReader("not json"))
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", strings.NewReader("not json"))
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -161,7 +161,7 @@ func TestEnroller_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 	e, _, _ := setupEnroller(t, "secrettok")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/lookout/enroll", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/portwing/enroll", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
