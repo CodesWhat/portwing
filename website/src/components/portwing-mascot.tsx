@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 
-// LookoutMascot replaces the ecosystem's stock `animate-wiggle` with a
+// PortwingMascot replaces the ecosystem's stock `animate-wiggle` with a
 // purpose-built "lean in and peer" loop: the pigeon cranes up and scales
 // toward the viewer (transform-origin at its feet, so the top stretches up
 // and the eyes get closer), then — at full size — swaps to the eyes-closed
@@ -19,7 +19,7 @@ type Props = {
   className?: string;
 };
 
-export function LookoutMascot({ size = 168, className }: Props) {
+export function PortwingMascot({ size = 168, className }: Props) {
   const [big, setBig] = useState(false);
   const [eyes, setEyes] = useState<"open" | "blink">("open");
 
@@ -66,20 +66,20 @@ export function LookoutMascot({ size = 168, className }: Props) {
 
   return (
     <div
-      className={`lookout-mascot ${big ? "is-big" : ""} ${className ?? ""}`}
+      className={`portwing-mascot ${big ? "is-big" : ""} ${className ?? ""}`}
       data-eyes={eyes}
       style={{ width: size, height: size }}
     >
       <Image
-        src="/lookout.png"
-        alt="Lookout"
+        src="/portwing.png"
+        alt="Portwing"
         width={size}
         height={size}
         priority
         className="lk-frame lk-open"
       />
       <Image
-        src="/lookout-blink.png"
+        src="/portwing-blink.png"
         alt=""
         aria-hidden="true"
         width={size}

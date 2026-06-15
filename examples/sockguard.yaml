@@ -1,6 +1,6 @@
-# Sockguard policy for fronting Lookout — mirrors sockguard's drydock preset.
+# Sockguard policy for fronting Portwing — mirrors sockguard's drydock preset.
 # Used by docker-compose.with-sockguard.yml. Covers what drydock needs through
-# Lookout: container list/inspect/stats, lifecycle, image pull/inspect/remove,
+# Portwing: container list/inspect/stats, lifecycle, image pull/inspect/remove,
 # /events, and narrow network/volume/distribution/service reads.
 #
 # Compose stack deploys need more (POST /networks/create, /volumes/create,
@@ -92,4 +92,4 @@ rules:
 
   - match: { method: "*", path: "/**" }
     action: deny
-    reason: "not allowed by lookout drydock policy"
+    reason: "not allowed by portwing drydock policy"

@@ -1,0 +1,95 @@
+# Grype reports Go module vulnerabilities embedded in the third-party
+# docker-compose executable packaged from Wolfi. Keep these ignores scoped to
+# that binary and review them by 2026-07-15 when Wolfi ships updated packages.
+ignore:
+  - vulnerability: GO-2026-5026
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: golang.org/x/net
+      version: v0.54.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-5028
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: golang.org/x/net
+      version: v0.54.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-5025
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: golang.org/x/net
+      version: v0.54.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-5027
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: golang.org/x/net
+      version: v0.54.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-5029
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: golang.org/x/net
+      version: v0.54.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-5030
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: golang.org/x/net
+      version: v0.54.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-4883
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-4887
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GHSA-pxq6-2prw-chj9
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GHSA-x744-4wpc-v9h2
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GHSA-vp62-88p7-qqf5
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GHSA-rg2x-37c3-w2rh
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GHSA-x86f-5xw2-fm2r
+    reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"

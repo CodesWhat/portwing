@@ -1,19 +1,19 @@
-# Release image assembled by GoReleaser from the prebuilt `lookout` binary.
+# Release image assembled by GoReleaser from the prebuilt `portwing` binary.
 # (For a from-source build use the top-level Dockerfile instead.)
 #
 # Wolfi (Chainguard) packages are installed into a staging rootfs, then copied
 # into a FROM scratch final image: CVE-minimal, no package manager in the
 # runtime (the apk *binary* never reaches the final stage), yet the apk
 # database is retained so vulnerability scanners and SBOM tools can still
-# inventory the OS packages. GoReleaser provides the per-arch `lookout` binary
+# inventory the OS packages. GoReleaser provides the per-arch `portwing` binary
 # in the build context; buildx selects the target arch via --platform.
 FROM cgr.dev/chainguard/wolfi-base:latest AS rootfs
 RUN apk add --no-cache --initdb --root /out \
       --repository https://packages.wolfi.dev/os \
       --keys-dir /etc/apk/keys \
       ca-certificates-bundle busybox docker-cli docker-compose wget \
- && echo 'lookout:x:65532:65532:lookout:/home/lookout:/sbin/nologin' >> /out/etc/passwd \
- && echo 'lookout:x:65532:' >> /out/etc/group \
+ && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >> /out/etc/passwd \
+ && echo 'portwing:x:65532:' >> /out/etc/group \
  && rm -rf /out/var/cache/apk/*
 
 # Final image: Wolfi rootfs plus the prebuilt binary. No USER directive — the
@@ -21,12 +21,12 @@ RUN apk add --no-cache --initdb --root /out \
 # UID 65532 at deploy time (see examples/ and SECURITY.md).
 FROM scratch
 COPY --from=rootfs /out /
-COPY lookout /usr/bin/lookout
+COPY portwing /usr/bin/portwing
 
 VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["wget", "-q", "--spider", "http://localhost:3000/_lookout/health"]
+  CMD ["wget", "-q", "--spider", "http://localhost:3000/_portwing/health"]
 
-ENTRYPOINT ["/usr/bin/lookout"]
+ENTRYPOINT ["/usr/bin/portwing"]

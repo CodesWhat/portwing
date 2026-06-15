@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="lookout.png" alt="Lookout" width="200" height="200">
+<img src="portwing.png" alt="Portwing" width="200" height="200">
 
-<h1>Lookout</h1>
+<h1>Portwing</h1>
 
 **Security-first remote Docker agent — control your containers from anywhere, safely.**
 
@@ -12,36 +12,36 @@
 
 > [!WARNING]
 > ### 🚧 Alpha software — not yet production-ready
-> Lookout is in **active alpha** (`v0.2.x`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
+> Portwing is in **active alpha** (`v0.2.x`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
 
 <p align="center">
-  <a href="https://github.com/CodesWhat/lookout/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/lookout?include_prereleases&label=release" alt="Release"></a>
-  <a href="https://github.com/CodesWhat/lookout/pkgs/container/lookout"><img src="https://img.shields.io/badge/GHCR-image-2ea44f?logo=github&logoColor=white" alt="GHCR"></a>
+  <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
+  <a href="https://github.com/CodesWhat/portwing/pkgs/container/portwing"><img src="https://img.shields.io/badge/GHCR-image-2ea44f?logo=github&logoColor=white" alt="GHCR"></a>
   <br>
-  <a href="https://github.com/orgs/CodesWhat/packages/container/package/lookout"><img src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white" alt="Multi-arch"></a>
-  <a href="https://github.com/orgs/CodesWhat/packages/container/package/lookout"><img src="https://img.shields.io/badge/image%20size-~10%20MB-informational?logo=docker&logoColor=white" alt="Image size"></a>
+  <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white" alt="Multi-arch"></a>
+  <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/image%20size-~10%20MB-informational?logo=docker&logoColor=white" alt="Image size"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-C9A227" alt="License AGPL-3.0"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/CodesWhat/lookout/stargazers"><img src="https://img.shields.io/github/stars/CodesWhat/lookout?style=flat" alt="Stars"></a>
-  <a href="https://github.com/CodesWhat/lookout/forks"><img src="https://img.shields.io/github/forks/CodesWhat/lookout?style=flat" alt="Forks"></a>
-  <a href="https://github.com/CodesWhat/lookout/issues"><img src="https://img.shields.io/github/issues/CodesWhat/lookout?style=flat" alt="Issues"></a>
-  <a href="https://github.com/CodesWhat/lookout/commits/main"><img src="https://img.shields.io/github/last-commit/CodesWhat/lookout?style=flat" alt="Last commit"></a>
-  <a href="https://github.com/CodesWhat/lookout/commits/main"><img src="https://img.shields.io/github/commit-activity/m/CodesWhat/lookout?style=flat" alt="Commit activity"></a>
+  <a href="https://github.com/CodesWhat/portwing/stargazers"><img src="https://img.shields.io/github/stars/CodesWhat/portwing?style=flat" alt="Stars"></a>
+  <a href="https://github.com/CodesWhat/portwing/forks"><img src="https://img.shields.io/github/forks/CodesWhat/portwing?style=flat" alt="Forks"></a>
+  <a href="https://github.com/CodesWhat/portwing/issues"><img src="https://img.shields.io/github/issues/CodesWhat/portwing?style=flat" alt="Issues"></a>
+  <a href="https://github.com/CodesWhat/portwing/commits/main"><img src="https://img.shields.io/github/last-commit/CodesWhat/portwing?style=flat" alt="Last commit"></a>
+  <a href="https://github.com/CodesWhat/portwing/commits/main"><img src="https://img.shields.io/github/commit-activity/m/CodesWhat/portwing?style=flat" alt="Commit activity"></a>
   <br>
-  <a href="https://github.com/CodesWhat/lookout"><img src="https://img.shields.io/github/repo-size/CodesWhat/lookout?style=flat" alt="Repo size"></a>
-  <img src="https://komarev.com/ghpvc/?username=CodesWhat-lookout&label=repo+views&style=flat" alt="Repo views">
+  <a href="https://github.com/CodesWhat/portwing"><img src="https://img.shields.io/github/repo-size/CodesWhat/portwing?style=flat" alt="Repo size"></a>
+  <img src="https://komarev.com/ghpvc/?username=CodesWhat-portwing&label=repo+views&style=flat" alt="Repo views">
 </p>
 
 <p align="center">
-  <a href="https://github.com/CodesWhat/lookout/actions/workflows/ci.yml"><img src="https://github.com/CodesWhat/lookout/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://github.com/CodesWhat/lookout/actions/workflows/security-vuln-weekly.yml"><img src="https://github.com/CodesWhat/lookout/actions/workflows/security-vuln-weekly.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
-  <a href="https://github.com/CodesWhat/lookout/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/lookout/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/security-vuln-weekly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/security-vuln-weekly.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
   <br>
-  <a href="https://goreportcard.com/report/github.com/codeswhat/lookout"><img src="https://goreportcard.com/badge/github.com/codeswhat/lookout" alt="Go Report Card"></a>
-  <a href="https://pkg.go.dev/github.com/codeswhat/lookout"><img src="https://pkg.go.dev/badge/github.com/codeswhat/lookout.svg" alt="Go Reference"></a>
-  <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/lookout"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/lookout?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
+  <a href="https://goreportcard.com/report/github.com/codeswhat/portwing"><img src="https://goreportcard.com/badge/github.com/codeswhat/portwing" alt="Go Report Card"></a>
+  <a href="https://pkg.go.dev/github.com/codeswhat/portwing"><img src="https://pkg.go.dev/badge/github.com/codeswhat/portwing.svg" alt="Go Reference"></a>
+  <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/portwing"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/portwing?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
   <!-- PLACEHOLDER: Snyk is not yet wired up for this repo — replace with a real monitored badge once onboarded -->
   <a href="https://app.snyk.io/org/codeswhat/projects"><img src="https://img.shields.io/badge/Snyk-monitored-4C4A73?logo=snyk&logoColor=white" alt="Monitored by Snyk (placeholder)"></a>
 </p>
@@ -79,7 +79,7 @@ flowchart LR
 
     subgraph hostA ["Remote host A"]
         direction LR
-        LA["Lookout<br/>(agent)"]
+        LA["Portwing<br/>(agent)"]
         SGA["sockguard<br/>(socket filter)"]
         DA["Docker Engine"]
         LA -- "filtered socket" --> SGA --> DA
@@ -87,7 +87,7 @@ flowchart LR
 
     subgraph hostB ["Remote host B"]
         direction LR
-        LB["Lookout<br/>(agent)"]
+        LB["Portwing<br/>(agent)"]
         SGB["sockguard<br/>(socket filter)"]
         DB["Docker Engine"]
         LB -- "filtered socket" --> SGB --> DB
@@ -97,21 +97,21 @@ flowchart LR
     DD -- "HTTPS + SSE · X-Dd-Agent-Secret" --> LB
 ```
 
-> The Drydock controller connects **inbound** to each Lookout agent over HTTP/HTTPS (it initiates; Lookout serves). Each agent reaches the Docker Engine only through a sockguard socket filter. Outbound **edge mode** (the agent dialing the controller, for hosts with no inbound port) is usable end-to-end as of Drydock 1.5 — see [Connection Modes](#connection-modes).
+> The Drydock controller connects **inbound** to each Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). Each agent reaches the Docker Engine only through a sockguard socket filter. Outbound **edge mode** (the agent dialing the controller, for hosts with no inbound port) is usable end-to-end as of Drydock 1.5 — see [Connection Modes](#connection-modes).
 
 <h2 align="center" id="quick-start">🚀 Quick Start</h2>
 
 ### Recommended deployment (hardened)
 
-The strongest posture combines three controls: **sockguard** (socket-level request filtering so Lookout never touches the raw Docker socket directly), **Ed25519 per-request authentication** (signed requests, replay protection, no shared secrets), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted tokens). Run Lookout in **standard mode strictly behind a TLS reverse proxy** — the Drydock controller connects inbound to it. (Outbound [edge mode](#connection-modes) for hosts with no inbound port is usable end-to-end with Drydock 1.5.)
+The strongest posture combines three controls: **sockguard** (socket-level request filtering so Portwing never touches the raw Docker socket directly), **Ed25519 per-request authentication** (signed requests, replay protection, no shared secrets), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted tokens). Run Portwing in **standard mode strictly behind a TLS reverse proxy** — the Drydock controller connects inbound to it. (Outbound [edge mode](#connection-modes) for hosts with no inbound port is usable end-to-end with Drydock 1.5.)
 
 **Step 1 — generate a token and pull the example:**
 
 ```bash
-openssl rand -hex 32 > lookout_token.txt
+openssl rand -hex 32 > portwing_token.txt
 # Download the hardened compose file and its sockguard policy
-curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/docker-compose.with-sockguard.yml
-curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/sockguard.yaml
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.with-sockguard.yml
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/sockguard.yaml
 ```
 
 **Step 2 — start the hardened stack:**
@@ -120,19 +120,19 @@ curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/so
 docker compose -f docker-compose.with-sockguard.yml up -d
 ```
 
-This runs sockguard and Lookout as separate containers sharing a filtered socket volume. Neither container has the raw Docker socket mounted directly; sockguard enforces an allowlist of Docker API operations at the socket level. The full compose file (`examples/docker-compose.with-sockguard.yml`):
+This runs sockguard and Portwing as separate containers sharing a filtered socket volume. Neither container has the raw Docker socket mounted directly; sockguard enforces an allowlist of Docker API operations at the socket level. The full compose file (`examples/docker-compose.with-sockguard.yml`):
 
 ```yaml
-# Lookout + sockguard — two-layer defense.
+# Portwing + sockguard — two-layer defense.
 #
-# Sockguard sits between Lookout and the host's Docker socket and writes a
-# filtered unix socket into a shared named volume. Lookout talks to that
+# Sockguard sits between Portwing and the host's Docker socket and writes a
+# filtered unix socket into a shared named volume. Portwing talks to that
 # filtered socket instead of mounting /var/run/docker.sock directly, so even
 # a fully compromised agent is constrained to the explicit API allowlist in
 # sockguard.yaml.
 #
 # Generate a token first:
-#   openssl rand -hex 32 > lookout_token.txt
+#   openssl rand -hex 32 > portwing_token.txt
 
 services:
   sockguard:
@@ -150,8 +150,8 @@ services:
     environment:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -166,35 +166,35 @@ services:
       - "3000:3000"
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
-      - TOKEN_FILE=/run/secrets/lookout_token
+      - TOKEN_FILE=/run/secrets/portwing_token
     secrets:
-      - lookout_token
+      - portwing_token
 
 secrets:
-  lookout_token:
-    file: ./lookout_token.txt
+  portwing_token:
+    file: ./portwing_token.txt
 
 volumes:
   sockguard-socket:
-  lookout-stacks:
+  portwing-stacks:
 ```
 
-**Upgrade to Ed25519 key auth (zero shared secrets):** generate a keypair with `lookout keygen`, mount the `authorized_keys` file, and set `AUTHORIZED_KEYS=/etc/lookout/authorized_keys` — see [Authentication](#authentication). Use `PRIVATE_KEY_FILE` for signed edge-mode hellos.
+**Upgrade to Ed25519 key auth (zero shared secrets):** generate a keypair with `portwing keygen`, mount the `authorized_keys` file, and set `AUTHORIZED_KEYS=/etc/portwing/authorized_keys` — see [Authentication](#authentication). Use `PRIVATE_KEY_FILE` for signed edge-mode hellos.
 
 <details>
 <summary>Edge mode variant (outbound WebSocket — early access)</summary>
 
-> **Early access.** Edge mode is usable end-to-end: Drydock 1.5 ships the `/api/lookout/ws` controller endpoint (Ed25519-only) and Lookout signs its hello with an Ed25519 key. Drydock 1.5 and Lookout 0.2.2 are both pre-release; full exec robustness under load lands in Lookout 0.2.2.
+> **Early access.** Edge mode is usable end-to-end: Drydock 1.5 ships the `/api/portwing/ws` controller endpoint (Ed25519-only) and Portwing signs its hello with an Ed25519 key. Drydock 1.5 and Portwing 0.2.2 are both pre-release; full exec robustness under load lands in Portwing 0.2.2.
 
-For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml) has Lookout dial out to your Drydock controller's edge endpoint (`DRYDOCK_URL` + `/api/lookout/ws`); no port is published on the remote host.
+For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml) has Portwing dial out to your Drydock controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`); no port is published on the remote host.
 
 ```yaml
 services:
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -205,22 +205,22 @@ services:
       - /tmp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
       - DRYDOCK_URL=https://drydock.example.com
-      - TOKEN_FILE=/run/secrets/lookout_token
+      - TOKEN_FILE=/run/secrets/portwing_token
       - AGENT_NAME=edge-host-01
       # Key-based hello instead of a shared token:
-      #   lookout keygen  →  PRIVATE_KEY_FILE=/run/secrets/lookout_key
+      #   portwing keygen  →  PRIVATE_KEY_FILE=/run/secrets/portwing_key
     secrets:
-      - lookout_token
+      - portwing_token
 
 secrets:
-  lookout_token:
-    file: ./lookout_token.txt
+  portwing_token:
+    file: ./portwing_token.txt
 
 volumes:
-  lookout-stacks:
+  portwing-stacks:
 ```
 
 </details>
@@ -228,15 +228,15 @@ volumes:
 <details>
 <summary>Quick start (evaluation only — not for production)</summary>
 
-> **This is for trying Lookout out locally.** Environment-variable tokens are visible in `docker inspect` and process listings. Do not use in production — use the hardened deployment above instead.
+> **This is for trying Portwing out locally.** Environment-variable tokens are visible in `docker inspect` and process listings. Do not use in production — use the hardened deployment above instead.
 
 ```bash
 docker run -d \
-  --name lookout \
+  --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 Without `TOKEN` (or `TOKEN_HASH`/`AUTHORIZED_KEYS`) the API is **unauthenticated** — anyone who can reach the port controls your Docker daemon.
@@ -247,7 +247,7 @@ Without `TOKEN` (or `TOKEN_HASH`/`AUTHORIZED_KEYS`) the API is **unauthenticated
 <summary>Binary install (install.sh)</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/codeswhat/lookout/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/install.sh | bash
 ```
 
 </details>
@@ -259,11 +259,11 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/lookout/main/scripts/inst
 <details>
 <summary><strong>Latest release highlights</strong></summary>
 
-- **v0.2.0 shipped on 2026-06-12** — Ed25519 per-request authentication with signed requests via `X-Lookout-Key-ID` / `X-Lookout-Timestamp` / `X-Lookout-Nonce` / `X-Lookout-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `lookout keygen` CLI subcommand, and `X-Lookout-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`.
-- **Key enrollment** — optional single-use `ENROLLMENT_TOKEN` (`POST /api/lookout/enroll`) for bootstrapping the first Ed25519 key — burned on first use, rate-limited, and audit-logged.
+- **v0.2.0 shipped on 2026-06-12** — Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`.
+- **Key enrollment** — optional single-use `ENROLLMENT_TOKEN` (`POST /api/portwing/enroll`) for bootstrapping the first Ed25519 key — burned on first use, rate-limited, and audit-logged.
 - **Argon2id token hashing** — `TOKEN_HASH` / `TOKEN_HASH_FILE` with OWASP-recommended parameters; SHA-256 success cache keeps per-request cost flat.
-- **MCP server** — read-only Model Context Protocol endpoint at `/_lookout/mcp` (Streamable HTTP, protocol 2025-11-25) for AI assistants (Claude, Cursor, Windsurf). Tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`.
-- **Prometheus metrics** — `/metrics` and `/_lookout/metrics` exposing `lookout_build_info`, container count, and host resource metrics.
+- **MCP server** — read-only Model Context Protocol endpoint at `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25) for AI assistants (Claude, Cursor, Windsurf). Tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`.
+- **Prometheus metrics** — `/metrics` and `/_portwing/metrics` exposing `portwing_build_info`, container count, and host resource metrics.
 - **Structured audit logging** — `AUDIT_LOG` env var records auth events, Compose operations, and exec sessions as JSON lines.
 - **Generic REST adapter** — headless REST + SSE management API for standalone mode without a Drydock platform connection (`ADAPTER=generic`).
 - **Hardened CI & supply chain** — SHA-pinned actions, five Go fuzz targets (60s CI / 5m nightly), integration suite against a real Docker daemon, weekly vulnerability scans (govulncheck/grype/gosec), monthly mutation testing, OpenSSF Scorecard, CodeQL, and cosign keyless signing + CycloneDX SBOM + SLSA provenance on every release.
@@ -279,13 +279,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 | | Feature | Description |
 |---|---|---|
-| 🔄 | **Connection Modes** | Standard mode (the Drydock controller connects inbound over HTTP/SSE) is the primary integration. Edge mode (agent dials out over WebSocket, for NAT/firewalled hosts) is usable end-to-end as of Drydock 1.5 + Lookout 0.2.2 (both pre-release). |
+| 🔄 | **Connection Modes** | Standard mode (the Drydock controller connects inbound over HTTP/SSE) is the primary integration. Edge mode (agent dials out over WebSocket, for NAT/firewalled hosts) is usable end-to-end as of Drydock 1.5 + Portwing 0.2.2 (both pre-release). |
 | 🐳 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
 | 🔑 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
 | 🔐 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
-| 🤖 | **MCP Server** | AI assistants connect to `/_lookout/mcp` (Streamable HTTP, protocol 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
+| 🤖 | **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
 | 📦 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting, including `dd:watcher-snapshot` events for Drydock compatibility. |
-| 📈 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_lookout/metrics`. Zero external dependencies. |
+| 📈 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_portwing/metrics`. Zero external dependencies. |
 | 📋 | **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Disabled by default (single nil check overhead when off). |
 | 🖥️ | **Host Metrics** | CPU, memory, disk, network, and uptime collection. |
 | ⚡ | **Interactive Exec** | Terminal sessions via WebSocket or HTTP hijack with 100 concurrent session cap. |
@@ -304,15 +304,15 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 <summary><strong>Token Authentication (quickstart)</strong></summary>
 
 Set `TOKEN` to a random secret. All requests must supply it via
-`Authorization: Bearer`, `X-Lookout-Token`, or `X-Dd-Agent-Secret`.
+`Authorization: Bearer`, `X-Portwing-Token`, or `X-Dd-Agent-Secret`.
 
 ```bash
 TOKEN=$(openssl rand -hex 32)
-docker run -d --name lookout \
+docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 3000:3000 \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 </details>
@@ -327,39 +327,39 @@ replay protection. No shared secrets.
 
 ```bash
 # Writes the private key (PEM PKCS#8) and the authorized_keys line to stdout.
-lookout keygen -comment "my-platform:prod"
+portwing keygen -comment "my-platform:prod"
 ```
 
 **Copy the `authorized_keys` line to the agent host:**
 
 ```
-# /etc/lookout/authorized_keys  (mode 0600)
+# /etc/portwing/authorized_keys  (mode 0600)
 ed25519 AAAA... my-platform:prod
 ```
 
 **Start the agent with Ed25519 auth:**
 
 ```bash
-docker run -d --name lookout \
+docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /etc/lookout/authorized_keys:/etc/lookout/authorized_keys:ro \
-  -e AUTHORIZED_KEYS=/etc/lookout/authorized_keys \
+  -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
+  -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 3000:3000 \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 **Key rotation (zero-downtime):**
 
-1. Generate a new keypair: `lookout keygen -comment "my-platform:prod:2026-07"`
+1. Generate a new keypair: `portwing keygen -comment "my-platform:prod:2026-07"`
 2. Append the new public key line to the authorized_keys file on the agent host.
-3. Send `SIGHUP` to reload: `kill -HUP $(pidof lookout)` or
-   `docker kill --signal HUP lookout`. Both old and new keys are now active.
+3. Send `SIGHUP` to reload: `kill -HUP $(pidof portwing)` or
+   `docker kill --signal HUP portwing`. Both old and new keys are now active.
 4. Update the platform to use the new private key.
 5. Remove the old key from the file and send another `SIGHUP`.
 
 Token auth (`TOKEN`/`TOKEN_HASH`) continues to work alongside Ed25519 — both
 can be set simultaneously during migration. The middleware checks for
-`X-Lookout-Signature` first; if absent, it falls back to the token check.
+`X-Portwing-Signature` first; if absent, it falls back to the token check.
 
 </details>
 
@@ -372,17 +372,17 @@ can be set simultaneously during migration. The middleware checks for
 
 ### Standard Mode — implemented
 
-Lookout runs an HTTP(S) server; the **Drydock controller connects inbound** and pulls from it. This is the integration that works today.
+Portwing runs an HTTP(S) server; the **Drydock controller connects inbound** and pulls from it. This is the integration that works today.
 
 - Set when `DRYDOCK_URL` is not configured
 - Drydock authenticates with the `X-Dd-Agent-Secret` shared secret (optional mTLS)
 - Handshake on `GET /api/containers` · `/api/watchers` · `/api/triggers`, then a long-lived **SSE** stream on `GET /api/events`
-- Transparent Docker API proxy on all paths; agent endpoints under `/_lookout/*`
+- Transparent Docker API proxy on all paths; agent endpoints under `/_portwing/*`
 - Optional TLS with modern cipher suites (TLS 1.2+)
 
 ### Edge Mode — early access
 
-Lookout initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/lookout/ws`) for hosts with no inbound port. Both sides are implemented — Drydock 1.5 ships the controller endpoint and Lookout signs an Ed25519 hello — so edge mode is **usable end-to-end**. Drydock 1.5 and Lookout 0.2.2 are pre-release; full exec robustness under load lands in Lookout 0.2.2. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
+Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound port. Both sides are implemented — Drydock 1.5 ships the controller endpoint and Portwing signs an Ed25519 hello — so edge mode is **usable end-to-end**. Drydock 1.5 and Portwing 0.2.2 are pre-release; full exec robustness under load lands in Portwing 0.2.2. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
 
 - Set when `DRYDOCK_URL` is configured along with `TOKEN`, `AUTHORIZED_KEYS`, or `PRIVATE_KEY_FILE`
 - Targets hosts behind NAT, firewalls, and dynamic IPs
@@ -402,18 +402,18 @@ Otherwise                                                              →  Stan
 <details>
 <summary><strong>Run without a Drydock platform connection</strong></summary>
 
-Run Lookout without any external controller by setting `ADAPTER=generic`.
+Run Portwing without any external controller by setting `ADAPTER=generic`.
 You get a clean REST + SSE API on `/api/v1/*` backed directly by the local
 Docker daemon — no Drydock account required.
 
 ```bash
 docker run -d \
-  --name lookout \
+  --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
   -p 3000:3000 \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 ### Endpoints
@@ -482,7 +482,7 @@ the connection alive through proxies.
 | `DRYDOCK_URL` | -- | WebSocket URL for Edge mode (`wss://...`) |
 | `TOKEN` | -- | Authentication token (plaintext) |
 | `TOKEN_FILE` | -- | Path to file containing token |
-| `TOKEN_HASH` | -- | Argon2id hash of token (generate with `lookout hash-token`) |
+| `TOKEN_HASH` | -- | Argon2id hash of token (generate with `portwing hash-token`) |
 | `TOKEN_HASH_FILE` | -- | Path to file containing Argon2id hash |
 | `AUTHORIZED_KEYS` | -- | Path to Ed25519 authorized_keys file (per-client asymmetric auth) |
 | `AUTHORIZED_KEYS_FILE` | -- | Alias for `AUTHORIZED_KEYS` |
@@ -537,8 +537,8 @@ the connection alive through proxies.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DD_AGENT_SECRET` | -- | Backward-compatible auth token |
-| `DD_AGENT_SECRET_FILE` | -- | Backward-compatible token file |
+| `DD_AGENT_SECRET` | -- | Drydock agent secret token |
+| `DD_AGENT_SECRET_FILE` | -- | Drydock agent secret token file |
 | `DD_POLL_INTERVAL` | `300` | Container inventory refresh (seconds) |
 
 </details>
@@ -555,9 +555,9 @@ the connection alive through proxies.
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/health` | GET | No | Simple health check — `{"status":"ok"}` |
-| `/_lookout/health` | GET | No | Health check + Docker connectivity |
+| `/_portwing/health` | GET | No | Health check + Docker connectivity |
 
-`/_lookout/health` returns HTTP 503 when the Docker daemon is unreachable.
+`/_portwing/health` returns HTTP 503 when the Docker daemon is unreachable.
 Both endpoints are unauthenticated and safe to use for load-balancer probes
 and Docker HEALTHCHECK instructions.
 
@@ -565,16 +565,16 @@ and Docker HEALTHCHECK instructions.
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/_lookout/info` | GET | Yes | Agent version, mode, capabilities |
-| `/_lookout/compose` | POST | Yes | Docker Compose operations |
-| `/_lookout/metrics` | GET | Yes | Prometheus metrics (agent-scoped) |
-| `/metrics` | GET | Yes | Prometheus metrics (compat alias) |
-| `/_lookout/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol 2025-11-25) |
+| `/_portwing/info` | GET | Yes | Agent version, mode, capabilities |
+| `/_portwing/compose` | POST | Yes | Docker Compose operations |
+| `/_portwing/metrics` | GET | Yes | Prometheus metrics (agent-scoped) |
+| `/metrics` | GET | Yes | Prometheus metrics (Drydock agent secret) |
+| `/_portwing/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol 2025-11-25) |
 
 ### MCP — AI Assistant Integration
 
-Lookout exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io/) endpoint
-at `POST /_lookout/mcp`. AI assistants (Claude, Cursor, Windsurf, or any MCP client) can query
+Portwing exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io/) endpoint
+at `POST /_portwing/mcp`. AI assistants (Claude, Cursor, Windsurf, or any MCP client) can query
 live container state through this endpoint using their standard tool-call flow.
 
 **Protocol:** MCP 2025-11-25 — Streamable HTTP, stateless single-request mode, `Content-Type: application/json`.
@@ -597,16 +597,16 @@ values are never transmitted, preventing accidental secret leakage.
 ```json
 {
   "mcpServers": {
-    "lookout": {
+    "portwing": {
       "command": "curl",
       "args": ["-s", "-X", "POST",
                "-H", "Content-Type: application/json",
-               "-H", "Authorization: Bearer YOUR_LOOKOUT_TOKEN",
-               "http://your-host:3000/_lookout/mcp"],
+               "-H", "Authorization: Bearer YOUR_PORTWING_TOKEN",
+               "http://your-host:3000/_portwing/mcp"],
       "type": "http",
-      "url": "http://your-host:3000/_lookout/mcp",
+      "url": "http://your-host:3000/_portwing/mcp",
       "headers": {
-        "Authorization": "Bearer YOUR_LOOKOUT_TOKEN"
+        "Authorization": "Bearer YOUR_PORTWING_TOKEN"
       }
     }
   }
@@ -617,8 +617,8 @@ values are never transmitted, preventing accidental secret leakage.
 
 ```bash
 claude mcp add --transport http \
-  --header "Authorization: Bearer YOUR_LOOKOUT_TOKEN" \
-  lookout http://your-host:3000/_lookout/mcp
+  --header "Authorization: Bearer YOUR_PORTWING_TOKEN" \
+  portwing http://your-host:3000/_portwing/mcp
 ```
 
 #### .mcp.json (project-level, Cursor / Windsurf / any client)
@@ -626,18 +626,18 @@ claude mcp add --transport http \
 ```json
 {
   "mcpServers": {
-    "lookout": {
+    "portwing": {
       "type": "http",
-      "url": "http://your-host:3000/_lookout/mcp",
+      "url": "http://your-host:3000/_portwing/mcp",
       "headers": {
-        "Authorization": "Bearer YOUR_LOOKOUT_TOKEN"
+        "Authorization": "Bearer YOUR_PORTWING_TOKEN"
       }
     }
   }
 }
 ```
 
-Replace `YOUR_LOOKOUT_TOKEN` with the value you set in `TOKEN` / `TOKEN_FILE` / `TOKEN_HASH`.
+Replace `YOUR_PORTWING_TOKEN` with the value you set in `TOKEN` / `TOKEN_FILE` / `TOKEN_HASH`.
 
 ### Drydock-Compatible Endpoints
 
@@ -656,22 +656,22 @@ All other paths (`/*`) are transparently proxied to the Docker Engine API, inclu
 
 ### Metrics
 
-Lookout exposes Prometheus metrics at `/_lookout/metrics` (and the alias
+Portwing exposes Prometheus metrics at `/_portwing/metrics` (and the alias
 `/metrics`). Both require bearer auth.
 
 Prometheus scrape config:
 
 ```yaml
 scrape_configs:
-  - job_name: lookout
+  - job_name: portwing
     scheme: https          # or http if TLS not configured
     static_configs:
       - targets: ["your-host:3000"]
     authorization:
       type: Bearer
-      credentials: YOUR_LOOKOUT_TOKEN
+      credentials: YOUR_PORTWING_TOKEN
     tls_config:
-      # ca_file: /etc/prometheus/lookout-ca.crt  # if using custom CA
+      # ca_file: /etc/prometheus/portwing-ca.crt  # if using custom CA
       insecure_skip_verify: false
 ```
 
@@ -693,18 +693,18 @@ scrape_configs:
 ```bash
 # Generate a strong token
 TOKEN=$(openssl rand -hex 32)
-docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/lookout:latest
+docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:latest
 ```
 
 ### File-based token (production)
 
 ```bash
 TOKEN=$(openssl rand -hex 32)
-printf '%s' "$TOKEN" > /run/secrets/lookout-token
-chmod 600 /run/secrets/lookout-token
-docker run -e TOKEN_FILE=/run/secrets/lookout-token \
-  -v /run/secrets/lookout-token:/run/secrets/lookout-token:ro \
-  ... ghcr.io/codeswhat/lookout:latest
+printf '%s' "$TOKEN" > /run/secrets/portwing-token
+chmod 600 /run/secrets/portwing-token
+docker run -e TOKEN_FILE=/run/secrets/portwing-token \
+  -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
+  ... ghcr.io/codeswhat/portwing:latest
 ```
 
 ### Hash-at-rest with TOKEN_HASH
@@ -714,18 +714,18 @@ or config files:
 
 ```bash
 # Generate the hash (token is read from stdin, never argv)
-HASH=$(printf '%s' "$TOKEN" | lookout hash-token)
+HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
 # $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 
 # Use the hash instead of the plaintext
-docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/lookout:latest
+docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:latest
 ```
 
 Or write the hash to a file and use `TOKEN_HASH_FILE`:
 
 ```bash
-printf '%s' "$TOKEN" | lookout hash-token > /run/secrets/lookout-token-hash
-docker run -e TOKEN_HASH_FILE=/run/secrets/lookout-token-hash ...
+printf '%s' "$TOKEN" | portwing hash-token > /run/secrets/portwing-token-hash
+docker run -e TOKEN_HASH_FILE=/run/secrets/portwing-token-hash ...
 ```
 
 </details>
@@ -737,7 +737,7 @@ docker run -e TOKEN_HASH_FILE=/run/secrets/lookout-token-hash ...
 <details>
 <summary><strong>Cosign verification for checksums and container images</strong></summary>
 
-Lookout releases are signed with [Sigstore cosign](https://github.com/sigstore/cosign)
+Portwing releases are signed with [Sigstore cosign](https://github.com/sigstore/cosign)
 via GitHub Actions keyless signing. Checksums and container images can be
 verified without managing signing keys.
 
@@ -747,7 +747,7 @@ verified without managing signing keys.
 TAG=v0.1.0
 
 cosign verify-blob \
-  --certificate-identity-regexp "https://github.com/CodesWhat/lookout/.github/workflows/.*" \
+  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --bundle "checksums.txt.bundle" \
   "checksums.txt"
@@ -759,15 +759,15 @@ cosign verify-blob \
 TAG=v0.1.0
 
 cosign verify \
-  --certificate-identity-regexp "https://github.com/CodesWhat/lookout/.github/workflows/.*" \
+  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  "ghcr.io/codeswhat/lookout:${TAG}"
+  "ghcr.io/codeswhat/portwing:${TAG}"
 ```
 
 ### SBOM
 
 Each release includes a CycloneDX SBOM attached as a release asset
-(`lookout-${TAG}-sbom.cdx.json`). Download and inspect it with any
+(`portwing-${TAG}-sbom.cdx.json`). Download and inspect it with any
 CycloneDX-compatible tool, or verify it with cosign the same way as the
 checksums file.
 
@@ -797,13 +797,13 @@ See [docs/security-model.md](docs/security-model.md) for the full citable spec a
 <details>
 <summary><strong>Structured JSON audit trail for every security-relevant action</strong></summary>
 
-Lookout ships structured JSON audit logging for every security-relevant action — a feature that commercial container management platforms lock behind paid tiers.
+Portwing ships structured JSON audit logging for every security-relevant action — a feature that commercial container management platforms lock behind paid tiers.
 
 ### Enable
 
 ```bash
 # Write to a file (opened append-only, mode 0600)
-docker run -e AUDIT_LOG=/var/log/lookout-audit.log ...
+docker run -e AUDIT_LOG=/var/log/portwing-audit.log ...
 
 # Or to stdout/stderr (useful with log aggregators)
 docker run -e AUDIT_LOG=stdout ...
@@ -824,7 +824,7 @@ Auditing is disabled by default (`AUDIT_LOG` unset). When disabled the overhead 
 ### Sample JSON lines
 
 ```json
-{"time":"2026-01-15T10:23:45.123456789Z","level":"INFO","msg":"","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_lookout/compose","outcome":"allowed","status":200,"duration_ms":3.14}
+{"time":"2026-01-15T10:23:45.123456789Z","level":"INFO","msg":"","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_portwing/compose","outcome":"allowed","status":200,"duration_ms":3.14}
 ```
 
 Compose operations include additional fields:
@@ -858,16 +858,16 @@ Exec tunnel events:
 | Security Policy | [`SECURITY.md`](SECURITY.md) |
 | Releasing | [`RELEASING.md`](RELEASING.md) |
 | Examples | [`examples/`](examples/) |
-| Issues | [GitHub Issues](https://github.com/CodesWhat/lookout/issues) |
-| Discussions | [GitHub Discussions](https://github.com/CodesWhat/lookout/discussions) |
+| Issues | [GitHub Issues](https://github.com/CodesWhat/portwing/issues) |
+| Discussions | [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions) |
 
 <hr>
 
 <a id="star-history"></a>
 
 <div align="center">
-  <a href="https://star-history.com/#CodesWhat/lookout&Date">
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=CodesWhat/lookout&type=Date" />
+  <a href="https://star-history.com/#CodesWhat/portwing&Date">
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=CodesWhat/portwing&type=Date" />
   </a>
 </div>
 
@@ -892,9 +892,9 @@ Exec tunnel events:
 
 ### Community & Support
 
-Issues, ideas, and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for private vulnerability disclosure, and use [GitHub Discussions](https://github.com/CodesWhat/lookout/discussions) for design questions.
+Issues, ideas, and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for private vulnerability disclosure, and use [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions) for design questions.
 
-Every release image is cosign-signed via GitHub Actions OIDC. Before running a Lookout image in production, verify it with the canonical invocation in the [Verify a Release](#verify-a-release) section above.
+Every release image is cosign-signed via GitHub Actions OIDC. Before running a Portwing image in production, verify it with the canonical invocation in the [Verify a Release](#verify-a-release) section above.
 
 **[AGPL-3.0 License](LICENSE)**
 
@@ -904,6 +904,6 @@ Built by <a href="https://codeswhat.com">CodesWhat</a>
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/codeswhat)
 [![Sponsor](https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/CodesWhat)
 
-<a href="#lookout">Back to top</a>
+<a href="#portwing">Back to top</a>
 
 </div>

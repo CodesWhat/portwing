@@ -70,6 +70,6 @@ linters:
           - bodyclose
       # errorlint: http.ErrServerClosed is a sentinel never wrapped; != is
       # the idiomatic Go HTTP server shutdown pattern.
-      - path: cmd/lookout/main\.go
+      - path: cmd/portwing/main\.go
         linters:
           - errorlint

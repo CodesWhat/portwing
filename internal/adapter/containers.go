@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/codeswhat/lookout/internal/docker"
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 // ContainerManager maintains an inventory of Docker containers and computes

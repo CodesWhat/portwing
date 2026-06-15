@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/portwing/internal/adapter"
 )
 
 func TestParseLabels(t *testing.T) {

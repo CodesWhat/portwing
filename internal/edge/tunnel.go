@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/pool"
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/pool"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // ExecSession represents an active exec session tunneled over WebSocket.
@@ -212,7 +212,9 @@ func (s *ExecSession) readLoop() {
 // Close shuts down the exec session. It is safe to call multiple times.
 func (s *ExecSession) Close() {
 	s.once.Do(func() {
-		s.conn.Close()
+		if err := s.conn.Close(); err != nil {
+			slog.Debug("closing exec session", "exec_id", s.execID, "error", err)
+		}
 		close(s.done)
 		s.client.execSessions.Delete(s.execID)
 	})

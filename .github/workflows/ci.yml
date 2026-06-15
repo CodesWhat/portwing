@@ -58,7 +58,7 @@ jobs:
         run: go vet ./...
 
       - name: Build
-        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o lookout ./cmd/lookout
+        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o portwing ./cmd/portwing
 
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...

@@ -1,30 +1,30 @@
 ---
 title: Verifying Releases
-description: How to verify the authenticity and integrity of Lookout container images and binary releases using cosign, GitHub attestations, SBOM, and checksums.
+description: How to verify the authenticity and integrity of Portwing container images and binary releases using cosign, GitHub attestations, SBOM, and checksums.
 ---
 
 <Callout type="info">
   Always verify a release before deploying it to any environment. Verification
   takes under a minute and confirms the artifact was produced by the official
-  Lookout release pipeline — not a tampered build.
+  Portwing release pipeline — not a tampered build.
 </Callout>
 
 <Callout type="warn">
-  Lookout is in alpha (v0.2.x). The signing identity regexp targets
+  Portwing is in alpha (v0.2.x). The signing identity regexp targets
   `release.yml` specifically, but the workflow path may change between
   pre-release milestones. If a verify command fails with a certificate mismatch,
-  check the [release notes](https://github.com/CodesWhat/lookout/releases) for
+  check the [release notes](https://github.com/CodesWhat/portwing/releases) for
   any signing-identity changes before assuming tampering.
 </Callout>
 
-All Lookout releases are signed via [Sigstore cosign](https://github.com/sigstore/cosign)
+All Portwing releases are signed via [Sigstore cosign](https://github.com/sigstore/cosign)
 using **keyless (OIDC) signing** from GitHub Actions — no static private key is
 stored anywhere. The signing certificate is issued by Fulcio against the
 GitHub Actions OIDC token, and the signature is recorded on the Rekor
 transparency log. The certificate identity is the URL of the release workflow
 itself:
 
-- **Certificate identity regexp:** `https://github.com/CodesWhat/lookout/.github/workflows/release.yml`
+- **Certificate identity regexp:** `https://github.com/CodesWhat/portwing/.github/workflows/release.yml`
 - **OIDC issuer:** `https://token.actions.githubusercontent.com`
 
 This means verification is key-less: you authenticate the *workflow*, not a
@@ -51,7 +51,7 @@ brew install gh            # macOS
 
 ## Verify the Container Image Signature
 
-Every image pushed to `ghcr.io/codeswhat/lookout` is cosign keyless-signed by
+Every image pushed to `ghcr.io/codeswhat/portwing` is cosign keyless-signed by
 the release workflow. Replace `TAG` with the version tag you are deploying
 (the tag is the semver without the leading `v`, matching GoReleaser's output —
 e.g. `0.2.1`, not `v0.2.1`):
@@ -60,9 +60,9 @@ e.g. `0.2.1`, not `v0.2.1`):
 TAG=0.2.1
 
 cosign verify \
-  --certificate-identity-regexp="https://github.com/CodesWhat/lookout/.github/workflows/release.yml" \
+  --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
   --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
-  "ghcr.io/codeswhat/lookout:${TAG}"
+  "ghcr.io/codeswhat/portwing:${TAG}"
 ```
 
 A successful run prints the signing certificate details and exits `0`. Any
@@ -78,8 +78,8 @@ independently verifiable without cosign:
 ```bash
 TAG=0.2.1
 
-gh attestation verify "oci://ghcr.io/codeswhat/lookout:${TAG}" \
-  --repo CodesWhat/lookout
+gh attestation verify "oci://ghcr.io/codeswhat/portwing:${TAG}" \
+  --repo CodesWhat/portwing
 ```
 
 Both `cosign verify` and `gh attestation verify` should pass for a release to
@@ -91,7 +91,7 @@ be considered trusted.
 
 Binary archives (`.tar.gz`, `.zip`) are listed in `checksums.txt` and attested
 with GitHub build provenance. Download both the archive and `checksums.txt`
-from the [Releases page](https://github.com/CodesWhat/lookout/releases), then:
+from the [Releases page](https://github.com/CodesWhat/portwing/releases), then:
 
 ### 1. Verify the checksums file itself
 
@@ -102,7 +102,7 @@ keyless signature over `checksums.txt`:
 TAG=v0.2.1
 
 cosign verify-blob \
-  --certificate-identity-regexp="https://github.com/CodesWhat/lookout/.github/workflows/release.yml" \
+  --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
   --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
   --bundle "checksums.txt.bundle" \
   "checksums.txt"
@@ -123,8 +123,8 @@ On macOS, use `shasum -a 256 --check --ignore-missing checksums.txt`.
 
 ```bash
 # Verify a specific downloaded archive
-gh attestation verify lookout_Linux_x86_64.tar.gz \
-  --repo CodesWhat/lookout
+gh attestation verify portwing_Linux_x86_64.tar.gz \
+  --repo CodesWhat/portwing
 ```
 
 ---
@@ -132,7 +132,7 @@ gh attestation verify lookout_Linux_x86_64.tar.gz \
 ## Download and Inspect the SBOM
 
 Each release ships a [CycloneDX](https://cyclonedx.org/) SBOM as a release
-asset named `lookout-${TAG}-sbom.cdx.json`. It enumerates every Go module
+asset named `portwing-${TAG}-sbom.cdx.json`. It enumerates every Go module
 dependency included in the binary.
 
 ```bash
@@ -140,11 +140,11 @@ TAG=v0.2.1
 
 # Download the SBOM asset
 gh release download "${TAG}" \
-  --repo CodesWhat/lookout \
-  --pattern "lookout-${TAG}-sbom.cdx.json"
+  --repo CodesWhat/portwing \
+  --pattern "portwing-${TAG}-sbom.cdx.json"
 
 # Inspect with any CycloneDX-compatible tool, e.g. the CycloneDX CLI
-cyclonedx validate --input-file "lookout-${TAG}-sbom.cdx.json"
+cyclonedx validate --input-file "portwing-${TAG}-sbom.cdx.json"
 ```
 
 The SBOM does **not** currently ship a detached cosign signature of its own,
@@ -157,12 +157,12 @@ compliance workflow requires a signed SBOM, open an issue.
 
 | Artifact | Method | Command |
 |---|---|---|
-| Container image | cosign keyless | `cosign verify ... ghcr.io/codeswhat/lookout:TAG` |
-| Container image | GitHub attestation | `gh attestation verify oci://ghcr.io/codeswhat/lookout:TAG` |
+| Container image | cosign keyless | `cosign verify ... ghcr.io/codeswhat/portwing:TAG` |
+| Container image | GitHub attestation | `gh attestation verify oci://ghcr.io/codeswhat/portwing:TAG` |
 | `checksums.txt` | cosign blob | `cosign verify-blob ... --bundle checksums.txt.bundle checksums.txt` |
 | Binary archive | SHA-256 checksum | `sha256sum --check --ignore-missing checksums.txt` |
-| Binary archive | GitHub attestation | `gh attestation verify lookout_Linux_x86_64.tar.gz --repo CodesWhat/lookout` |
-| SBOM | Inspect manually | `cyclonedx validate --input-file lookout-TAG-sbom.cdx.json` |
+| Binary archive | GitHub attestation | `gh attestation verify portwing_Linux_x86_64.tar.gz --repo CodesWhat/portwing` |
+| SBOM | Inspect manually | `cyclonedx validate --input-file portwing-TAG-sbom.cdx.json` |
 
 For the full security model — including authentication tokens, TLS configuration,
 and threat boundaries — see [Security Model](/security-model).

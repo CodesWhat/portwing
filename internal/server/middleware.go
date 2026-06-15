@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/audit"
-	"github.com/codeswhat/lookout/internal/auth"
+	"github.com/codeswhat/portwing/internal/audit"
+	"github.com/codeswhat/portwing/internal/auth"
 )
 
 // tokenVerifier is the interface used by AuthMiddleware to verify a presented
@@ -32,6 +32,14 @@ type rawTokenVerifier struct {
 func (v *rawTokenVerifier) Verify(token string) bool {
 	return subtle.ConstantTimeCompare([]byte(token), []byte(v.token)) == 1
 }
+
+const (
+	// Header names only; these are not secret values.
+	// #nosec G101 -- header name constant; not a credential.
+	headerPortwingToken = "X-Portwing-Token"
+	// #nosec G101 -- header name constant; not a credential.
+	headerDrydockAgentSecret = "X-Dd-Agent-Secret"
+)
 
 // RateLimiter tracks failed authentication attempts by IP address and blocks
 // IPs that exceed the failure threshold within a rolling window.
@@ -132,8 +140,8 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 // token before calling next. If verifier is nil, authentication is disabled
 // and all requests are passed through.
 //
-// The middleware checks Authorization: Bearer first, then X-Lookout-Token,
-// then X-Dd-Agent-Secret for Drydock backwards compatibility.
+// The middleware checks Authorization: Bearer first, then X-Portwing-Token,
+// then X-Dd-Agent-Secret for Drydock compatibility.
 //
 // Rate limiting is applied before verification, so failed attempts are always
 // counted regardless of whether the verifier uses a raw token or Argon2id.
@@ -163,15 +171,7 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 			return
 		}
 
-		// Check Authorization: Bearer first, then X-Lookout-Token, then the
-		// Drydock-compatible X-Dd-Agent-Secret.
-		provided := bearerToken(r)
-		if provided == "" {
-			provided = r.Header.Get("X-Lookout-Token")
-		}
-		if provided == "" {
-			provided = r.Header.Get("X-Dd-Agent-Secret")
-		}
+		provided := agentToken(r)
 
 		if !verifier.Verify(provided) {
 			rl.RecordFailure(clientIP)
@@ -216,10 +216,10 @@ type Ed25519Config struct {
 }
 
 // AuthMiddlewareWithEd25519 is AuthMiddleware extended with an optional Ed25519
-// verification path. When an incoming request carries X-Lookout-Signature it
-// is verified via Ed25519; otherwise the request falls through to the token
-// verifier. Either path (ed25519 or token) must succeed for the request to
-// proceed.
+// verification path. When an incoming request carries X-Portwing-Signature,
+// it is verified via Ed25519;
+// otherwise the request falls through to the token verifier. Either path must
+// succeed for the request to proceed.
 //
 // The body is consumed and buffered for signature verification; the downstream
 // handler sees a fresh reader.
@@ -251,13 +251,15 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		// If Ed25519 is configured and the request carries a signature, use
 		// that path exclusively. Reading the body first is required because
 		// VerifyRequest needs it for the canonical message.
-		if ed.Registry != nil && r.Header.Get(auth.HeaderSignature) != "" {
+		if ed.Registry != nil && auth.HasSignature(r.Header) {
 			// Buffer the body.
 			var body []byte
 			if r.Body != nil {
 				var err error
 				body, err = io.ReadAll(io.LimitReader(r.Body, 64*1024*1024))
-				r.Body.Close()
+				if closeErr := r.Body.Close(); closeErr != nil {
+					slog.Warn("closing request body", "error", closeErr)
+				}
 				if err != nil {
 					http.Error(w, "reading request body", http.StatusBadRequest)
 					return
@@ -276,7 +278,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				slog.Warn("ed25519 authentication failed",
 					"ip", clientIP, "reason", auth.ReasonFor(err))
 				auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
-				w.Header().Set(auth.HeaderReason, auth.ReasonFor(err))
+				setAuthReason(w.Header(), auth.ReasonFor(err))
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -298,13 +300,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			return
 		}
 
-		provided := bearerToken(r)
-		if provided == "" {
-			provided = r.Header.Get("X-Lookout-Token")
-		}
-		if provided == "" {
-			provided = r.Header.Get("X-Dd-Agent-Secret")
-		}
+		provided := agentToken(r)
 
 		if !verifier.Verify(provided) {
 			rl.RecordFailure(clientIP)
@@ -384,6 +380,20 @@ func bearerToken(r *http.Request) string {
 		return strings.TrimSpace(auth[7:])
 	}
 	return ""
+}
+
+func agentToken(r *http.Request) string {
+	if token := bearerToken(r); token != "" {
+		return token
+	}
+	if token := r.Header.Get(headerPortwingToken); token != "" {
+		return token
+	}
+	return r.Header.Get(headerDrydockAgentSecret)
+}
+
+func setAuthReason(h http.Header, reason string) {
+	h.Set(auth.HeaderReason, reason)
 }
 
 // SetTrustedProxies configures the CIDR ranges whose forwarding headers are

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/docker"
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 // shortSocketPath returns a temp socket path short enough for the unix
@@ -109,7 +109,7 @@ func newStubDockerClient(t *testing.T) (*docker.Client, func()) {
 				Image:   "nginx:latest",
 				ImageID: "sha256:test",
 				Labels: map[string]string{
-					"lookout.display_name": "container-1",
+					"portwing.display_name": "container-1",
 				},
 			},
 		})
@@ -141,7 +141,7 @@ func newStubDockerClient(t *testing.T) (*docker.Client, func()) {
 			Config: docker.ContainerConfig{
 				Image: "nginx:latest",
 				Labels: map[string]string{
-					"lookout.display_name": "container-1",
+					"portwing.display_name": "container-1",
 				},
 			},
 			NetworkSettings: &docker.NetworkSettings{

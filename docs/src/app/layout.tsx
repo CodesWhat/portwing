@@ -5,7 +5,7 @@ import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import Image from "next/image";
 import { source } from "@/lib/source";
-import logo from "../../public/lookout.png";
+import logo from "../../public/portwing.png";
 import "./globals.css";
 
 const ibmPlexSans = IBM_Plex_Sans({
@@ -20,9 +20,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Lookout Docs",
-  description: "Documentation for Lookout, the security-first remote Docker agent.",
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://getlookout.dev"),
+  title: "Portwing Docs",
+  description: "Documentation for Portwing, the security-first remote Docker agent.",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://getportwing.dev"),
 };
 
 export const viewport: Viewport = {
@@ -46,8 +46,8 @@ export default function RootLayout({
             nav={{
               title: (
                 <span className="flex items-center gap-2">
-                  <Image src={logo} alt="Lookout" width={28} height={28} priority />
-                  <span className="font-semibold tracking-tight">Lookout</span>
+                  <Image src={logo} alt="Portwing" width={28} height={28} priority />
+                  <span className="font-semibold tracking-tight">Portwing</span>
                 </span>
               ),
               url: "/",
@@ -55,7 +55,7 @@ export default function RootLayout({
             links={[
               {
                 text: "GitHub",
-                url: "https://github.com/CodesWhat/lookout",
+                url: "https://github.com/CodesWhat/portwing",
                 external: true,
               },
             ]}

@@ -20,9 +20,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/codeswhat/lookout/internal/docker"
-	"github.com/codeswhat/lookout/internal/metrics"
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/metrics"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // protocolVersion is the MCP spec revision this server implements.
@@ -130,7 +130,7 @@ func (h *Handler) handleInitialize(w http.ResponseWriter, req rpcRequest) {
 			"tools": map[string]interface{}{},
 		},
 		"serverInfo": map[string]interface{}{
-			"name":    "lookout",
+			"name":    "portwing",
 			"version": protocol.AgentVersion,
 		},
 	}

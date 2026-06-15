@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"runtime"
 	"strconv"
@@ -217,9 +218,21 @@ func (c *Collector) collectDisk(m *HostMetrics) {
 	if err := syscall.Statfs(c.dockerDataRoot, &stat); err != nil {
 		return
 	}
-	m.DiskTotal = stat.Blocks * uint64(stat.Bsize)
-	m.DiskFree = stat.Bavail * uint64(stat.Bsize)
+	blockSize := int64(stat.Bsize)
+	m.DiskTotal = statfsBytes(stat.Blocks, blockSize)
+	m.DiskFree = statfsBytes(stat.Bavail, blockSize)
 	m.DiskUsed = m.DiskTotal - m.DiskFree
+}
+
+func statfsBytes(blocks uint64, blockSize int64) uint64 {
+	if blockSize <= 0 {
+		return 0
+	}
+	size := uint64(blockSize)
+	if blocks > math.MaxUint64/size {
+		return math.MaxUint64
+	}
+	return blocks * size
 }
 
 // collectNetwork reads /proc/net/dev and sums rx/tx bytes across all non-lo interfaces.

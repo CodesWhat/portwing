@@ -1,6 +1,6 @@
 version: 2
 
-project_name: lookout
+project_name: portwing
 
 before:
   hooks:
@@ -8,16 +8,16 @@ before:
     - go vet ./...
 
 builds:
-  - id: lookout
-    main: ./cmd/lookout
-    binary: lookout
+  - id: portwing
+    main: ./cmd/portwing
+    binary: portwing
     env:
       - CGO_ENABLED=0
     flags:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/codeswhat/lookout/internal/protocol.AgentVersion={{.Version}}
+      - -X github.com/codeswhat/portwing/internal/protocol.AgentVersion={{.Version}}
     goos:
       - linux
       - darwin
@@ -65,7 +65,7 @@ docker_signs:
       - "${artifact}@${digest}"
       - "--yes"
     # Sign both the per-arch images and the multi-arch manifest lists, so
-    # `cosign verify ghcr.io/codeswhat/lookout:<tag>` succeeds on the index
+    # `cosign verify ghcr.io/codeswhat/portwing:<tag>` succeeds on the index
     # users actually pull (not just the per-arch -amd64/-arm64/-armv7 tags).
     artifacts: all
     output: true
@@ -81,8 +81,8 @@ changelog:
 
 dockers:
   - image_templates:
-      - "ghcr.io/codeswhat/lookout:{{ .Version }}-amd64"
-      - "ghcr.io/codeswhat/lookout:latest-amd64"
+      - "ghcr.io/codeswhat/portwing:{{ .Version }}-amd64"
+      - "ghcr.io/codeswhat/portwing:latest-amd64"
     dockerfile: Dockerfile.release
     use: buildx
     build_flag_templates:
@@ -90,8 +90,8 @@ dockers:
     goarch: amd64
 
   - image_templates:
-      - "ghcr.io/codeswhat/lookout:{{ .Version }}-arm64"
-      - "ghcr.io/codeswhat/lookout:latest-arm64"
+      - "ghcr.io/codeswhat/portwing:{{ .Version }}-arm64"
+      - "ghcr.io/codeswhat/portwing:latest-arm64"
     dockerfile: Dockerfile.release
     use: buildx
     build_flag_templates:
@@ -99,8 +99,8 @@ dockers:
     goarch: arm64
 
   - image_templates:
-      - "ghcr.io/codeswhat/lookout:{{ .Version }}-armv7"
-      - "ghcr.io/codeswhat/lookout:latest-armv7"
+      - "ghcr.io/codeswhat/portwing:{{ .Version }}-armv7"
+      - "ghcr.io/codeswhat/portwing:latest-armv7"
     dockerfile: Dockerfile.release.armv7
     use: buildx
     build_flag_templates:
@@ -109,14 +109,14 @@ dockers:
     goarm: "7"
 
 docker_manifests:
-  - name_template: "ghcr.io/codeswhat/lookout:{{ .Version }}"
+  - name_template: "ghcr.io/codeswhat/portwing:{{ .Version }}"
     image_templates:
-      - "ghcr.io/codeswhat/lookout:{{ .Version }}-amd64"
-      - "ghcr.io/codeswhat/lookout:{{ .Version }}-arm64"
-      - "ghcr.io/codeswhat/lookout:{{ .Version }}-armv7"
+      - "ghcr.io/codeswhat/portwing:{{ .Version }}-amd64"
+      - "ghcr.io/codeswhat/portwing:{{ .Version }}-arm64"
+      - "ghcr.io/codeswhat/portwing:{{ .Version }}-armv7"
 
-  - name_template: "ghcr.io/codeswhat/lookout:latest"
+  - name_template: "ghcr.io/codeswhat/portwing:latest"
     image_templates:
-      - "ghcr.io/codeswhat/lookout:latest-amd64"
-      - "ghcr.io/codeswhat/lookout:latest-arm64"
-      - "ghcr.io/codeswhat/lookout:latest-armv7"
+      - "ghcr.io/codeswhat/portwing:latest-amd64"
+      - "ghcr.io/codeswhat/portwing:latest-arm64"
+      - "ghcr.io/codeswhat/portwing:latest-armv7"

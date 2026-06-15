@@ -1,9 +1,9 @@
 ---
 title: Standalone Mode
-description: Run Lookout as a hardened remote Docker API without a Drydock platform connection, using the generic REST adapter.
+description: Run Portwing as a hardened remote Docker API without a Drydock platform connection, using the generic REST adapter.
 ---
 
-Lookout normally operates in one of two connection modes — edge (WebSocket to Drydock) or standard (Drydock-compatible HTTP server). **Standalone mode** is a third option: set `ADAPTER=generic` and Lookout becomes a self-contained, security-hardened remote Docker API with no external controller required.
+Portwing normally operates in one of two connection modes — edge (WebSocket to Drydock) or standard (Drydock-compatible HTTP server). **Standalone mode** is a third option: set `ADAPTER=generic` and Portwing becomes a self-contained, security-hardened remote Docker API with no external controller required.
 
 The generic adapter exposes a clean REST and SSE surface under `/api/v1/*`, backed directly by the local Docker daemon. Everything else — auth enforcement, rate limiting, TLS, the Docker API passthrough, the MCP server, health endpoints — works identically to the other modes.
 
@@ -15,16 +15,16 @@ Pass `ADAPTER=generic` when starting the container. You must also configure at l
 
 ```bash
 docker run -d \
-  --name lookout \
+  --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
   -p 3000:3000 \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 <Callout type="warn">
-Never expose Lookout directly on a public interface without TLS. Run it behind a reverse proxy that terminates TLS, or supply `TLS_CERT` and `TLS_KEY` to enable the built-in TLS listener. See [Configuration](/configuration).
+Never expose Portwing directly on a public interface without TLS. Run it behind a reverse proxy that terminates TLS, or supply `TLS_CERT` and `TLS_KEY` to enable the built-in TLS listener. See [Configuration](/configuration).
 </Callout>
 
 The `ADAPTER` environment variable defaults to `drydock`. The only change needed to switch modes is setting it to `generic`. All other configuration — token auth, Ed25519 keys, TLS, bind address, port — is unchanged.
@@ -54,7 +54,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ```json
 {
   "agentVersion": "0.2.1",
-  "protocolName": "lookout",
+  "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"
 }
@@ -136,14 +136,14 @@ These two endpoints are unauthenticated and are safe for load-balancer probes an
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Returns `{"status":"ok"}` — HTTP 200 always |
-| `GET /_lookout/health` | Returns Docker connectivity status — HTTP 503 if daemon is unreachable |
+| `GET /_portwing/health` | Returns Docker connectivity status — HTTP 503 if daemon is unreachable |
 
 ```bash
 # Simple liveness probe
 curl -sf http://localhost:3000/health
 
 # Readiness probe (includes Docker connectivity)
-curl -sf http://localhost:3000/_lookout/health
+curl -sf http://localhost:3000/_portwing/health
 ```
 
 ```json
@@ -157,11 +157,11 @@ curl -sf http://localhost:3000/_lookout/health
 
 ## Agent info endpoint
 
-`GET /_lookout/info` returns agent version, Docker version, connection mode, uptime, hostname, and the capability list. Auth required.
+`GET /_portwing/info` returns agent version, Docker version, connection mode, uptime, hostname, and the capability list. Auth required.
 
 ```bash
 curl -s -H "Authorization: Bearer $TOKEN" \
-  http://localhost:3000/_lookout/info | jq .
+  http://localhost:3000/_portwing/info | jq .
 ```
 
 The `capabilities` array for the generic adapter lists `containers`, `logs`, `events`, and `version`.
@@ -197,8 +197,8 @@ All `/api/v1/*` endpoints and the Docker proxy require a valid credential. Suppl
 | Header | Usage |
 |--------|-------|
 | `Authorization: Bearer TOKEN` | Standard bearer token (checked first) |
-| `X-Lookout-Token: TOKEN` | Alternate header |
-| `X-Lookout-Signature` + three companion headers | Ed25519 per-request signature |
+| `X-Portwing-Token: TOKEN` | Alternate header |
+| `X-Portwing-Signature` + three companion headers | Ed25519 per-request signature |
 
 Ten failed attempts per IP per rolling minute result in HTTP 429 until the window expires.
 
@@ -208,7 +208,7 @@ For full details on token options (`TOKEN`, `TOKEN_FILE`, `TOKEN_HASH`) and Ed25
 
 ## MCP server (read-only alternative)
 
-Lookout also exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_lookout/mcp`. It is available in all adapter modes, including `generic`. AI assistants (Claude, Cursor, Windsurf) can query live container state through this endpoint without issuing raw REST calls.
+Portwing also exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_portwing/mcp`. It is available in all adapter modes, including `generic`. AI assistants (Claude, Cursor, Windsurf) can query live container state through this endpoint without issuing raw REST calls.
 
 Available tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`.
 

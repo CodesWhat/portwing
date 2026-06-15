@@ -23,7 +23,7 @@
 }
 
 /*
- * Lookout's take on the shared CodesWhat family theme. Same warm-neutral
+ * Portwing's take on the shared CodesWhat family theme. Same warm-neutral
  * base as sockguard/drydock, but the single brand accent is pulled from the
  * mascot: a vermilion (~hsl(13 100% 60%)) that sits between the cap's red and
  * the brand orange. Neutrals carry a faint violet cast (the pigeon's slate
@@ -70,12 +70,12 @@
   --ring: 13 100% 63%;
 }
 
-/* ── Lookout mascot: lean-in + blink ─────────────────────────────────
- * Drives <LookoutMascot>. transform-origin is at the feet so scaling
+/* ── Portwing mascot: lean-in + blink ─────────────────────────────────
+ * Drives <PortwingMascot>. transform-origin is at the feet so scaling
  * cranes the top up and brings the eyes toward the viewer; the two
  * frames are stacked and cross-faded by the data-eyes attribute.
  */
-.lookout-mascot {
+.portwing-mascot {
   position: relative;
   transform-origin: 50% 100%;
   transition:
@@ -86,21 +86,21 @@
    * the open/blink frame underneath never re-renders or doubles it. */
   filter: drop-shadow(0 14px 24px rgb(0 0 0 / 0.16));
 }
-.dark .lookout-mascot {
+.dark .portwing-mascot {
   filter: drop-shadow(0 16px 28px rgb(0 0 0 / 0.55));
 }
-.lookout-mascot.is-big {
+.portwing-mascot.is-big {
   /* crane up (translateY) + stretch the top (scaleY > scaleX) + lean toward viewer */
   transform: translateY(-7%) scaleX(1.08) scaleY(1.2);
   filter: drop-shadow(0 26px 40px rgb(0 0 0 / 0.26));
 }
-.dark .lookout-mascot.is-big {
+.dark .portwing-mascot.is-big {
   filter: drop-shadow(0 30px 48px rgb(0 0 0 / 0.6));
 }
-.lookout-mascot .lk-frame {
+.portwing-mascot .lk-frame {
   display: block;
 }
-.lookout-mascot .lk-blink {
+.portwing-mascot .lk-blink {
   position: absolute;
   inset: 0;
   opacity: 0;
@@ -108,13 +108,13 @@
    * the whole time; this frame just drops on top to close the eyes, so only
    * the eyes change and the silhouette/shadow never moves. */
 }
-.lookout-mascot[data-eyes="blink"] .lk-blink {
+.portwing-mascot[data-eyes="blink"] .lk-blink {
   opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lookout-mascot,
-  .lookout-mascot.is-big {
+  .portwing-mascot,
+  .portwing-mascot.is-big {
     transform: none;
     transition: none;
   }

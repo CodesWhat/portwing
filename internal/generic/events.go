@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/codeswhat/lookout/internal/docker"
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 // genericEvent is the stable envelope written on the SSE stream.

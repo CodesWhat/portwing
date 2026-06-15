@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/codeswhat/lookout/internal/adapter"
+	"github.com/codeswhat/portwing/internal/adapter"
 )
 
 type SSEClient struct {

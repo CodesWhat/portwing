@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/codeswhat/lookout/internal/adapter"
-	"github.com/codeswhat/lookout/internal/docker"
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // Adapter is the generic standalone adapter. It exposes a clean REST surface

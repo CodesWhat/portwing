@@ -221,3 +221,31 @@ func TestParsePHCRejectsBelowMinimumParams(t *testing.T) {
 		}
 	}
 }
+
+// TestParsePHCRejectsOverflowParams verifies numeric parameters must fit the
+// types passed into argon2.IDKey.
+func TestParsePHCRejectsOverflowParams(t *testing.T) {
+	t.Parallel()
+
+	phc, err := HashToken("sometoken")
+	if err != nil {
+		t.Fatalf("HashToken: %v", err)
+	}
+
+	cases := map[string]struct {
+		old, new string
+	}{
+		"memory over uint32": {"m=19456", "m=4294986752"},
+		"time over uint32":   {"t=2", "t=4294967298"},
+	}
+
+	for name, c := range cases {
+		bad := strings.Replace(phc, c.old, c.new, 1)
+		if bad == phc {
+			t.Fatalf("%s: replacement %q not found in PHC", name, c.old)
+		}
+		if _, err := ParsePHC(bad); err == nil {
+			t.Errorf("%s: expected error, got nil", name)
+		}
+	}
+}

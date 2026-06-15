@@ -35,13 +35,13 @@ Three enrollment models are considered. A recommendation follows the threat anal
 
 ### 2.1 Model A — First-Claim TOFU (Trust On First Use)
 
-> **Not implemented.** Model A is described here for design completeness only. It is not implemented in Lookout. The env vars referenced below (`TOFU_ENROLLMENT`, `ENROLLMENT_TIMEOUT`, `LOOKOUT_DEV_TOFU`) are hypothetical and have no effect on the running agent. See the recommendation at the end of this section.
+> **Not implemented.** Model A is described here for design completeness only. It is not implemented in Portwing. The env vars referenced below (`TOFU_ENROLLMENT`, `ENROLLMENT_TIMEOUT`, `PORTWING_DEV_TOFU`) are hypothetical and have no effect on the running agent. See the recommendation at the end of this section.
 
 The agent exposes a one-time enrollment endpoint. The first caller presents an Ed25519 public key; the agent accepts and persists it. Subsequent calls to the enrollment endpoint are rejected.
 
 **Flow (hypothetical):**
-1. Operator starts Lookout with `TOFU_ENROLLMENT=1` (hypothetical) and `ENROLLMENT_TIMEOUT=300` (hypothetical, seconds).
-2. Within the timeout window, the caller `POST /api/lookout/enroll` with `{"public_key": "<base64url ed25519 pubkey>"}`.
+1. Operator starts Portwing with `TOFU_ENROLLMENT=1` (hypothetical) and `ENROLLMENT_TIMEOUT=300` (hypothetical, seconds).
+2. Within the timeout window, the caller `POST /api/portwing/enroll` with `{"public_key": "<base64url ed25519 pubkey>"}`.
 3. Agent writes the key to the authorized-keys file and disables the enrollment endpoint.
 4. All subsequent requests must carry an Ed25519 signature.
 
@@ -83,7 +83,7 @@ The agent is pre-configured with a short-lived `ENROLLMENT_TOKEN` (a random secr
 
 **Flow:**
 1. Operator generates a random enrollment token and sets `ENROLLMENT_TOKEN=<hex>` on the agent.
-2. Platform calls `POST /api/lookout/enroll` with `{"enrollment_token": "<hex>", "public_key": "<base64url>"}`.
+2. Platform calls `POST /api/portwing/enroll` with `{"enrollment_token": "<hex>", "public_key": "<base64url>"}`.
 3. Agent verifies the token (constant-time), appends the public key to the authorized-keys file, clears the token from memory, and acknowledges.
 4. The agent refuses further enrollment calls until restarted with a new token.
 
@@ -102,7 +102,7 @@ The agent is pre-configured with a short-lived `ENROLLMENT_TOKEN` (a random secr
 
 **Implement Model B (authorized_keys file) as the primary path**, with Model C (enrollment token) as an optional convenience for automated/cloud deployments.
 
-Model A (bare TOFU) is explicitly *not recommended* for production use and is **not implemented**. It is described here for completeness only; the hypothetical `LOOKOUT_DEV_TOFU=1` gate does not exist in the codebase.
+Model A (bare TOFU) is explicitly *not recommended* for production use and is **not implemented**. It is described here for completeness only; the hypothetical `PORTWING_DEV_TOFU=1` gate does not exist in the codebase.
 
 ---
 
@@ -124,11 +124,11 @@ The client signs the following canonical byte string (UTF-8, no trailing newline
 <Nonce, 32 hex bytes>
 ```
 
-Example for `POST /api/lookout/containers` with a JSON body:
+Example for `POST /api/portwing/containers` with a JSON body:
 
 ```
 POST
-/api/lookout/containers
+/api/portwing/containers
 9f86d081884c7d659a2feaa0c55ad015...
 1749600000
 a1b2c3d4e5f6...
@@ -140,19 +140,19 @@ The signed content deliberately does not include the `Host` header — the agent
 
 | Header | Format | Example |
 |--------|--------|---------|
-| `X-Lookout-Key-ID` | hex-encoded first 8 bytes of SHA-256(public_key) | `4a3f2b1c9d8e7f6a` |
-| `X-Lookout-Timestamp` | Unix epoch, seconds, decimal string | `1749600000` |
-| `X-Lookout-Nonce` | 32 random hex bytes (128-bit) | `a1b2c3d4e5f6...` |
-| `X-Lookout-Signature` | base64url (no padding) Ed25519 signature over canonical string | `MEQCIBe...` |
+| `X-Portwing-Key-ID` | hex-encoded first 8 bytes of SHA-256(public_key) | `4a3f2b1c9d8e7f6a` |
+| `X-Portwing-Timestamp` | Unix epoch, seconds, decimal string | `1749600000` |
+| `X-Portwing-Nonce` | 32 random hex bytes (128-bit) | `a1b2c3d4e5f6...` |
+| `X-Portwing-Signature` | base64url (no padding) Ed25519 signature over canonical string | `MEQCIBe...` |
 
-The existing `Authorization: Bearer` and `X-Lookout-Token` headers continue to work as the legacy path.
+The existing `Authorization: Bearer` and `X-Portwing-Token` headers continue to work as the legacy path.
 
 #### Verification steps (agent side)
 
-1. If `X-Lookout-Signature` is absent, fall through to legacy token verification.
-2. Look up the key by `X-Lookout-Key-ID`. If not found, return 401.
-3. Parse `X-Lookout-Timestamp`. If `|now - timestamp| > 60s`, return 401 with `X-Lookout-Reason: timestamp-skew`.
-4. Check the nonce LRU (see §3.3). If seen, return 401 with `X-Lookout-Reason: replay`.
+1. If `X-Portwing-Signature` is absent, fall through to legacy token verification.
+2. Look up the key by `X-Portwing-Key-ID`. If not found, return 401.
+3. Parse `X-Portwing-Timestamp`. If `|now - timestamp| > 60s`, return 401 with `X-Portwing-Reason: timestamp-skew`.
+4. Check the nonce LRU (see §3.3). If seen, return 401 with `X-Portwing-Reason: replay`.
 5. Reconstruct the canonical byte string from the request (method, path, SHA-256 of body, timestamp, nonce).
 6. Verify the Ed25519 signature against the registered public key. `crypto/ed25519.Verify` returns a bool — no constant-time concern here since the signature algorithm itself is not timing-sensitive to verify.
 7. Record the nonce in the LRU. Advance the rate limiter success counter.
@@ -160,14 +160,14 @@ The existing `Authorization: Bearer` and `X-Lookout-Token` headers continue to w
 #### Wire example
 
 ```http
-POST /api/lookout/containers/myapp/start HTTP/1.1
+POST /api/portwing/containers/myapp/start HTTP/1.1
 Host: agent.example.internal:3000
 Content-Type: application/json
 Content-Length: 2
-X-Lookout-Key-ID: 4a3f2b1c9d8e7f6a
-X-Lookout-Timestamp: 1749600000
-X-Lookout-Nonce: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
-X-Lookout-Signature: d2hhdCBhIGRheSB0byBiZSBhbGl2ZQ
+X-Portwing-Key-ID: 4a3f2b1c9d8e7f6a
+X-Portwing-Timestamp: 1749600000
+X-Portwing-Nonce: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
+X-Portwing-Signature: d2hhdCBhIGRheSB0byBiZSBhbGl2ZQ
 
 {}
 ```
@@ -185,7 +185,7 @@ The `HelloMessage` gains an optional `pubKeyID`, `timestamp`, `nonce`, and `sign
   "type": "hello",
   "data": {
     "version": "0.2.0",
-    "protocol": "lookout/1",
+    "protocol": "portwing/1",
     "agentId": "...",
     "agentName": "prod-worker-01",
     "tokenHash": "",
@@ -216,7 +216,7 @@ If a future threat model requires per-message integrity (e.g., TLS termination a
 
 #### Timestamp window
 
-Requests with `|server_time - X-Lookout-Timestamp| > 60 seconds` are rejected. This eliminates all replays captured more than 60 seconds after the fact.
+Requests with `|server_time - X-Portwing-Timestamp| > 60 seconds` are rejected. This eliminates all replays captured more than 60 seconds after the fact.
 
 #### Nonce LRU
 
@@ -357,7 +357,7 @@ Wire example (edge hello with Ed25519, no token):
   "type": "hello",
   "data": {
     "version": "0.2.0",
-    "protocol": "lookout/1",
+    "protocol": "portwing/1",
     "agentId": "3e4a5b6c-7d8e-9f0a-b1c2-d3e4f5a6b7c8",
     "agentName": "prod-worker-01",
     "pubKeyId": "4a3f2b1c9d8e7f6a",
@@ -377,7 +377,7 @@ The public key in the authorized-keys file is the same key material that can bac
 
 1. Agent generates Ed25519 keypair (this design).
 2. Agent self-signs or CSR-signs an X.509 cert using the same keypair for mTLS.
-3. Lookout accepts TLS client certificates and verifies the public key in the cert against the authorized-keys file — same verification path, different transport binding.
+3. Portwing accepts TLS client certificates and verifies the public key in the cert against the authorized-keys file — same verification path, different transport binding.
 
 This means the authorized-keys file remains the single source of truth regardless of whether auth is done via HTTP headers or TLS client certs.
 
@@ -385,7 +385,7 @@ This means the authorized-keys file remains the single source of truth regardles
 
 ## 6. Comparison Table
 
-| Property | Lookout (proposed) | Komodo v2 Periphery | Arcane Edge Agent |
+| Property | Portwing (proposed) | Komodo v2 Periphery | Arcane Edge Agent |
 |----------|--------------------|---------------------|-------------------|
 | Algorithm | Ed25519 (stdlib) | Ed25519 (auto-generated) | X.509 / mTLS (CA-issued) |
 | Enrollment model | Operator-provisioned file (recommended) or enrollment token | Onboarding key (burn-once bootstrap) | Agent token bootstraps cert issuance |
@@ -406,7 +406,7 @@ Sources consulted:
 - Salt Data Blog v1-to-v2 upgrade guide: [Upgrading Komodo](https://blog.saltdata.ro/upgrading-komodo-v1-to-v2)
 - Arcane edge mTLS docs: [Edge Agent mTLS](https://getarcane.app/docs/security/edge-mtls)
 
-**Why Lookout's design is ahead:** Komodo replaced a shared passkey with PKI but its request-level signing protocol is not publicly documented; community evidence suggests long-term key exchange without per-request signatures, meaning a captured TLS session (at a terminating load balancer) could replay requests. Lookout's design binds every request to a timestamp and nonce, making replay impossible even against TLS-terminating intermediaries. Arcane's mTLS model is strong but requires a CA infrastructure and certificate lifecycle management; Lookout achieves equivalent per-request proof with only stdlib crypto.
+**Why Portwing's design is ahead:** Komodo replaced a shared passkey with PKI but its request-level signing protocol is not publicly documented; community evidence suggests long-term key exchange without per-request signatures, meaning a captured TLS session (at a terminating load balancer) could replay requests. Portwing's design binds every request to a timestamp and nonce, making replay impossible even against TLS-terminating intermediaries. Arcane's mTLS model is strong but requires a CA infrastructure and certificate lifecycle management; Portwing achieves equivalent per-request proof with only stdlib crypto.
 
 ---
 
@@ -437,7 +437,7 @@ No changes to existing files. Zero deps beyond stdlib.
 ### PR 3 — `internal/server/middleware.go`: wire Ed25519 verifier into auth middleware
 
 **Files (modified):**
-- `internal/server/middleware.go` — `AuthMiddleware` gains an optional `*auth.Ed25519Verifier` parameter (or wraps both verifiers in a `compositeVerifier`). Ed25519 check runs first; if `X-Lookout-Signature` is absent, falls through to existing `tokenVerifier` path.
+- `internal/server/middleware.go` — `AuthMiddleware` gains an optional `*auth.Ed25519Verifier` parameter (or wraps both verifiers in a `compositeVerifier`). Ed25519 check runs first; if `X-Portwing-Signature` is absent, falls through to existing `tokenVerifier` path.
 
 **Conflict flag:** HIGH — this file is the most likely to be touched by other teams (rate limiter changes, new middleware, etc.). Coordinate merge order.
 
@@ -466,7 +466,7 @@ No changes to existing files. Zero deps beyond stdlib.
 - `internal/auth/enroll.go` — `EnrollmentHandler(cfg *config.Config, registry *KeyRegistry) http.Handler`; validates `ENROLLMENT_TOKEN`, appends key to authorized-keys file, burns token
 
 **Files (modified):**
-- `internal/server/http.go` — register `POST /api/lookout/enroll` if `cfg.EnrollmentToken != ""`
+- `internal/server/http.go` — register `POST /api/portwing/enroll` if `cfg.EnrollmentToken != ""`
 
 **Conflict flag:** `internal/server/http.go` — HIGH conflict risk with other Wave 2 teams adding routes. Coordinate.
 
@@ -474,7 +474,7 @@ No changes to existing files. Zero deps beyond stdlib.
 
 Add Control 11 entry covering key registry, per-request signature verification, and replay protection. Reference this design doc.
 
-### PR 8 — CLI: `lookout keygen` subcommand
+### PR 8 — CLI: `portwing keygen` subcommand
 
 **Files (new):**
 - `cmd/keygen/keygen.go` — generate Ed25519 keypair, write private key to stdout in PEM (`PRIVATE KEY` block), write public key in authorized-keys line format

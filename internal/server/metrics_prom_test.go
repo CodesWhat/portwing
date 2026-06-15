@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/docker"
-	"github.com/codeswhat/lookout/internal/metrics"
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/metrics"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // shortSocketPath returns a socket path short enough for darwin's 104-byte
@@ -139,10 +139,10 @@ func TestHandleMetricsBuildInfo(t *testing.T) {
 	}
 	body := rr.Body.String()
 
-	if !strings.Contains(body, `lookout_build_info{version="`+protocol.AgentVersion+`"} 1`) {
+	if !strings.Contains(body, `portwing_build_info{version="`+protocol.AgentVersion+`"} 1`) {
 		t.Errorf("missing build info line; got:\n%s", body)
 	}
-	if !strings.Contains(body, "lookout_uptime_seconds ") {
+	if !strings.Contains(body, "portwing_uptime_seconds ") {
 		t.Errorf("missing uptime line; got:\n%s", body)
 	}
 	ct := rr.Header().Get("Content-Type")

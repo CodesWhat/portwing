@@ -9,14 +9,14 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { LookoutMascot } from "@/components/lookout-mascot";
+import { PortwingMascot } from "@/components/portwing-mascot";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { comparisonRows } from "./data/comparison-rows";
 import { type FeatureCategory, features } from "./data/features";
 
-const REPO = "https://github.com/CodesWhat/lookout";
+const REPO = "https://github.com/CodesWhat/portwing";
 const DOCS = "/docs";
 
 const categoryLabels: Record<FeatureCategory, { label: string; color: string; border: string }> = {
@@ -37,8 +37,8 @@ const categoryLabels: Record<FeatureCategory, { label: string; color: string; bo
   },
 };
 
-const dockerCompose = `# Lookout + sockguard — two-layer defense.
-# Generate a token first:  openssl rand -hex 32 > lookout_token.txt
+const dockerCompose = `# Portwing + sockguard — two-layer defense.
+# Generate a token first:  openssl rand -hex 32 > portwing_token.txt
 services:
   sockguard:
     image: ghcr.io/codeswhat/sockguard:latest
@@ -53,8 +53,8 @@ services:
     environment:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     depends_on: [sockguard]
     read_only: true
@@ -64,19 +64,19 @@ services:
     ports: ["3000:3000"]
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
-      - TOKEN_FILE=/run/secrets/lookout_token
-    secrets: [lookout_token]
+      - TOKEN_FILE=/run/secrets/portwing_token
+    secrets: [portwing_token]
 
 secrets:
-  lookout_token:
-    file: ./lookout_token.txt
+  portwing_token:
+    file: ./portwing_token.txt
 
 volumes:
   sockguard-socket:
-  lookout-stacks:`;
+  portwing-stacks:`;
 
 function ComparisonCell({ value, planned }: { value: string; planned?: boolean }) {
   if (planned) {
@@ -124,7 +124,7 @@ export default function Home() {
 
           <div className="relative z-10 flex flex-col items-center">
             <div className="mb-8">
-              <LookoutMascot size={168} />
+              <PortwingMascot size={168} />
             </div>
 
             <Badge variant="secondary" className="mb-6 px-4 py-1.5 text-sm font-medium">
@@ -180,7 +180,7 @@ export default function Home() {
               {/* Distribution Badges */}
               <div className="mt-10 flex flex-wrap items-center justify-center gap-2">
                 <a
-                  href="https://github.com/CodesWhat/lookout/pkgs/container/lookout"
+                  href="https://github.com/CodesWhat/portwing/pkgs/container/portwing"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -191,7 +191,7 @@ export default function Home() {
                   />
                 </a>
                 <a
-                  href="https://github.com/orgs/CodesWhat/packages/container/package/lookout"
+                  href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -202,7 +202,7 @@ export default function Home() {
                   />
                 </a>
                 <a
-                  href="https://github.com/orgs/CodesWhat/packages/container/package/lookout"
+                  href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -225,28 +225,28 @@ export default function Home() {
                 <a href={`${REPO}/stargazers`} target="_blank" rel="noopener noreferrer">
                   {/* biome-ignore lint/performance/noImgElement: external badge */}
                   <img
-                    src="https://img.shields.io/github/stars/CodesWhat/lookout?style=flat"
+                    src="https://img.shields.io/github/stars/CodesWhat/portwing?style=flat"
                     alt="Stars"
                   />
                 </a>
                 <a href={`${REPO}/forks`} target="_blank" rel="noopener noreferrer">
                   {/* biome-ignore lint/performance/noImgElement: external badge */}
                   <img
-                    src="https://img.shields.io/github/forks/CodesWhat/lookout?style=flat"
+                    src="https://img.shields.io/github/forks/CodesWhat/portwing?style=flat"
                     alt="Forks"
                   />
                 </a>
                 <a href={`${REPO}/issues`} target="_blank" rel="noopener noreferrer">
                   {/* biome-ignore lint/performance/noImgElement: external badge */}
                   <img
-                    src="https://img.shields.io/github/issues/CodesWhat/lookout?style=flat"
+                    src="https://img.shields.io/github/issues/CodesWhat/portwing?style=flat"
                     alt="Issues"
                   />
                 </a>
                 <a href={`${REPO}/commits/main`} target="_blank" rel="noopener noreferrer">
                   {/* biome-ignore lint/performance/noImgElement: external badge */}
                   <img
-                    src="https://img.shields.io/github/last-commit/CodesWhat/lookout?style=flat"
+                    src="https://img.shields.io/github/last-commit/CodesWhat/portwing?style=flat"
                     alt="Last commit"
                   />
                 </a>
@@ -260,29 +260,29 @@ export default function Home() {
                 >
                   {/* biome-ignore lint/performance/noImgElement: external badge */}
                   <img
-                    src="https://github.com/CodesWhat/lookout/actions/workflows/ci.yml/badge.svg?branch=main"
+                    src="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml/badge.svg?branch=main"
                     alt="CI"
                   />
                 </a>
                 <a
-                  href="https://goreportcard.com/report/github.com/codeswhat/lookout"
+                  href="https://goreportcard.com/report/github.com/codeswhat/portwing"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   {/* biome-ignore lint/performance/noImgElement: external badge */}
                   <img
-                    src="https://goreportcard.com/badge/github.com/codeswhat/lookout"
+                    src="https://goreportcard.com/badge/github.com/codeswhat/portwing"
                     alt="Go Report Card"
                   />
                 </a>
                 <a
-                  href="https://pkg.go.dev/github.com/codeswhat/lookout"
+                  href="https://pkg.go.dev/github.com/codeswhat/portwing"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   {/* biome-ignore lint/performance/noImgElement: external badge */}
                   <img
-                    src="https://pkg.go.dev/badge/github.com/codeswhat/lookout.svg"
+                    src="https://pkg.go.dev/badge/github.com/codeswhat/portwing.svg"
                     alt="Go Reference"
                   />
                 </a>
@@ -312,7 +312,7 @@ export default function Home() {
                 Drydock
               </a>{" "}
               orchestrates ·{" "}
-              <span className="font-semibold text-foreground">Lookout</span> is the agent on every
+              <span className="font-semibold text-foreground">Portwing</span> is the agent on every
               host ·{" "}
               <a
                 href="https://github.com/CodesWhat/sockguard"
@@ -343,7 +343,7 @@ export default function Home() {
             <div className="overflow-hidden rounded-xl border border-border">
               <div className="flex items-center gap-2 border-b border-border bg-secondary px-5 py-3">
                 <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                <span className="font-mono text-xs text-muted-foreground">lookout capabilities</span>
+                <span className="font-mono text-xs text-muted-foreground">portwing capabilities</span>
                 <span className="ml-auto font-mono text-xs text-muted-foreground/60">
                   {features.length} modules
                 </span>
@@ -421,7 +421,7 @@ export default function Home() {
                 Comparison
               </h2>
               <p className="relative mt-4 text-muted-foreground">
-                How Lookout stacks up against other remote Docker agents
+                How Portwing stacks up against other remote Docker agents
               </p>
             </div>
 
@@ -448,7 +448,7 @@ export default function Home() {
                       Diun
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-foreground">
-                      Lookout
+                      Portwing
                     </th>
                   </tr>
                 </thead>
@@ -475,7 +475,7 @@ export default function Home() {
                         <ComparisonCell value={row.diun} />
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <ComparisonCell value={row.lookout} planned={row.planned} />
+                        <ComparisonCell value={row.portwing} planned={row.planned} />
                       </td>
                     </tr>
                   ))}

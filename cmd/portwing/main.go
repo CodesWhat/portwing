@@ -14,17 +14,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/codeswhat/lookout/internal/adapter"
-	"github.com/codeswhat/lookout/internal/adapter/drydock"
-	"github.com/codeswhat/lookout/internal/audit"
-	"github.com/codeswhat/lookout/internal/auth"
-	"github.com/codeswhat/lookout/internal/config"
-	"github.com/codeswhat/lookout/internal/docker"
-	"github.com/codeswhat/lookout/internal/edge"
-	"github.com/codeswhat/lookout/internal/generic"
-	applog "github.com/codeswhat/lookout/internal/log"
-	"github.com/codeswhat/lookout/internal/protocol"
-	"github.com/codeswhat/lookout/internal/server"
+	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/adapter/drydock"
+	"github.com/codeswhat/portwing/internal/audit"
+	"github.com/codeswhat/portwing/internal/auth"
+	"github.com/codeswhat/portwing/internal/config"
+	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/edge"
+	"github.com/codeswhat/portwing/internal/generic"
+	applog "github.com/codeswhat/portwing/internal/log"
+	"github.com/codeswhat/portwing/internal/protocol"
+	"github.com/codeswhat/portwing/internal/server"
 )
 
 func main() {
@@ -46,7 +46,7 @@ func main() {
 
 	applog.SetupLogger(cfg.LogLevel)
 
-	slog.Info("starting lookout", "version", protocol.AgentVersion, "mode", modeString(cfg))
+	slog.Info("starting portwing", "version", protocol.AgentVersion, "mode", modeString(cfg))
 
 	dockerClient, err := docker.NewClient(cfg.DockerSocket, cfg.RequestTimeout)
 	if err != nil {
@@ -112,7 +112,7 @@ func main() {
 		}
 	}
 
-	slog.Info("lookout stopped")
+	slog.Info("portwing stopped")
 }
 
 func selectAdapter(cfg *config.Config, dockerClient *docker.Client) adapter.Adapter {
@@ -140,8 +140,8 @@ func modeString(cfg *config.Config) string {
 //
 // Usage:
 //
-//	lookout keygen [-comment <text>]
-//	lookout keygen -pub-from <private.pem> [-comment <text>]
+//	portwing keygen [-comment <text>]
+//	portwing keygen -pub-from <private.pem> [-comment <text>]
 func runKeygen(args []string) {
 	fs := flag.NewFlagSet("keygen", flag.ExitOnError)
 	comment := fs.String("comment", "", "Comment to embed in the authorized_keys line (optional)")
@@ -149,8 +149,8 @@ func runKeygen(args []string) {
 
 	// Print usage to stderr.
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: lookout keygen [-comment <text>]")
-		fmt.Fprintln(os.Stderr, "       lookout keygen -pub-from <private.pem> [-comment <text>]")
+		fmt.Fprintln(os.Stderr, "Usage: portwing keygen [-comment <text>]")
+		fmt.Fprintln(os.Stderr, "       portwing keygen -pub-from <private.pem> [-comment <text>]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Generates an Ed25519 keypair for use with AUTHORIZED_KEYS authentication.")
 		fmt.Fprintln(os.Stderr, "The private key (PEM PKCS#8) and authorized_keys line are written to stdout.")

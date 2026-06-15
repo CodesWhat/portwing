@@ -84,7 +84,7 @@ jobs:
           context: .
           push: false
           load: true
-          tags: lookout:grype-scan
+          tags: portwing:grype-scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -92,10 +92,11 @@ jobs:
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
         id: grype
         with:
-          image: lookout:grype-scan
+          image: portwing:grype-scan
           severity-cutoff: high
           fail-build: true
           output-format: sarif
+          config: .grype.yaml
 
       - name: Upload Grype SARIF to code scanning
         # Code scanning uploads require GHAS, not available on free private repos.
@@ -139,6 +140,7 @@ jobs:
           severity-cutoff: high
           fail-build: true
           output-format: sarif
+          config: .grype.yaml
 
       - name: Upload Grype source SARIF
         if: always() && github.event.repository.visibility == 'public'
@@ -175,6 +177,6 @@ jobs:
         with:
           sarif_file: gosec-results.sarif
 
-  # NOTE: testssl job omitted — Lookout does not operate a TLS listener of its own
-  # (TLS is handled by a reverse proxy in front). Re-add if Lookout gains direct
+  # NOTE: testssl job omitted — Portwing does not operate a TLS listener of its own
+  # (TLS is handled by a reverse proxy in front). Re-add if Portwing gains direct
   # TLS termination.

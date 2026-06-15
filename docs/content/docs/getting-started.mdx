@@ -1,16 +1,16 @@
 ---
 title: Getting Started
-description: Deploy Lookout as a hardened remote Docker agent using the recommended sockguard two-layer configuration, or a simpler standard-mode setup.
+description: Deploy Portwing as a hardened remote Docker agent using the recommended sockguard two-layer configuration, or a simpler standard-mode setup.
 ---
 
-Lookout is a security-first remote Docker agent. The Drydock controller connects **inbound** to each Lookout agent over HTTP (it initiates; Lookout serves). All compose files ship with hardened defaults — `read_only`, `cap_drop: ALL`, `no-new-privileges`, and Docker secrets instead of inline tokens.
+Portwing is a security-first remote Docker agent. The Drydock controller connects **inbound** to each Portwing agent over HTTP (it initiates; Portwing serves). All compose files ship with hardened defaults — `read_only`, `cap_drop: ALL`, `no-new-privileges`, and Docker secrets instead of inline tokens.
 
 ## Recommended deployment (hardened with sockguard)
 
 The strongest posture combines three controls:
 
-- **Sockguard** — a socket-level request filter so Lookout never touches the raw Docker socket directly. Even a fully compromised agent is constrained to the explicit API allowlist in `sockguard.yaml`.
-- **Secrets-mounted token** — the token is read from a Docker secret at `/run/secrets/lookout_token`, never exposed in environment variables or `docker inspect` output.
+- **Sockguard** — a socket-level request filter so Portwing never touches the raw Docker socket directly. Even a fully compromised agent is constrained to the explicit API allowlist in `sockguard.yaml`.
+- **Secrets-mounted token** — the token is read from a Docker secret at `/run/secrets/portwing_token`, never exposed in environment variables or `docker inspect` output.
 - **Hardened container runtime** — both containers run `read_only`, drop all capabilities, and set `no-new-privileges`.
 
 For the strongest auth posture, upgrade to Ed25519 per-request keys after the initial setup — see [Authentication](/authentication).
@@ -18,9 +18,9 @@ For the strongest auth posture, upgrade to Ed25519 per-request keys after the in
 ### Step 1 — generate a token and download the example files
 
 ```bash
-openssl rand -hex 32 > lookout_token.txt
-curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/docker-compose.with-sockguard.yml
-curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/sockguard.yaml
+openssl rand -hex 32 > portwing_token.txt
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.with-sockguard.yml
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/sockguard.yaml
 ```
 
 ### Step 2 — start the hardened stack
@@ -29,25 +29,25 @@ curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/so
 docker compose -f docker-compose.with-sockguard.yml up -d
 ```
 
-This starts sockguard and Lookout as two separate containers sharing a filtered socket via a named volume. Sockguard writes a filtered Unix socket into that volume; Lookout talks to that filtered socket via `DOCKER_SOCKET` rather than mounting `/var/run/docker.sock` directly.
+This starts sockguard and Portwing as two separate containers sharing a filtered socket via a named volume. Sockguard writes a filtered Unix socket into that volume; Portwing talks to that filtered socket via `DOCKER_SOCKET` rather than mounting `/var/run/docker.sock` directly.
 
 ```yaml filename="docker-compose.with-sockguard.yml"
-# Lookout + sockguard — two-layer defense.
+# Portwing + sockguard — two-layer defense.
 #
-# Sockguard sits between Lookout and the host's Docker socket and writes a
-# filtered unix socket into a shared named volume. Lookout talks to that
+# Sockguard sits between Portwing and the host's Docker socket and writes a
+# filtered unix socket into a shared named volume. Portwing talks to that
 # filtered socket instead of mounting /var/run/docker.sock directly, so even
 # a fully compromised agent is constrained to the explicit API allowlist in
 # sockguard.yaml.
 #
 # The bundled sockguard.yaml mirrors sockguard's drydock preset: container
 # lifecycle, image pull/inspect/remove, events, and narrow network/volume
-# reads. Compose stack deploys through Lookout need broader rules (network
+# reads. Compose stack deploys through Portwing need broader rules (network
 # create, volume create, build) — extend sockguard.yaml deliberately if you
 # use stacks, rather than bypassing the filter.
 #
 # Generate a token first:
-#   openssl rand -hex 32 > lookout_token.txt
+#   openssl rand -hex 32 > portwing_token.txt
 
 services:
   sockguard:
@@ -65,8 +65,8 @@ services:
     environment:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -81,51 +81,51 @@ services:
       - "3000:3000"
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
-      - TOKEN_FILE=/run/secrets/lookout_token
+      - TOKEN_FILE=/run/secrets/portwing_token
     secrets:
-      - lookout_token
+      - portwing_token
 
 secrets:
-  lookout_token:
-    file: ./lookout_token.txt
+  portwing_token:
+    file: ./portwing_token.txt
 
 volumes:
   sockguard-socket:
-  lookout-stacks:
+  portwing-stacks:
 ```
 
 <Callout type="info">
-If you manage Docker Compose stacks through Lookout, the bundled `sockguard.yaml` uses the drydock preset (container lifecycle, image ops, events, narrow network/volume reads). Compose deploys require additional rules — extend `sockguard.yaml` deliberately (network create, volume create, build) rather than bypassing the filter.
+If you manage Docker Compose stacks through Portwing, the bundled `sockguard.yaml` uses the drydock preset (container lifecycle, image ops, events, narrow network/volume reads). Compose deploys require additional rules — extend `sockguard.yaml` deliberately (network create, volume create, build) rather than bypassing the filter.
 </Callout>
 
 ---
 
 ## Standard mode (no sockguard)
 
-If you want a simpler setup — Drydock or another client connects inbound to port 3000 and Lookout talks to the raw Docker socket directly — use the standard compose file. It keeps all the runtime hardening but drops the sockguard layer.
+If you want a simpler setup — Drydock or another client connects inbound to port 3000 and Portwing talks to the raw Docker socket directly — use the standard compose file. It keeps all the runtime hardening but drops the sockguard layer.
 
 ```bash
-openssl rand -hex 32 > lookout_token.txt
-curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/docker-compose.standard.yml
+openssl rand -hex 32 > portwing_token.txt
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.standard.yml
 docker compose -f docker-compose.standard.yml up -d
 ```
 
 ```yaml filename="docker-compose.standard.yml"
-# Lookout — standard mode (inbound HTTP on :3000), hardened defaults.
+# Portwing — standard mode (inbound HTTP on :3000), hardened defaults.
 #
 # Generate a token first:
-#   openssl rand -hex 32 > lookout_token.txt
+#   openssl rand -hex 32 > portwing_token.txt
 #
-# The image ships a built-in HEALTHCHECK against /_lookout/health.
+# The image ships a built-in HEALTHCHECK against /_portwing/health.
 # To run non-root, uncomment `user:` and add your docker socket's numeric
 # group ID via group_add — see SECURITY.md ("container runtime identity").
 
 services:
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -141,56 +141,56 @@ services:
       - "3000:3000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
-      - TOKEN_FILE=/run/secrets/lookout_token
+      - TOKEN_FILE=/run/secrets/portwing_token
       # Stronger at-rest posture: replace TOKEN_FILE with an Argon2id hash
       # (no plaintext credential anywhere on the agent host):
-      #   lookout hash-token  →  TOKEN_HASH=$argon2id$...
+      #   portwing hash-token  →  TOKEN_HASH=$argon2id$...
     secrets:
-      - lookout_token
+      - portwing_token
 
 secrets:
-  lookout_token:
-    file: ./lookout_token.txt
+  portwing_token:
+    file: ./portwing_token.txt
 
 volumes:
-  lookout-stacks:
+  portwing-stacks:
 ```
 
 ---
 
 ## Edge mode
 
-Edge mode lets Lookout dial **out** to your Drydock controller over a WebSocket tunnel instead of listening for inbound connections. This is useful for hosts behind NAT or a firewall where you cannot publish an inbound port.
+Edge mode lets Portwing dial **out** to your Drydock controller over a WebSocket tunnel instead of listening for inbound connections. This is useful for hosts behind NAT or a firewall where you cannot publish an inbound port.
 
 <Callout type="warn">
-**Early access — requires Drydock 1.5 and Lookout 0.2.2.** The `/api/lookout/ws` controller endpoint shipped in Drydock 1.5 and Lookout's agent signs its hello with Ed25519, so edge mode now works end-to-end. Both releases are still pre-release (the current stable lines are Drydock 1.4.x and Lookout 0.2.0), and full exec-session robustness under load lands in Lookout 0.2.2 — prefer standard mode for production until the stable releases ship. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
+**Early access — requires Drydock 1.5 and Portwing 0.2.2.** The `/api/portwing/ws` controller endpoint shipped in Drydock 1.5 and Portwing's agent signs its hello with Ed25519, so edge mode now works end-to-end. Both releases are still pre-release (the current stable lines are Drydock 1.4.x and Portwing 0.2.0), and full exec-session robustness under load lands in Portwing 0.2.2 — prefer standard mode for production until the stable releases ship. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
 </Callout>
 
 ```bash
-lookout keygen -comment "edge-host-01" > lookout_ed25519.pem
+portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
 # Register the printed public key with your Drydock controller, then:
-curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/docker-compose.edge.yml
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.edge.yml
 # Edit DRYDOCK_URL and AGENT_NAME, then:
 docker compose -f docker-compose.edge.yml up -d
 ```
 
 ```yaml filename="docker-compose.edge.yml"
-# Lookout — edge mode: outbound WebSocket tunnel to Drydock.
+# Portwing — edge mode: outbound WebSocket tunnel to Drydock.
 # No inbound ports are published; the agent dials out, so it works
 # behind NAT and firewalls. The built-in HEALTHCHECK still works
 # (the health endpoint listens container-locally in edge mode too).
 #
 # Edge mode against Drydock 1.5 is Ed25519-only: the controller's
-# /api/lookout/ws endpoint rejects token-based hellos. Generate a
+# /api/portwing/ws endpoint rejects token-based hellos. Generate a
 # keypair and register its public key with Drydock before starting:
-#   lookout keygen -comment "edge-host-01" > lookout_ed25519.pem
-# Register the printed public key (POST /api/v1/lookout/keys).
+#   portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+# Register the printed public key (POST /api/v1/portwing/keys).
 
 services:
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -201,20 +201,20 @@ services:
       - /tmp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
       - DRYDOCK_URL=https://drydock.example.com
-      - PRIVATE_KEY_FILE=/run/secrets/lookout_key
+      - PRIVATE_KEY_FILE=/run/secrets/portwing_key
       - AGENT_NAME=edge-host-01
     secrets:
-      - lookout_key
+      - portwing_key
 
 secrets:
-  lookout_key:
-    file: ./lookout_ed25519.pem
+  portwing_key:
+    file: ./portwing_ed25519.pem
 
 volumes:
-  lookout-stacks:
+  portwing-stacks:
 ```
 
 Set `DRYDOCK_URL` to your Drydock instance, `AGENT_NAME` to a unique identifier for the host, and `PRIVATE_KEY_FILE` to the agent's Ed25519 key (register its public key with Drydock). No port needs to be published on the agent side. Edge mode requires Drydock 1.5 or later. See [Connection Modes](/connection-modes) for a full comparison of standard vs. edge mode.
@@ -223,7 +223,7 @@ Set `DRYDOCK_URL` to your Drydock instance, `AGENT_NAME` to a unique identifier 
 
 ## Evaluation only (not for production)
 
-If you just want to try Lookout locally without setting up compose files, you can run it with a single `docker run`. Tokens passed via environment variable are visible in `docker inspect` and process listings.
+If you just want to try Portwing locally without setting up compose files, you can run it with a single `docker run`. Tokens passed via environment variable are visible in `docker inspect` and process listings.
 
 <Callout type="warn">
 **Do not use this in production.** The `TOKEN` environment variable is visible to anyone with access to `docker inspect` or the host process list. Use the hardened deployment above for any real workload.
@@ -231,11 +231,11 @@ If you just want to try Lookout locally without setting up compose files, you ca
 
 ```bash
 docker run -d \
-  --name lookout \
+  --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/lookout:latest
+  ghcr.io/codeswhat/portwing:latest
 ```
 
 Without `TOKEN` (or `TOKEN_HASH` / `AUTHORIZED_KEYS`) the API is **unauthenticated** — anyone who can reach the port controls your Docker daemon.
@@ -244,6 +244,6 @@ Without `TOKEN` (or `TOKEN_HASH` / `AUTHORIZED_KEYS`) the API is **unauthenticat
 
 ## Next steps
 
-- **Stronger auth** — upgrade from a shared token to Ed25519 per-request signatures (zero shared secrets, per-client identity, replay protection). Generate a keypair with `lookout keygen` and mount an `authorized_keys` file. See [Authentication](/authentication).
+- **Stronger auth** — upgrade from a shared token to Ed25519 per-request signatures (zero shared secrets, per-client identity, replay protection). Generate a keypair with `portwing keygen` and mount an `authorized_keys` file. See [Authentication](/authentication).
 - **Connection modes** — understand the difference between standard (inbound) and edge (outbound) modes, and when to use each. See [Connection Modes](/connection-modes).
 - **All environment variables** — `DOCKER_SOCKET`, `TOKEN_HASH`, `AUTHORIZED_KEYS`, `AUDIT_LOG`, `ADAPTER`, and more. See [Configuration](/configuration).

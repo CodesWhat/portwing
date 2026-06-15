@@ -14,6 +14,7 @@ import (
 
 // LoadPrivateKey reads an Ed25519 private key from a PEM-encoded PKCS#8 file.
 func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
+	// #nosec G304 -- private key path is explicit operator configuration.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading private key %q: %w", path, err)

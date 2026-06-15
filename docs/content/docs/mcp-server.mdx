@@ -1,12 +1,12 @@
 ---
 title: MCP Server
-description: Lookout's built-in read-only Model Context Protocol endpoint lets MCP-aware AI agents query live Docker container and host state.
+description: Portwing's built-in read-only Model Context Protocol endpoint lets MCP-aware AI agents query live Docker container and host state.
 ---
 
-Lookout ships a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_lookout/mcp`. AI assistants — Claude Desktop, Cursor, Windsurf, or any MCP-compatible client — can call its tools to inspect containers and host metrics using their standard tool-call flow. No extra process or sidecar is needed; the endpoint is part of the main Lookout HTTP server.
+Portwing ships a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_portwing/mcp`. AI assistants — Claude Desktop, Cursor, Windsurf, or any MCP-compatible client — can call its tools to inspect containers and host metrics using their standard tool-call flow. No extra process or sidecar is needed; the endpoint is part of the main Portwing HTTP server.
 
 <Callout type="warn">
-The MCP server is available in Lookout v0.2.x (currently alpha). The tool surface is stable, but the endpoint should be treated as experimental until v1.0.
+The MCP server is available in Portwing v0.2.x (currently alpha). The tool surface is stable, but the endpoint should be treated as experimental until v1.0.
 </Callout>
 
 ---
@@ -15,25 +15,25 @@ The MCP server is available in Lookout v0.2.x (currently alpha). The tool surfac
 
 | Property | Value |
 |---|---|
-| Endpoint | `POST /_lookout/mcp` |
+| Endpoint | `POST /_portwing/mcp` |
 | Protocol revision | MCP 2025-11-25 |
 | Transport | Streamable HTTP — stateless single-request mode |
 | Content-Type | `application/json` (request and response) |
 | Session management | None — no `Mcp-Session-Id` is issued or required |
 
-Every POST returns one JSON-RPC 2.0 response object. `GET /_lookout/mcp` returns `405 Method Not Allowed` to signal that no SSE stream is offered at this endpoint.
+Every POST returns one JSON-RPC 2.0 response object. `GET /_portwing/mcp` returns `405 Method Not Allowed` to signal that no SSE stream is offered at this endpoint.
 
-Authentication follows the same bearer-token scheme used by all other Lookout endpoints. See [Authentication](/authentication).
+Authentication follows the same bearer-token scheme used by all other Portwing endpoints. See [Authentication](/authentication).
 
 ---
 
 ## Enabling the endpoint
 
-The MCP endpoint is always active when Lookout is running — it is not gated by a separate flag or environment variable. Configure access using the standard token variables (`TOKEN`, `TOKEN_FILE`, or `TOKEN_HASH`). See [Configuration](/configuration) for the full variable reference.
+The MCP endpoint is always active when Portwing is running — it is not gated by a separate flag or environment variable. Configure access using the standard token variables (`TOKEN`, `TOKEN_FILE`, or `TOKEN_HASH`). See [Configuration](/configuration) for the full variable reference.
 
 ```bash
-# Minimal example: run Lookout with a token and connect an MCP client
-docker run -e TOKEN=mysecrettoken -p 3000:3000 ghcr.io/codeswhat/lookout:latest
+# Minimal example: run Portwing with a token and connect an MCP client
+docker run -e TOKEN=mysecrettoken -p 3000:3000 ghcr.io/codeswhat/portwing:latest
 ```
 
 ---
@@ -124,7 +124,7 @@ Returns a point-in-time snapshot of host-level resource metrics. No parameters.
 
 **Parameters:** none
 
-**Response:** a metrics snapshot including CPU, memory, disk, network I/O, and uptime. The exact shape matches the Prometheus collector used internally by Lookout.
+**Response:** a metrics snapshot including CPU, memory, disk, network I/O, and uptime. The exact shape matches the Prometheus collector used internally by Portwing.
 
 ---
 
@@ -152,18 +152,18 @@ Returns a one-shot CPU, memory, and network stats snapshot for a single containe
 
 ## Client configuration
 
-Replace `YOUR_LOOKOUT_TOKEN` with the value you set in `TOKEN`, `TOKEN_FILE`, or `TOKEN_HASH` (see [Configuration](/configuration)).
+Replace `YOUR_PORTWING_TOKEN` with the value you set in `TOKEN`, `TOKEN_FILE`, or `TOKEN_HASH` (see [Configuration](/configuration)).
 
 ### Claude Desktop (`claude_desktop_config.json`)
 
 ```json
 {
   "mcpServers": {
-    "lookout": {
+    "portwing": {
       "type": "http",
-      "url": "http://your-host:3000/_lookout/mcp",
+      "url": "http://your-host:3000/_portwing/mcp",
       "headers": {
-        "Authorization": "Bearer YOUR_LOOKOUT_TOKEN"
+        "Authorization": "Bearer YOUR_PORTWING_TOKEN"
       }
     }
   }
@@ -174,8 +174,8 @@ Replace `YOUR_LOOKOUT_TOKEN` with the value you set in `TOKEN`, `TOKEN_FILE`, or
 
 ```bash
 claude mcp add --transport http \
-  --header "Authorization: Bearer YOUR_LOOKOUT_TOKEN" \
-  lookout http://your-host:3000/_lookout/mcp
+  --header "Authorization: Bearer YOUR_PORTWING_TOKEN" \
+  portwing http://your-host:3000/_portwing/mcp
 ```
 
 ### Project-level `.mcp.json` (Cursor, Windsurf, or any MCP client)
@@ -183,11 +183,11 @@ claude mcp add --transport http \
 ```json
 {
   "mcpServers": {
-    "lookout": {
+    "portwing": {
       "type": "http",
-      "url": "http://your-host:3000/_lookout/mcp",
+      "url": "http://your-host:3000/_portwing/mcp",
       "headers": {
-        "Authorization": "Bearer YOUR_LOOKOUT_TOKEN"
+        "Authorization": "Bearer YOUR_PORTWING_TOKEN"
       }
     }
   }

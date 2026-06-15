@@ -113,7 +113,7 @@ func TestVerifyRequest_HappyPath(t *testing.T) {
 	t.Parallel()
 	reg, lru, pub, priv := testSetup(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
 	nonce := randomNonce(t)
 	tsUnix := time.Now().Unix()
 	signRequest(t, req, nil, priv, pub, tsUnix, nonce)
@@ -131,7 +131,7 @@ func TestVerifyRequest_BadSignature(t *testing.T) {
 	t.Parallel()
 	reg, lru, pub, priv := testSetup(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
 	nonce := randomNonce(t)
 	tsUnix := time.Now().Unix()
 	signRequest(t, req, nil, priv, pub, tsUnix, nonce)
@@ -149,7 +149,7 @@ func TestVerifyRequest_SkewedTimestamp(t *testing.T) {
 	t.Parallel()
 	reg, lru, pub, priv := testSetup(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
 	nonce := randomNonce(t)
 	// 120 seconds in the past — exceeds 60s window.
 	tsUnix := time.Now().Unix() - 120
@@ -169,14 +169,14 @@ func TestVerifyRequest_ReplayedNonce(t *testing.T) {
 	tsUnix := time.Now().Unix()
 
 	// First request succeeds.
-	req1 := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
+	req1 := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
 	signRequest(t, req1, nil, priv, pub, tsUnix, nonce)
 	if _, err := VerifyRequest(req1, nil, reg, lru, 60); err != nil {
 		t.Fatalf("first request failed: %v", err)
 	}
 
 	// Second request with same nonce must be rejected as replay.
-	req2 := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
 	signRequest(t, req2, nil, priv, pub, tsUnix, nonce)
 	_, err := VerifyRequest(req2, nil, reg, lru, 60)
 	if !errors.Is(err, ErrNonceReplay) {
@@ -194,7 +194,7 @@ func TestVerifyRequest_UnknownKey(t *testing.T) {
 		t.Fatalf("GenerateKey: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
 	nonce := randomNonce(t)
 	tsUnix := time.Now().Unix()
 	signRequest(t, req, nil, priv2, pub2, tsUnix, nonce)
@@ -209,7 +209,7 @@ func TestVerifyRequest_MissingHeaders(t *testing.T) {
 	t.Parallel()
 	reg, lru, _, _ := testSetup(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/lookout/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
 	// No signature headers at all.
 	_, err := VerifyRequest(req, nil, reg, lru, 60)
 	if !errors.Is(err, ErrMissingHeaders) {
@@ -273,7 +273,7 @@ func TestVerifyRequest_WithBody(t *testing.T) {
 	reg, lru, pub, priv := testSetup(t)
 
 	body := []byte(`{"key":"value"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/lookout/containers", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/containers", nil)
 	nonce := randomNonce(t)
 	tsUnix := time.Now().Unix()
 	signRequest(t, req, body, priv, pub, tsUnix, nonce)
@@ -292,7 +292,7 @@ func TestVerifyRequest_BodyMismatch(t *testing.T) {
 	reg, lru, pub, priv := testSetup(t)
 
 	body := []byte(`{"key":"value"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/lookout/containers", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/containers", nil)
 	nonce := randomNonce(t)
 	tsUnix := time.Now().Unix()
 	signRequest(t, req, body, priv, pub, tsUnix, nonce)

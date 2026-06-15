@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# drydock-compat-check.sh — Drydock compatibility smoke test for Lookout
+# drydock-compat-check.sh — Drydock compatibility smoke test for Portwing
 #
 # Usage:
 #   ./scripts/drydock-compat-check.sh [HOST] [TOKEN]
 #
 # Arguments:
-#   HOST   Base URL of the Lookout instance (default: http://localhost:3000)
-#   TOKEN  Shared secret (X-Dd-Agent-Secret / X-Lookout-Token)
-#          If omitted, no auth header is sent (works when Lookout runs without a token).
+#   HOST   Base URL of the Portwing instance (default: http://localhost:3000)
+#   TOKEN  Shared secret (X-Portwing-Token)
+#          If omitted, no auth header is sent (works when Portwing runs without a token).
 #
 # Environment (used when the positional argument is omitted):
-#   LOOKOUT_URL    Same as HOST
-#   LOOKOUT_TOKEN  Same as TOKEN (TOKEN env var also accepted)
+#   PORTWING_URL   Same as HOST
+#   PORTWING_TOKEN Same as TOKEN (TOKEN env var also accepted)
 #
 # Requirements: curl, jq
 #
@@ -21,8 +21,8 @@
 
 set -euo pipefail
 
-HOST="${1:-${LOOKOUT_URL:-http://localhost:3000}}"
-TOKEN="${2:-${LOOKOUT_TOKEN:-${TOKEN:-}}}"
+HOST="${1:-${PORTWING_URL:-http://localhost:3000}}"
+TOKEN="${2:-${PORTWING_TOKEN:-${TOKEN:-}}}"
 
 PASS=0
 FAIL=0
@@ -41,7 +41,7 @@ curl_api() {
   local extra_args=("$@")
   local auth_args=()
   if [[ -n "$TOKEN" ]]; then
-    auth_args=(-H "X-Dd-Agent-Secret: ${TOKEN}")
+    auth_args=(-H "X-Portwing-Token: ${TOKEN}")
   fi
   curl -sf --max-time 10 \
     ${auth_args[@]+"${auth_args[@]}"} \
@@ -81,7 +81,7 @@ if [[ "$HEALTH_OK" == "true" ]]; then
     assert "/health has status field" "fail" "got: $HEALTH"
   fi
 else
-  assert "/health returns 200" "fail" "curl failed — is Lookout running at ${HOST}?"
+  assert "/health returns 200" "fail" "curl failed — is Portwing running at ${HOST}?"
   assert "/health has status field" "fail" "skipped (health request failed)"
 fi
 
@@ -168,7 +168,7 @@ bold "5. GET /api/watchers/unknown/missing (should 404)"
 
 if [[ -n "$TOKEN" ]]; then
   HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-    -H "X-Dd-Agent-Secret: ${TOKEN}" \
+    -H "X-Portwing-Token: " \
     "${HOST}/api/watchers/unknown/missing" 2>/dev/null || echo "000")
 else
   HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
@@ -210,7 +210,7 @@ fi
 bold "8. GET /api/events SSE headers"
 
 AUTH_ARGS=()
-[[ -n "$TOKEN" ]] && AUTH_ARGS+=(-H "X-Dd-Agent-Secret: ${TOKEN}")
+[[ -n "$TOKEN" ]] && AUTH_ARGS+=(-H "X-Portwing-Token: ")
 
 SSE_HEADERS=$(curl -sf --max-time 5 -D - -o /dev/null \
   ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \

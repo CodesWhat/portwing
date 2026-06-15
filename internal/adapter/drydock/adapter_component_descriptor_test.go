@@ -3,7 +3,7 @@ package drydock
 import (
 	"testing"
 
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 func TestGetWatcherComponentsReturnsProtocolDescriptors(t *testing.T) {

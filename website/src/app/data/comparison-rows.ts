@@ -5,7 +5,7 @@ interface ComparisonRow {
   hawser: string;
   watchtower: string;
   diun: string;
-  lookout: string;
+  portwing: string;
   planned?: boolean;
 }
 
@@ -22,7 +22,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "Yes",
     watchtower: "Updates only",
     diun: "Notify only",
-    lookout: "Yes",
+    portwing: "Yes",
   },
   {
     feature: "Default-deny socket (no raw socket)",
@@ -31,7 +31,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "No",
     watchtower: "No",
     diun: "No",
-    lookout: "Yes",
+    portwing: "Yes",
   },
   {
     feature: "Per-client key auth (Ed25519)",
@@ -40,7 +40,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "Shared secret",
     watchtower: "—",
     diun: "—",
-    lookout: "Yes",
+    portwing: "Yes",
   },
   {
     feature: "Signed images + SBOM + provenance",
@@ -49,7 +49,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "No",
     watchtower: "No",
     diun: "No",
-    lookout: "Yes",
+    portwing: "Yes",
   },
   {
     feature: "Hardened runtime defaults",
@@ -58,7 +58,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "Partial",
     watchtower: "No",
     diun: "Partial",
-    lookout: "Yes",
+    portwing: "Yes",
   },
   {
     feature: "Structured audit log",
@@ -67,7 +67,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "No",
     watchtower: "No",
     diun: "No",
-    lookout: "Yes",
+    portwing: "Yes",
   },
   {
     feature: "Prometheus metrics",
@@ -76,7 +76,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "No",
     watchtower: "No",
     diun: "Yes",
-    lookout: "Yes",
+    portwing: "Yes",
   },
   {
     feature: "MCP server (AI-native, read-only)",
@@ -85,7 +85,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "No",
     watchtower: "No",
     diun: "No",
-    lookout: "Yes",
+    portwing: "Yes",
   },
   {
     feature: "Edge / NAT outbound mode",
@@ -94,7 +94,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "Yes",
     watchtower: "—",
     diun: "—",
-    lookout: "Agent-side (controller WIP)",
+    portwing: "Agent-side (controller WIP)",
     planned: true,
   },
   {
@@ -104,7 +104,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "Yes",
     watchtower: "Yes",
     diun: "Yes",
-    lookout: "Yes (~10 MB)",
+    portwing: "Yes (~10 MB)",
   },
   {
     feature: "License",
@@ -113,6 +113,6 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "MIT",
     watchtower: "Apache-2.0",
     diun: "MIT",
-    lookout: "AGPL-3.0",
+    portwing: "AGPL-3.0",
   },
 ];

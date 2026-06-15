@@ -1,13 +1,13 @@
 ---
 title: API Reference
-description: Complete HTTP API reference for the Lookout agent, grouped by function with authentication requirements and curl examples.
+description: Complete HTTP API reference for the Portwing agent, grouped by function with authentication requirements and curl examples.
 ---
 
 <Callout type="info">
-The OpenAPI 3.1 specification at [`api/openapi.yaml`](https://github.com/CodesWhat/lookout/blob/main/api/openapi.yaml) in the repository is the authoritative source of truth. This page is derived from that spec. If anything conflicts, the spec wins.
+The OpenAPI 3.1 specification at [`api/openapi.yaml`](https://github.com/CodesWhat/portwing/blob/main/api/openapi.yaml) in the repository is the authoritative source of truth. This page is derived from that spec. If anything conflicts, the spec wins.
 </Callout>
 
-Lookout exposes an HTTP API on port `3000` by default (configurable via `PORT`). All requests are served over plain HTTP or TLS 1.2+ depending on whether `TLS_CERT` / `TLS_KEY` are configured. See [Authentication](/authentication) for token and Ed25519 key setup, and [Connection Modes](/connection-modes) for how Standard mode and Edge mode differ.
+Portwing exposes an HTTP API on port `3000` by default (configurable via `PORT`). All requests are served over plain HTTP or TLS 1.2+ depending on whether `TLS_CERT` / `TLS_KEY` are configured. See [Authentication](/authentication) for token and Ed25519 key setup, and [Connection Modes](/connection-modes) for how Standard mode and Edge mode differ.
 
 ---
 
@@ -18,10 +18,10 @@ Protected endpoints require the agent token in one of these headers (checked in 
 | Header | Notes |
 |--------|-------|
 | `Authorization: Bearer <token>` | Standard, preferred |
-| `X-Lookout-Token` | Alternative header |
-| `X-Dd-Agent-Secret` | Drydock backward-compatibility alias |
+| `X-Portwing-Token` | Alternative header |
+| `X-Dd-Agent-Secret` | Drydock agent secret header |
 
-Alternatively, per-request Ed25519 signatures are accepted when the `X-Lookout-Signature` header is present. See [Authentication](/authentication) for the full signing protocol.
+Alternatively, per-request Ed25519 signatures are accepted when the `X-Portwing-Signature` header is present. See [Authentication](/authentication) for the full signing protocol.
 
 **Rate limiting:** 10 failed auth attempts per IP per rolling minute. Exceeding the limit returns HTTP `429` until the window resets.
 
@@ -34,8 +34,8 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/health` | None | Returns `{"status":"ok"}`. Always HTTP 200 while the agent is running. |
-| `GET` | `/_lookout/health` | None | Returns agent status and Docker daemon connectivity. Returns HTTP 503 when Docker is unreachable. |
-| `GET` | `/_lookout/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. |
+| `GET` | `/_portwing/health` | None | Returns agent status and Docker daemon connectivity. Returns HTTP 503 when Docker is unreachable. |
+| `GET` | `/_portwing/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. |
 
 ### Response shapes
 
@@ -45,7 +45,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
 { "status": "ok" }
 ```
 
-**`GET /_lookout/health`**
+**`GET /_portwing/health`**
 
 ```json
 { "status": "healthy", "docker": "connected" }
@@ -53,7 +53,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
 
 Returns HTTP `503` with `"status":"unhealthy","docker":"disconnected"` when Docker is unreachable.
 
-**`GET /_lookout/info`**
+**`GET /_portwing/info`**
 
 ```json
 {
@@ -75,11 +75,11 @@ Returns HTTP `503` with `"status":"unhealthy","docker":"disconnected"` when Dock
 curl -s http://localhost:3000/health
 
 # Docker connectivity check
-curl -s http://localhost:3000/_lookout/health | jq .
+curl -s http://localhost:3000/_portwing/health | jq .
 
 # Agent metadata
 curl -s -H "Authorization: Bearer $TOKEN" \
-  http://localhost:3000/_lookout/info | jq .
+  http://localhost:3000/_portwing/info | jq .
 ```
 
 ---
@@ -90,8 +90,8 @@ Prometheus-format host and agent metrics. See [Observability](/observability) fo
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/_lookout/metrics` | Required | Agent metrics only, prefixed `lookout_`. Preferred for targeted scraping. |
-| `GET` | `/metrics` | Required | Alias for `/_lookout/metrics`. Provided for compatibility with default Prometheus scrape configs. |
+| `GET` | `/_portwing/metrics` | Required | Agent metrics only, prefixed `portwing_`. Preferred for targeted scraping. |
+| `GET` | `/metrics` | Required | Alias for `/_portwing/metrics`. Provided for compatibility with default Prometheus scrape configs. |
 
 Both endpoints return `text/plain` in Prometheus exposition format 0.0.4.
 
@@ -99,25 +99,25 @@ Both endpoints return `text/plain` in Prometheus exposition format 0.0.4.
 
 ```bash
 curl -s -H "Authorization: Bearer $TOKEN" \
-  http://localhost:3000/_lookout/metrics
+  http://localhost:3000/_portwing/metrics
 ```
 
 Sample output:
 
 ```
-# HELP lookout_cpu_usage_percent Host CPU usage percentage.
-# TYPE lookout_cpu_usage_percent gauge
-lookout_cpu_usage_percent 23.5
-# HELP lookout_memory_used_bytes Host memory used in bytes.
-# TYPE lookout_memory_used_bytes gauge
-lookout_memory_used_bytes 4294967296
+# HELP portwing_cpu_usage_percent Host CPU usage percentage.
+# TYPE portwing_cpu_usage_percent gauge
+portwing_cpu_usage_percent 23.5
+# HELP portwing_memory_used_bytes Host memory used in bytes.
+# TYPE portwing_memory_used_bytes gauge
+portwing_memory_used_bytes 4294967296
 ```
 
 ---
 
 ## Containers and Events (Drydock-compatible)
 
-These endpoints are used by the Drydock controller when Lookout runs in Standard mode. They share the `/api/` prefix and all require authentication.
+These endpoints are used by the Drydock controller when Portwing runs in Standard mode. They share the `/api/` prefix and all require authentication.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -192,7 +192,7 @@ Available when `ADAPTER=generic`. These endpoints expose container management wi
 ```json
 {
   "agentVersion": "0.1.0",
-  "protocolName": "lookout",
+  "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"
 }
@@ -252,7 +252,7 @@ Execute Docker Compose sub-commands within the managed stacks directory (`STACKS
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/_lookout/compose` | Required | Run a Compose operation against a named stack. |
+| `POST` | `/_portwing/compose` | Required | Run a Compose operation against a named stack. |
 
 ### Request body
 
@@ -312,21 +312,21 @@ curl -s -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"operation":"up","stackName":"myapp"}' \
-  http://localhost:3000/_lookout/compose | jq .
+  http://localhost:3000/_portwing/compose | jq .
 
 # Tear down a stack and remove volumes
 curl -s -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"operation":"down","stackName":"myapp","removeVolumes":true}' \
-  http://localhost:3000/_lookout/compose | jq .
+  http://localhost:3000/_portwing/compose | jq .
 ```
 
 ---
 
 ## Docker API Passthrough
 
-Any path not matched by a named Lookout route is transparently proxied to the local Docker daemon over its Unix socket. This gives Lookout clients the full Docker Engine API surface without additional tooling.
+Any path not matched by a named Portwing route is transparently proxied to the local Docker daemon over its Unix socket. This gives Portwing clients the full Docker Engine API surface without additional tooling.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -360,7 +360,7 @@ One-shot bootstrap endpoint for registering an Ed25519 public key (Model C authe
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/api/lookout/enroll` | Enrollment token | Register an Ed25519 public key. Token is burned after first successful use. |
+| `POST` | `/api/portwing/enroll` | Enrollment token | Register an Ed25519 public key. Token is burned after first successful use. |
 
 <Callout type="info">
 This endpoint is only available when `ENROLLMENT_TOKEN` (and `AUTHORIZED_KEYS`) are configured. The endpoint is reachable without a prior agent token — the enrollment token is the credential. It is subject to the same IP-based rate limiter as auth failures.
@@ -386,7 +386,7 @@ This endpoint is only available when `ENROLLMENT_TOKEN` (and `AUTHORIZED_KEYS`) 
 }
 ```
 
-`key_id` is `hex(SHA-256(pubkey)[:8])` — the value to supply in `X-Lookout-Key-ID` headers for subsequent signed requests.
+`key_id` is `hex(SHA-256(pubkey)[:8])` — the value to supply in `X-Portwing-Key-ID` headers for subsequent signed requests.
 
 After enrollment, the key is immediately active. The enrollment token is burned; subsequent calls return HTTP `401` until the agent restarts with a new `ENROLLMENT_TOKEN`.
 
@@ -396,7 +396,7 @@ After enrollment, the key is immediately active. The enrollment token is burned;
 curl -s -X POST \
   -H "Content-Type: application/json" \
   -d "{\"enrollment_token\":\"$ENROLL_TOKEN\",\"public_key\":\"$PUBKEY_B64\"}" \
-  http://localhost:3000/api/lookout/enroll | jq .
+  http://localhost:3000/api/portwing/enroll | jq .
 ```
 
 ---

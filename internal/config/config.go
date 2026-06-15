@@ -134,7 +134,7 @@ func Load() (*Config, error) {
 	if agentName == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
-			agentName = "lookout"
+			agentName = "portwing"
 		} else {
 			agentName = hostname
 		}
@@ -213,6 +213,7 @@ func detectDockerSocket() string {
 	candidates = append(candidates, "/run/docker.sock")
 
 	for _, path := range candidates {
+		// #nosec G703 -- candidates are fixed well-known Docker socket paths plus HOME-derived local Docker paths.
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
@@ -269,6 +270,7 @@ func splitCSV(s string) []string {
 }
 
 func loadTokenFile(path string) (string, error) {
+	// #nosec G304 -- token file path is explicit operator configuration.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err

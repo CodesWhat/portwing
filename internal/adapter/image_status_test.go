@@ -3,7 +3,7 @@ package adapter
 import (
 	"testing"
 
-	"github.com/codeswhat/lookout/internal/docker"
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 func TestParseImageRef(t *testing.T) {

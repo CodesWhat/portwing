@@ -1,19 +1,19 @@
-# Lookout + sockguard — two-layer defense.
+# Portwing + sockguard — two-layer defense.
 #
-# Sockguard sits between Lookout and the host's Docker socket and writes a
-# filtered unix socket into a shared named volume. Lookout talks to that
+# Sockguard sits between Portwing and the host's Docker socket and writes a
+# filtered unix socket into a shared named volume. Portwing talks to that
 # filtered socket instead of mounting /var/run/docker.sock directly, so even
 # a fully compromised agent is constrained to the explicit API allowlist in
 # sockguard.yaml.
 #
 # The bundled sockguard.yaml mirrors sockguard's drydock preset: container
 # lifecycle, image pull/inspect/remove, events, and narrow network/volume
-# reads. Compose stack deploys through Lookout need broader rules (network
+# reads. Compose stack deploys through Portwing need broader rules (network
 # create, volume create, build) — extend sockguard.yaml deliberately if you
 # use stacks, rather than bypassing the filter.
 #
 # Generate a token first:
-#   openssl rand -hex 32 > lookout_token.txt
+#   openssl rand -hex 32 > portwing_token.txt
 
 services:
   sockguard:
@@ -31,8 +31,8 @@ services:
     environment:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
-  lookout:
-    image: ghcr.io/codeswhat/lookout:latest
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -47,17 +47,17 @@ services:
       - "3000:3000"
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
-      - lookout-stacks:/data/stacks
+      - portwing-stacks:/data/stacks
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
-      - TOKEN_FILE=/run/secrets/lookout_token
+      - TOKEN_FILE=/run/secrets/portwing_token
     secrets:
-      - lookout_token
+      - portwing_token
 
 secrets:
-  lookout_token:
-    file: ./lookout_token.txt
+  portwing_token:
+    file: ./portwing_token.txt
 
 volumes:
   sockguard-socket:
-  lookout-stacks:
+  portwing-stacks:

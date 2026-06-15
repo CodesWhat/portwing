@@ -1,24 +1,24 @@
 ---
 title: Introduction
-description: Lookout is a security-first remote Docker agent — control your containers from anywhere, safely.
+description: Portwing is a security-first remote Docker agent — control your containers from anywhere, safely.
 ---
 
 A security-first remote Docker agent. Control your containers from anywhere, safely.
 
-## Why Lookout?
+## Why Portwing?
 
 The Docker socket (`/var/run/docker.sock`) is effectively root on your host. Most
 remote-management agents mount it straight in and hope nothing goes wrong — a
 compromised agent, a leaked token, or a single missing check is enough to own the
-box. Lookout is built the other way around: **deny by default, prove every action,
+box. Portwing is built the other way around: **deny by default, prove every action,
 and never touch the raw socket if you can avoid it.**
 
-Lookout is the remote agent for [Drydock](https://github.com/CodesWhat/drydock) — one
+Portwing is the remote agent for [Drydock](https://github.com/CodesWhat/drydock) — one
 controller managing containers across every one of your hosts — and it runs happily
 standalone too.
 
 - **Default-deny socket** — bundle the sibling project [Sockguard](https://github.com/CodesWhat/sockguard)
-  and Lookout talks to a filtered unix socket instead of the raw daemon. Even a fully
+  and Portwing talks to a filtered unix socket instead of the raw daemon. Even a fully
   compromised agent is constrained to an explicit Docker API allowlist.
 - **Ed25519 per-client auth** — signed requests with replay protection and no shared
   secrets on the wire. Prefer a token? Store only its Argon2id hash.
@@ -35,35 +35,35 @@ standalone too.
 - **Tiny & multi-arch** — a single static Go binary, ~10 MB, for amd64 · arm64 · arm/v7.
 
 <Callout type="warn">
-  Lookout is in **active alpha** (`v0.2.x`). APIs, environment variables, and on-disk
+  Portwing is in **active alpha** (`v0.2.x`). APIs, environment variables, and on-disk
   or wire formats may change between minor releases without notice. Pin to an exact
   version and review the changelog before upgrading.
 </Callout>
 
 ## Architecture
 
-One Drydock controller connects inbound to a Lookout agent on each host. Each agent
+One Drydock controller connects inbound to a Portwing agent on each host. Each agent
 reaches the Docker Engine only through a Sockguard socket filter:
 
 ```text
                          ┌──────────── Remote host A ───────────┐
-                         │  Lookout → sockguard → Docker Engine  │
+                         │  Portwing → sockguard → Docker Engine  │
    Drydock ──HTTPS+SSE──▶│                                       │
   (controller)           └───────────────────────────────────────┘
         │                ┌──────────── Remote host B ───────────┐
-        └─────HTTPS+SSE─▶│  Lookout → sockguard → Docker Engine  │
+        └─────HTTPS+SSE─▶│  Portwing → sockguard → Docker Engine  │
                          └───────────────────────────────────────┘
 ```
 
 ## Quick Start
 
-The strongest posture runs Lookout and Sockguard as two hardened containers sharing a
+The strongest posture runs Portwing and Sockguard as two hardened containers sharing a
 filtered socket — neither mounts the raw Docker socket directly:
 
 ```bash
-openssl rand -hex 32 > lookout_token.txt
-curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/docker-compose.with-sockguard.yml
-curl -fsSLO https://raw.githubusercontent.com/CodesWhat/lookout/main/examples/sockguard.yaml
+openssl rand -hex 32 > portwing_token.txt
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.with-sockguard.yml
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/sockguard.yaml
 docker compose -f docker-compose.with-sockguard.yml up -d
 ```
 

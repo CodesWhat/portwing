@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/codeswhat/lookout/internal/adapter"
-	"github.com/codeswhat/lookout/internal/docker"
-	"github.com/codeswhat/lookout/internal/protocol"
+	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // Label constants for Drydock container configuration.
@@ -27,7 +27,7 @@ const (
 	defaultMessageHandlerConcurrency = 32
 )
 
-// Adapter is the Drydock adapter for Lookout. It provides container sync,
+// Adapter is the Drydock adapter for Portwing. It provides container sync,
 // component sync, watcher/trigger stubs, and SSE broadcasting.
 type Adapter struct {
 	containers   *adapter.ContainerManager

@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Complete environment-variable reference for Lookout, grouped by category.
+description: Complete environment-variable reference for Portwing, grouped by category.
 ---
 
 All configuration is done through environment variables — no config file is required. Variables with no default must be set explicitly; unmarked defaults are applied automatically at startup.
@@ -15,12 +15,12 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 |---|---|---|
 | `PORT` | `3000` | TCP port the HTTP server listens on. |
 | `BIND_ADDRESS` | `0.0.0.0` | IP address the server binds to. |
-| `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Lookout operates in Edge mode and connects outbound to Drydock. |
+| `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Portwing operates in Edge mode and connects outbound to Drydock. |
 | `TLS_CERT` | — | Path to server TLS certificate (Standard mode). |
 | `TLS_KEY` | — | Path to server TLS private key (Standard mode). |
 | `CA_CERT` | — | Path to a custom CA certificate used when verifying the Drydock server in Edge mode. |
 | `TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification on the outbound Edge connection. **Testing only.** |
-| `TRUSTED_PROXIES` | — | Comma-separated list of CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`) for reverse proxies whose `X-Forwarded-For` header Lookout will trust for real-IP resolution. When unset, forwarding headers are ignored entirely. |
+| `TRUSTED_PROXIES` | — | Comma-separated list of CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`) for reverse proxies whose `X-Forwarded-For` header Portwing will trust for real-IP resolution. When unset, forwarding headers are ignored entirely. |
 
 <Callout type="warn">
 `TRUSTED_PROXIES` affects rate-limiting and IP-based access controls. An over-broad CIDR (e.g. `0.0.0.0/0`) lets any client spoof its source IP, bypassing those controls. Set only the CIDRs of your actual proxy infrastructure.
@@ -28,13 +28,13 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 
 ### Authentication variables
 
-The following variables govern how Lookout authenticates incoming requests. `TOKEN` and `TOKEN_HASH` are mutually exclusive — setting both causes startup to fail.
+The following variables govern how Portwing authenticates incoming requests. `TOKEN` and `TOKEN_HASH` are mutually exclusive — setting both causes startup to fail.
 
 | Variable | Default | Description |
 |---|---|---|
 | `TOKEN` | — | Plaintext shared-secret token. Acceptable for local dev; prefer `TOKEN_HASH` in production. |
 | `TOKEN_FILE` | — | Path to a file whose trimmed contents are used as the token. Overrides `TOKEN`. |
-| `TOKEN_HASH` | — | Argon2id hash of the token (generate with `lookout hash-token`). Preferred over plaintext. |
+| `TOKEN_HASH` | — | Argon2id hash of the token (generate with `portwing hash-token`). Preferred over plaintext. |
 | `TOKEN_HASH_FILE` | — | Path to a file containing the Argon2id hash. Overrides `TOKEN_HASH`. |
 | `AUTHORIZED_KEYS` | — | Path to an Ed25519 `authorized_keys` file for per-client asymmetric authentication (Model B). `AUTHORIZED_KEYS_FILE` is an alias for this variable. |
 | `AUTHORIZED_KEYS_FILE` | — | Alias for `AUTHORIZED_KEYS`. |
@@ -54,7 +54,7 @@ The following variables govern how Lookout authenticates incoming requests. `TOK
 
 | Variable | Default | Description |
 |---|---|---|
-| `DOCKER_SOCKET` | Auto-detect | Path to the Docker Unix socket. Lookout checks `/var/run/docker.sock`, `~/.docker/run/docker.sock`, `~/.orbstack/run/docker.sock`, and `/run/docker.sock` in that order; falls back to `/var/run/docker.sock` if none exist. |
+| `DOCKER_SOCKET` | Auto-detect | Path to the Docker Unix socket. Portwing checks `/var/run/docker.sock`, `~/.docker/run/docker.sock`, `~/.orbstack/run/docker.sock`, and `/run/docker.sock` in that order; falls back to `/var/run/docker.sock` if none exist. |
 | `DOCKER_HOST` | — | Docker TCP host (e.g. `tcp://192.168.1.10:2375`). Alternative to socket-based access. |
 | `STACKS_DIR` | `/data/stacks` | Directory where Compose stack files are stored and managed. |
 
@@ -65,7 +65,7 @@ The following variables govern how Lookout authenticates incoming requests. `TOK
 | Variable | Default | Description |
 |---|---|---|
 | `AGENT_ID` | UUID v4 (generated) | Stable unique identifier for this agent instance. Set explicitly to preserve identity across restarts. |
-| `AGENT_NAME` | System hostname | Human-readable label shown in Drydock and audit logs. Falls back to `lookout` if the hostname cannot be read. |
+| `AGENT_NAME` | System hostname | Human-readable label shown in Drydock and audit logs. Falls back to `portwing` if the hostname cannot be read. |
 
 ---
 
@@ -94,10 +94,10 @@ The following variables govern how Lookout authenticates incoming requests. `TOK
 
 ## Drydock Compatibility
 
-These variables provide backward compatibility with the legacy Drydock Node.js agent naming conventions. Prefer the canonical names above for new deployments.
+These variables mirror Drydock agent configuration names for deployments managed by a Drydock controller.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DD_AGENT_SECRET` | — | Backward-compatible alias for `TOKEN`. Read before `TOKEN` is applied; `TOKEN` takes precedence if both are set. |
-| `DD_AGENT_SECRET_FILE` | — | Backward-compatible alias for `TOKEN_FILE`. |
+| `DD_AGENT_SECRET` | — | Drydock agent secret token. Read before `TOKEN` is applied; `TOKEN` takes precedence if both are set. |
+| `DD_AGENT_SECRET_FILE` | — | File containing the Drydock agent secret token. |
 | `DD_POLL_INTERVAL` | `300` | Container inventory refresh interval in seconds (Drydock-compatible polling mode). |

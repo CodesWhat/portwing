@@ -1,4 +1,4 @@
-# From-source build: `docker build -t lookout .`
+# From-source build: `docker build -t portwing .`
 # (Release images are built by GoReleaser from prebuilt binaries via
 # Dockerfile.release; this file is the standalone equivalent.)
 
@@ -9,7 +9,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /lookout ./cmd/lookout
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwing
 
 # Stage 2: Assemble the Wolfi runtime rootfs (CVE-minimal, no package manager
 # in the final image; the apk database is retained for scanners/SBOM).
@@ -18,8 +18,8 @@ RUN apk add --no-cache --initdb --root /out \
       --repository https://packages.wolfi.dev/os \
       --keys-dir /etc/apk/keys \
       ca-certificates-bundle busybox docker-cli docker-compose wget \
- && echo 'lookout:x:65532:65532:lookout:/home/lookout:/sbin/nologin' >> /out/etc/passwd \
- && echo 'lookout:x:65532:' >> /out/etc/group \
+ && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >> /out/etc/passwd \
+ && echo 'portwing:x:65532:' >> /out/etc/group \
  && rm -rf /out/var/cache/apk/*
 
 # Stage 3: Final image — Wolfi rootfs plus the binary. No USER directive — the
@@ -27,12 +27,12 @@ RUN apk add --no-cache --initdb --root /out \
 # UID 65532 at deploy time (see examples/ and SECURITY.md).
 FROM scratch
 COPY --from=rootfs /out /
-COPY --from=builder /lookout /usr/bin/lookout
+COPY --from=builder /portwing /usr/bin/portwing
 
 VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["wget", "-q", "--spider", "http://localhost:3000/_lookout/health"]
+  CMD ["wget", "-q", "--spider", "http://localhost:3000/_portwing/health"]
 
-ENTRYPOINT ["/usr/bin/lookout"]
+ENTRYPOINT ["/usr/bin/portwing"]

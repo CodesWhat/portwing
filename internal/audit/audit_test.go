@@ -59,7 +59,7 @@ func TestAPIRequestAllowed(t *testing.T) {
 	t.Parallel()
 	l, read := captureLogger(t)
 
-	l.APIRequest("10.0.0.1", "GET", "/_lookout/info", OutcomeAllowed, 200, 3.14)
+	l.APIRequest("10.0.0.1", "GET", "/_portwing/info", OutcomeAllowed, 200, 3.14)
 
 	line := read()
 	if line == "" {
@@ -84,7 +84,7 @@ func TestAuthFailureEvent(t *testing.T) {
 	t.Parallel()
 	l, read := captureLogger(t)
 
-	l.AuthFailure("192.0.2.5", "GET", "/_lookout/info")
+	l.AuthFailure("192.0.2.5", "GET", "/_portwing/info")
 
 	m := decodeEvent(t, read())
 	if m["event"] != EventAuthFailure {
@@ -99,7 +99,7 @@ func TestRateLimitedEvent(t *testing.T) {
 	t.Parallel()
 	l, read := captureLogger(t)
 
-	l.RateLimited("192.0.2.9", "POST", "/_lookout/compose")
+	l.RateLimited("192.0.2.9", "POST", "/_portwing/compose")
 
 	m := decodeEvent(t, read())
 	if m["event"] != EventRateLimited {
