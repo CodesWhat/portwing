@@ -51,7 +51,7 @@ Portwing runs an HTTP(S) server. The Drydock controller connects inbound.
 
 ### 2.3 Edge Mode
 
-Portwing initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/portwing/ws`). All communication is multiplexed over this single connection. Both sides are implemented: Drydock 1.5 ships the controller endpoint (Ed25519-only, `portwing/1.0`) and Portwing signs its hello with Ed25519. Full exec robustness lands in Portwing 0.2.2; Drydock 1.5 and Portwing 0.2.2 are pre-release.
+Portwing initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/portwing/ws`). All communication is multiplexed over this single connection. Both sides are implemented: Drydock 1.5 ships the controller endpoint (Ed25519-only, `portwing/1.0`) and Portwing signs its hello with Ed25519. Edge mode is usable end-to-end as of the current release; full exec robustness under load is still being hardened. Drydock 1.5 and the current Portwing release are both pre-release.
 
 - Works behind NAT, firewalls, dynamic IPs
 - Auto-reconnect with exponential backoff + jitter
@@ -446,6 +446,6 @@ Packages: `ca-certificates`, `busybox`, `docker-cli`, `docker-compose`, `wget`
 ## 15. Migration Strategy
 
 1. **Phase 1: Drop-in Standard Mode** -- Replace existing Node.js agent with Portwing binary
-2. **Phase 2: Edge Mode** -- Drydock controller `/api/portwing/ws` WebSocket endpoint shipped in Drydock 1.5; end-to-end edge mode is functional (full exec robustness in Portwing 0.2.2)
+2. **Phase 2: Edge Mode** -- Drydock controller `/api/portwing/ws` WebSocket endpoint shipped in Drydock 1.5; end-to-end edge mode is functional as of the current release (full exec robustness under load still being hardened)
 3. **Phase 3: Native WebSocket in Drydock** -- Replace AgentClient SSE with WebSocket
 4. **Phase 4: Deprecate SSE** -- Remove SSE endpoints after one release cycle

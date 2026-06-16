@@ -21,7 +21,7 @@ Questions or help? Open an [issue](https://github.com/CodesWhat/portwing/issues)
 
 4. **Create a branch** from the appropriate base:
    - Bug fixes for the current release: branch from `main`
-   - New features targeting the next release: branch from the active dev branch (e.g. `dev/0.2.0`)
+   - New features targeting the next release: branch from the active dev branch (e.g. `dev/0.4.0`)
 
 ## Development loop
 

@@ -1,0 +1,172 @@
+name: "🔀 Quality: Deep Fuzz (monthly)"
+run-name: >-
+  ${{
+    github.event_name == 'schedule' && '🔀 Quality: Deep Fuzz — Monthly schedule' ||
+    format('🔀 Quality: Deep Fuzz — Monthly, manual by {0}', github.actor)
+  }}
+
+# Tier 3 of the fuzz strategy. Tier 1 lives in `ci.yml go-fuzz` (60-second
+# smoke per PR/push), Tier 2 in `quality-fuzz-nightly.yml` (5 minutes per
+# fuzzer daily). This workflow gives every fuzzer a 1-hour coverage budget on
+# the first day of each month so we get one very deep pass that can reach paths
+# the shorter tiers miss, plus on-demand longer runs via `workflow_dispatch`
+# before a release. Mirrors sockguard's monthly tier; same rationale.
+#
+# 1 hour per fuzzer × 5 fuzzers × matrix-parallel = ~1 hour wall time. Crashes
+# upload with 180-day retention so a failing input from an older monthly run
+# stays recoverable long enough to turn into a committed regression test.
+
+on:
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "Per-fuzzer coverage budget (Go duration, e.g. 1h, 3h). Max ≈5h45m before the job timeout trims it."
+        required: false
+        default: "1h"
+  schedule:
+    - cron: '30 8 1 * *'  # Monthly on day 1 at 08:30 UTC (after mutation at 06:30)
+
+permissions:
+  contents: read
+
+concurrency:
+  # Don't cancel an in-flight monthly when a manual dispatch fires — they
+  # answer different questions and either can confirm health.
+  group: quality-fuzz-monthly-${{ github.workflow }}-${{ github.event.inputs.fuzztime || 'scheduled' }}
+  cancel-in-progress: false
+
+jobs:
+  monthly-fuzz:
+    name: "🔀 Fuzz ${{ matrix.fuzzer.name }} (monthly)"
+    runs-on: ubuntu-latest
+    # 6-hour ceiling is the hard cap regardless of the fuzztime input.
+    # Anything longer should run on a dedicated box, not a shared runner.
+    timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzzer:
+          - { name: FuzzParsePHC,            pkg: ./internal/server/ }
+          - { name: FuzzParseTrustedProxies, pkg: ./internal/server/ }
+          - { name: FuzzParseImageRef,       pkg: ./internal/adapter/ }
+          - { name: FuzzParseLabels,         pkg: ./internal/adapter/drydock/ }
+          - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: "1.26"
+
+      - name: Resolve fuzz budget
+        id: budget
+        env:
+          INPUT_FUZZTIME: ${{ github.event.inputs.fuzztime }}
+        run: |
+          FUZZTIME="${INPUT_FUZZTIME:-1h}"
+          echo "fuzztime=${FUZZTIME}" >> "$GITHUB_OUTPUT"
+          # Parse the trailing unit (h, m, or s) and convert to seconds, then add
+          # a 120-second cushion so the go test -timeout always outlasts -fuzztime.
+          if [[ "${FUZZTIME}" =~ ^([0-9]+)h$ ]]; then
+            budget_s=$(( BASH_REMATCH[1] * 3600 ))
+          elif [[ "${FUZZTIME}" =~ ^([0-9]+)m$ ]]; then
+            budget_s=$(( BASH_REMATCH[1] * 60 ))
+          elif [[ "${FUZZTIME}" =~ ^([0-9]+)s$ ]]; then
+            budget_s=${BASH_REMATCH[1]}
+          else
+            budget_s=3600
+          fi
+          echo "test_timeout=$(( budget_s + 120 ))s" >> "$GITHUB_OUTPUT"
+
+      - name: Fuzz ${{ matrix.fuzzer.name }}
+        id: fuzz
+        env:
+          FUZZER: ${{ matrix.fuzzer.name }}
+          PKG: ${{ matrix.fuzzer.pkg }}
+          FUZZTIME: ${{ steps.budget.outputs.fuzztime }}
+          TEST_TIMEOUT: ${{ steps.budget.outputs.test_timeout }}
+        run: |
+          LOG="${RUNNER_TEMP}/fuzz-${FUZZER}.log"
+
+          run_fuzz() {
+            go test -run='^$' \
+              -fuzz="^${FUZZER}\$" \
+              -fuzztime="${FUZZTIME}" \
+              -timeout="${TEST_TIMEOUT}" \
+              "${PKG}" 2>&1 | tee "${LOG}"
+            return "${PIPESTATUS[0]}"
+          }
+
+          emit() { echo "kind=$1" >> "$GITHUB_OUTPUT"; }
+
+          for attempt in 1 2; do
+            rc=0
+            run_fuzz || rc=$?
+
+            if [ "${rc}" -eq 0 ]; then
+              emit pass
+              exit 0
+            fi
+
+            if grep -q "Failing input written to testdata" "${LOG}"; then
+              emit crash
+              echo "::error::${FUZZER} found a crashing input — commit it to the seed corpus and fix the regression."
+              exit "${rc}"
+            fi
+
+            if ! grep -q "context deadline exceeded" "${LOG}"; then
+              emit error
+              echo "::error::${FUZZER} failed for a non-flake reason (exit ${rc})."
+              exit "${rc}"
+            fi
+
+            echo "::warning::${FUZZER}: known -fuzztime boundary flake on attempt ${attempt}/2."
+          done
+
+          emit flake
+          echo "::error::${FUZZER} hit the boundary flake on both attempts."
+          exit 1
+
+      - name: Upload fuzz corpus on failure or cancel
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: fuzz-corpus-${{ matrix.fuzzer.name }}-${{ github.run_id }}
+          path: "**/testdata/fuzz/${{ matrix.fuzzer.name }}/"
+          retention-days: 180
+          if-no-files-found: ignore
+
+      - name: Summarize
+        if: always()
+        env:
+          FUZZER: ${{ matrix.fuzzer.name }}
+          PKG: ${{ matrix.fuzzer.pkg }}
+          FUZZTIME: ${{ steps.budget.outputs.fuzztime }}
+          STATUS: ${{ job.status }}
+          KIND: ${{ steps.fuzz.outputs.kind }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          {
+            echo "### ${FUZZER} (monthly deep)"
+            echo ""
+            echo "- Package: \`${PKG}\`"
+            echo "- Budget:  ${FUZZTIME}"
+            echo "- Result:  ${STATUS}"
+            if [ "${KIND}" = "crash" ]; then
+              echo ""
+              echo "A crashing input was saved to \`testdata/fuzz/${FUZZER}/\`."
+              echo "Download artifact \`fuzz-corpus-${FUZZER}-${RUN_ID}\`, commit the"
+              echo "minimized input to the seed corpus, fix the bug, and push."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
