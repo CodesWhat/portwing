@@ -249,11 +249,9 @@ jobs:
 
   dependency-review:
     name: "📦 Dependency Review"
-    # Runs on public-repo PRs. The action additionally requires the
-    # **Dependency Graph** feature to be enabled (org/repo Security settings);
-    # until that is turned on it reports "not supported on this repository", so
-    # the review step is marked continue-on-error to stay informational rather
-    # than block the PR. Flip that off once Dependency Graph is enabled.
+    # Runs on public-repo PRs and gates the merge. Requires the Dependency
+    # Graph feature, which is enabled on this repo
+    # (Settings → Advanced Security → Dependency graph).
     if: github.event.repository.visibility == 'public' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -273,7 +271,6 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
-        continue-on-error: true
 
   go-fuzz:
     # Tier 1 — per-PR smoke-level fuzzing. Each fuzzer gets a fixed 60 s
