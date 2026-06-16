@@ -2,6 +2,12 @@ version: 2
 
 project_name: portwing
 
+release:
+  # Mark rc/beta/alpha tags as GitHub prereleases so they don't surface as the
+  # "Latest release"; stable tags create a normal release. (The dockers_v2
+  # `:latest` tag is independently guarded by `not .Prerelease`.)
+  prerelease: auto
+
 before:
   hooks:
     - go mod tidy

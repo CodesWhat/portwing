@@ -5,7 +5,6 @@ package banner
 
 import (
 	_ "embed"
-	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -40,12 +39,13 @@ func Render(w io.Writer, info Info) {
 	}
 	body = centerArt(body, terminalCols(w))
 
-	fmt.Fprintln(w)
-	fmt.Fprint(w, body)
+	var b strings.Builder
+	b.WriteByte('\n')
+	b.WriteString(body)
 	if !strings.HasSuffix(body, "\n") {
-		fmt.Fprintln(w)
+		b.WriteByte('\n')
 	}
-	fmt.Fprintln(w)
+	b.WriteByte('\n')
 
 	line := "  portwing " + info.Version
 	if info.Mode != "" {
@@ -54,8 +54,12 @@ func Render(w io.Writer, info Info) {
 	if info.Adapter != "" {
 		line += "  ·  " + info.Adapter + " adapter"
 	}
-	fmt.Fprintln(w, line)
-	fmt.Fprintln(w)
+	b.WriteString(line)
+	b.WriteString("\n\n")
+
+	// Best-effort: the banner is cosmetic, so a failed write to stderr/stdout
+	// is not actionable.
+	_, _ = io.WriteString(w, b.String())
 }
 
 func displayWidth(s string) int {
