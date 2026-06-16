@@ -54,7 +54,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
-          go-version-file: go.mod
+          # go.mod declares only the language version (`go 1.26.0`) with no
+          # `toolchain` directive, so go-version-file would pin govulncheck to
+          # 1.26.0 and report stdlib advisories already fixed in 1.26.1+. Track
+          # the latest 1.26.x like the build and the gating ci.yml scan do.
+          go-version: "1.26"
 
       - name: Install govulncheck
         run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
@@ -204,7 +208,12 @@ jobs:
       - name: Run Gosec
         uses: securego/gosec@9e6a9843d7a4a6e3e9a8539b02612c8a4aa3f889  # v2.27.1
         with:
-          args: -fmt sarif -out gosec-results.sarif ./...
+          # Report-only: gosec is heuristic (e.g. G115 int->uint conversions in
+          # the benchmark helpers) and feeds findings to the Security tab via the
+          # SARIF upload below. Build gating is handled by CodeQL (ruleset-enforced),
+          # Grype, and govulncheck, so -no-fail keeps gosec from failing the run
+          # on advisory-level findings while still surfacing them for triage.
+          args: -no-fail -fmt sarif -out gosec-results.sarif ./...
 
       - name: Upload Gosec SARIF
         if: always() && github.event.repository.visibility == 'public'
