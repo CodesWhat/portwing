@@ -69,7 +69,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen %s: %v", *socket, err)
 	}
-	if err := os.Chmod(*socket, 0o666); err != nil {
+	// Owner-only: the soak runs portwing as the same user, so it can connect
+	// without the world-writable bit gosec (G302) rightly objects to.
+	if err := os.Chmod(*socket, 0o600); err != nil {
 		log.Fatalf("chmod %s: %v", *socket, err)
 	}
 
@@ -82,6 +84,8 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := versionPrefix.ReplaceAllString(r.URL.Path, "")
 		if verbose {
+			// #nosec G706 -- benchmark-only mock; %q quotes the request fields so
+			// control chars can't forge log lines, and -log is opt-in for debugging.
 			log.Printf("method=%q path=%q (raw=%q)", r.Method, path, r.URL.Path)
 		}
 
@@ -208,7 +212,7 @@ func streamEvents(w http.ResponseWriter, r *http.Request) {
 			if err := enc.Encode(evt); err != nil {
 				return
 			}
-			fmt.Fprint(w, "\n")
+			_, _ = fmt.Fprint(w, "\n")
 			flusher.Flush()
 		}
 	}
