@@ -1,6 +1,10 @@
 <div align="center">
 
-<img src="portwing.png" alt="Portwing" width="200" height="200">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="portwing-dark.png" />
+  <source media="(prefers-color-scheme: light)" srcset="portwing.png" />
+  <img src="portwing.png" alt="Portwing" width="200" height="200">
+</picture>
 
 <h1>Portwing</h1>
 

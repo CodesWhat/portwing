@@ -46,7 +46,7 @@ export default function RootLayout({
             nav={{
               title: (
                 <span className="flex items-center gap-2">
-                  <Image src={logo} alt="Portwing" width={28} height={28} priority />
+                  <Image src={logo} alt="Portwing" width={28} height={28} priority className="dark:invert" />
                   <span className="font-semibold tracking-tight">Portwing</span>
                 </span>
               ),
