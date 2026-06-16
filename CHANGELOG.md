@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Renamed to Portwing** (formerly Lookout): the project name, Go module path (`github.com/codeswhat/portwing`), binary, Docker image, and every `lookout`-prefixed identifier are now `portwing`. **Breaking for anyone running a pre-release build:** the auth header `X-Lookout-Token` is now `X-Portwing-Token` (and the Ed25519 request headers `X-Lookout-Key-ID` / `-Timestamp` / `-Nonce` / `-Signature` are now `X-Portwing-*`), and the Prometheus metrics are renamed from `lookout_*` to `portwing_*` — update any clients, scrapers, dashboards, and alert rules accordingly. There is no backward-compatible alias.
 - **Release pipeline**: pin GoReleaser to the `~> v2` major line (was `latest`) in both the release workflow and the CI config-check job, so neither can silently jump to a future GoReleaser v3 and to clear the action's "using 'latest' as default version" advisory.
+- **Docker release build**: migrate from the deprecated GoReleaser `dockers` + `docker_manifests` blocks to a single `dockers_v2` entry that builds all three platforms (linux/amd64, linux/arm64, linux/arm/v7) in one buildx run and pushes a single multi-arch OCI index per tag. The two per-arch release Dockerfiles are unified into one `Dockerfile.release` that selects Wolfi (amd64/arm64) or Alpine (armv7) by `TARGETARCH`. The published image now also carries a Syft image SBOM attestation, and `:latest` is no longer moved by prereleases.
 
 ### Fixed
 
