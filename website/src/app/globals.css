@@ -70,10 +70,9 @@
   --ring: 13 100% 63%;
 }
 
-/* ── Portwing mascot: lean-in + blink ─────────────────────────────────
+/* ── Portwing mascot: lean-in ─────────────────────────────────────────
  * Drives <PortwingMascot>. transform-origin is at the feet so scaling
- * cranes the top up and brings the eyes toward the viewer; the two
- * frames are stacked and cross-faded by the data-eyes attribute.
+ * cranes the top up and brings the eyes toward the viewer.
  */
 .portwing-mascot {
   position: relative;
@@ -99,17 +98,6 @@
 }
 .portwing-mascot .lk-frame {
   display: block;
-}
-.portwing-mascot .lk-blink {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  /* Instant cut, no transition. The eyes-open body underneath stays rendered
-   * the whole time; this frame just drops on top to close the eyes, so only
-   * the eyes change and the silhouette/shadow never moves. */
-}
-.portwing-mascot[data-eyes="blink"] .lk-blink {
-  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

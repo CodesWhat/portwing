@@ -2,6 +2,12 @@ version: 2
 
 project_name: portwing
 
+release:
+  # Mark rc/beta/alpha tags as GitHub prereleases so they don't surface as the
+  # "Latest release"; stable tags create a normal release. (The dockers_v2
+  # `:latest` tag is independently guarded by `not .Prerelease`.)
+  prerelease: auto
+
 before:
   hooks:
     - go mod tidy
@@ -64,9 +70,9 @@ docker_signs:
       - "sign"
       - "${artifact}@${digest}"
       - "--yes"
-    # Sign both the per-arch images and the multi-arch manifest lists, so
-    # `cosign verify ghcr.io/codeswhat/portwing:<tag>` succeeds on the index
-    # users actually pull (not just the per-arch -amd64/-arm64/-armv7 tags).
+    # dockers_v2 pushes a single multi-arch OCI index per tag (no per-arch
+    # -amd64/-arm64/-armv7 tags), so `all` signs that index — exactly the
+    # image `cosign verify ghcr.io/codeswhat/portwing:<tag>` checks on pull.
     artifacts: all
     output: true
 
@@ -79,44 +85,27 @@ changelog:
       - "^🔧"
       - "^🎨"
 
-dockers:
-  - image_templates:
-      - "ghcr.io/codeswhat/portwing:{{ .Version }}-amd64"
-      - "ghcr.io/codeswhat/portwing:latest-amd64"
+# One dockers_v2 entry builds all three platforms in a single buildx run and
+# pushes a single multi-arch OCI index per tag — it replaces the old per-arch
+# `dockers` + `docker_manifests` blocks (both deprecated in GoReleaser v2).
+# The unified Dockerfile.release selects Wolfi (amd64/arm64) or Alpine (armv7)
+# per arch and copies the binary from the $TARGETPLATFORM/ context subdir.
+dockers_v2:
+  - id: portwing
     dockerfile: Dockerfile.release
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-    goarch: amd64
-
-  - image_templates:
-      - "ghcr.io/codeswhat/portwing:{{ .Version }}-arm64"
-      - "ghcr.io/codeswhat/portwing:latest-arm64"
-    dockerfile: Dockerfile.release
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/arm64"
-    goarch: arm64
-
-  - image_templates:
-      - "ghcr.io/codeswhat/portwing:{{ .Version }}-armv7"
-      - "ghcr.io/codeswhat/portwing:latest-armv7"
-    dockerfile: Dockerfile.release.armv7
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/arm/v7"
-    goarch: arm
-    goarm: "7"
-
-docker_manifests:
-  - name_template: "ghcr.io/codeswhat/portwing:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/codeswhat/portwing:{{ .Version }}-amd64"
-      - "ghcr.io/codeswhat/portwing:{{ .Version }}-arm64"
-      - "ghcr.io/codeswhat/portwing:{{ .Version }}-armv7"
-
-  - name_template: "ghcr.io/codeswhat/portwing:latest"
-    image_templates:
-      - "ghcr.io/codeswhat/portwing:latest-amd64"
-      - "ghcr.io/codeswhat/portwing:latest-arm64"
-      - "ghcr.io/codeswhat/portwing:latest-armv7"
+    ids:
+      - portwing
+    images:
+      - "ghcr.io/codeswhat/portwing"
+    tags:
+      - "{{ .Version }}"
+      # Empty tags are ignored, so prereleases never move :latest.
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
+    # Attach a Syft image SBOM to the pushed index (buildx attestation). This
+    # is additive to the archive-level `sboms:` block above, which covers the
+    # binaries but not the image's OS packages.
+    sbom: "true"

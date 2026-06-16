@@ -67,14 +67,13 @@ See [Getting Started](/getting-started) for the full Sockguard variant and TLS e
 
 ## Edge Mode
 
-**Status: implemented end-to-end — requires Drydock 1.5 and Portwing 0.2.2 (both currently pre-release).**
+**Status: implemented end-to-end — requires Drydock 1.5+ and Portwing 0.3.0+. Treat as early access.**
 
 <Callout type="warn">
   Edge mode works end-to-end as of **Drydock 1.5** (which ships the `/api/portwing/ws`
-  endpoint) and **Portwing 0.2.2**. Both are pre-release as of this writing — the current
-  stable lines are Drydock 1.4.x and Portwing 0.2.0 — and full exec-session robustness
-  under load lands in Portwing 0.2.2, so prefer standard mode for production until the
-  stable releases ship. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and
+  endpoint) and **Portwing 0.3.0**. It's still new — exec-session robustness under sustained
+  load is not yet battle-tested — so prefer standard mode for production until you've
+  validated edge mode for your workload. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and
   register the public key with Drydock — token-only (`TOKEN` / `TOKEN_HASH`) connections
   are rejected.
 </Callout>
@@ -109,7 +108,7 @@ Setting only `TOKEN_HASH` with `DRYDOCK_URL` is explicitly rejected at startup �
 
 On each connection attempt the agent:
 
-1. Opens a WebSocket to `DRYDOCK_URL/api/portwing/ws` using the `portwing/1.0` sub-protocol.
+1. Opens a WebSocket to `DRYDOCK_URL/api/portwing/ws` and identifies itself with the `portwing/1.0` protocol string carried in its `hello` message — an application-level identifier, not a negotiated `Sec-WebSocket-Protocol` sub-protocol header.
 2. Sends a `hello` message containing its agent ID, name, capabilities, Docker version, and a credential. When `PRIVATE_KEY_FILE` is configured the hello is Ed25519-signed (see [Authentication](/authentication)); otherwise the token SHA-256 hash is included.
 3. Waits up to `WELCOME_TIMEOUT` seconds for the controller's `welcome` response.
 4. On success, sends an initial container inventory (`dd:container_sync`), component descriptors (`dd:component_sync`), and host metrics.
@@ -165,6 +164,6 @@ secrets:
 | Works behind NAT / firewall | No | Yes |
 | Agent-side implementation | Complete | Complete |
 | Controller-side support | Complete | Drydock 1.5+ (pre-release) |
-| Recommended for production | Yes | Early access (Drydock 1.5 + Portwing 0.2.2) |
+| Recommended for production | Yes | Early access (Drydock 1.5+ and Portwing 0.3.0+) |
 
-If your host is reachable from the internet or your Drydock server, use Standard mode today. Edge mode is the right answer for hosts with no inbound port and is functional now on Drydock 1.5 and Portwing 0.2.2 — both pre-release — so treat it as early access and wait for the stable releases before relying on it in production.
+If your host is reachable from the internet or your Drydock server, use Standard mode today. Edge mode is the right answer for hosts with no inbound port and is functional now on Drydock 1.5 and Portwing 0.3.0 — treat it as early access and validate it for your workload before relying on it in production.

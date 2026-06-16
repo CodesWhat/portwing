@@ -102,7 +102,7 @@ func (c *Client) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		err := c.connect(ctx)
+		established, err := c.connect(ctx)
 		if ctx.Err() != nil {
 			// Shutting down - send close frame if we still have a connection.
 			c.connMu.Lock()
@@ -121,6 +121,13 @@ func (c *Client) Run(ctx context.Context) error {
 
 		if err != nil {
 			slog.Warn("connection lost", "error", err)
+		}
+
+		// Reset backoff after a connection that was actually established, so a
+		// long-lived session that later drops reconnects from RECONNECT_DELAY
+		// instead of inheriting stale backoff from earlier failures (SPEC §13.1).
+		if established {
+			delay = time.Duration(c.cfg.ReconnectDelay) * time.Second
 		}
 
 		waitDuration := jitteredDuration(delay)
@@ -143,7 +150,7 @@ func (c *Client) Run(ctx context.Context) error {
 
 // connect dials the WebSocket, performs the hello/welcome handshake, syncs
 // state, and runs the read and write pumps.
-func (c *Client) connect(ctx context.Context) error {
+func (c *Client) connect(ctx context.Context) (bool, error) {
 	// Build TLS config.
 	tlsConfig := &tls.Config{
 		// #nosec G402 -- TLS_SKIP_VERIFY is an explicit test-only escape hatch documented as unsafe.
@@ -153,11 +160,11 @@ func (c *Client) connect(ctx context.Context) error {
 	if c.cfg.CACert != "" {
 		caCert, err := os.ReadFile(c.cfg.CACert)
 		if err != nil {
-			return fmt.Errorf("reading CA cert: %w", err)
+			return false, fmt.Errorf("reading CA cert: %w", err)
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(caCert) {
-			return fmt.Errorf("failed to parse CA cert")
+			return false, fmt.Errorf("failed to parse CA cert")
 		}
 		tlsConfig.RootCAs = pool
 	}
@@ -176,7 +183,7 @@ func (c *Client) connect(ctx context.Context) error {
 
 	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
-		return fmt.Errorf("websocket dial: %w", err)
+		return false, fmt.Errorf("websocket dial: %w", err)
 	}
 	conn.SetReadLimit(maxReadSize)
 
@@ -187,36 +194,38 @@ func (c *Client) connect(ctx context.Context) error {
 	// Send hello.
 	if err := c.sendHello(ctx); err != nil {
 		closeWebSocket(conn, "send hello failure")
-		return fmt.Errorf("sending hello: %w", err)
+		return false, fmt.Errorf("sending hello: %w", err)
 	}
 
 	// Wait for welcome.
 	welcomeTimeout := time.Duration(c.cfg.WelcomeTimeout) * time.Second
 	if err := conn.SetReadDeadline(time.Now().Add(welcomeTimeout)); err != nil {
 		closeWebSocket(conn, "set welcome deadline failure")
-		return fmt.Errorf("setting welcome deadline: %w", err)
+		return false, fmt.Errorf("setting welcome deadline: %w", err)
 	}
 
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
 		closeWebSocket(conn, "read welcome failure")
-		return fmt.Errorf("reading welcome: %w", err)
+		return false, fmt.Errorf("reading welcome: %w", err)
 	}
 
 	var env protocol.Envelope
 	if err := json.Unmarshal(msg, &env); err != nil {
 		closeWebSocket(conn, "parse welcome failure")
-		return fmt.Errorf("parsing welcome envelope: %w", err)
+		return false, fmt.Errorf("parsing welcome envelope: %w", err)
 	}
 	if env.Type != protocol.TypeWelcome {
 		closeWebSocket(conn, "unexpected welcome type")
-		return fmt.Errorf("expected welcome, got %q", env.Type)
+		return false, fmt.Errorf("expected welcome, got %q", env.Type)
 	}
 
-	// Clear read deadline.
-	if err := conn.SetReadDeadline(time.Time{}); err != nil {
-		closeWebSocket(conn, "clear welcome deadline failure")
-		return fmt.Errorf("clearing welcome deadline: %w", err)
+	// Switch from the one-shot welcome deadline to the steady-state read
+	// deadline (SPEC §13.2). readPump re-arms it after every message; if the
+	// controller stops answering pings the read times out and we reconnect.
+	if err := conn.SetReadDeadline(time.Now().Add(readDeadline(c.cfg.HeartbeatInterval))); err != nil {
+		closeWebSocket(conn, "set read deadline failure")
+		return false, fmt.Errorf("setting read deadline: %w", err)
 	}
 
 	slog.Info("connected to controller")
@@ -259,7 +268,9 @@ func (c *Client) connect(ctx context.Context) error {
 	}
 	c.connMu.Unlock()
 
-	return readErr
+	// Reaching here means the welcome handshake succeeded, so the connection
+	// counts as established even if the read pump later returned an error.
+	return true, readErr
 }
 
 // sendHello sends the hello handshake message. When PRIVATE_KEY_FILE is
@@ -365,6 +376,13 @@ func (c *Client) readPump(ctx context.Context) error {
 		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			return fmt.Errorf("read message: %w", err)
+		}
+
+		// Re-arm the read deadline on every received message, including pings
+		// (SPEC §13.2). A read that blocks past the deadline means the
+		// controller has gone silent and the connection is dead.
+		if err := c.conn.SetReadDeadline(time.Now().Add(readDeadline(c.cfg.HeartbeatInterval))); err != nil {
+			return fmt.Errorf("resetting read deadline: %w", err)
 		}
 
 		var env protocol.Envelope
@@ -620,6 +638,17 @@ func (c *Client) sendMessage(env protocol.Envelope) {
 // msEdge returns elapsed milliseconds since start as a float64.
 func msEdge(start time.Time) float64 {
 	return float64(time.Since(start).Nanoseconds()) / 1e6
+}
+
+// readDeadline returns the steady-state WebSocket read deadline:
+// max(2 * HEARTBEAT_INTERVAL, 60s). Exceeding it means pings have gone
+// unanswered, so the connection is treated as dead (SPEC §13.2).
+func readDeadline(heartbeatSeconds int) time.Duration {
+	d := 2 * time.Duration(heartbeatSeconds) * time.Second
+	if d < 60*time.Second {
+		d = 60 * time.Second
+	}
+	return d
 }
 
 func jitteredDuration(delay time.Duration) time.Duration {

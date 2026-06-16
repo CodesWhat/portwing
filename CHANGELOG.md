@@ -7,12 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-15
+
+### Added
+
+- **Startup banner**: the agent prints a centered truecolor half-block render of the logo plus a one-line `version · mode · adapter` summary at startup. Color is emitted only to a TTY (or under `FORCE_COLOR`) and suppressed under `NO_COLOR`, with ANSI escapes stripped so piped and log output stay clean.
+
 ### Changed
 
+- **Renamed to Portwing** (formerly Lookout): the project name, Go module path (`github.com/codeswhat/portwing`), binary, Docker image, and every `lookout`-prefixed identifier are now `portwing`. **Breaking for anyone running a pre-release build:** the auth header `X-Lookout-Token` is now `X-Portwing-Token` (and the Ed25519 request headers `X-Lookout-Key-ID` / `-Timestamp` / `-Nonce` / `-Signature` are now `X-Portwing-*`), and the Prometheus metrics are renamed from `lookout_*` to `portwing_*` — update any clients, scrapers, dashboards, and alert rules accordingly. There is no backward-compatible alias.
 - **Release pipeline**: pin GoReleaser to the `~> v2` major line (was `latest`) in both the release workflow and the CI config-check job, so neither can silently jump to a future GoReleaser v3 and to clear the action's "using 'latest' as default version" advisory.
+- **Docker release build**: migrate from the deprecated GoReleaser `dockers` + `docker_manifests` blocks to a single `dockers_v2` entry that builds all three platforms (linux/amd64, linux/arm64, linux/arm/v7) in one buildx run and pushes a single multi-arch OCI index per tag. The two per-arch release Dockerfiles are unified into one `Dockerfile.release` that selects Wolfi (amd64/arm64) or Alpine (armv7) by `TARGETARCH`. The published image now also carries a Syft image SBOM attestation, and `:latest` is no longer moved by prereleases.
 
 ### Fixed
 
+- **Edge reconnect backoff**: a long-lived edge session that drops now reconnects from `RECONNECT_DELAY` instead of inheriting stale exponential backoff from earlier connect failures (SPEC §13.1).
+- **Edge read deadline**: the WebSocket read deadline is now held at a steady-state `max(2·HEARTBEAT_INTERVAL, 60s)` and re-armed on every received message, so a controller that goes silent (stops answering pings) is detected and triggers a reconnect instead of blocking forever (SPEC §13.2).
 - **Flaky fuzz smoke / gating CI**: the Go fuzzing harness intermittently failed with a spurious `context deadline exceeded` (no crash, no slow input — verified handlers stay sub-10ms on adversarial inputs). On many-core machines Go fuzzing's default one-worker-per-core saturates every core and starves the coordinator goroutine until a worker misses its sync deadline. Both the pre-push hook and the gating CI fuzz job now cap fuzz worker count to `max(1, min(4, cores-1))` so the coordinator always keeps a core, which *prevents* the starvation; CI additionally retries the residual known `-fuzztime` boundary race once as a backstop (never retrying a real crash).
 
 ## [0.2.0] - 2026-06-12
@@ -42,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Streaming through auth middleware**: response body flushing and WebSocket hijack now work correctly when wrapped by the auth middleware chain (`statusRecorder` forwards `Flush` and `Hijack`).
-- **Version injection**: GoReleaser ldflags now correctly set `protocol.AgentVersion` and `protocol.Commit` at build time.
+- **Version injection**: GoReleaser ldflags now correctly set `protocol.AgentVersion` at build time.
 
 ## [0.1.0] - 2025-06-01
 
