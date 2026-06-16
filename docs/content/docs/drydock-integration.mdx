@@ -13,10 +13,10 @@ Drydock supports two agent connectivity patterns. Portwing implements both.
 
 **Standard Mode** (fully implemented): The Drydock controller opens an inbound HTTP connection to each remote host's Portwing agent. Portwing runs an HTTP server; the controller polls `/api/*` and holds a long-lived SSE stream.
 
-**Edge Mode** (implemented end-to-end; requires Drydock 1.5+ and Portwing 0.2.2+): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
+**Edge Mode** (implemented end-to-end; requires Drydock 1.5+ and Portwing 0.3.0+): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
 
 <Callout type="warn">
-Edge Mode is implemented on both sides: Drydock 1.5 ships the `/api/portwing/ws` controller endpoint (Ed25519-only, `portwing/1.0` protocol) and Portwing's agent (`internal/edge/client.go`) signs its hello with Ed25519. Drydock 1.5 and Portwing 0.2.2 are both pre-release — the current stable lines (Drydock 1.4.x, Portwing 0.2.0) do **not** include the endpoint — so treat Edge Mode as early access and prefer Standard Mode for production until the stable releases ship.
+Edge Mode is implemented on both sides: Drydock 1.5 ships the `/api/portwing/ws` controller endpoint (Ed25519-only, `portwing/1.0` protocol) and Portwing's agent (`internal/edge/client.go`) signs its hello with Ed25519. The endpoint requires Drydock 1.5+ (older controllers don't expose it), and edge mode is still new — treat it as early access and prefer Standard Mode for production until you've validated it for your workload.
 </Callout>
 
 ---
@@ -374,7 +374,7 @@ Verified against Drydock 1.5.x (`app/agent/AgentClient.ts`, `app/agent/api/`).
 | `GET /api/log/entries` returns `[]` | Compatible | `routes.go:handleLogEntries`; `AgentClient.ts:1503` |
 | `X-Dd-Agent-Secret` authentication | Compatible | `server/http.go` auth middleware; `AgentClient.ts:73` |
 | `/health` unauthenticated | Compatible | `routes.go:handleSimpleHealth`; `AgentClient.ts:152` |
-| Edge Mode WebSocket `/api/portwing/ws` | Implemented (Drydock 1.5) | Ed25519-only, `portwing/1.0`; requires Drydock 1.5+ and Portwing 0.2.2+ (both pre-release) |
+| Edge Mode WebSocket `/api/portwing/ws` | Implemented (Drydock 1.5) | Ed25519-only, `portwing/1.0`; requires Drydock 1.5+ and Portwing 0.3.0+ (early access) |
 
 ---
 
