@@ -1,11 +1,11 @@
 # Portwing Roadmap
 
-> Portwing is **alpha** software (`v0.2.x`). This roadmap describes direction and
+> Portwing is **alpha** software (`v0.3.x`). This roadmap describes direction and
 > priorities — not commitments. Items and ordering may change between releases.
 > For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
 
-## Now — `v0.2.x` (hardening the alpha)
+## Now — `v0.3.x` (hardening the alpha)
 
 The current line prioritizes production-readiness of the existing feature set
 over new surface area.
@@ -14,8 +14,26 @@ over new surface area.
   signing, and resource limits across the Docker proxy and the edge tunnel.
 - **Release & supply chain** — reproducible multi-arch builds, cosign-signed
   images, SBOMs, build provenance, and a CI-gated tag → release pipeline.
-- **Test coverage** — broaden unit, integration, and fuzz coverage, closing
-  gaps in the auth, MCP, and adapter paths.
+- **Test coverage & quality gates** — broaden unit, integration, and fuzz
+  coverage across the auth, MCP, and adapter paths, and bring the CI quality
+  posture to parity with sockguard's:
+  - **Three-tier fuzzing** — *shipped.* 60s smoke per PR (`ci.yml go-fuzz`),
+    5m nightly (`quality-fuzz-nightly.yml`), and a 1h monthly deep pass
+    (`quality-fuzz-monthly.yml`).
+  - **Soak testing** — *shipped.* `quality-soak-weekly.yml` drives the agent
+    (generic adapter, mock Docker upstream) under a sustained mix of inventory/
+    version/proxy reads plus SSE subscriber connect/hold/disconnect churn, and
+    fails if its resident set grows past a budget (64 MiB default) over a
+    multi-hour soak — the long-lived-agent leak profile the unit/integration
+    tiers don't catch. Harness: `benchmarks/cmd/{mockdocker,loadgen}` +
+    `scripts/soak.sh`.
+  - **Benchmark tracking** — *shipped.* Go benchmarks cover the per-request hot
+    paths (auth middleware, Argon2id verify — cold derivation and warm SHA-256
+    cache, client-IP extraction, rate limiter) and the parse paths (PHC,
+    image-ref, Drydock labels, trusted-proxy CIDRs, MCP dispatch).
+    `quality-bench-monthly.yml` reruns them with `-benchmem -count=5` on the
+    first of each month and keeps the results as a 90-day artifact, so a ns/op
+    or allocs/op regression is visible month over month.
 - **Documentation** — keep `SPEC.md`, `README.md`, and the design docs in sync
   with the code as behavior settles.
 
@@ -27,9 +45,10 @@ over new surface area.
   and the paired Portwing release are pre-release.
 - **Edge tunnel robustness** — ordered exec I/O, backpressure under load, and a
   dedicated test harness for the tunnel (auth hello, request fan-out, exec
-  sessions). Lands in v0.2.2.
-- **Reproducible base images** — pin runtime base images by digest with
-  automated update tracking.
+  sessions). Ongoing.
+- **Reproducible base images** — *shipped.* Both `Dockerfile` and
+  `Dockerfile.release` pin every base image by digest (`wolfi-base`, `alpine`,
+  `golang`), and Dependabot tracks the `docker` ecosystem weekly for updates.
 
 ## Later — toward `v1.0`
 
