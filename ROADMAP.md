@@ -43,9 +43,14 @@ over new surface area.
   `/api/portwing/ws` controller endpoint (Ed25519-only), so the agent can dial
   out and manage NAT'd / firewalled hosts with no inbound port. Both Drydock 1.5
   and the paired Portwing release are pre-release.
-- **Edge tunnel robustness** — ordered exec I/O, backpressure under load, and a
-  dedicated test harness for the tunnel (auth hello, request fan-out, exec
-  sessions). Ongoing.
+- **Edge tunnel robustness** — *shipped.* Ordered exec I/O (input that races
+  ahead of the Docker exec coming up is buffered in arrival order and replayed,
+  not dropped), outbound backpressure (a single writer goroutine fronts a
+  bounded send queue with a per-frame write deadline and evicts a controller
+  that can't keep up, so one slow consumer can't head-of-line-block every
+  session or stall the read pump), and a dedicated unit test harness for the
+  tunnel (auth hello, request fan-out, exec sessions) built on a consumer-side
+  Docker seam.
 - **Reproducible base images** — *shipped.* Both `Dockerfile` and
   `Dockerfile.release` pin every base image by digest (`wolfi-base`, `alpine`,
   `golang`), and Dependabot tracks the `docker` ecosystem weekly for updates.
