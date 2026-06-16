@@ -14,18 +14,42 @@ import (
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
+// execInputQueue bounds the per-session input backlog. Input is decoded on the
+// read loop and handed to a single writer goroutine, so this buffers the burst
+// that can arrive before the Docker exec is live (and any momentary write
+// stall) without ever blocking the read pump.
+const execInputQueue = 256
+
 // ExecSession represents an active exec session tunneled over WebSocket.
+//
+// Input ordering is the session's core invariant: a single inputWriter
+// goroutine drains inbox in arrival order, so keystrokes that race ahead of the
+// Docker exec coming up are buffered and replayed in order rather than dropped.
 type ExecSession struct {
 	execID      string
 	containerID string
-	conn        net.Conn
 	client      *Client
-	done        chan struct{}
-	once        sync.Once
+
+	// conn is the hijacked Docker exec stream. It is nil until the exec is
+	// brought up; readers synchronize through connReady (or the mu-guarded
+	// closed flag during teardown).
+	conn      net.Conn
+	connReady chan struct{} // closed once conn is live and ordered I/O may flow
+
+	// inbox carries decoded input in arrival order for inputWriter to drain.
+	inbox chan []byte
+
+	done chan struct{}
+	once sync.Once
+
+	mu     sync.Mutex
+	closed bool
 }
 
-// StartExec creates and starts a Docker exec session, then begins streaming
-// output back over the WebSocket.
+// StartExec registers the exec session synchronously, then brings the Docker
+// exec up asynchronously. Registering up front is what makes input ordered:
+// exec_input that arrives immediately after exec_start finds the session and is
+// queued, instead of racing the bring-up and being dropped.
 func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	// Check concurrent session limit.
 	var count int
@@ -43,15 +67,28 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		return
 	}
 
+	session := &ExecSession{
+		execID:      msg.ExecID,
+		containerID: msg.ContainerID,
+		client:      c,
+		connReady:   make(chan struct{}),
+		inbox:       make(chan []byte, execInputQueue),
+		done:        make(chan struct{}),
+	}
+	c.execSessions.Store(msg.ExecID, session)
+
+	go session.inputWriter()
+	go c.bringUpExec(ctx, msg, session)
+}
+
+// bringUpExec performs the Docker round-trips for an already-registered session
+// and, on success, wires the live connection and starts streaming.
+func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage, session *ExecSession) {
 	// Create exec instance.
 	execID, err := c.dockerClient.CreateExec(ctx, msg.ContainerID, msg.Cmd, msg.User, true)
 	if err != nil {
 		slog.Error("failed to create exec", "container", msg.ContainerID, "error", err)
-		// Best-effort error reply; connection loss will surface on the read pump.
-		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
-			ExecID: msg.ExecID,
-			Reason: fmt.Sprintf("create exec failed: %v", err),
-		})
+		session.failStart(fmt.Sprintf("create exec failed: %v", err))
 		return
 	}
 
@@ -59,11 +96,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	conn, err := c.dockerClient.StartExec(ctx, execID, true)
 	if err != nil {
 		slog.Error("failed to start exec", "execID", execID, "error", err)
-		// Best-effort error reply; connection loss will surface on the read pump.
-		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
-			ExecID: msg.ExecID,
-			Reason: fmt.Sprintf("start exec failed: %v", err),
-		})
+		session.failStart(fmt.Sprintf("start exec failed: %v", err))
 		return
 	}
 
@@ -74,17 +107,13 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		}
 	}
 
-	session := &ExecSession{
-		execID:      msg.ExecID,
-		containerID: msg.ContainerID,
-		conn:        conn,
-		client:      c,
-		done:        make(chan struct{}),
+	// Wire the connection. If the session was already torn down while we were
+	// bringing the exec up, activate closes the orphaned conn and we stop here.
+	if !session.activate(conn) {
+		return
 	}
 
-	c.execSessions.Store(msg.ExecID, session)
-
-	// Send exec_ready; best-effort — connection loss will surface on the read pump.
+	// Announce readiness; best-effort — connection loss surfaces on the read pump.
 	_ = c.sendTypedMessage(protocol.TypeExecReady, protocol.ExecReadyMessage{
 		ExecID: msg.ExecID,
 	})
@@ -93,7 +122,9 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	go session.readLoop()
 }
 
-// HandleInput writes decoded input data to an active exec session.
+// HandleInput decodes input and enqueues it for ordered delivery. The enqueue
+// is non-blocking: the read pump must keep servicing pings and other sessions,
+// so a full queue drops the input with a warning rather than stalling.
 func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 	val, ok := c.execSessions.Load(msg.ExecID)
 	if !ok {
@@ -109,18 +140,54 @@ func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 		return
 	}
 
-	// Write with retry (up to 10 attempts, 50ms intervals).
-	for attempt := 0; attempt < 10; attempt++ {
-		_, err := session.conn.Write(data)
-		if err == nil {
-			return
-		}
-		slog.Debug("exec write retry", "execID", msg.ExecID, "attempt", attempt+1, "error", err)
-		time.Sleep(50 * time.Millisecond)
+	select {
+	case session.inbox <- data:
+	case <-session.done:
+		slog.Debug("exec input for closed session", "execID", msg.ExecID)
+	default:
+		slog.Warn("exec input queue full, dropping", "execID", msg.ExecID)
+	}
+}
+
+// inputWriter is the session's single input writer. It waits for the exec to go
+// live, then drains inbox in order, writing each chunk to the connection. Being
+// the only writer is what guarantees input ordering.
+func (s *ExecSession) inputWriter() {
+	select {
+	case <-s.connReady:
+	case <-s.done:
+		return
 	}
 
-	slog.Warn("failed to write exec input after retries", "execID", msg.ExecID)
-	session.Close()
+	for {
+		select {
+		case data := <-s.inbox:
+			s.writeInput(data)
+		case <-s.done:
+			return
+		}
+	}
+}
+
+// writeInput writes one chunk to the exec connection, retrying transient
+// failures (up to 10 attempts, 50ms apart). A session that can't be written to
+// is closed.
+func (s *ExecSession) writeInput(data []byte) {
+	for attempt := 0; attempt < 10; attempt++ {
+		if _, err := s.conn.Write(data); err == nil {
+			return
+		} else {
+			slog.Debug("exec write retry", "execID", s.execID, "attempt", attempt+1, "error", err)
+		}
+		select {
+		case <-s.done:
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	slog.Warn("failed to write exec input after retries", "execID", s.execID)
+	s.Close()
 }
 
 // HandleResize changes the TTY dimensions for an active exec session.
@@ -157,6 +224,36 @@ func (c *Client) EndExec(msg protocol.ExecEndMessage) {
 
 	session := val.(*ExecSession)
 	session.Close()
+}
+
+// activate wires the live connection and unblocks inputWriter. It returns false
+// if the session was already closed during bring-up, in which case the caller
+// must not start the read loop and activate has closed the orphaned conn.
+func (s *ExecSession) activate(conn net.Conn) bool {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		if err := conn.Close(); err != nil {
+			slog.Debug("closing orphaned exec conn", "exec_id", s.execID, "error", err)
+		}
+		return false
+	}
+	s.conn = conn
+	s.mu.Unlock()
+
+	close(s.connReady)
+	return true
+}
+
+// failStart tears the session down and reports a terminal exec_end. It closes
+// first so the session is deregistered before the controller sees the failure.
+func (s *ExecSession) failStart(reason string) {
+	s.Close()
+	// Best-effort error reply; connection loss will surface on the read pump.
+	_ = s.client.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+		ExecID: s.execID,
+		Reason: reason,
+	})
 }
 
 // readLoop reads output from the exec session's connection and sends it back
@@ -209,11 +306,21 @@ func (s *ExecSession) readLoop() {
 	}
 }
 
-// Close shuts down the exec session. It is safe to call multiple times.
+// Close shuts down the exec session. It is safe to call multiple times and
+// safe to race against bring-up: it records the closed state under mu and
+// closes whatever connection is currently wired (none, if the exec never went
+// live).
 func (s *ExecSession) Close() {
 	s.once.Do(func() {
-		if err := s.conn.Close(); err != nil {
-			slog.Debug("closing exec session", "exec_id", s.execID, "error", err)
+		s.mu.Lock()
+		s.closed = true
+		conn := s.conn
+		s.mu.Unlock()
+
+		if conn != nil {
+			if err := conn.Close(); err != nil {
+				slog.Debug("closing exec session", "exec_id", s.execID, "error", err)
+			}
 		}
 		close(s.done)
 		s.client.execSessions.Delete(s.execID)

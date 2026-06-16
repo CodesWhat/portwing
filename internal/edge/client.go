@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -35,7 +36,29 @@ const (
 	maxResponseBody = 100 * 1024 * 1024 // 100 MB — proxied response body cap
 	maxExecSessions = 100               // concurrent exec sessions
 	maxStreams      = 100               // concurrent in-flight tunneled requests
+
+	// sendQueueSize bounds outbound frames buffered for the sendPump. A full
+	// queue means the controller can't keep up, so the connection is evicted
+	// (slow-consumer backpressure) rather than letting the backlog grow.
+	sendQueueSize = 256
+	// writeWait bounds a single WebSocket write. A controller that can't accept
+	// a frame within this window is treated as wedged and the connection is
+	// evicted, instead of blocking the writer forever.
+	writeWait = 10 * time.Second
 )
+
+// dockerAPI is the subset of *docker.Client the edge Client depends on. It is
+// defined on the consumer side so the tunnel's exec sessions and the request
+// fan-out can be exercised against a fake Docker daemon without a live socket.
+// *docker.Client satisfies it structurally.
+type dockerAPI interface {
+	GetVersion(ctx context.Context) (string, error)
+	Do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error)
+	DoStream(ctx context.Context, method, path string, body io.Reader) (*http.Response, error)
+	CreateExec(ctx context.Context, containerID string, cmd []string, user string, tty bool) (string, error)
+	StartExec(ctx context.Context, execID string, tty bool) (net.Conn, error)
+	ResizeExec(ctx context.Context, execID string, cols, rows int) error
+}
 
 // edgeMessageSender wraps the edge Client to implement adapter.MessageSender.
 type edgeMessageSender struct {
@@ -50,7 +73,7 @@ func (s *edgeMessageSender) SendTypedMessage(msgType string, data interface{}) e
 // and tunnels Docker API requests over the WebSocket.
 type Client struct {
 	cfg          *config.Config
-	dockerClient *docker.Client
+	dockerClient dockerAPI
 	adapter      adapter.EdgeAdapter
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
@@ -58,6 +81,13 @@ type Client struct {
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
+
+	// sendCh fronts all post-handshake writes with a single sendPump goroutine,
+	// so a slow controller backs up here instead of head-of-line-blocking every
+	// sender or stalling the read pump. It is nil outside an active connection;
+	// the hello/welcome handshake writes the conn directly (no concurrent
+	// writer exists yet). Guarded by connMu alongside conn.
+	sendCh chan protocol.Envelope
 
 	execSessions sync.Map
 
@@ -230,6 +260,25 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 
 	slog.Info("connected to controller")
 
+	pumpCtx, pumpCancel := context.WithCancel(ctx)
+	defer pumpCancel()
+
+	var wg sync.WaitGroup
+
+	// Bring the outbound send path up before any post-handshake send, so the
+	// adapter sync, metrics, and every pump funnel through the single sendPump
+	// (the only writer) instead of writing the conn concurrently.
+	sendCh := make(chan protocol.Envelope, sendQueueSize)
+	c.connMu.Lock()
+	c.sendCh = sendCh
+	c.connMu.Unlock()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.sendPump(pumpCtx, conn, sendCh)
+	}()
+
 	// Let adapter handle initial sync (container sync, component sync, etc.).
 	sender := &edgeMessageSender{client: c}
 	if err := c.adapter.OnConnect(ctx, sender); err != nil {
@@ -240,10 +289,6 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	c.sendMetrics()
 
 	// Run pumps.
-	pumpCtx, pumpCancel := context.WithCancel(ctx)
-	defer pumpCancel()
-
-	var wg sync.WaitGroup
 	wg.Add(2)
 
 	var readErr error
@@ -266,6 +311,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		closeWebSocket(c.conn, "connection loop end")
 		c.conn = nil
 	}
+	c.sendCh = nil
 	c.connMu.Unlock()
 
 	// Reaching here means the welcome handshake succeeded, so the connection
@@ -421,7 +467,11 @@ func (c *Client) readPump(ctx context.Context) error {
 				continue
 			}
 			c.auditor.ExecStart(c.cfg.DrydockURL, msg.ContainerID, msg.ExecID)
-			go c.StartExec(ctx, msg)
+			// Synchronous: StartExec only registers the session and spawns the
+			// Docker bring-up, so it returns immediately. Registering before the
+			// next message is dispatched is what keeps a following exec_input
+			// from racing the bring-up and being dropped (ordered exec I/O).
+			c.StartExec(ctx, msg)
 
 		case protocol.TypeExecInput:
 			var msg protocol.ExecInputMessage
@@ -621,17 +671,74 @@ func (c *Client) sendTypedMessage(msgType string, data interface{}) error {
 	return nil
 }
 
-// sendMessage performs a thread-safe WebSocket write.
+// sendMessage hands an envelope to the sendPump. The enqueue is non-blocking:
+// sendMessage runs on the read-pump goroutine for pongs and rejections, so it
+// must never block. A full queue means the controller can't keep up — the
+// connection is evicted (and Run reconnects) rather than dropping frames, which
+// would hang a request or corrupt a stream.
+//
+// Before the send path is up (the hello/welcome handshake), sendCh is nil and
+// the frame is written directly — no concurrent writer exists yet.
 func (c *Client) sendMessage(env protocol.Envelope) {
 	c.connMu.Lock()
-	defer c.connMu.Unlock()
+	ch := c.sendCh
+	conn := c.conn
+	c.connMu.Unlock()
 
-	if c.conn == nil {
+	if ch == nil {
+		// Handshake phase: synchronous direct write, provably single-writer.
+		if conn == nil {
+			return
+		}
+		_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+		if err := conn.WriteJSON(env); err != nil {
+			slog.Warn("websocket write failed", "type", env.Type, "error", err)
+		}
 		return
 	}
 
-	if err := c.conn.WriteJSON(env); err != nil {
-		slog.Warn("websocket write failed", "type", env.Type, "error", err)
+	select {
+	case ch <- env:
+	default:
+		c.failConn("send queue full")
+	}
+}
+
+// sendPump is the sole writer to the WebSocket once a connection is up.
+// Fronting every send with one goroutine and a bounded queue is the tunnel's
+// outbound backpressure: a slow controller backs up sendCh instead of
+// head-of-line-blocking every sender or stalling the read pump, and a write
+// that can't complete within writeWait evicts the connection rather than
+// blocking forever.
+func (c *Client) sendPump(ctx context.Context, conn *websocket.Conn, sendCh chan protocol.Envelope) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case env := <-sendCh:
+			if err := conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				c.failConn("set write deadline failed")
+				return
+			}
+			if err := conn.WriteJSON(env); err != nil {
+				slog.Warn("websocket write failed", "type", env.Type, "error", err)
+				c.failConn("write failed")
+				return
+			}
+		}
+	}
+}
+
+// failConn evicts the active WebSocket. Closing it unblocks the read pump with
+// an error, which tears the pumps down and lets Run reconnect with backoff.
+// Safe to call from any goroutine and more than once.
+func (c *Client) failConn(reason string) {
+	c.connMu.Lock()
+	conn := c.conn
+	c.connMu.Unlock()
+	if conn != nil {
+		slog.Warn("evicting controller connection", "reason", reason)
+		closeWebSocket(conn, reason)
 	}
 }
 
