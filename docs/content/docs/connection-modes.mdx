@@ -109,7 +109,7 @@ Setting only `TOKEN_HASH` with `DRYDOCK_URL` is explicitly rejected at startup â
 
 On each connection attempt the agent:
 
-1. Opens a WebSocket to `DRYDOCK_URL/api/portwing/ws` using the `portwing/1.0` sub-protocol.
+1. Opens a WebSocket to `DRYDOCK_URL/api/portwing/ws` and identifies itself with the `portwing/1.0` protocol string carried in its `hello` message â€” an application-level identifier, not a negotiated `Sec-WebSocket-Protocol` sub-protocol header.
 2. Sends a `hello` message containing its agent ID, name, capabilities, Docker version, and a credential. When `PRIVATE_KEY_FILE` is configured the hello is Ed25519-signed (see [Authentication](/authentication)); otherwise the token SHA-256 hash is included.
 3. Waits up to `WELCOME_TIMEOUT` seconds for the controller's `welcome` response.
 4. On success, sends an initial container inventory (`dd:container_sync`), component descriptors (`dd:component_sync`), and host metrics.

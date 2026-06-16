@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Renamed to Portwing** (formerly Lookout): the project name, Go module path (`github.com/codeswhat/portwing`), binary, Docker image, and every `lookout`-prefixed identifier are now `portwing`. **Breaking for anyone running a pre-release build:** the auth header `X-Lookout-Token` is now `X-Portwing-Token` (and the Ed25519 request headers `X-Lookout-Key-ID` / `-Timestamp` / `-Nonce` / `-Signature` are now `X-Portwing-*`), and the Prometheus metrics are renamed from `lookout_*` to `portwing_*` — update any clients, scrapers, dashboards, and alert rules accordingly. There is no backward-compatible alias.
 - **Release pipeline**: pin GoReleaser to the `~> v2` major line (was `latest`) in both the release workflow and the CI config-check job, so neither can silently jump to a future GoReleaser v3 and to clear the action's "using 'latest' as default version" advisory.
 
 ### Fixed
@@ -42,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Streaming through auth middleware**: response body flushing and WebSocket hijack now work correctly when wrapped by the auth middleware chain (`statusRecorder` forwards `Flush` and `Hijack`).
-- **Version injection**: GoReleaser ldflags now correctly set `protocol.AgentVersion` and `protocol.Commit` at build time.
+- **Version injection**: GoReleaser ldflags now correctly set `protocol.AgentVersion` at build time.
 
 ## [0.1.0] - 2025-06-01
 

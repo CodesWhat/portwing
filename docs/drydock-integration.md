@@ -77,14 +77,16 @@ sequenceDiagram
     participant L as Portwing (edge client)
     participant D as Drydock controller
     L->>D: WSS /api/portwing/ws
-    L->>D: hello {version, protocol, agentId, agentName, tokenHash,<br/>dockerVersion, capabilities, drydockCompat, watcherTypes}
+    L->>D: hello {version, protocol, agentId, agentName, pubKeyId,<br/>timestamp, nonce, signature, dockerVersion,<br/>capabilities, drydockCompat, watcherTypes}
     D->>L: welcome {pollInterval: 300}
     L->>D: dd:container_sync {containers: [...]}
     L->>D: dd:component_sync {watchers: [...], triggers: []}
     L->>D: metrics {...}
 ```
 
-The full `hello` payload (exact field set) is in [SPEC.md §3.2](../SPEC.md#32-hello-message).
+The edge-mode hello is Ed25519-signed (`pubKeyId`/`timestamp`/`nonce`/`signature`); the controller endpoint is Ed25519-only and rejects token-hash hellos. The full `hello` payload (exact field set) is in [SPEC.md §3.2](../SPEC.md#32-hello-message).
+
+> **Drydock version:** the `/api/portwing/ws` controller endpoint and the `portwing/1.0` protocol string require a Drydock build that ships them. Drydock 1.5 is the first controller release with this endpoint, so edge mode needs Drydock 1.5+; older controllers do not expose it.
 
 ---
 
@@ -138,7 +140,7 @@ Portwing sends:
 }
 ```
 
-Note: `memoryGb` is 0 on Portwing 0.2.1 and earlier (cgo/sysinfo omitted); Drydock accepts 0. A later release reports real memory on Linux via `/proc/meminfo` (still no cgo).
+Note: `memoryGb` is 0 on Portwing 0.2.0 and earlier (cgo/sysinfo omitted); Drydock accepts 0. A later release reports real memory on Linux via `/proc/meminfo` (still no cgo).
 
 ### `dd:container-added` / `dd:container-updated`
 

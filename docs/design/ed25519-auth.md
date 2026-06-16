@@ -178,18 +178,18 @@ The edge client (runs inside Docker, initiates an outbound WebSocket to the cont
 
 #### Phase 1: Signed Hello
 
-The `HelloMessage` gains an optional `pubKeyID`, `timestamp`, `nonce`, and `signature` field. The client signs the same canonical string as for HTTP, using the WebSocket upgrade URL path and an empty body hash.
+The `HelloMessage` gains an optional `pubKeyId`, `timestamp`, `nonce`, and `signature` field. The client signs the same canonical string as for HTTP, using the WebSocket upgrade URL path and an empty body hash.
 
 ```json
 {
   "type": "hello",
   "data": {
     "version": "0.2.0",
-    "protocol": "portwing/1",
+    "protocol": "portwing/1.0",
     "agentId": "...",
     "agentName": "prod-worker-01",
     "tokenHash": "",
-    "pubKeyID": "4a3f2b1c9d8e7f6a",
+    "pubKeyId": "4a3f2b1c9d8e7f6a",
     "timestamp": 1749600000,
     "nonce": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
     "signature": "d2hhdCBhIGRheSB0byBiZSBhbGl2ZQ",
@@ -357,7 +357,7 @@ Wire example (edge hello with Ed25519, no token):
   "type": "hello",
   "data": {
     "version": "0.2.0",
-    "protocol": "portwing/1",
+    "protocol": "portwing/1.0",
     "agentId": "3e4a5b6c-7d8e-9f0a-b1c2-d3e4f5a6b7c8",
     "agentName": "prod-worker-01",
     "pubKeyId": "4a3f2b1c9d8e7f6a",
