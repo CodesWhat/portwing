@@ -16,7 +16,7 @@
 # Wolfi rootfs — amd64 and arm64 share one recipe; buildx pulls the per-arch
 # wolfi-base via --platform, so the arm64 build of this stage installs arm64
 # packages even though the stage is named "-amd64".
-FROM cgr.dev/chainguard/wolfi-base:latest AS rootfs-amd64
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb AS rootfs-amd64
 RUN apk add --no-cache --initdb --root /out \
       --repository https://packages.wolfi.dev/os \
       --keys-dir /etc/apk/keys \
@@ -30,7 +30,7 @@ FROM rootfs-amd64 AS rootfs-arm64
 # Alpine rootfs — armv7 only (Wolfi has no armv7). The branch (vMAJOR.MINOR) is
 # derived from the base image so the FROM tag is the single source of truth for
 # the version: Dependabot bumps the tag and the repositories follow.
-FROM alpine:3.24 AS rootfs-arm
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS rootfs-arm
 RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
  && apk add --no-cache --initdb --root /out \
       --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
