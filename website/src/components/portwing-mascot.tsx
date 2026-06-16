@@ -6,13 +6,10 @@ import { useEffect, useState } from "react";
 // PortwingMascot replaces the ecosystem's stock `animate-wiggle` with a
 // purpose-built "lean in and peer" loop: the pigeon cranes up and scales
 // toward the viewer (transform-origin at its feet, so the top stretches up
-// and the eyes get closer), then — at full size — swaps to the eyes-closed
-// blink frame a few times before settling back down.
+// and the eyes get closer), then settles back down.
 //
-// Both frames are rendered stacked and cross-faded via opacity so neither
-// has to lazy-load mid-blink (no flash on the first blink). The whole thing
-// is gated behind prefers-reduced-motion: reduce → it just sits there, eyes
-// open, no transform.
+// The whole thing is gated behind prefers-reduced-motion: reduce → it just
+// sits there, no transform.
 
 type Props = {
   size?: number;
@@ -21,7 +18,6 @@ type Props = {
 
 export function PortwingMascot({ size = 168, className }: Props) {
   const [big, setBig] = useState(false);
-  const [eyes, setEyes] = useState<"open" | "blink">("open");
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -42,17 +38,8 @@ export function PortwingMascot({ size = 168, className }: Props) {
       await wait(1400);
       while (!cancelled) {
         setBig(true); // lean in / scale up
-        await wait(720); // let the crane-up settle before blinking
+        await wait(1100); // hold at full size before settling
         if (cancelled) break;
-
-        for (let i = 0; i < 3 && !cancelled; i++) {
-          setEyes("blink");
-          await wait(150);
-          setEyes("open");
-          await wait(170);
-        }
-
-        await wait(140);
         setBig(false); // settle back down
         await wait(620 + 2600); // return + rest before the next peer
       }
@@ -67,7 +54,6 @@ export function PortwingMascot({ size = 168, className }: Props) {
   return (
     <div
       className={`portwing-mascot ${big ? "is-big" : ""} ${className ?? ""}`}
-      data-eyes={eyes}
       style={{ width: size, height: size }}
     >
       <Image
@@ -77,15 +63,6 @@ export function PortwingMascot({ size = 168, className }: Props) {
         height={size}
         priority
         className="lk-frame lk-open"
-      />
-      <Image
-        src="/portwing-blink.png"
-        alt=""
-        aria-hidden="true"
-        width={size}
-        height={size}
-        priority
-        className="lk-frame lk-blink"
       />
     </div>
   );
