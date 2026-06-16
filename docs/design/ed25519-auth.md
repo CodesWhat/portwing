@@ -184,7 +184,7 @@ The `HelloMessage` gains an optional `pubKeyId`, `timestamp`, `nonce`, and `sign
 {
   "type": "hello",
   "data": {
-    "version": "0.2.0",
+    "version": "0.3.0",
     "protocol": "portwing/1.0",
     "agentId": "...",
     "agentName": "prod-worker-01",
@@ -356,7 +356,7 @@ Wire example (edge hello with Ed25519, no token):
 {
   "type": "hello",
   "data": {
-    "version": "0.2.0",
+    "version": "0.3.0",
     "protocol": "portwing/1.0",
     "agentId": "3e4a5b6c-7d8e-9f0a-b1c2-d3e4f5a6b7c8",
     "agentName": "prod-worker-01",

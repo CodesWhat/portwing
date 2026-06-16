@@ -140,7 +140,7 @@ Portwing sends:
 }
 ```
 
-Note: `memoryGb` is 0 on Portwing 0.2.0 and earlier (cgo/sysinfo omitted); Drydock accepts 0. A later release reports real memory on Linux via `/proc/meminfo` (still no cgo).
+Note: `memoryGb` is 0 on Portwing 0.3.0 and earlier (cgo/sysinfo omitted); Drydock accepts 0. A later release reports real memory on Linux via `/proc/meminfo` (still no cgo).
 
 ### `dd:container-added` / `dd:container-updated`
 
