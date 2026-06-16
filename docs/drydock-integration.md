@@ -277,7 +277,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `dd:update-operation-changed` SSE | N-A | Same |
 | `dd:batch-update-completed` SSE | N-A | Same |
 | `dd:security-alert` / `dd:security-scan-cycle-complete` SSE | N-A | Portwing does not perform security scanning |
-| Edge Mode WebSocket (`/api/portwing/ws`) | IMPLEMENTED (Drydock 1.5) | Portwing: `edge/client.go` + Ed25519 hello; Drydock: `app/api/portwing-ws.ts` (Ed25519-only). Requires Drydock 1.5 + Portwing 0.2.2 (pre-release) |
+| Edge Mode WebSocket (`/api/portwing/ws`) | IMPLEMENTED (Drydock 1.5) | Portwing: `edge/client.go` + Ed25519 hello; Drydock: `app/api/portwing-ws.ts` (Ed25519-only). Requires Drydock 1.5+ and Portwing 0.3.0+ (early access) |
 
 ---
 
