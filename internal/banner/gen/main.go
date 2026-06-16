@@ -88,7 +88,7 @@ func main() {
 		body.WriteString(ln)
 		body.WriteByte('\n')
 	}
-	if err := os.WriteFile(*out, []byte(body.String()), 0o644); err != nil { //nolint:gosec // generated asset, world-readable is intended
+	if err := os.WriteFile(*out, []byte(body.String()), 0o644); err != nil { // #nosec G306 -- generated banner asset; world-readable (0644) is intended
 		fatal(err)
 	}
 	fmt.Fprintf(os.Stderr, "wrote %s (%d rows × %d cols) from %s\n", *out, len(lines), cols, *src)

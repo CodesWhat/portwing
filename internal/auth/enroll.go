@@ -150,13 +150,21 @@ func remoteHost(r *http.Request) string {
 
 // appendKeyLine appends a single key line to the authorized_keys file,
 // creating it (mode 0600) if it does not exist.
-func appendKeyLine(path, line string) error {
+func appendKeyLine(path, line string) (err error) {
 	// #nosec G304 -- authorized_keys path is explicit operator configuration.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening authorized_keys for append: %w", err)
 	}
-	defer f.Close()
-	_, err = fmt.Fprintln(f, line)
-	return err
+	defer func() {
+		// Surface a deferred close error (e.g. a flush failure on the write)
+		// so a partially written key line isn't reported as success.
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("closing authorized_keys: %w", cerr)
+		}
+	}()
+	if _, err = fmt.Fprintln(f, line); err != nil {
+		return fmt.Errorf("writing authorized_keys: %w", err)
+	}
+	return nil
 }
