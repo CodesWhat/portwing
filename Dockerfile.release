@@ -1,13 +1,22 @@
-# Release image assembled by GoReleaser from the prebuilt `portwing` binary.
-# (For a from-source build use the top-level Dockerfile instead.)
+# Release image assembled by GoReleaser (dockers_v2) from the prebuilt
+# `portwing` binaries — one image per target platform from this single
+# Dockerfile. (For a from-source build use the top-level Dockerfile instead.)
 #
-# Wolfi (Chainguard) packages are installed into a staging rootfs, then copied
-# into a FROM scratch final image: CVE-minimal, no package manager in the
-# runtime (the apk *binary* never reaches the final stage), yet the apk
-# database is retained so vulnerability scanners and SBOM tools can still
-# inventory the OS packages. GoReleaser provides the per-arch `portwing` binary
-# in the build context; buildx selects the target arch via --platform.
-FROM cgr.dev/chainguard/wolfi-base:latest AS rootfs
+# Runtime packages come from Wolfi (Chainguard) on amd64/arm64 and from Alpine
+# on armv7 — Wolfi has no armv7. buildx selects the per-arch base via the
+# predefined TARGETARCH arg. Both arches use the same staging-rootfs → FROM
+# scratch approach: packages install into /out, which the final scratch image
+# copies in, so the apk *binary* never reaches the runtime (CVE-minimal, no
+# package manager) while the apk database is retained for vuln scanners / SBOM.
+#
+# GoReleaser stages the per-platform binary under $TARGETPLATFORM/portwing in
+# the build context (linux/amd64/portwing, linux/arm64/portwing,
+# linux/arm/v7/portwing).
+
+# Wolfi rootfs — amd64 and arm64 share one recipe; buildx pulls the per-arch
+# wolfi-base via --platform, so the arm64 build of this stage installs arm64
+# packages even though the stage is named "-amd64".
+FROM cgr.dev/chainguard/wolfi-base:latest AS rootfs-amd64
 RUN apk add --no-cache --initdb --root /out \
       --repository https://packages.wolfi.dev/os \
       --keys-dir /etc/apk/keys \
@@ -16,12 +25,35 @@ RUN apk add --no-cache --initdb --root /out \
  && echo 'portwing:x:65532:' >> /out/etc/group \
  && rm -rf /out/var/cache/apk/*
 
-# Final image: Wolfi rootfs plus the prebuilt binary. No USER directive — the
+FROM rootfs-amd64 AS rootfs-arm64
+
+# Alpine rootfs — armv7 only (Wolfi has no armv7). The branch (vMAJOR.MINOR) is
+# derived from the base image so the FROM tag is the single source of truth for
+# the version: Dependabot bumps the tag and the repositories follow.
+FROM alpine:3.24 AS rootfs-arm
+RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
+ && apk add --no-cache --initdb --root /out \
+      --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
+      --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community" \
+      --keys-dir /etc/apk/keys \
+      ca-certificates busybox docker-cli docker-cli-compose wget \
+ && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >> /out/etc/passwd \
+ && echo 'portwing:x:65532:' >> /out/etc/group \
+ && rm -rf /out/var/cache/apk/*
+
+# Select the rootfs by target arch. TARGETARCH is a buildx-predefined global arg
+# (amd64 / arm64 / arm) usable directly in FROM without an explicit ARG.
+FROM rootfs-${TARGETARCH} AS rootfs
+
+# Final image: selected rootfs plus the prebuilt binary. No USER directive — the
 # agent runs as root by default so it can reach the host Docker socket; drop to
 # UID 65532 at deploy time (see examples/ and SECURITY.md).
 FROM scratch
 COPY --from=rootfs /out /
-COPY portwing /usr/bin/portwing
+# TARGETPLATFORM is a global-scope predefined arg; redeclare it inside this
+# stage so the COPY below can resolve the per-platform binary subdirectory.
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/portwing /usr/bin/portwing
 
 VOLUME /data/stacks
 EXPOSE 3000
