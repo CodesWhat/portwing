@@ -18,6 +18,7 @@ import (
 	"github.com/codeswhat/portwing/internal/adapter/drydock"
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/auth"
+	"github.com/codeswhat/portwing/internal/banner"
 	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/edge"
@@ -43,6 +44,12 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	banner.Render(os.Stderr, banner.Info{
+		Version: protocol.AgentVersion,
+		Mode:    modeString(cfg),
+		Adapter: cfg.Adapter,
+	})
 
 	applog.SetupLogger(cfg.LogLevel)
 
