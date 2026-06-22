@@ -93,3 +93,10 @@ ignore:
       version: v28.5.2+incompatible
       type: go-module
       location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-4610
+    reason: "Windows-only Docker CLI plugin search path issue embedded in Wolfi docker-compose binary; Portwing image is Linux. Review by 2026-07-15."
+    package:
+      name: github.com/docker/cli
+      version: v29.5.1+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
