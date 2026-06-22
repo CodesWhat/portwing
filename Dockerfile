@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwin
 
 # Stage 2: Assemble the Wolfi runtime rootfs (CVE-minimal, no package manager
 # in the final image; the apk database is retained for scanners/SBOM).
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb AS rootfs
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:e161445c05b19e668cb5cc44df2f0403329fd4f0ac892794255e328e760612a1 AS rootfs
 RUN apk add --no-cache --initdb --root /out \
       --repository https://packages.wolfi.dev/os \
       --keys-dir /etc/apk/keys \
