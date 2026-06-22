@@ -107,8 +107,9 @@ jobs:
           push: false
           load: true
           tags: portwing:grype-scan
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Keep the vulnerability scan honest: cached apk-install layers can
+          # preserve stale distro packages after Wolfi publishes fixes.
+          no-cache: true
 
       - name: Run Grype vulnerability scanner
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0

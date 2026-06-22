@@ -161,10 +161,12 @@ func writeInspect(w http.ResponseWriter, id string) {
 // writeLogs writes a single Docker-multiplexed stdout frame: an 8-byte header
 // (stream byte + 3 pad + big-endian payload length) followed by the payload.
 func writeLogs(w http.ResponseWriter) {
-	payload := []byte("soak log line\n")
+	const logPayload = "soak log line\n"
+	const logPayloadLen = uint32(len(logPayload))
+	payload := []byte(logPayload)
 	header := make([]byte, 8)
 	header[0] = 1 // stdout
-	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
+	binary.BigEndian.PutUint32(header[4:8], logPayloadLen)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	_, _ = w.Write(header)
 	_, _ = w.Write(payload)
