@@ -1,11 +1,11 @@
 # Portwing Roadmap
 
-> Portwing is **alpha** software (`v0.3.x`). This roadmap describes direction and
+> Portwing is **alpha** software (`v0.4.x`). This roadmap describes direction and
 > priorities — not commitments. Items and ordering may change between releases.
 > For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
 
-## Now — `v0.3.x` (hardening the alpha)
+## Now — `v0.4.x` (hardening the alpha)
 
 The current line prioritizes production-readiness of the existing feature set
 over new surface area.
