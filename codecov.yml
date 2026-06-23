@@ -1,0 +1,33 @@
+# Codecov configuration for portwing.
+#
+# Coverage comes from the CI "Build & Test" job, which runs
+#   go test -race -coverprofile=coverage.out ./...
+# and uploads coverage.out via codecov/codecov-action.
+#
+# Philosophy: portwing already gates correctness through race tests, fuzzing,
+# and weekly soak runs. Codecov adds a coverage ratchet on top — the project
+# total may not regress, and new code in a PR must be meaningfully covered.
+# Unit coverage intentionally excludes the fuzz/soak/integration tiers, so the
+# absolute number is a floor, not the whole story.
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto      # never drop below the current project coverage…
+        threshold: 1%      # …with a 1% wobble for race/timing flakiness
+    patch:
+      default:
+        target: 80%        # new/changed lines in a PR must be ≥80% covered
+
+comment:
+  layout: "reach, diff, flags, files"
+  require_changes: true     # only comment when coverage actually moves
+
+# Paths excluded from coverage accounting. These are either not unit-tested by
+# design (load generators, example manifests) or test scaffolding itself.
+ignore:
+  - "benchmarks/**"
+  - "examples/**"
+  - "**/*_test.go"
+  - "**/testdata/**"
