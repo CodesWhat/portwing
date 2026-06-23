@@ -266,7 +266,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 - **Key enrollment** — optional single-use `ENROLLMENT_TOKEN` (`POST /api/portwing/enroll`) for bootstrapping the first Ed25519 key — burned on first use, rate-limited, and audit-logged.
 - **Argon2id token hashing** — `TOKEN_HASH` / `TOKEN_HASH_FILE` with OWASP-recommended parameters; SHA-256 success cache keeps per-request cost flat.
 - **MCP server** — read-only Model Context Protocol endpoint at `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25) for AI assistants (Claude, Cursor, Windsurf). Tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`.
-- **Prometheus metrics** — `/metrics` and `/_portwing/metrics` exposing `portwing_build_info`, container count, and host resource metrics.
+- **Prometheus metrics** — `/metrics` and `/_portwing/metrics` exposing `portwing_build_info`, container count, and host resource metrics, plus agent request metrics: request totals by method/code (`portwing_http_requests_total`), a request-duration histogram (`portwing_http_request_duration_seconds`), in-flight gauge (`portwing_http_requests_in_flight`), auth-failure counter (`portwing_auth_failures_total`), and rate-limited counter (`portwing_rate_limited_total`).
 - **Structured audit logging** — `AUDIT_LOG` env var records auth events, Compose operations, and exec sessions as JSON lines.
 - **Generic REST adapter** — headless REST + SSE management API for standalone mode without a Drydock platform connection (`ADAPTER=generic`).
 - **Hardened CI & supply chain** — SHA-pinned actions, five Go fuzz targets (60s CI / 5m nightly), integration suite against a real Docker daemon, weekly vulnerability scans (govulncheck/grype/gosec), monthly mutation testing, OpenSSF Scorecard, CodeQL, and cosign keyless signing + CycloneDX SBOM + SLSA provenance on every release.
@@ -529,6 +529,7 @@ the connection alive through proxies.
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `SKIP_DF_COLLECTION` | -- | Disable disk metrics |
 | `AUDIT_LOG` | -- | Audit log sink: `stdout`, `stderr`, or a file path; unset disables auditing |
+| `AUDIT_BUFFER_SIZE` | `256` | In-memory audit records retained for `GET /_portwing/audit`; `0` disables. Independent of `AUDIT_LOG`. |
 
 ### Adapter
 
@@ -572,6 +573,7 @@ and Docker HEALTHCHECK instructions.
 | `/_portwing/compose` | POST | Yes | Docker Compose operations |
 | `/_portwing/metrics` | GET | Yes | Prometheus metrics (agent-scoped) |
 | `/metrics` | GET | Yes | Prometheus metrics (Drydock agent secret) |
+| `/_portwing/audit` | GET | Yes | Recent audit records (JSON, newest-first; `?limit=N`) |
 | `/_portwing/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol 2025-11-25) |
 
 ### MCP — AI Assistant Integration
@@ -660,7 +662,7 @@ All other paths (`/*`) are transparently proxied to the Docker Engine API, inclu
 ### Metrics
 
 Portwing exposes Prometheus metrics at `/_portwing/metrics` (and the alias
-`/metrics`). Both require bearer auth.
+`/metrics`). Both require bearer auth. In addition to build/host/per-container series, both endpoints also expose agent request metrics: `portwing_http_requests_total{method,code}`, `portwing_http_request_duration_seconds` (histogram), `portwing_http_requests_in_flight` (gauge), `portwing_auth_failures_total{reason}`, and `portwing_rate_limited_total`.
 
 Prometheus scrape config:
 
@@ -812,7 +814,7 @@ docker run -e AUDIT_LOG=/var/log/portwing-audit.log ...
 docker run -e AUDIT_LOG=stdout ...
 ```
 
-Auditing is disabled by default (`AUDIT_LOG` unset). When disabled the overhead is a single nil pointer check per request.
+Auditing is disabled by default (`AUDIT_LOG` unset). When disabled the overhead is a single nil pointer check per request. Separately, setting `AUDIT_BUFFER_SIZE` (default 256) keeps the most recent audit records in an in-memory ring buffer for pull-based retrieval at `GET /_portwing/audit` (auth required), so a controller can read the audit trail without host file access. The buffer is independent of `AUDIT_LOG` and works even when the slog sink is off.
 
 ### Events
 
