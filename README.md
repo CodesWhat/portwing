@@ -45,6 +45,7 @@
   <br>
   <a href="https://goreportcard.com/report/github.com/codeswhat/portwing"><img src="https://goreportcard.com/badge/github.com/codeswhat/portwing" alt="Go Report Card"></a>
   <a href="https://pkg.go.dev/github.com/codeswhat/portwing"><img src="https://pkg.go.dev/badge/github.com/codeswhat/portwing.svg" alt="Go Reference"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-69%25-yellow?logo=go&logoColor=white" alt="Coverage"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/portwing"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/portwing?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
 </p>
 
