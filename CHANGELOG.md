@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Coverage reporting moved from Codecov to Qlty Cloud.** Part of the org-wide consolidation onto Qlty (one vendor for code quality and coverage). CI now publishes the Go coverprofile to Qlty Cloud via GitHub OIDC — no stored coverage token — and enforces a vendor-free statement-coverage floor (68%) with `go tool cover`, replacing the Codecov project ratchet and `codecov.yml`. A coverage badge was added to the README.
+
 ## [0.5.0] - 2026-06-23
 
 ### Added

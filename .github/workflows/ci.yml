@@ -26,6 +26,11 @@ jobs:
     name: "🏗️ Build & Test"
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # OIDC for the Qlty coverage upload: id-token mints the token, contents is
+    # for checkout. No coverage secret to store or rotate.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
@@ -63,15 +68,33 @@ jobs:
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
 
-      - name: Upload coverage to Codecov
-        # Tokenless uploads work once the repo is public; the token covers the
-        # private window. Upload even if a later step fails, but not on cancel.
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
+      - name: Publish coverage to Qlty
+        # Org-wide coverage consolidated on Qlty Cloud (replaces Codecov).
+        # OIDC auth — no token to store or rotate. Skipped on fork PRs, which
+        # GitHub does not grant id-token:write. Advisory: continue-on-error so a
+        # publish hiccup never blocks CI; the coverage gate below is enforcement.
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        continue-on-error: true
+        uses: qltysh/qlty-action/coverage@fd52dc852530a708d68c3b7342f8d33d1df4cd55  # v2.2.1
         with:
+          oidc: true
           files: coverage.out
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          format: coverprofile
+
+      - name: Coverage gate
+        # Vendor-free floor: fails when the weighted statement total drops below
+        # COVERAGE_MIN (real total ~69.7% as of 2026-06). Replaces the Codecov
+        # project ratchet; ratchet up as coverage climbs. go.mod is at the repo
+        # root, so coverprofile paths need no rewrite (unlike sockguard's app/).
+        env:
+          COVERAGE_MIN: "68"
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')
+          echo "Total statement coverage: ${total}% (floor ${COVERAGE_MIN}%)"
+          awk -v t="$total" -v m="$COVERAGE_MIN" 'BEGIN { exit (t+0 >= m+0) ? 0 : 1 }' || {
+            echo "::error::coverage ${total}% is below the ${COVERAGE_MIN}% floor"
+            exit 1
+          }
 
   lint:
     name: "🧹 Lint"
