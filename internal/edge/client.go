@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	crand "crypto/rand"
@@ -28,6 +29,7 @@ import (
 	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/metrics"
+	"github.com/codeswhat/portwing/internal/pool"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -65,7 +67,7 @@ type edgeMessageSender struct {
 	client *Client
 }
 
-func (s *edgeMessageSender) SendTypedMessage(msgType string, data interface{}) error {
+func (s *edgeMessageSender) SendTypedMessage(msgType string, data any) error {
 	return s.client.sendTypedMessage(msgType, data)
 }
 
@@ -100,6 +102,9 @@ type Client struct {
 
 // NewClient creates a new edge-mode Client.
 func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAdapter, auditor *audit.Logger) *Client {
+	if cfg.TLSSkipVerify {
+		slog.Warn("TLS certificate verification disabled (TLS_SKIP_VERIFY=true): the outbound controller connection is vulnerable to man-in-the-middle interception; use only for testing")
+	}
 	return &Client{
 		cfg:          cfg,
 		dockerClient: dockerClient,
@@ -181,8 +186,10 @@ func (c *Client) Run(ctx context.Context) error {
 // connect dials the WebSocket, performs the hello/welcome handshake, syncs
 // state, and runs the read and write pumps.
 func (c *Client) connect(ctx context.Context) (bool, error) {
-	// Build TLS config.
+	// Build TLS config. Pin a TLS 1.2 floor to match the server's inbound
+	// posture; the controller dial relies on Go defaults otherwise.
 	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
 		// #nosec G402 -- TLS_SKIP_VERIFY is an explicit test-only escape hatch documented as unsafe.
 		InsecureSkipVerify: c.cfg.TLSSkipVerify,
 	}
@@ -305,6 +312,11 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 
 	wg.Wait()
 
+	// Tear down any exec sessions that outlived this connection so they (and
+	// their Docker exec conns) don't leak across reconnects; the next
+	// connection starts with a clean exec table.
+	c.closeAllExecSessions()
+
 	// Close connection.
 	c.connMu.Lock()
 	if c.conn != nil {
@@ -348,10 +360,16 @@ func (c *Client) sendHello(ctx context.Context) error {
 		Capabilities:  capabilities,
 	}
 
-	// Attempt Ed25519 signing if a private key is configured.
+	// Attempt Ed25519 signing if a private key is configured. If signing fails
+	// and no token is configured for fallback, refuse to send a credential-less
+	// hello — silently downgrading to an unauthenticated hello is worse than
+	// failing the connection (Run retries with backoff).
 	if c.cfg.PrivateKeyFile != "" {
 		if err := c.signHello(ctx, &hello); err != nil {
-			slog.Warn("ed25519 hello signing failed, falling back to token hash", "error", err)
+			if c.cfg.Token == "" {
+				return fmt.Errorf("ed25519 hello signing failed and no token configured for fallback: %w", err)
+			}
+			slog.Error("ed25519 hello signing failed, falling back to token hash", "error", err)
 			c.setTokenHash(&hello)
 		}
 	} else {
@@ -523,7 +541,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 
 	var bodyReader io.Reader
 	if req.Body != nil {
-		bodyReader = strings.NewReader(string(req.Body))
+		bodyReader = bytes.NewReader(req.Body)
 	}
 
 	var resp *http.Response
@@ -563,8 +581,9 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			ContentType: resp.Header.Get("Content-Type"),
 		})
 
-		// Stream body in chunks.
-		buf := make([]byte, 32*1024)
+		// Stream body in chunks using a pooled 32 KiB buffer so the per-request
+		// stream buffer is reused instead of freshly allocated each time.
+		buf := pool.GetStreamBuffer()
 		for {
 			n, readErr := resp.Body.Read(buf)
 			if n > 0 {
@@ -578,6 +597,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 				break
 			}
 		}
+		pool.PutStreamBuffer(buf)
 
 		_ = c.sendTypedMessage(protocol.TypeStreamEnd, protocol.StreamEndMessage{
 			RequestID: req.RequestID,
@@ -656,7 +676,7 @@ func (c *Client) sendMetrics() {
 }
 
 // sendTypedMessage wraps data in an Envelope and sends it over the WebSocket.
-func (c *Client) sendTypedMessage(msgType string, data interface{}) error {
+func (c *Client) sendTypedMessage(msgType string, data any) error {
 	rawData, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshaling %s: %w", msgType, err)
@@ -740,6 +760,19 @@ func (c *Client) failConn(reason string) {
 		slog.Warn("evicting controller connection", "reason", reason)
 		closeWebSocket(conn, reason)
 	}
+}
+
+// closeAllExecSessions tears down every live exec session. Called when a
+// controller connection ends so sessions don't leak across reconnects: each
+// Close() also deregisters the session from execSessions, which is safe to do
+// while ranging a sync.Map.
+func (c *Client) closeAllExecSessions() {
+	c.execSessions.Range(func(_, v any) bool {
+		if s, ok := v.(*ExecSession); ok {
+			s.Close()
+		}
+		return true
+	})
 }
 
 // msEdge returns elapsed milliseconds since start as a float64.
