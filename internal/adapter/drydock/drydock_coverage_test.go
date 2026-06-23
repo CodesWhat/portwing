@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -170,14 +169,17 @@ func TestSSEServeHTTP_StreamsEventFromChannel(t *testing.T) {
 	defer cancel()
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	//nolint:bodyclose // body is closed via the deferred close below; bodyclose can't track it because the scanner captures resp.Body in a goroutine.
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil && ctx.Err() != nil {
-		return
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		t.Fatalf("GET SSE: %v", err)
 	}
-	defer resp.Body.Close()
 
 	// Wait until the SSE client is registered.
 	var clientID string
@@ -238,13 +240,15 @@ func TestSSEServeHTTP_ChannelClosed_ExitsLoop(t *testing.T) {
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil && ctx.Err() != nil {
-		return
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		t.Fatalf("GET SSE: %v", err)
 	}
-	defer resp.Body.Close()
 
 	// Wait for client registration then close its channel.
 	var clientID string
@@ -279,27 +283,6 @@ func TestSSEServeHTTP_ChannelClosed_ExitsLoop(t *testing.T) {
 // We send an event but the underlying writer errors on subsequent writes.
 // We exercise this via a server that wraps a custom writer.
 // ---------------------------------------------------------------------------
-
-// writeLimitedResponseWriter wraps ResponseWriter and returns error after
-// a configured number of successful writes.
-type writeLimitedResponseWriter struct {
-	http.ResponseWriter
-	successWritesLeft int
-}
-
-func (w *writeLimitedResponseWriter) Write(b []byte) (int, error) {
-	if w.successWritesLeft <= 0 {
-		return 0, errors.New("write quota exceeded")
-	}
-	w.successWritesLeft--
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *writeLimitedResponseWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
 
 // ---------------------------------------------------------------------------
 // adapter.go — spawnMessageHandler: goroutine ctx.Err() check (line 351-353)
@@ -921,13 +904,15 @@ func TestSSEServeHTTP_EventWriteError_Handled(t *testing.T) {
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil && ctx.Err() != nil {
-		return
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		t.Fatalf("GET SSE: %v", err)
 	}
-	defer resp.Body.Close()
 
 	// Wait for client registration.
 	var clientID string
@@ -968,27 +953,6 @@ func TestSSEServeHTTP_EventWriteError_Handled(t *testing.T) {
 // then closes. We just call handleContainerLogs with a request body that
 // provides a frame header promising 1000 bytes but only delivers 10.
 // ---------------------------------------------------------------------------
-
-// truncatedPayloadReader is an io.ReadCloser that provides a valid 8-byte
-// frame header (frameSize=1000) followed by only 5 bytes of actual data.
-// This causes io.CopyN to fail with io.ErrUnexpectedEOF.
-type truncatedPayloadReader struct {
-	r io.Reader
-}
-
-func (t *truncatedPayloadReader) Read(p []byte) (int, error) { return t.r.Read(p) }
-func (t *truncatedPayloadReader) Close() error               { return nil }
-
-func newTruncatedFrameReader() io.ReadCloser {
-	header := make([]byte, 8)
-	header[0] = 1
-	binary.BigEndian.PutUint32(header[4:8], 1000) // claims 1000 bytes
-	payload := []byte("short")                    // only 5 bytes
-
-	return &truncatedPayloadReader{
-		r: io.MultiReader(bytes.NewReader(header), bytes.NewReader(payload)),
-	}
-}
 
 // ---------------------------------------------------------------------------
 // SSE write error on event — unit-level test (no HTTP server needed)

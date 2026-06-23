@@ -151,7 +151,10 @@ func TestDo_InvalidMethod(t *testing.T) {
 
 	c := newTestClient(srv)
 	// A null byte in the method name causes http.NewRequest to return an error.
-	_, err := c.Do(context.Background(), "INVALID\x00METHOD", "/path", nil)
+	resp, err := c.Do(context.Background(), "INVALID\x00METHOD", "/path", nil)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error for invalid method, got nil")
 	}
@@ -166,7 +169,10 @@ func TestDoStream_InvalidMethod(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	_, err := c.DoStream(context.Background(), "INVALID\x00METHOD", "/path", nil)
+	resp, err := c.DoStream(context.Background(), "INVALID\x00METHOD", "/path", nil)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error for invalid method, got nil")
 	}

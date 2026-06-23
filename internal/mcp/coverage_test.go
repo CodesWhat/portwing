@@ -458,7 +458,7 @@ func statsWithNetworkStub(t *testing.T) (*docker.Client, func()) {
 		w.Header().Set("Content-Type", "application/json")
 		// Use raw JSON to populate the anonymous Networks struct.
 		payload := `{"networks":{"eth0":{"rx_bytes":1234,"tx_bytes":5678},"lo":{"rx_bytes":100,"tx_bytes":200}}}`
-		w.Write([]byte(payload))
+		_, _ = w.Write([]byte(payload))
 	})
 
 	srv := &http.Server{Handler: mux}
@@ -678,9 +678,9 @@ func demuxErrorStub(t *testing.T) (*docker.Client, func()) {
 		hdr := make([]byte, 8)
 		hdr[0] = 1
 		binary.BigEndian.PutUint32(hdr[4:8], 100)
-		w.Write(hdr)
+		_, _ = w.Write(hdr)
 		// Write only 10 bytes then end response.
-		w.Write(make([]byte, 10))
+		_, _ = w.Write(make([]byte, 10))
 	})
 
 	srv := &http.Server{Handler: mux}

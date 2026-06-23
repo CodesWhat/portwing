@@ -19,9 +19,16 @@ linters:
         - (io.Closer).Close
         - (*os.File).Close
         - (net.Conn).Close
+        - (net.Listener).Close
         - (net.Conn).SetReadDeadline
         - (*github.com/gorilla/websocket.Conn).Close
         - (*github.com/gorilla/websocket.Conn).SetReadDeadline
+        # CLI/diagnostic output to injected io.Writers (stdout/stderr) — a failed
+        # terminal write is unactionable. errcheck already excludes these for the
+        # os.Stdout/os.Stderr literals by default; extend it to writer params.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     gosec:
       excludes:
         # G115: integer overflow on conversion — flagged on well-bounded Docker

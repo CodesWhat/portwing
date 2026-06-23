@@ -547,6 +547,7 @@ func TestEnroller_RegistryReloadFailure(t *testing.T) {
 	// Make file world-readable so registry.Load() fails inside ServeHTTP.
 	// appendKeyLine opens O_APPEND|O_WRONLY so it won't fail; only the
 	// subsequent registry.Load() (which needs to read the file) will fail.
+	// #nosec G302 -- intentionally world-readable to exercise the registry's permission-rejection path.
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatalf("Chmod: %v", err)
 	}

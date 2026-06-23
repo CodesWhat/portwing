@@ -32,7 +32,7 @@ func shortTempDir(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
 }
 
