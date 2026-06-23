@@ -47,7 +47,8 @@ type Config struct {
 	DDPollInterval int
 
 	// Audit
-	AuditLog string
+	AuditLog        string
+	AuditBufferSize int
 
 	// Ed25519 key authentication (Model B: operator-provisioned authorized_keys)
 	AuthorizedKeysFile  string // AUTHORIZED_KEYS / AUTHORIZED_KEYS_FILE
@@ -176,7 +177,8 @@ func Load() (*Config, error) {
 
 		DDPollInterval: getEnvInt("DD_POLL_INTERVAL", 300),
 
-		AuditLog: getEnv("AUDIT_LOG", ""),
+		AuditLog:        getEnv("AUDIT_LOG", ""),
+		AuditBufferSize: getEnvInt("AUDIT_BUFFER_SIZE", 256),
 
 		AuthorizedKeysFile:  authorizedKeysFile,
 		MaxClockSkewSeconds: getEnvInt("MAX_CLOCK_SKEW_SECONDS", 60),

@@ -13,7 +13,7 @@ import (
 func captureLogger(t *testing.T) (*Logger, func() string) {
 	t.Helper()
 	tmp := filepath.Join(t.TempDir(), "audit.log")
-	l, close, err := New(tmp)
+	l, close, err := New(tmp, 0)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -40,7 +40,7 @@ func decodeEvent(t *testing.T, line string) map[string]interface{} {
 
 func TestDisabledEmitsNothing(t *testing.T) {
 	t.Parallel()
-	l, _, err := New("")
+	l, _, err := New("", 0)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestComposeOpEvent(t *testing.T) {
 func TestFileSinkPermissions(t *testing.T) {
 	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "audit.log")
-	l, close, err := New(tmp)
+	l, close, err := New(tmp, 0)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestFileSinkPermissions(t *testing.T) {
 
 func TestStdoutSink(t *testing.T) {
 	t.Parallel()
-	l, close, err := New("stdout")
+	l, close, err := New("stdout", 0)
 	if err != nil {
 		t.Fatalf("New(stdout): %v", err)
 	}
@@ -162,7 +162,7 @@ func TestStdoutSink(t *testing.T) {
 
 func TestStderrSink(t *testing.T) {
 	t.Parallel()
-	l, close, err := New("stderr")
+	l, close, err := New("stderr", 0)
 	if err != nil {
 		t.Fatalf("New(stderr): %v", err)
 	}

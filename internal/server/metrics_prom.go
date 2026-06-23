@@ -172,6 +172,11 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// --- application / request-level metrics ---
+	if s.metrics != nil {
+		s.metrics.WritePrometheus(&b, escapeLabelValue)
+	}
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprint(w, b.String())

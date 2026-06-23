@@ -36,6 +36,11 @@
 //	"stdout"  – write to os.Stdout
 //	"stderr"  – write to os.Stderr
 //	"<path>"  – write to a file; opened append-only, mode 0600
+//
+// Set AUDIT_BUFFER_SIZE to the number of recent audit records to keep in
+// memory for pull-based export via GET /_portwing/audit. Default 256; 0
+// disables the buffer. The buffer is independent of AUDIT_LOG — it works even
+// when slog output is disabled.
 package audit
 
 import (
@@ -65,15 +70,23 @@ const (
 // Logger is a structured audit logger. The zero value is valid and emits
 // nothing (auditing disabled). All methods are safe for concurrent use.
 type Logger struct {
-	log *slog.Logger // nil when auditing is disabled
+	log  *slog.Logger // nil when slog output is disabled
+	ring *ring        // nil when the in-memory buffer is disabled
 }
 
-// New creates a Logger that writes to the sink indicated by dest.
-// dest == "" disables auditing. The returned closer should be called on
-// shutdown; it is a no-op for stdout/stderr sinks.
-func New(dest string) (*Logger, func(), error) {
+// New creates a Logger that writes to the sink indicated by dest and keeps an
+// in-memory ring buffer of the most recent bufferSize events.
+// dest == "" disables slog output. bufferSize <= 0 disables the buffer.
+// The two are independent: a buffer works even when dest is "".
+// The returned closer should be called on shutdown; it is a no-op for
+// stdout/stderr sinks.
+func New(dest string, bufferSize int) (*Logger, func(), error) {
+	l := &Logger{}
+	if bufferSize > 0 {
+		l.ring = newRing(bufferSize)
+	}
 	if dest == "" {
-		return &Logger{}, func() {}, nil
+		return l, func() {}, nil
 	}
 
 	var w io.Writer
@@ -104,94 +117,178 @@ func New(dest string) (*Logger, func(), error) {
 		},
 	})
 
-	return &Logger{log: slog.New(h)}, closer, nil
+	l.log = slog.New(h)
+	return l, closer, nil
 }
 
-// Enabled reports whether auditing is active.
+// Enabled reports whether slog output is active.
 func (l *Logger) Enabled() bool { return l.log != nil }
+
+// Records returns the most recent audit records from the in-memory buffer,
+// newest-first, capped at limit. limit <= 0 returns all buffered records.
+// Returns an empty slice when the buffer is disabled or empty.
+func (l *Logger) Records(limit int) []Record {
+	if l.ring == nil {
+		return []Record{}
+	}
+	return l.ring.records(limit)
+}
 
 // APIRequest records an authenticated (or rejected) HTTP API call.
 func (l *Logger) APIRequest(actor, method, path, outcome string, status int, durationMs float64) {
-	if l.log == nil {
+	if l.log == nil && l.ring == nil {
 		return
 	}
-	l.log.Info("",
-		slog.String("event", EventAPIRequest),
-		slog.String("actor", actor),
-		slog.String("method", method),
-		slog.String("path", path),
-		slog.String("outcome", outcome),
-		slog.Int("status", status),
-		slog.Float64("duration_ms", durationMs),
-	)
+	if l.log != nil {
+		l.log.Info("",
+			slog.String("event", EventAPIRequest),
+			slog.String("actor", actor),
+			slog.String("method", method),
+			slog.String("path", path),
+			slog.String("outcome", outcome),
+			slog.Int("status", status),
+			slog.Float64("duration_ms", durationMs),
+		)
+	}
+	if l.ring != nil {
+		l.ring.push(Record{
+			Time:       time.Now().UTC(),
+			Event:      EventAPIRequest,
+			Actor:      actor,
+			Method:     method,
+			Path:       path,
+			Outcome:    outcome,
+			Status:     status,
+			DurationMs: durationMs,
+		})
+	}
 }
 
 // AuthFailure records a failed authentication attempt.
 func (l *Logger) AuthFailure(actor, method, path string) {
-	if l.log == nil {
+	if l.log == nil && l.ring == nil {
 		return
 	}
-	l.log.Info("",
-		slog.String("event", EventAuthFailure),
-		slog.String("actor", actor),
-		slog.String("method", method),
-		slog.String("path", path),
-		slog.String("outcome", OutcomeDenied),
-	)
+	if l.log != nil {
+		l.log.Info("",
+			slog.String("event", EventAuthFailure),
+			slog.String("actor", actor),
+			slog.String("method", method),
+			slog.String("path", path),
+			slog.String("outcome", OutcomeDenied),
+		)
+	}
+	if l.ring != nil {
+		l.ring.push(Record{
+			Time:    time.Now().UTC(),
+			Event:   EventAuthFailure,
+			Actor:   actor,
+			Method:  method,
+			Path:    path,
+			Outcome: OutcomeDenied,
+		})
+	}
 }
 
 // RateLimited records a request blocked by the rate limiter.
 func (l *Logger) RateLimited(actor, method, path string) {
-	if l.log == nil {
+	if l.log == nil && l.ring == nil {
 		return
 	}
-	l.log.Info("",
-		slog.String("event", EventRateLimited),
-		slog.String("actor", actor),
-		slog.String("method", method),
-		slog.String("path", path),
-		slog.String("outcome", OutcomeDenied),
-	)
+	if l.log != nil {
+		l.log.Info("",
+			slog.String("event", EventRateLimited),
+			slog.String("actor", actor),
+			slog.String("method", method),
+			slog.String("path", path),
+			slog.String("outcome", OutcomeDenied),
+		)
+	}
+	if l.ring != nil {
+		l.ring.push(Record{
+			Time:    time.Now().UTC(),
+			Event:   EventRateLimited,
+			Actor:   actor,
+			Method:  method,
+			Path:    path,
+			Outcome: OutcomeDenied,
+		})
+	}
 }
 
 // ComposeOp records a Docker Compose lifecycle operation.
 func (l *Logger) ComposeOp(actor, operation, stack, outcome string) {
-	if l.log == nil {
+	if l.log == nil && l.ring == nil {
 		return
 	}
-	l.log.Info("",
-		slog.String("event", EventComposeOp),
-		slog.String("actor", actor),
-		slog.String("operation", operation),
-		slog.String("stack", stack),
-		slog.String("outcome", outcome),
-	)
+	if l.log != nil {
+		l.log.Info("",
+			slog.String("event", EventComposeOp),
+			slog.String("actor", actor),
+			slog.String("operation", operation),
+			slog.String("stack", stack),
+			slog.String("outcome", outcome),
+		)
+	}
+	if l.ring != nil {
+		l.ring.push(Record{
+			Time:      time.Now().UTC(),
+			Event:     EventComposeOp,
+			Actor:     actor,
+			Operation: operation,
+			Stack:     stack,
+			Outcome:   outcome,
+		})
+	}
 }
 
 // Enrollment records an Ed25519 key enrollment event.
 // outcome is OutcomeAllowed on success, OutcomeDenied on failure.
 func (l *Logger) Enrollment(actor, keyID, outcome string) {
-	if l.log == nil {
+	if l.log == nil && l.ring == nil {
 		return
 	}
-	l.log.Info("",
-		slog.String("event", EventEnrollment),
-		slog.String("actor", actor),
-		slog.String("key_id", keyID),
-		slog.String("outcome", outcome),
-	)
+	if l.log != nil {
+		l.log.Info("",
+			slog.String("event", EventEnrollment),
+			slog.String("actor", actor),
+			slog.String("key_id", keyID),
+			slog.String("outcome", outcome),
+		)
+	}
+	if l.ring != nil {
+		l.ring.push(Record{
+			Time:    time.Now().UTC(),
+			Event:   EventEnrollment,
+			Actor:   actor,
+			KeyID:   keyID,
+			Outcome: outcome,
+		})
+	}
 }
 
 // ExecStart records the start of an interactive exec tunnel.
 func (l *Logger) ExecStart(actor, container, execID string) {
-	if l.log == nil {
+	if l.log == nil && l.ring == nil {
 		return
 	}
-	l.log.Info("",
-		slog.String("event", EventExecStart),
-		slog.String("actor", actor),
-		slog.String("container", container),
-		slog.String("exec_id", execID),
-		slog.String("outcome", OutcomeAllowed),
-	)
+	if l.log != nil {
+		l.log.Info("",
+			slog.String("event", EventExecStart),
+			slog.String("actor", actor),
+			slog.String("container", container),
+			slog.String("exec_id", execID),
+			slog.String("outcome", OutcomeAllowed),
+		)
+	}
+	if l.ring != nil {
+		l.ring.push(Record{
+			Time:      time.Now().UTC(),
+			Event:     EventExecStart,
+			Actor:     actor,
+			Container: container,
+			ExecID:    execID,
+			Outcome:   OutcomeAllowed,
+		})
+	}
 }

@@ -24,7 +24,7 @@ func silenceSlog(b *testing.B) {
 // benchmarks measure the auth path itself, not log I/O.
 func noopAuditor(b *testing.B) *audit.Logger {
 	b.Helper()
-	l, cleanup, err := audit.New("")
+	l, cleanup, err := audit.New("", 0)
 	if err != nil {
 		b.Fatalf("audit.New: %v", err)
 	}
@@ -56,7 +56,7 @@ func BenchmarkAuthMiddleware(b *testing.B) {
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
 			rl := NewRateLimiter()
-			h := rl.AuthMiddleware(c.verifier, auditor, next)
+			h := rl.AuthMiddleware(c.verifier, auditor, nil, next)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/containers", nil)
 			req.RemoteAddr = "192.0.2.10:40000"
 			if c.token != "" {

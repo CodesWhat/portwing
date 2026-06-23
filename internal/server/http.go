@@ -74,6 +74,7 @@ type Server struct {
 	adapter      adapter.ServerAdapter
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
+	metrics      *metrics.Registry
 	rateLimiter  *RateLimiter
 	verifier     tokenVerifier
 	ed25519      Ed25519Config
@@ -100,7 +101,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	}
 	// verifier == nil means no auth configured.
 
-	auditor, auditClose, err := audit.New(cfg.AuditLog)
+	auditor, auditClose, err := audit.New(cfg.AuditLog, cfg.AuditBufferSize)
 	if err != nil {
 		return nil, fmt.Errorf("opening audit log: %w", err)
 	}
@@ -157,6 +158,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		adapter:      a,
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
+		metrics:      metrics.NewRegistry(),
 		rateLimiter:  NewRateLimiter(),
 		verifier:     verifier,
 		ed25519:      ed25519Cfg,
@@ -222,19 +224,20 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Enrollment endpoint: reachable WITHOUT auth (it IS the bootstrap), but
 	// rate-limited. Registered only when ENROLLMENT_TOKEN is configured.
 	if s.enroller != nil {
-		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller)
+		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller, s.metrics)
 		mux.Handle("POST /api/portwing/enroll", enrollHandler)
 	}
 
 	// Auth required - wrap with audit-aware auth middleware (with Ed25519 support).
 	authWrap := func(h http.HandlerFunc) http.Handler {
-		return s.rateLimiter.AuthMiddlewareWithEd25519(s.verifier, s.ed25519, s.auditor, http.HandlerFunc(h))
+		return s.rateLimiter.AuthMiddlewareWithEd25519(s.verifier, s.ed25519, s.auditor, s.metrics, http.HandlerFunc(h))
 	}
 
 	mux.Handle("GET /_portwing/info", authWrap(s.handleInfo))
 	mux.Handle("POST /_portwing/compose", authWrap(s.handleCompose))
 	mux.Handle("GET /_portwing/metrics", authWrap(s.handleMetrics))
 	mux.Handle("GET /metrics", authWrap(s.handleMetrics))
+	mux.Handle("GET /_portwing/audit", authWrap(s.handleAudit))
 	mcpHandler := authWrap(func(w http.ResponseWriter, r *http.Request) {
 		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
 	})

@@ -152,6 +152,8 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 | `/_portwing/health` | GET | No | `{"status":"healthy"}` + Docker connectivity |
 | `/_portwing/info` | GET | Yes | Agent version, Docker version, mode, uptime, caps |
 | `/_portwing/compose` | POST | Yes | Docker Compose operations |
+| `/_portwing/metrics` | GET | Yes | Prometheus metrics (build/host/container + agent request series) |
+| `/_portwing/audit` | GET | Yes | Recent audit records (JSON, newest-first) |
 
 ### 4.2 Docker API Proxy
 
@@ -261,6 +263,8 @@ sequenceDiagram
 ## 8. Metrics Collection
 
 **Interval:** 30 seconds
+
+In addition to host/container metrics, the Prometheus endpoints (`/_portwing/metrics`, `/metrics`) expose agent-level series: `portwing_http_requests_total{method,code}` (counter), `portwing_http_request_duration_seconds` (histogram), `portwing_http_requests_in_flight` (gauge), `portwing_auth_failures_total{reason}` (counter), `portwing_rate_limited_total` (counter).
 
 ```json
 {

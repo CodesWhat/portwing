@@ -117,6 +117,7 @@ func makeTestServer(dockerClient *docker.Client) *Server {
 	return &Server{
 		dockerClient: dockerClient,
 		collector:    metrics.NewCollector("/tmp", true), // skip disk
+		metrics:      metrics.NewRegistry(),
 		startTime:    time.Now().Add(-5 * time.Second),
 	}
 }

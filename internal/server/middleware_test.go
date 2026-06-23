@@ -24,7 +24,7 @@ import (
 // status codes and don't need to verify audit output.
 func noAudit(t *testing.T) *audit.Logger {
 	t.Helper()
-	l, _, err := audit.New("")
+	l, _, err := audit.New("", 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestAuthMiddlewareRawTokenAccept(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerPortwingToken, "correct")
@@ -59,7 +59,7 @@ func TestAuthMiddlewareRawTokenReject(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerPortwingToken, "wrong")
@@ -89,7 +89,7 @@ func TestAuthMiddlewareArgon2idAccept(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := newArgon2Verifier(params)
-	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerPortwingToken, token)
@@ -119,7 +119,7 @@ func TestAuthMiddlewareArgon2idReject(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := newArgon2Verifier(params)
-	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerPortwingToken, "wrongtoken")
@@ -136,7 +136,7 @@ func TestAuthMiddlewareNilVerifier(t *testing.T) {
 	t.Parallel()
 
 	rl := NewRateLimiter()
-	h := rl.AuthMiddleware(nil, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(nil, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -154,7 +154,7 @@ func TestAuthMiddlewareBearerHeader(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "bearer-secret"}
-	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer bearer-secret")
@@ -213,7 +213,7 @@ func TestRateLimiterNotBypassedBySpoofedXFF(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	for i := 0; i < 10; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -246,7 +246,7 @@ func TestAuthMiddlewareFallbackHeader(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "legacytoken"}
-	h := rl.AuthMiddleware(verifier, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Dd-Agent-Secret", "legacytoken")
@@ -264,7 +264,7 @@ func TestAuditMiddlewareEmitsAuthFailure(t *testing.T) {
 	t.Parallel()
 
 	tmp := t.TempDir() + "/audit.log"
-	l, close, err := audit.New(tmp)
+	l, close, err := audit.New(tmp, 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestAuditMiddlewareEmitsAuthFailure(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, l, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, l, nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
 	req.Header.Set(headerPortwingToken, "wrong")
@@ -295,7 +295,7 @@ func TestAuditMiddlewareEmitsRateLimited(t *testing.T) {
 	t.Parallel()
 
 	tmp := t.TempDir() + "/audit.log"
-	l, close, err := audit.New(tmp)
+	l, close, err := audit.New(tmp, 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestAuditMiddlewareEmitsRateLimited(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, l, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, l, nil, http.HandlerFunc(okHandler))
 
 	// Exhaust the 10-failure limit.
 	for i := 0; i < 10; i++ {
@@ -337,7 +337,7 @@ func TestAuditMiddlewareEmitsAPIRequest(t *testing.T) {
 	t.Parallel()
 
 	tmp := t.TempDir() + "/audit.log"
-	l, close, err := audit.New(tmp)
+	l, close, err := audit.New(tmp, 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestAuditMiddlewareEmitsAPIRequest(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, l, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddleware(verifier, l, nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
 	req.Header.Set(headerPortwingToken, "correct")
@@ -378,7 +378,7 @@ func TestAuthMiddlewarePreservesStreamingInterfaces(t *testing.T) {
 
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "correct"}
-	h := rl.AuthMiddleware(verifier, noAudit(t), inner)
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
 	req.Header.Set(headerPortwingToken, "correct")
@@ -394,7 +394,7 @@ func TestAuthMiddlewarePreservesStreamingInterfaces(t *testing.T) {
 
 	// No-auth mode wraps with the same recorder; verify that path too.
 	sawFlusher, sawHijacker = false, false
-	h = rl.AuthMiddleware(nil, noAudit(t), inner)
+	h = rl.AuthMiddleware(nil, noAudit(t), nil, inner)
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/events", nil))
 
@@ -465,7 +465,7 @@ func TestEd25519MiddlewareAccept(t *testing.T) {
 	t.Parallel()
 	ed, priv := setupEd25519(t)
 	rl := NewRateLimiter()
-	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
 	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
@@ -483,7 +483,7 @@ func TestEd25519MiddlewareTokenFallback(t *testing.T) {
 	t.Parallel()
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "mysecret"}
-	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/path", nil)
 	req.Header.Set(headerPortwingToken, "mysecret")
@@ -502,7 +502,7 @@ func TestEd25519MiddlewareBothConfigured(t *testing.T) {
 	ed, priv := setupEd25519(t)
 	rl := NewRateLimiter()
 	verifier := &rawTokenVerifier{token: "mysecret"}
-	h := rl.AuthMiddlewareWithEd25519(verifier, ed, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(verifier, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/path", nil)
 	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
@@ -521,7 +521,7 @@ func TestEd25519MiddlewareBadTimestamp(t *testing.T) {
 	t.Parallel()
 	ed, priv := setupEd25519(t)
 	rl := NewRateLimiter()
-	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/path", nil)
 	signEd25519Request(t, req, nil, priv, time.Now().Unix()-200, freshNonce(t))
@@ -541,7 +541,7 @@ func TestEd25519MiddlewareReplayedNonce(t *testing.T) {
 	t.Parallel()
 	ed, priv := setupEd25519(t)
 	rl := NewRateLimiter()
-	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	nonce := freshNonce(t)
 	tsUnix := time.Now().Unix()
@@ -571,7 +571,7 @@ func TestEd25519MiddlewareUnknownKey(t *testing.T) {
 	t.Parallel()
 	ed, _ := setupEd25519(t)
 	rl := NewRateLimiter()
-	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	// Generate a key that is NOT in the registry.
 	_, priv2, err := ed25519.GenerateKey(rand.Reader)
@@ -602,7 +602,7 @@ func TestRateLimitOnlyRecordsFailures(t *testing.T) {
 	deny := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	})
-	h := rl.rateLimitOnly(deny)
+	h := rl.rateLimitOnly(deny, nil)
 
 	for i := 0; i < 10; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", nil)
