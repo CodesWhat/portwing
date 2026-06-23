@@ -70,18 +70,19 @@ const (
 // Logger is a structured audit logger. The zero value is valid and emits
 // nothing (auditing disabled). All methods are safe for concurrent use.
 type Logger struct {
-	log  *slog.Logger // nil when slog output is disabled
-	ring *ring        // nil when the in-memory buffer is disabled
+	log    *slog.Logger // nil when slog output is disabled
+	ring   *ring        // nil when the in-memory buffer is disabled
+	closer func()       // flushes/closes the underlying file; no-op for non-file sinks
 }
 
 // New creates a Logger that writes to the sink indicated by dest and keeps an
 // in-memory ring buffer of the most recent bufferSize events.
 // dest == "" disables slog output. bufferSize <= 0 disables the buffer.
 // The two are independent: a buffer works even when dest is "".
-// The returned closer should be called on shutdown; it is a no-op for
-// stdout/stderr sinks.
+// The returned closer is retained internally; callers should use Logger.Close()
+// on shutdown instead.
 func New(dest string, bufferSize int) (*Logger, func(), error) {
-	l := &Logger{}
+	l := &Logger{closer: func() {}}
 	if bufferSize > 0 {
 		l.ring = newRing(bufferSize)
 	}
@@ -90,7 +91,6 @@ func New(dest string, bufferSize int) (*Logger, func(), error) {
 	}
 
 	var w io.Writer
-	closer := func() {}
 
 	switch dest {
 	case "stdout":
@@ -104,7 +104,7 @@ func New(dest string, bufferSize int) (*Logger, func(), error) {
 			return nil, func() {}, err
 		}
 		w = f
-		closer = func() { _ = f.Close() }
+		l.closer = func() { _ = f.Close() }
 	}
 
 	h := slog.NewJSONHandler(w, &slog.HandlerOptions{
@@ -118,7 +118,15 @@ func New(dest string, bufferSize int) (*Logger, func(), error) {
 	})
 
 	l.log = slog.New(h)
-	return l, closer, nil
+	return l, l.closer, nil
+}
+
+// Close flushes and closes the underlying file sink. It is a no-op for
+// stdout, stderr, and disabled loggers, and is safe to call more than once.
+func (l *Logger) Close() {
+	if l.closer != nil {
+		l.closer()
+	}
 }
 
 // Enabled reports whether slog output is active.

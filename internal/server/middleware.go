@@ -52,6 +52,8 @@ type RateLimiter struct {
 	maxIPs   int
 
 	trustedProxies []*net.IPNet
+
+	done chan struct{}
 }
 
 type ipAttempts struct {
@@ -68,9 +70,19 @@ func NewRateLimiter() *RateLimiter {
 		maxFails: 10,
 		window:   time.Minute,
 		maxIPs:   10000,
+		done:     make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
+}
+
+// Stop terminates the background cleanup goroutine. It is idempotent.
+func (rl *RateLimiter) Stop() {
+	select {
+	case <-rl.done:
+	default:
+		close(rl.done)
+	}
 }
 
 // cleanup runs every 5 minutes and removes entries whose window has expired.
@@ -78,15 +90,20 @@ func (rl *RateLimiter) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for ip, a := range rl.attempts {
-			if now.Sub(a.firstFail) > rl.window {
-				delete(rl.attempts, ip)
+	for {
+		select {
+		case <-rl.done:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, a := range rl.attempts {
+				if now.Sub(a.firstFail) > rl.window {
+					delete(rl.attempts, ip)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
 
@@ -308,16 +325,18 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		// that path exclusively. Reading the body first is required because
 		// VerifyRequest needs it for the canonical message.
 		if ed.Registry != nil && auth.HasSignature(r.Header) {
-			// Buffer the body.
+			// Buffer the body (capped at 1 MB; MaxBytesReader also closes the
+			// connection on overflow, preventing slow-drip memory exhaustion).
 			var body []byte
 			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 				var err error
-				body, err = io.ReadAll(io.LimitReader(r.Body, 64*1024*1024))
+				body, err = io.ReadAll(r.Body)
 				if closeErr := r.Body.Close(); closeErr != nil {
 					slog.Warn("closing request body", "error", closeErr)
 				}
 				if err != nil {
-					http.Error(w, "reading request body", http.StatusBadRequest)
+					http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 					return
 				}
 				// Restore for downstream handlers.
