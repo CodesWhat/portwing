@@ -101,7 +101,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	}
 	// verifier == nil means no auth configured.
 
-	auditor, auditClose, err := audit.New(cfg.AuditLog)
+	auditor, auditClose, err := audit.New(cfg.AuditLog, cfg.AuditBufferSize)
 	if err != nil {
 		return nil, fmt.Errorf("opening audit log: %w", err)
 	}
@@ -237,6 +237,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /_portwing/compose", authWrap(s.handleCompose))
 	mux.Handle("GET /_portwing/metrics", authWrap(s.handleMetrics))
 	mux.Handle("GET /metrics", authWrap(s.handleMetrics))
+	mux.Handle("GET /_portwing/audit", authWrap(s.handleAudit))
 	mcpHandler := authWrap(func(w http.ResponseWriter, r *http.Request) {
 		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
 	})

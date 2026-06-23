@@ -80,7 +80,7 @@ func main() {
 
 	if cfg.IsEdgeMode() {
 		slog.Info("starting in edge mode", "url", cfg.DrydockURL)
-		auditor, auditClose, err := audit.New(cfg.AuditLog)
+		auditor, auditClose, err := audit.New(cfg.AuditLog, cfg.AuditBufferSize)
 		if err != nil {
 			slog.Error("failed to open audit log", "error", err)
 			os.Exit(1)

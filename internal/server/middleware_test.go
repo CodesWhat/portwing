@@ -24,7 +24,7 @@ import (
 // status codes and don't need to verify audit output.
 func noAudit(t *testing.T) *audit.Logger {
 	t.Helper()
-	l, _, err := audit.New("")
+	l, _, err := audit.New("", 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestAuditMiddlewareEmitsAuthFailure(t *testing.T) {
 	t.Parallel()
 
 	tmp := t.TempDir() + "/audit.log"
-	l, close, err := audit.New(tmp)
+	l, close, err := audit.New(tmp, 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestAuditMiddlewareEmitsRateLimited(t *testing.T) {
 	t.Parallel()
 
 	tmp := t.TempDir() + "/audit.log"
-	l, close, err := audit.New(tmp)
+	l, close, err := audit.New(tmp, 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestAuditMiddlewareEmitsAPIRequest(t *testing.T) {
 	t.Parallel()
 
 	tmp := t.TempDir() + "/audit.log"
-	l, close, err := audit.New(tmp)
+	l, close, err := audit.New(tmp, 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}

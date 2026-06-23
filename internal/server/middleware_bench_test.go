@@ -24,7 +24,7 @@ func silenceSlog(b *testing.B) {
 // benchmarks measure the auth path itself, not log I/O.
 func noopAuditor(b *testing.B) *audit.Logger {
 	b.Helper()
-	l, cleanup, err := audit.New("")
+	l, cleanup, err := audit.New("", 0)
 	if err != nil {
 		b.Fatalf("audit.New: %v", err)
 	}

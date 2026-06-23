@@ -77,7 +77,7 @@ func newTestClient(t *testing.T) (*Client, *websocket.Conn) {
 
 	// "" disables the audit logger (zero overhead beyond a nil check), so the
 	// readPump exec_start audit call is a safe no-op.
-	auditor, closeAudit, err := audit.New("")
+	auditor, closeAudit, err := audit.New("", 0)
 	if err != nil {
 		t.Fatalf("audit.New: %v", err)
 	}
