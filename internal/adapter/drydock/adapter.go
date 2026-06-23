@@ -203,7 +203,7 @@ func GetWatcherComponents() []protocol.ComponentDescriptor {
 		{
 			Type: "docker",
 			Name: "docker",
-			Configuration: map[string]interface{}{
+			Configuration: map[string]any{
 				"description":  "Watches Docker containers for updates via Docker Engine API",
 				"capabilities": []string{"container-sync", "labels"},
 			},
@@ -324,7 +324,7 @@ func (a *Adapter) sendContainerEvent(sender adapter.MessageSender, msgType strin
 	}
 }
 
-func (a *Adapter) sendTypedMessage(sender adapter.MessageSender, msgType string, data interface{}) {
+func (a *Adapter) sendTypedMessage(sender adapter.MessageSender, msgType string, data any) {
 	if sender == nil {
 		slog.Warn("failed to send typed message: sender is nil", "type", msgType)
 		return

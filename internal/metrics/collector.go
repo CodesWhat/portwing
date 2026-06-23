@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 )
 
 // HostMetrics contains system-level resource metrics.
@@ -52,7 +51,6 @@ type Collector struct {
 	dockerDataRoot string
 	skipDisk       bool
 	prevCPU        *cpuStats
-	prevTime       time.Time
 }
 
 // NewCollector creates a new metrics collector.
@@ -125,11 +123,8 @@ func (c *Collector) collectCPU() float64 {
 		current.softirq = vals[6]
 		current.steal = vals[7]
 
-		now := time.Now()
-
 		if c.prevCPU == nil {
 			c.prevCPU = current
-			c.prevTime = now
 			return 0
 		}
 
@@ -137,7 +132,6 @@ func (c *Collector) collectCPU() float64 {
 		deltaIdle := float64(current.idleTotal() - c.prevCPU.idleTotal())
 
 		c.prevCPU = current
-		c.prevTime = now
 
 		if deltaTotal == 0 {
 			return 0

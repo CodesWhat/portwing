@@ -10,6 +10,12 @@ import (
 	"github.com/codeswhat/portwing/internal/docker"
 )
 
+// cachedContainer pairs a built Container with the signal that produced it.
+type cachedContainer struct {
+	container Container
+	signal    string
+}
+
 // ContainerManager maintains an inventory of Docker containers and computes
 // diffs between snapshots. A LabelParser is injected to allow adapter-specific
 // label extraction.
@@ -19,6 +25,8 @@ type ContainerManager struct {
 	labelParser  LabelParser
 	containersMu sync.RWMutex
 	containers   map[string]Container // keyed by container ID
+	cacheMu      sync.Mutex
+	inspectCache map[string]cachedContainer // keyed by container ID
 }
 
 // NewContainerManager creates a ContainerManager. If labelParser is nil, a
@@ -34,6 +42,7 @@ func NewContainerManager(dockerClient *docker.Client, agentName string, labelPar
 		agentName:    agentName,
 		labelParser:  labelParser,
 		containers:   make(map[string]Container),
+		inspectCache: make(map[string]cachedContainer),
 	}
 }
 
@@ -102,17 +111,35 @@ func (m *ContainerManager) Refresh(ctx context.Context) (added, updated, removed
 
 	newMap := make(map[string]Container, len(listed))
 
+	m.cacheMu.Lock()
 	for _, entry := range listed {
-		inspect, err := m.dockerClient.InspectContainer(ctx, entry.ID)
-		if err != nil {
-			slog.Warn("failed to inspect container during refresh", "id", entry.ID, "error", err)
-			continue
+		signal := entry.State + "|" + entry.Status + "|" + entry.ImageID
+
+		if cached, hit := m.inspectCache[entry.ID]; hit && cached.signal == signal {
+			c := cached.container
+			newMap[c.ID] = c
+		} else {
+			inspect, err := m.dockerClient.InspectContainer(ctx, entry.ID)
+			if err != nil {
+				slog.Warn("failed to inspect container during refresh", "id", entry.ID, "error", err)
+				continue
+			}
+			c := m.toContainer(inspect, &entry)
+			m.inspectCache[entry.ID] = cachedContainer{container: c, signal: signal}
+			newMap[c.ID] = c
 		}
+	}
 
-		c := m.toContainer(inspect, &entry)
-		newMap[c.ID] = c
+	// Evict stale cache entries.
+	for id := range m.inspectCache {
+		if _, ok := newMap[id]; !ok {
+			delete(m.inspectCache, id)
+		}
+	}
+	m.cacheMu.Unlock()
 
-		if old, exists := oldMap[c.ID]; exists {
+	for id, c := range newMap {
+		if old, exists := oldMap[id]; exists {
 			if old.Status != c.Status {
 				updated = append(updated, c)
 			}
