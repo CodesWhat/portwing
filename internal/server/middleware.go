@@ -16,6 +16,7 @@ import (
 
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/auth"
+	"github.com/codeswhat/portwing/internal/metrics"
 )
 
 // tokenVerifier is the interface used by AuthMiddleware to verify a presented
@@ -148,15 +149,25 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 //
 // auditor receives auth_failure and rate_limited events, and an api_request
 // event (with outcome and duration) for every request that reaches next.
-func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Logger, next http.Handler) http.Handler {
+// reg receives request/auth/rate-limit counters and duration histograms;
+// it may be nil (metrics are skipped in that case).
+func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Logger, reg *metrics.Registry, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
 		// No authentication configured - pass through.
 		if verifier == nil {
 			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			if reg != nil {
+				reg.IncInFlight()
+				defer reg.DecInFlight()
+			}
 			next.ServeHTTP(rw, r)
 			auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			if reg != nil {
+				reg.IncRequest(r.Method, rw.code)
+				reg.ObserveRequestDuration(time.Since(start).Seconds())
+			}
 			return
 		}
 
@@ -167,6 +178,10 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 		// and that blocked IPs never reach the verifier.
 		if rl.IsRateLimited(clientIP) {
 			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusTooManyRequests)
+				reg.IncRateLimited()
+			}
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 			return
 		}
@@ -177,13 +192,25 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 			rl.RecordFailure(clientIP)
 			slog.Warn("authentication failed", "ip", clientIP)
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusUnauthorized)
+				reg.IncAuthFailure("bad_token")
+			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
 		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		if reg != nil {
+			reg.IncInFlight()
+			defer reg.DecInFlight()
+		}
 		next.ServeHTTP(rw, r)
 		auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+		if reg != nil {
+			reg.IncRequest(r.Method, rw.code)
+			reg.ObserveRequestDuration(time.Since(start).Seconds())
+		}
 	})
 }
 
@@ -191,17 +218,31 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 // This is used for the enrollment endpoint which does its own credential
 // check. Downstream 401 responses are recorded as failures so the endpoint
 // cannot be brute-forced past the limiter.
-func (rl *RateLimiter) rateLimitOnly(next http.Handler) http.Handler {
+// reg receives request counters and duration histograms; it may be nil.
+func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		clientIP := rl.clientIP(r)
 		if rl.IsRateLimited(clientIP) {
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusTooManyRequests)
+				reg.IncRateLimited()
+			}
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
 		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		if reg != nil {
+			reg.IncInFlight()
+			defer reg.DecInFlight()
+		}
 		next.ServeHTTP(rw, r)
 		if rw.code == http.StatusUnauthorized {
 			rl.RecordFailure(clientIP)
+		}
+		if reg != nil {
+			reg.IncRequest(r.Method, rw.code)
+			reg.ObserveRequestDuration(time.Since(start).Seconds())
 		}
 	})
 }
@@ -223,10 +264,13 @@ type Ed25519Config struct {
 //
 // The body is consumed and buffered for signature verification; the downstream
 // handler sees a fresh reader.
+// reg receives request/auth/rate-limit counters and duration histograms;
+// it may be nil (metrics are skipped in that case).
 func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 	verifier tokenVerifier,
 	ed Ed25519Config,
 	auditor *audit.Logger,
+	reg *metrics.Registry,
 	next http.Handler,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -235,8 +279,16 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		// No authentication configured - pass through.
 		if verifier == nil && ed.Registry == nil {
 			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			if reg != nil {
+				reg.IncInFlight()
+				defer reg.DecInFlight()
+			}
 			next.ServeHTTP(rw, r)
 			auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			if reg != nil {
+				reg.IncRequest(r.Method, rw.code)
+				reg.ObserveRequestDuration(time.Since(start).Seconds())
+			}
 			return
 		}
 
@@ -244,6 +296,10 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 
 		if rl.IsRateLimited(clientIP) {
 			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusTooManyRequests)
+				reg.IncRateLimited()
+			}
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 			return
 		}
@@ -275,17 +331,30 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			keyID, err := auth.VerifyRequest(r, body, ed.Registry, ed.Nonces, skew)
 			if err != nil {
 				rl.RecordFailure(clientIP)
+				reason := auth.ReasonFor(err)
 				slog.Warn("ed25519 authentication failed",
-					"ip", clientIP, "reason", auth.ReasonFor(err))
+					"ip", clientIP, "reason", reason)
 				auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
-				setAuthReason(w.Header(), auth.ReasonFor(err))
+				if reg != nil {
+					reg.IncRequest(r.Method, http.StatusUnauthorized)
+					reg.IncAuthFailure(reason)
+				}
+				setAuthReason(w.Header(), reason)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 			slog.Debug("ed25519 authentication succeeded", "key_id", keyID, "ip", clientIP)
 			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+			if reg != nil {
+				reg.IncInFlight()
+				defer reg.DecInFlight()
+			}
 			next.ServeHTTP(rw, r)
 			auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			if reg != nil {
+				reg.IncRequest(r.Method, rw.code)
+				reg.ObserveRequestDuration(time.Since(start).Seconds())
+			}
 			return
 		}
 
@@ -296,6 +365,10 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			rl.RecordFailure(clientIP)
 			slog.Warn("authentication failed: no credentials presented", "ip", clientIP)
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusUnauthorized)
+				reg.IncAuthFailure("no_credentials")
+			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -306,13 +379,25 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			rl.RecordFailure(clientIP)
 			slog.Warn("authentication failed", "ip", clientIP)
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusUnauthorized)
+				reg.IncAuthFailure("bad_token")
+			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
 		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		if reg != nil {
+			reg.IncInFlight()
+			defer reg.DecInFlight()
+		}
 		next.ServeHTTP(rw, r)
 		auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+		if reg != nil {
+			reg.IncRequest(r.Method, rw.code)
+			reg.ObserveRequestDuration(time.Since(start).Seconds())
+		}
 	})
 }
 
