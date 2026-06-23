@@ -66,6 +66,10 @@ Portwing implements the following:
 - **TLS**: TLS 1.2+ with modern AEAD cipher suites only.
 - **Docker Compose security**: path traversal protection, env var validation and denylist, service name injection prevention.
 - **Resource limits**: WebSocket read (16 MB), response body (100 MB), exec body (10 MB), signed-request body (64 MB), concurrent sessions (100), nonce LRU (10,000).
+
+### Nonce cache capacity and fail-open behavior
+
+The nonce LRU cache (capacity controlled by `NONCE_LRU_SIZE`, default 10,000) tracks nonces within the ±60 s timestamp window to block replayed Ed25519-signed requests. When the cache is full, new nonces are silently accepted without being recorded — the cache fails open for *tracking* while the timestamp window remains enforced. This is safe because nonces are only recorded *after* a valid Ed25519 signature has been verified: filling the cache to trigger fail-open requires a large volume of legitimately signed requests, which is not possible for an unauthenticated attacker. The default capacity of 10,000 entries exceeds expected request volume for a single-host agent and ensures the fail-open path is not reachable under normal conditions.
 - **Minimal attack surface**: static binary, three direct dependencies, stdlib crypto only, Wolfi OS base image with no package manager.
 - **Supply chain**: SHA-pinned GitHub Actions with harden-runner on every job, weekly govulncheck/grype/gosec scans, OpenSSF Scorecard, cosign-signed images, SLSA build provenance, and SBOMs on every release.
 

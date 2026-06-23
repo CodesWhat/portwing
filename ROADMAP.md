@@ -12,11 +12,16 @@ over new surface area.
 
 - **Security hardening** — credential handling, replay protection, per-request
   signing, and resource limits across the Docker proxy and the edge tunnel.
+  Active items from the latest hardening pass: tightening pre-auth body limits,
+  validating registry-auth and proxy query parameters before they reach the
+  daemon, private-key file-permission parity, a consistent outbound TLS posture,
+  and goroutine-lifecycle cleanup on shutdown.
 - **Release & supply chain** — reproducible multi-arch builds, cosign-signed
   images, SBOMs, build provenance, and a CI-gated tag → release pipeline.
 - **Test coverage & quality gates** — broaden unit, integration, and fuzz
-  coverage across the auth, MCP, and adapter paths, and bring the CI quality
-  posture to parity with sockguard's:
+  coverage across the auth, MCP, and adapter paths — including the wire-protocol
+  envelope parser and the HTTP handlers — and bring the CI quality posture to
+  parity with sockguard's:
   - **Three-tier fuzzing** — *shipped.* 60s smoke per PR (`ci.yml go-fuzz`),
     5m nightly (`quality-fuzz-nightly.yml`), and a 1h monthly deep pass
     (`quality-fuzz-monthly.yml`).
@@ -35,7 +40,11 @@ over new surface area.
     first of each month and keeps the results as a 90-day artifact, so a ns/op
     or allocs/op regression is visible month over month.
 - **Documentation** — keep `SPEC.md`, `README.md`, and the design docs in sync
-  with the code as behavior settles.
+  with the code as behavior settles. Near-term clean-up of the docs site:
+  replace illustrative/placeholder CVE identifiers in the security model with
+  described vulnerability classes, correct the security-model control numbering,
+  document the nonce-cache replay-window behavior in `SECURITY.md`, and sync the
+  docs site and marketing copy to the current release.
 
 ## Next — hardening edge mode
 
