@@ -106,6 +106,7 @@ type ExecStartMessage struct {
 	User        string   `json:"user,omitempty"`
 	Cols        int      `json:"cols"`
 	Rows        int      `json:"rows"`
+	Tty         *bool    `json:"tty,omitempty"`
 }
 
 type ExecReadyMessage struct {

@@ -89,11 +89,13 @@ func TestLoadTokenHashFileLoadsFromFile(t *testing.T) {
 	}
 }
 
-// TestLoadEdgeModeWithBothTokenAndURL verifies that DRYDOCK_URL + TOKEN is valid.
+// TestLoadEdgeModeWithBothTokenAndURL verifies that DRYDOCK_URL + TOKEN + PRIVATE_KEY_FILE is valid.
+// PRIVATE_KEY_FILE is required in edge mode because drydock rejects token-only agents.
 func TestLoadEdgeModeWithBothTokenAndURL(t *testing.T) {
 	setEnv(t,
 		"DRYDOCK_URL", "https://drydock.example.com",
 		"TOKEN", "rawtoken",
+		"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
 	)
 
 	cfg, err := Load()
@@ -181,10 +183,12 @@ func TestLoadEnrollmentTokenFile(t *testing.T) {
 }
 
 // TestIsEdgeModeWithAuthorizedKeys verifies IsEdgeMode with AUTHORIZED_KEYS.
+// PRIVATE_KEY_FILE is also required because drydock rejects token-only agents.
 func TestIsEdgeModeWithAuthorizedKeys(t *testing.T) {
 	setEnv(t,
 		"DRYDOCK_URL", "https://drydock.example.com",
 		"AUTHORIZED_KEYS", "/tmp/ak",
+		"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
 	)
 	cfg, err := Load()
 	if err != nil {
@@ -192,5 +196,22 @@ func TestIsEdgeModeWithAuthorizedKeys(t *testing.T) {
 	}
 	if !cfg.IsEdgeMode() {
 		t.Error("expected IsEdgeMode() true with DRYDOCK_URL + AUTHORIZED_KEYS")
+	}
+}
+
+// TestLoadEdgeModeWithoutPrivateKeyErrors verifies that DRYDOCK_URL without PRIVATE_KEY_FILE
+// always fails, even when TOKEN is set. Drydock rejects token-only agents.
+func TestLoadEdgeModeWithoutPrivateKeyErrors(t *testing.T) {
+	setEnv(t,
+		"DRYDOCK_URL", "https://drydock.example.com",
+		"TOKEN", "rawtoken",
+	)
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for edge mode without PRIVATE_KEY_FILE, got nil")
+	}
+	if !strings.Contains(err.Error(), "PRIVATE_KEY_FILE") {
+		t.Fatalf("expected 'PRIVATE_KEY_FILE' in error, got: %v", err)
 	}
 }
