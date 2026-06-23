@@ -112,8 +112,12 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage, session *ExecSession) {
 	defer recoverSession("bringUpExec", msg.ExecID)
 
+	// tty defaults to true when the field is absent (nil), preserving the
+	// prior hardcoded behavior. Explicit false disables PTY allocation.
+	tty := msg.Tty == nil || *msg.Tty
+
 	// Create exec instance.
-	execID, err := c.dockerClient.CreateExec(ctx, msg.ContainerID, msg.Cmd, msg.User, true)
+	execID, err := c.dockerClient.CreateExec(ctx, msg.ContainerID, msg.Cmd, msg.User, tty)
 	if err != nil {
 		slog.Error("failed to create exec", "container", msg.ContainerID, "error", err)
 		session.failStart(fmt.Sprintf("create exec failed: %v", err))
@@ -127,7 +131,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	session.dockerExecID = execID
 
 	// Start exec and get hijacked connection.
-	conn, err := c.dockerClient.StartExec(ctx, execID, true)
+	conn, err := c.dockerClient.StartExec(ctx, execID, tty)
 	if err != nil {
 		slog.Error("failed to start exec", "execID", execID, "error", err)
 		session.failStart(fmt.Sprintf("start exec failed: %v", err))

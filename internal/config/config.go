@@ -125,6 +125,12 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires TOKEN, AUTHORIZED_KEYS, or PRIVATE_KEY_FILE")
 		}
 	}
+	// Drydock categorically rejects token-only agents (ed25519-required); a
+	// PRIVATE_KEY_FILE must always be present in edge mode so startup fails fast
+	// with a clear message rather than looping forever on a rejected hello.
+	if drydockURL != "" && getEnv("PRIVATE_KEY_FILE", "") == "" {
+		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents")
+	}
 
 	agentID := getEnv("AGENT_ID", "")
 	if agentID == "" {

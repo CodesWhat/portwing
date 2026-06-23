@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,6 +33,12 @@ import (
 	"github.com/codeswhat/portwing/internal/pool"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
+
+// errFatal is returned by connect when the connection fails in a way that
+// cannot be recovered by retrying (e.g. a 404 on the WebSocket upgrade, or an
+// Ed25519 hello-signing failure). Run propagates it as a fatal error instead of
+// entering the reconnect loop.
+var errFatal = errors.New("fatal connection error")
 
 const (
 	maxReadSize     = 16 * 1024 * 1024  // 16 MB — WebSocket read limit
@@ -96,6 +103,12 @@ type Client struct {
 	// streamSem bounds concurrent in-flight request handlers (maxStreams).
 	streamSem chan struct{}
 
+	// welcomePollInterval is the poll interval (seconds) received from the
+	// controller's welcome frame. Zero means the controller did not supply one,
+	// so writePump falls back to DDPollInterval from config. Set once per
+	// connection before writePump starts; writePump reads it without a lock.
+	welcomePollInterval int
+
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
 }
@@ -155,6 +168,10 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 
 		if err != nil {
+			if errors.Is(err, errFatal) {
+				slog.Error("fatal connection error, not retrying", "error", err)
+				return err
+			}
 			slog.Warn("connection lost", "error", err)
 		}
 
@@ -218,8 +235,14 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 
 	slog.Info("connecting to controller", "url", wsURL)
 
-	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
+	conn, resp, err := dialer.DialContext(ctx, wsURL, nil)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
+		if errors.Is(err, websocket.ErrBadHandshake) && resp != nil && resp.StatusCode == http.StatusNotFound {
+			return false, fmt.Errorf("%w: controller returned 404 on WebSocket upgrade — DD_EXPERIMENTAL_PORTWING is likely not enabled or the /api/portwing/ws route is absent", errFatal)
+		}
 		return false, fmt.Errorf("websocket dial: %w", err)
 	}
 	conn.SetReadLimit(maxReadSize)
@@ -255,6 +278,21 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	if env.Type != protocol.TypeWelcome {
 		closeWebSocket(conn, "unexpected welcome type")
 		return false, fmt.Errorf("expected welcome, got %q", env.Type)
+	}
+
+	var welcome protocol.WelcomeMessage
+	if err := json.Unmarshal(env.Data, &welcome); err != nil {
+		slog.Warn("could not parse welcome payload", "error", err)
+	} else {
+		if welcome.PollInterval > 0 {
+			c.welcomePollInterval = welcome.PollInterval
+		}
+		if compat, ok := welcome.Config["serverCompatLevel"]; ok && compat != protocol.DrydockCompat {
+			slog.Warn("controller compat level mismatch",
+				"serverCompatLevel", compat,
+				"agentExpects", protocol.DrydockCompat,
+			)
+		}
 	}
 
 	// Switch from the one-shot welcome deadline to the steady-state read
@@ -360,17 +398,14 @@ func (c *Client) sendHello(ctx context.Context) error {
 		Capabilities:  capabilities,
 	}
 
-	// Attempt Ed25519 signing if a private key is configured. If signing fails
-	// and no token is configured for fallback, refuse to send a credential-less
-	// hello — silently downgrading to an unauthenticated hello is worse than
-	// failing the connection (Run retries with backoff).
+	// Sign the hello with Ed25519. If signing fails, this is fatal — drydock
+	// rejects token-only agents, so falling back to a token hash (or retrying a
+	// key the agent can't read/parse) would just loop forever against a
+	// controller that always responds with ed25519-required. errFatal stops Run
+	// rather than entering the reconnect loop.
 	if c.cfg.PrivateKeyFile != "" {
 		if err := c.signHello(ctx, &hello); err != nil {
-			if c.cfg.Token == "" {
-				return fmt.Errorf("ed25519 hello signing failed and no token configured for fallback: %w", err)
-			}
-			slog.Error("ed25519 hello signing failed, falling back to token hash", "error", err)
-			c.setTokenHash(&hello)
+			return fmt.Errorf("%w: ed25519 hello signing failed (check PRIVATE_KEY_FILE path, permissions, and format): %w", errFatal, err)
 		}
 	} else {
 		c.setTokenHash(&hello)
@@ -524,6 +559,18 @@ func (c *Client) readPump(ctx context.Context) error {
 			// Best-effort pong reply; connection loss will surface on next read.
 			_ = c.sendTypedMessage(protocol.TypePong, protocol.PongMessage(ping))
 
+		case protocol.TypeError:
+			var errMsg protocol.ErrorMessage
+			if err := json.Unmarshal(env.Data, &errMsg); err != nil {
+				slog.Warn("invalid error message", "error", err)
+				continue
+			}
+			slog.Warn("received error from controller",
+				"code", errMsg.Code,
+				"message", errMsg.Message,
+				"requestId", errMsg.RequestID,
+			)
+
 		default:
 			// Delegate to adapter for unrecognized message types.
 			if !c.adapter.HandleMessage(ctx, sender, env.Type, env.Data) {
@@ -625,6 +672,11 @@ func (c *Client) writePump(ctx context.Context) {
 	pollInterval := c.adapter.PollInterval()
 	if pollInterval <= 0 {
 		pollInterval = c.cfg.DDPollInterval
+	}
+	// Override with the poll interval from the welcome frame when the controller
+	// supplies one; it takes precedence over both the adapter and config defaults.
+	if c.welcomePollInterval > 0 {
+		pollInterval = c.welcomePollInterval
 	}
 	pollDuration := time.Duration(pollInterval) * time.Second
 
