@@ -197,9 +197,9 @@ type DDComponentSyncMessage struct {
 }
 
 type ComponentDescriptor struct {
-	Type          string                 `json:"type"`
-	Name          string                 `json:"name"`
-	Configuration map[string]interface{} `json:"configuration,omitempty"`
+	Type          string         `json:"type"`
+	Name          string         `json:"name"`
+	Configuration map[string]any `json:"configuration,omitempty"`
 }
 
 type DDWatchRequestMessage struct {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -180,6 +181,19 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) error {
 		if strings.HasPrefix(svc, "-") {
 			return fmt.Errorf("invalid service name: %q", svc)
 		}
+	}
+
+	// Validate registry auth server if present.
+	if req.RegistryAuth != nil && req.RegistryAuth.Server != "" {
+		u, err := url.ParseRequestURI(req.RegistryAuth.Server)
+		if err != nil {
+			return fmt.Errorf("registryAuth.server is not a valid URI: %w", err)
+		}
+		if u.Scheme != "https" {
+			return fmt.Errorf("registryAuth.server must use https scheme, got %q", u.Scheme)
+		}
+	} else if req.RegistryAuth != nil {
+		return fmt.Errorf("registryAuth.server is required and must be an https URI")
 	}
 
 	// Validate stack path is within stacksDir.

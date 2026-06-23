@@ -9,7 +9,7 @@ import (
 // MessageSender allows adapters to send typed messages over the active
 // transport (WebSocket in edge mode, SSE in standard mode, etc.).
 type MessageSender interface {
-	SendTypedMessage(msgType string, data interface{}) error
+	SendTypedMessage(msgType string, data any) error
 }
 
 // LabelParser extracts adapter-specific metadata from container labels.

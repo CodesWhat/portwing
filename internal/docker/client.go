@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +10,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
+	"net/url"
+	"regexp"
 	"time"
 )
 
@@ -268,6 +270,19 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
+// containerRefPattern matches valid Docker container IDs and names.
+// Docker names allow [a-zA-Z0-9_.-] and must start with an alphanumeric.
+var containerRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
+
+// validateContainerRef returns an error if ref is not a valid Docker container
+// name or ID (safe to interpolate into a URL path segment).
+func validateContainerRef(ref string) error {
+	if !containerRefPattern.MatchString(ref) {
+		return fmt.Errorf("invalid container id/name: %q", ref)
+	}
+	return nil
+}
+
 // ListContainers returns all containers (or only running ones if all is false).
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerJSON, error) {
 	path := "/containers/json"
@@ -283,7 +298,8 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerJSON,
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("list containers: status %d: %s", resp.StatusCode, string(body))
+		slog.Warn("docker error", "method", "ListContainers", "status", resp.StatusCode, "body", string(body))
+		return nil, fmt.Errorf("list containers: docker error (status %d)", resp.StatusCode)
 	}
 
 	var containers []ContainerJSON
@@ -295,6 +311,9 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerJSON,
 
 // InspectContainer returns detailed information about a single container.
 func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerInspect, error) {
+	if err := validateContainerRef(id); err != nil {
+		return nil, fmt.Errorf("inspect container: %w", err)
+	}
 	resp, err := c.Do(ctx, http.MethodGet, "/containers/"+id+"/json", nil)
 	if err != nil {
 		return nil, fmt.Errorf("inspect container: %w", err)
@@ -303,7 +322,8 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerIns
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("inspect container: status %d: %s", resp.StatusCode, string(body))
+		slog.Warn("docker error", "method", "InspectContainer", "path", "/containers/"+id+"/json", "status", resp.StatusCode, "body", string(body))
+		return nil, fmt.Errorf("inspect container: docker error (status %d)", resp.StatusCode)
 	}
 
 	var info ContainerInspect
@@ -316,6 +336,9 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerIns
 // RemoveContainer deletes a container. If force is true, the container is
 // killed before removal.
 func (c *Client) RemoveContainer(ctx context.Context, id string, force bool) error {
+	if err := validateContainerRef(id); err != nil {
+		return fmt.Errorf("remove container: %w", err)
+	}
 	path := "/containers/" + id
 	if force {
 		path += "?force=1"
@@ -329,7 +352,8 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force bool) err
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("remove container: status %d: %s", resp.StatusCode, string(body))
+		slog.Warn("docker error", "method", "RemoveContainer", "path", path, "status", resp.StatusCode, "body", string(body))
+		return fmt.Errorf("remove container: docker error (status %d)", resp.StatusCode)
 	}
 	return nil
 }
@@ -337,24 +361,30 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force bool) err
 // GetContainerLogs returns a stream of container logs. The caller is
 // responsible for closing the returned ReadCloser.
 func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until string, follow, timestamps bool) (io.ReadCloser, error) {
-	params := "stdout=1&stderr=1"
-	if tail != "" {
-		params += "&tail=" + tail
-	}
-	if since != "" {
-		params += "&since=" + since
-	}
-	if until != "" {
-		params += "&until=" + until
-	}
-	if follow {
-		params += "&follow=1"
-	}
-	if timestamps {
-		params += "&timestamps=1"
+	if err := validateContainerRef(id); err != nil {
+		return nil, fmt.Errorf("container logs: %w", err)
 	}
 
-	path := "/containers/" + id + "/logs?" + params
+	q := url.Values{}
+	q.Set("stdout", "1")
+	q.Set("stderr", "1")
+	if tail != "" {
+		q.Set("tail", tail)
+	}
+	if since != "" {
+		q.Set("since", since)
+	}
+	if until != "" {
+		q.Set("until", until)
+	}
+	if follow {
+		q.Set("follow", "1")
+	}
+	if timestamps {
+		q.Set("timestamps", "1")
+	}
+
+	path := "/containers/" + id + "/logs?" + q.Encode()
 
 	var resp *http.Response
 	var err error
@@ -369,7 +399,8 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 
 	if resp.StatusCode != http.StatusOK {
 		body := readAndCloseBody(resp.Body)
-		return nil, fmt.Errorf("container logs: status %d: %s", resp.StatusCode, string(body))
+		slog.Warn("docker error", "method", "GetContainerLogs", "path", "/containers/"+id+"/logs", "status", resp.StatusCode, "body", body)
+		return nil, fmt.Errorf("container logs: docker error (status %d)", resp.StatusCode)
 	}
 
 	return resp.Body, nil
@@ -378,6 +409,10 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 // CreateExec creates an exec instance in the given container and returns
 // the exec ID.
 func (c *Client) CreateExec(ctx context.Context, containerID string, cmd []string, user string, tty bool) (string, error) {
+	if err := validateContainerRef(containerID); err != nil {
+		return "", fmt.Errorf("create exec: %w", err)
+	}
+
 	type execConfig struct {
 		AttachStdin  bool     `json:"AttachStdin"`
 		AttachStdout bool     `json:"AttachStdout"`
@@ -401,7 +436,7 @@ func (c *Client) CreateExec(ctx context.Context, containerID string, cmd []strin
 		return "", fmt.Errorf("marshaling exec config: %w", err)
 	}
 
-	resp, err := c.Do(ctx, http.MethodPost, "/containers/"+containerID+"/exec", strings.NewReader(string(payload)))
+	resp, err := c.Do(ctx, http.MethodPost, "/containers/"+containerID+"/exec", bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("create exec: %w", err)
 	}
@@ -409,7 +444,8 @@ func (c *Client) CreateExec(ctx context.Context, containerID string, cmd []strin
 
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("create exec: status %d: %s", resp.StatusCode, string(body))
+		slog.Warn("docker error", "method", "CreateExec", "path", "/containers/"+containerID+"/exec", "status", resp.StatusCode, "body", string(body))
+		return "", fmt.Errorf("create exec: docker error (status %d)", resp.StatusCode)
 	}
 
 	var result struct {
@@ -541,7 +577,8 @@ func (c *Client) GetDockerInfo(ctx context.Context) (*DockerInfo, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("docker info: status %d: %s", resp.StatusCode, string(body))
+		slog.Warn("docker error", "method", "GetDockerInfo", "path", "/info", "status", resp.StatusCode, "body", string(body))
+		return nil, fmt.Errorf("docker info: docker error (status %d)", resp.StatusCode)
 	}
 
 	var info DockerInfo
@@ -580,20 +617,24 @@ type ContainerStatsResponse struct {
 
 // ContainerStats fetches a single-shot stats snapshot for the given container ID.
 func (c *Client) ContainerStats(ctx context.Context, id string) (*ContainerStatsResponse, error) {
+	if err := validateContainerRef(id); err != nil {
+		return nil, fmt.Errorf("container stats: %w", err)
+	}
 	resp, err := c.Do(ctx, http.MethodGet, "/containers/"+id+"/stats?stream=false&one-shot=true", nil)
 	if err != nil {
-		return nil, fmt.Errorf("container stats %s: %w", id, err)
+		return nil, fmt.Errorf("container stats: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("container stats %s: status %d: %s", id, resp.StatusCode, string(body))
+		slog.Warn("docker error", "method", "ContainerStats", "path", "/containers/"+id+"/stats", "status", resp.StatusCode, "body", string(body))
+		return nil, fmt.Errorf("container stats: docker error (status %d)", resp.StatusCode)
 	}
 
 	var stats ContainerStatsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
-		return nil, fmt.Errorf("decoding container stats %s: %w", id, err)
+		return nil, fmt.Errorf("decoding container stats: %w", err)
 	}
 	return &stats, nil
 }

@@ -164,7 +164,7 @@ func TestHandleWatcherGetReturnsKnownWatcher(t *testing.T) {
 		t.Fatalf("unexpected content-type: got %q", ct)
 	}
 
-	var desc map[string]interface{}
+	var desc map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&desc); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestHandleLogEntriesReturnsEmptyArray(t *testing.T) {
 		t.Fatalf("unexpected content-type: got %q", ct)
 	}
 
-	var entries []interface{}
+	var entries []any
 	if err := json.NewDecoder(rec.Body).Decode(&entries); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

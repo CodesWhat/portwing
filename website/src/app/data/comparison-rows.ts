@@ -94,8 +94,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "Yes",
     watchtower: "—",
     diun: "—",
-    portwing: "Agent-side (controller WIP)",
-    planned: true,
+    portwing: "Yes (Drydock 1.5+, early access)",
   },
   {
     feature: "Single static Go binary",

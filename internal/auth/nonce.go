@@ -18,6 +18,7 @@ type NonceLRU struct {
 	seen    map[string]time.Time // nonce → time first seen
 	maxSize int
 	ttl     time.Duration // entries are safe to evict after this duration
+	done    chan struct{}
 }
 
 // NewNonceLRU returns a NonceLRU with the given capacity and a TTL equal to
@@ -34,9 +35,19 @@ func NewNonceLRU(maxSize int, windowSeconds int) *NonceLRU {
 		seen:    make(map[string]time.Time),
 		maxSize: maxSize,
 		ttl:     time.Duration(windowSeconds) * time.Second,
+		done:    make(chan struct{}),
 	}
 	go lru.cleanup()
 	return lru
+}
+
+// Close stops the background cleanup goroutine. It is idempotent.
+func (l *NonceLRU) Close() {
+	select {
+	case <-l.done:
+	default:
+		close(l.done)
+	}
 }
 
 // Add records the nonce if it has not been seen before and the cache is not
@@ -85,14 +96,19 @@ func (l *NonceLRU) cleanup() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		l.mu.Lock()
-		cutoff := time.Now().Add(-l.ttl)
-		for nonce, t := range l.seen {
-			if t.Before(cutoff) {
-				delete(l.seen, nonce)
+	for {
+		select {
+		case <-l.done:
+			return
+		case <-ticker.C:
+			l.mu.Lock()
+			cutoff := time.Now().Add(-l.ttl)
+			for nonce, t := range l.seen {
+				if t.Before(cutoff) {
+					delete(l.seen, nonce)
+				}
 			}
+			l.mu.Unlock()
 		}
-		l.mu.Unlock()
 	}
 }

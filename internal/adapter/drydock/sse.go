@@ -17,7 +17,6 @@ import (
 type SSEClient struct {
 	id     string
 	events chan []byte
-	done   chan struct{}
 }
 
 // ContainerProvider supplies the current container inventory for SSE payloads.
@@ -61,7 +60,6 @@ func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := &SSEClient{
 		id:     uuid.New().String(),
 		events: make(chan []byte, 64),
-		done:   make(chan struct{}),
 	}
 
 	b.mu.Lock()
@@ -191,9 +189,9 @@ func (b *SSEBroadcaster) buildWatcherSnapshotPayload() ([]byte, error) {
 		containers = []adapter.Container{}
 	}
 
-	event := map[string]interface{}{
+	event := map[string]any{
 		"type": "dd:watcher-snapshot",
-		"data": map[string]interface{}{
+		"data": map[string]any{
 			"watcher":    GetWatcherComponents()[0],
 			"containers": containers,
 		},
@@ -214,7 +212,7 @@ func (b *SSEBroadcaster) BroadcastWatcherSnapshot() {
 
 // BroadcastContainerAdded sends a dd:container-added event to all clients.
 func (b *SSEBroadcaster) BroadcastContainerAdded(c adapter.Container) {
-	event := map[string]interface{}{
+	event := map[string]any{
 		"type": "dd:container-added",
 		"data": c,
 	}
@@ -228,7 +226,7 @@ func (b *SSEBroadcaster) BroadcastContainerAdded(c adapter.Container) {
 
 // BroadcastContainerUpdated sends a dd:container-updated event to all clients.
 func (b *SSEBroadcaster) BroadcastContainerUpdated(c adapter.Container) {
-	event := map[string]interface{}{
+	event := map[string]any{
 		"type": "dd:container-updated",
 		"data": c,
 	}
@@ -242,7 +240,7 @@ func (b *SSEBroadcaster) BroadcastContainerUpdated(c adapter.Container) {
 
 // BroadcastContainerRemoved sends a dd:container-removed event to all clients.
 func (b *SSEBroadcaster) BroadcastContainerRemoved(id, name string) {
-	event := map[string]interface{}{
+	event := map[string]any{
 		"type": "dd:container-removed",
 		"data": map[string]string{
 			"id":   id,

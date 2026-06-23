@@ -82,6 +82,14 @@ type Server struct {
 	auditor      *audit.Logger
 	httpServer   *http.Server
 	startTime    time.Time
+
+	// pollCancel stops the pollContainers goroutine on Shutdown.
+	pollCancel context.CancelFunc
+	// hupDone is closed by Shutdown to stop the SIGHUP goroutine.
+	hupDone chan struct{}
+	// hupCh is the signal channel registered for SIGHUP; kept so Shutdown
+	// can call signal.Stop on it.
+	hupCh chan os.Signal
 }
 
 // NewServer creates and configures a new standard-mode Server.
@@ -101,11 +109,10 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	}
 	// verifier == nil means no auth configured.
 
-	auditor, auditClose, err := audit.New(cfg.AuditLog, cfg.AuditBufferSize)
+	auditor, _, err := audit.New(cfg.AuditLog, cfg.AuditBufferSize)
 	if err != nil {
 		return nil, fmt.Errorf("opening audit log: %w", err)
 	}
-	_ = auditClose // closed when process exits; file is append-only
 
 	// Set up Ed25519 key registry if configured.
 	var ed25519Cfg Ed25519Config
@@ -119,20 +126,6 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 			Nonces:         auth.NewNonceLRU(cfg.NonceLRUSize, cfg.MaxClockSkewSeconds),
 			MaxSkewSeconds: cfg.MaxClockSkewSeconds,
 		}
-
-		// Reload authorized_keys on SIGHUP so keys can be rotated or revoked
-		// without a restart. The nonce LRU is preserved across reloads.
-		hup := make(chan os.Signal, 1)
-		signal.Notify(hup, syscall.SIGHUP)
-		go func() {
-			for range hup {
-				if err := reg.Load(); err != nil {
-					slog.Error("SIGHUP: authorized_keys reload failed", "error", err)
-					continue
-				}
-				slog.Info("SIGHUP: authorized_keys reloaded", "keys", reg.Len())
-			}
-		}()
 	}
 
 	// Loud warning if the agent is starting with no way to authenticate any
@@ -165,6 +158,33 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		enroller:     enroller,
 		auditor:      auditor,
 		startTime:    time.Now(),
+		hupDone:      make(chan struct{}),
+	}
+
+	// Reload authorized_keys on SIGHUP so keys can be rotated or revoked
+	// without a restart. The nonce LRU is preserved across reloads.
+	if ed25519Cfg.Registry != nil {
+		reg := ed25519Cfg.Registry
+		hup := make(chan os.Signal, 1)
+		signal.Notify(hup, syscall.SIGHUP)
+		s.hupCh = hup
+		go func() {
+			for {
+				select {
+				case <-s.hupDone:
+					return
+				case _, ok := <-hup:
+					if !ok {
+						return
+					}
+					if err := reg.Load(); err != nil {
+						slog.Error("SIGHUP: authorized_keys reload failed", "error", err)
+						continue
+					}
+					slog.Info("SIGHUP: authorized_keys reloaded", "keys", reg.Len())
+				}
+			}
+		}()
 	}
 
 	if len(cfg.TrustedProxies) > 0 {
@@ -241,7 +261,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mcpHandler := authWrap(func(w http.ResponseWriter, r *http.Request) {
 		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
 	})
-	mux.Handle("/_portwing/mcp", mcpHandler)
+	mux.Handle("POST /_portwing/mcp", mcpHandler)
 
 	// Adapter-specific routes.
 	s.adapter.RegisterRoutes(mux, authWrap)
@@ -300,7 +320,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	capabilities = append(capabilities, s.adapter.Capabilities()...)
 
-	info := map[string]interface{}{
+	info := map[string]any{
 		"version":       protocol.AgentVersion,
 		"dockerVersion": dockerVersion,
 		"mode":          "standard",
@@ -319,6 +339,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 	actor := s.rateLimiter.clientIP(r)
 
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	var req docker.ComposeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
@@ -515,7 +536,9 @@ func (s *Server) streamResponse(w http.ResponseWriter, body io.Reader) {
 // ListenAndServe starts the HTTP server. It launches background container
 // polling and uses TLS if certificates are configured.
 func (s *Server) ListenAndServe() error {
-	go s.pollContainers()
+	pollCtx, pollCancel := context.WithCancel(context.Background())
+	s.pollCancel = pollCancel
+	go s.pollContainers(pollCtx)
 
 	if s.cfg.TLSCert != "" && s.cfg.TLSKey != "" {
 		return s.httpServer.ListenAndServeTLS(s.cfg.TLSCert, s.cfg.TLSKey)
@@ -523,16 +546,40 @@ func (s *Server) ListenAndServe() error {
 	return s.httpServer.ListenAndServe()
 }
 
-// Shutdown gracefully shuts down the HTTP server.
+// Shutdown gracefully shuts down the HTTP server and stops background goroutines.
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Stop the pollContainers goroutine.
+	if s.pollCancel != nil {
+		s.pollCancel()
+	}
+
+	// Stop the SIGHUP reload goroutine.
+	if s.hupCh != nil {
+		signal.Stop(s.hupCh)
+	}
+	select {
+	case <-s.hupDone:
+	default:
+		close(s.hupDone)
+	}
+
+	// Stop the rate limiter cleanup goroutine.
+	s.rateLimiter.Stop()
+
+	// Stop the nonce LRU cleanup goroutine.
+	if s.ed25519.Nonces != nil {
+		s.ed25519.Nonces.Close()
+	}
+
+	// Flush and close the audit log.
+	s.auditor.Close()
+
 	return s.httpServer.Shutdown(ctx)
 }
 
 // pollContainers periodically refreshes the container inventory via the
-// adapter and lets the adapter broadcast changes.
-func (s *Server) pollContainers() {
-	ctx := context.Background()
-
+// adapter and lets the adapter broadcast changes. It exits when ctx is cancelled.
+func (s *Server) pollContainers(ctx context.Context) {
 	// Initial refresh (builds inventory).
 	if _, _, _, err := s.adapter.RefreshContainers(ctx); err != nil {
 		slog.Error("initial container inventory failed", "error", err)
@@ -546,15 +593,20 @@ func (s *Server) pollContainers() {
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		added, updated, removed, err := s.adapter.RefreshContainers(ctx)
-		if err != nil {
-			slog.Error("container refresh failed", "error", err)
-			continue
-		}
-		// In standard mode, sender is nil — adapter handles SSE internally.
-		if err := s.adapter.OnContainerRefresh(ctx, nil, added, updated, removed); err != nil {
-			slog.Error("container refresh notify failed", "error", err)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			added, updated, removed, err := s.adapter.RefreshContainers(ctx)
+			if err != nil {
+				slog.Error("container refresh failed", "error", err)
+				continue
+			}
+			// In standard mode, sender is nil — adapter handles SSE internally.
+			if err := s.adapter.OnContainerRefresh(ctx, nil, added, updated, removed); err != nil {
+				slog.Error("container refresh notify failed", "error", err)
+			}
 		}
 	}
 }

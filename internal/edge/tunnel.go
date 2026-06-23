@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"sync"
@@ -14,21 +16,44 @@ import (
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
-// execInputQueue bounds the per-session input backlog. Input is decoded on the
-// read loop and handed to a single writer goroutine, so this buffers the burst
-// that can arrive before the Docker exec is live (and any momentary write
-// stall) without ever blocking the read pump.
+// execInputQueue bounds the per-session input backlog. Input and resizes are
+// decoded on the read loop and handed to a single writer goroutine, so this
+// buffers the burst that can arrive before the Docker exec is live (and any
+// momentary write stall) without ever blocking the read pump.
 const execInputQueue = 256
+
+// execItem is one ordered unit drained by inputWriter: either stdin bytes to
+// write to the exec, or a TTY resize. Routing both through the single drainer
+// keeps them in arrival order and — critically — off the read pump, so a slow
+// or failing resize can never stall ping/exec dispatch.
+type execItem struct {
+	data   []byte    // stdin bytes; nil for a resize
+	resize *resizeOp // non-nil for a resize
+}
+
+// resizeOp is a pending TTY resize.
+type resizeOp struct {
+	cols int
+	rows int
+}
 
 // ExecSession represents an active exec session tunneled over WebSocket.
 //
 // Input ordering is the session's core invariant: a single inputWriter
-// goroutine drains inbox in arrival order, so keystrokes that race ahead of the
-// Docker exec coming up are buffered and replayed in order rather than dropped.
+// goroutine drains inbox in arrival order, so keystrokes (and resizes) that race
+// ahead of the Docker exec coming up are buffered and replayed in order rather
+// than dropped.
 type ExecSession struct {
-	execID      string
+	execID      string // controller-assigned exec ID (used on the wire)
 	containerID string
 	client      *Client
+
+	// dockerExecID is the Docker-assigned exec instance ID returned by
+	// CreateExec. It differs from execID (which is the controller's ID) and is
+	// the one Docker's resize endpoint expects. Written once in bringUpExec
+	// before connReady is closed; inputWriter only reads it after <-connReady,
+	// so the channel close publishes it without a separate lock.
+	dockerExecID string
 
 	// conn is the hijacked Docker exec stream. It is nil until the exec is
 	// brought up; readers synchronize through connReady (or the mu-guarded
@@ -36,8 +61,9 @@ type ExecSession struct {
 	conn      net.Conn
 	connReady chan struct{} // closed once conn is live and ordered I/O may flow
 
-	// inbox carries decoded input in arrival order for inputWriter to drain.
-	inbox chan []byte
+	// inbox carries decoded input and resizes in arrival order for inputWriter
+	// to drain.
+	inbox chan execItem
 
 	done chan struct{}
 	once sync.Once
@@ -53,7 +79,7 @@ type ExecSession struct {
 func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	// Check concurrent session limit.
 	var count int
-	c.execSessions.Range(func(_, _ interface{}) bool {
+	c.execSessions.Range(func(_, _ any) bool {
 		count++
 		return count < maxExecSessions
 	})
@@ -72,18 +98,20 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		containerID: msg.ContainerID,
 		client:      c,
 		connReady:   make(chan struct{}),
-		inbox:       make(chan []byte, execInputQueue),
+		inbox:       make(chan execItem, execInputQueue),
 		done:        make(chan struct{}),
 	}
 	c.execSessions.Store(msg.ExecID, session)
 
-	go session.inputWriter()
+	go session.inputWriter(ctx)
 	go c.bringUpExec(ctx, msg, session)
 }
 
 // bringUpExec performs the Docker round-trips for an already-registered session
 // and, on success, wires the live connection and starts streaming.
 func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage, session *ExecSession) {
+	defer recoverSession("bringUpExec", msg.ExecID)
+
 	// Create exec instance.
 	execID, err := c.dockerClient.CreateExec(ctx, msg.ContainerID, msg.Cmd, msg.User, true)
 	if err != nil {
@@ -91,6 +119,12 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 		session.failStart(fmt.Sprintf("create exec failed: %v", err))
 		return
 	}
+
+	// Record the Docker exec ID so post-startup resizes target the instance
+	// Docker actually knows about (not the controller's execID). Safe without a
+	// lock: this write happens-before activate closes connReady, and the only
+	// reader (inputWriter, via doResize) reads it only after <-connReady.
+	session.dockerExecID = execID
 
 	// Start exec and get hijacked connection.
 	conn, err := c.dockerClient.StartExec(ctx, execID, true)
@@ -141,7 +175,7 @@ func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 	}
 
 	select {
-	case session.inbox <- data:
+	case session.inbox <- execItem{data: data}:
 	case <-session.done:
 		slog.Debug("exec input for closed session", "execID", msg.ExecID)
 	default:
@@ -152,7 +186,9 @@ func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 // inputWriter is the session's single input writer. It waits for the exec to go
 // live, then drains inbox in order, writing each chunk to the connection. Being
 // the only writer is what guarantees input ordering.
-func (s *ExecSession) inputWriter() {
+func (s *ExecSession) inputWriter(ctx context.Context) {
+	defer recoverSession("inputWriter", s.execID)
+
 	select {
 	case <-s.connReady:
 	case <-s.done:
@@ -161,8 +197,12 @@ func (s *ExecSession) inputWriter() {
 
 	for {
 		select {
-		case data := <-s.inbox:
-			s.writeInput(data)
+		case item := <-s.inbox:
+			if item.resize != nil {
+				s.doResize(ctx, *item.resize)
+			} else {
+				s.writeInput(item.data)
+			}
 		case <-s.done:
 			return
 		}
@@ -190,8 +230,12 @@ func (s *ExecSession) writeInput(data []byte) {
 	s.Close()
 }
 
-// HandleResize changes the TTY dimensions for an active exec session.
-func (c *Client) HandleResize(ctx context.Context, msg protocol.ExecResizeMessage) {
+// HandleResize enqueues a TTY resize for ordered delivery. Like HandleInput the
+// enqueue is non-blocking, so the read pump keeps servicing pings and other
+// sessions: the actual ResizeExec round-trip (and its retries) runs on the
+// session's single inputWriter goroutine, never on the read pump. The ctx param
+// is unused — the drainer carries the session's ctx from StartExec.
+func (c *Client) HandleResize(_ context.Context, msg protocol.ExecResizeMessage) {
 	val, ok := c.execSessions.Load(msg.ExecID)
 	if !ok {
 		slog.Debug("exec session not found for resize", "execID", msg.ExecID)
@@ -199,19 +243,36 @@ func (c *Client) HandleResize(ctx context.Context, msg protocol.ExecResizeMessag
 	}
 
 	session := val.(*ExecSession)
-	_ = session // verify session exists
 
-	// Resize with retry (up to 10 attempts, 50ms intervals).
-	for attempt := 0; attempt < 10; attempt++ {
-		err := c.dockerClient.ResizeExec(ctx, msg.ExecID, msg.Cols, msg.Rows)
-		if err == nil {
-			return
-		}
-		slog.Debug("exec resize retry", "execID", msg.ExecID, "attempt", attempt+1, "error", err)
-		time.Sleep(50 * time.Millisecond)
+	select {
+	case session.inbox <- execItem{resize: &resizeOp{cols: msg.Cols, rows: msg.Rows}}:
+	case <-session.done:
+		slog.Debug("exec resize for closed session", "execID", msg.ExecID)
+	default:
+		slog.Warn("exec resize queue full, dropping", "execID", msg.ExecID)
 	}
+}
 
-	slog.Warn("failed to resize exec after retries", "execID", msg.ExecID)
+// doResize performs the Docker resize round-trip on the inputWriter goroutine.
+// It targets dockerExecID (the Docker-assigned instance ID, not the controller
+// execID), retrying transient failures while respecting session/connection
+// teardown so a failing resize can't pin the drainer indefinitely.
+func (s *ExecSession) doResize(ctx context.Context, op resizeOp) {
+	for attempt := 0; attempt < 10; attempt++ {
+		if err := s.client.dockerClient.ResizeExec(ctx, s.dockerExecID, op.cols, op.rows); err == nil {
+			return
+		} else {
+			slog.Debug("exec resize retry", "execID", s.execID, "attempt", attempt+1, "error", err)
+		}
+		select {
+		case <-s.done:
+			return
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	slog.Warn("failed to resize exec after retries", "execID", s.execID)
 }
 
 // EndExec closes an active exec session.
@@ -260,6 +321,7 @@ func (s *ExecSession) failStart(reason string) {
 // as exec_output messages. On error or EOF, it sends exec_end and cleans up.
 func (s *ExecSession) readLoop() {
 	defer s.Close()
+	defer recoverSession("readLoop", s.execID)
 
 	for {
 		buf := pool.GetBuffer()
@@ -287,7 +349,7 @@ func (s *ExecSession) readLoop() {
 
 			// Send exec_end.
 			reason := "exited"
-			if err.Error() != "EOF" {
+			if !errors.Is(err, io.EOF) {
 				reason = err.Error()
 			}
 
@@ -325,4 +387,14 @@ func (s *ExecSession) Close() {
 		close(s.done)
 		s.client.execSessions.Delete(s.execID)
 	})
+}
+
+// recoverSession swallows and logs a panic in a per-session goroutine so one
+// bad exec stream can't take down the whole agent process. Deferred at the
+// entry of each per-session goroutine (bringUpExec, inputWriter, readLoop).
+func recoverSession(where, execID string) {
+	if r := recover(); r != nil {
+		slog.Error("recovered from panic in exec session goroutine",
+			"where", where, "execID", execID, "panic", r)
+	}
 }

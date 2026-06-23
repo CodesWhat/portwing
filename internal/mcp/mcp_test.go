@@ -139,7 +139,7 @@ func newTestHandler(t *testing.T) (*Handler, func()) {
 	return NewHandler(client, collector), shutdown
 }
 
-func postMCP(t *testing.T, h *Handler, body interface{}) *httptest.ResponseRecorder {
+func postMCP(t *testing.T, h *Handler, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -166,14 +166,14 @@ func TestInitializeRoundTrip(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "initialize",
-		"params": map[string]interface{}{
+		"params": map[string]any{
 			"protocolVersion": "2025-11-25",
-			"capabilities":    map[string]interface{}{},
-			"clientInfo":      map[string]interface{}{"name": "test", "version": "0.0.1"},
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "test", "version": "0.0.1"},
 		},
 	})
 
@@ -186,7 +186,7 @@ func TestInitializeRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := resp.Result.(map[string]any)
 	if !ok {
 		t.Fatalf("result is not an object: %T", resp.Result)
 	}
@@ -195,7 +195,7 @@ func TestInitializeRoundTrip(t *testing.T) {
 		t.Errorf("protocolVersion = %v, want %v", got, want)
 	}
 
-	caps, ok := result["capabilities"].(map[string]interface{})
+	caps, ok := result["capabilities"].(map[string]any)
 	if !ok {
 		t.Fatalf("capabilities is not an object")
 	}
@@ -203,7 +203,7 @@ func TestInitializeRoundTrip(t *testing.T) {
 		t.Error("capabilities.tools missing")
 	}
 
-	serverInfo, ok := result["serverInfo"].(map[string]interface{})
+	serverInfo, ok := result["serverInfo"].(map[string]any)
 	if !ok {
 		t.Fatalf("serverInfo is not an object")
 	}
@@ -217,7 +217,7 @@ func TestToolsListShape(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "tools/list",
@@ -232,12 +232,12 @@ func TestToolsListShape(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := resp.Result.(map[string]any)
 	if !ok {
 		t.Fatalf("result is not an object")
 	}
 
-	tools, ok := result["tools"].([]interface{})
+	tools, ok := result["tools"].([]any)
 	if !ok {
 		t.Fatalf("tools is not an array")
 	}
@@ -251,7 +251,7 @@ func TestToolsListShape(t *testing.T) {
 	}
 
 	for _, raw := range tools {
-		tool, ok := raw.(map[string]interface{})
+		tool, ok := raw.(map[string]any)
 		if !ok {
 			t.Errorf("tool entry is not an object: %T", raw)
 			continue
@@ -283,13 +283,13 @@ func TestToolsCallListContainers(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      3,
 		"method":  "tools/call",
-		"params": map[string]interface{}{
+		"params": map[string]any{
 			"name":      "list_containers",
-			"arguments": map[string]interface{}{},
+			"arguments": map[string]any{},
 		},
 	})
 
@@ -302,29 +302,29 @@ func TestToolsCallListContainers(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := resp.Result.(map[string]any)
 	if !ok {
 		t.Fatalf("result is not an object")
 	}
 
 	if isErr, _ := result["isError"].(bool); isErr {
-		content, _ := result["content"].([]interface{})
+		content, _ := result["content"].([]any)
 		if len(content) > 0 {
-			msg, _ := content[0].(map[string]interface{})
+			msg, _ := content[0].(map[string]any)
 			t.Fatalf("tool returned error: %v", msg["text"])
 		}
 		t.Fatal("tool returned error (no content)")
 	}
 
-	content, ok := result["content"].([]interface{})
+	content, ok := result["content"].([]any)
 	if !ok || len(content) == 0 {
 		t.Fatal("content is empty")
 	}
 
-	block, _ := content[0].(map[string]interface{})
+	block, _ := content[0].(map[string]any)
 	text, _ := block["text"].(string)
 
-	var containers []map[string]interface{}
+	var containers []map[string]any
 	if err := json.Unmarshal([]byte(text), &containers); err != nil {
 		t.Fatalf("unmarshal container list: %v\ntext: %s", err, text)
 	}
@@ -347,7 +347,7 @@ func TestUnknownMethodError(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      99,
 		"method":  "resources/list",
@@ -372,13 +372,13 @@ func TestInspectContainerNoEnvLeak(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      5,
 		"method":  "tools/call",
-		"params": map[string]interface{}{
+		"params": map[string]any{
 			"name":      "inspect_container",
-			"arguments": map[string]interface{}{"id": "abc123"},
+			"arguments": map[string]any{"id": "abc123"},
 		},
 	})
 
@@ -387,12 +387,12 @@ func TestInspectContainerNoEnvLeak(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	result, _ := resp.Result.(map[string]interface{})
-	content, _ := result["content"].([]interface{})
+	result, _ := resp.Result.(map[string]any)
+	content, _ := result["content"].([]any)
 	if len(content) == 0 {
 		t.Fatal("empty content")
 	}
-	block, _ := content[0].(map[string]interface{})
+	block, _ := content[0].(map[string]any)
 	text, _ := block["text"].(string)
 
 	// Env values from the stub are "PATH=/usr/local/sbin" and "HOME=/root".
@@ -414,7 +414,7 @@ func TestPing(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      10,
 		"method":  "ping",
@@ -449,7 +449,7 @@ func TestNotificationsInitialized(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "notifications/initialized",
 	})
@@ -464,13 +464,13 @@ func TestToolsCallContainerLogs(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      6,
 		"method":  "tools/call",
-		"params": map[string]interface{}{
+		"params": map[string]any{
 			"name":      "container_logs",
-			"arguments": map[string]interface{}{"id": "abc123", "tail": 50},
+			"arguments": map[string]any{"id": "abc123", "tail": 50},
 		},
 	})
 
@@ -483,28 +483,28 @@ func TestToolsCallContainerLogs(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := resp.Result.(map[string]any)
 	if !ok {
 		t.Fatalf("result is not an object")
 	}
 	if isErr, _ := result["isError"].(bool); isErr {
-		content, _ := result["content"].([]interface{})
+		content, _ := result["content"].([]any)
 		if len(content) > 0 {
-			msg, _ := content[0].(map[string]interface{})
+			msg, _ := content[0].(map[string]any)
 			t.Fatalf("tool returned error: %v", msg["text"])
 		}
 		t.Fatal("tool returned error (no content)")
 	}
 
-	content, ok := result["content"].([]interface{})
+	content, ok := result["content"].([]any)
 	if !ok || len(content) == 0 {
 		t.Fatal("content is empty")
 	}
 
-	block, _ := content[0].(map[string]interface{})
+	block, _ := content[0].(map[string]any)
 	text, _ := block["text"].(string)
 
-	var out map[string]interface{}
+	var out map[string]any
 	if err := json.Unmarshal([]byte(text), &out); err != nil {
 		t.Fatalf("unmarshal container_logs result: %v\ntext: %s", err, text)
 	}
@@ -518,13 +518,13 @@ func TestToolsCallContainerStats(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      7,
 		"method":  "tools/call",
-		"params": map[string]interface{}{
+		"params": map[string]any{
 			"name":      "container_stats",
-			"arguments": map[string]interface{}{"id": "abc123"},
+			"arguments": map[string]any{"id": "abc123"},
 		},
 	})
 
@@ -537,28 +537,28 @@ func TestToolsCallContainerStats(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := resp.Result.(map[string]any)
 	if !ok {
 		t.Fatalf("result is not an object")
 	}
 	if isErr, _ := result["isError"].(bool); isErr {
-		content, _ := result["content"].([]interface{})
+		content, _ := result["content"].([]any)
 		if len(content) > 0 {
-			msg, _ := content[0].(map[string]interface{})
+			msg, _ := content[0].(map[string]any)
 			t.Fatalf("tool returned error: %v", msg["text"])
 		}
 		t.Fatal("tool returned error (no content)")
 	}
 
-	content, ok := result["content"].([]interface{})
+	content, ok := result["content"].([]any)
 	if !ok || len(content) == 0 {
 		t.Fatal("content is empty")
 	}
 
-	block, _ := content[0].(map[string]interface{})
+	block, _ := content[0].(map[string]any)
 	text, _ := block["text"].(string)
 
-	var out map[string]interface{}
+	var out map[string]any
 	if err := json.Unmarshal([]byte(text), &out); err != nil {
 		t.Fatalf("unmarshal container_stats result: %v\ntext: %s", err, text)
 	}
@@ -572,13 +572,13 @@ func TestToolsCallHostMetrics(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
 
-	rr := postMCP(t, h, map[string]interface{}{
+	rr := postMCP(t, h, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      8,
 		"method":  "tools/call",
-		"params": map[string]interface{}{
+		"params": map[string]any{
 			"name":      "host_metrics",
-			"arguments": map[string]interface{}{},
+			"arguments": map[string]any{},
 		},
 	})
 
@@ -591,7 +591,7 @@ func TestToolsCallHostMetrics(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := resp.Result.(map[string]any)
 	if !ok {
 		t.Fatalf("result is not an object")
 	}

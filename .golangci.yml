@@ -7,6 +7,7 @@ linters:
     - errorlint
     - gosec
     - misspell
+    - unused
   settings:
     errcheck:
       # Exclude close/teardown calls where the error is unactionable:

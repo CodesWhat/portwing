@@ -12,6 +12,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Application/request Prometheus metrics**: `/metrics` and `/_portwing/metrics` now also expose `portwing_http_requests_total{method,code}`, `portwing_http_request_duration_seconds` (histogram), `portwing_http_requests_in_flight` (gauge), `portwing_auth_failures_total{reason}`, and `portwing_rate_limited_total`. The endpoints and their existing build/host/per-container series are unchanged.
 - **Audit ring buffer and `GET /_portwing/audit`**: setting `AUDIT_BUFFER_SIZE` (default 256, 0 disables) retains the most recent audit records in memory for pull-based retrieval at the new authenticated endpoint `GET /_portwing/audit`, which returns `{"records":[...],"count":N}` newest-first with an optional `?limit=N` query parameter. The buffer is independent of `AUDIT_LOG` and works even when the slog sink is off. The JSON record schema is unchanged (ts/event/actor/method/path/outcome/status/duration_ms plus event-specific fields).
 - **Kubernetes deployment examples**: hardened DaemonSet manifests for standard and edge mode under `examples/kubernetes/` (read-only rootfs, dropped capabilities, non-root, node-socket mount, health probes).
+- **Broadened test coverage**: a fuzz target for the wire `Envelope` parser (`FuzzEnvelope`), HTTP handler tests for the server (auth wrap, compose body limit, MCP method gating), drydock `HandleMessage` branch tests, and compose `validateRequest` injection-vector tests.
+
+### Security
+
+- **Pre-auth request body cap**: signed (Ed25519) requests are buffered through `http.MaxBytesReader` at 1 MB before signature verification — previously a 64 MB `io.LimitReader` with no read timeout, which let a slow-drip sender hold a large per-connection buffer before authenticating. Over-limit bodies now get 413. The exec (10 MB) and MCP (1 MB) limits are unchanged.
+- **Registry-credential and proxy-parameter validation**: compose `registryAuth.server` must be a valid `https` URI before `docker login` runs (blocks redirecting a shared registry credential to an attacker-controlled host); container-log `since`/`until` and the other log query params are built with `url.Values` rather than string concatenation (blocks `&follow=1`-style injection that could pin an indefinitely blocking stream); container IDs/names are validated against the Docker charset before they are interpolated into Docker API paths.
+- **Private signing-key permission check**: `PRIVATE_KEY_FILE` is rejected when it is group/world-accessible (looser than 0600), matching the existing `authorized_keys` check.
+- **Outbound TLS posture**: the edge controller dial pins `MinVersion: TLS 1.2` (matching the inbound server), warns when `TLS_SKIP_VERIFY=true`, and refuses to send an unauthenticated hello when Ed25519 signing fails and no token fallback is configured (previously a silent downgrade).
+- **Docker daemon error bodies are no longer forwarded to clients**: non-2xx Docker responses surface a generic `docker error (status N)` to API/MCP callers while the raw body is logged server-side; the MCP log demuxer also caps per-frame allocation at 256 KiB.
+- **Nonce-cache behavior documented**: `SECURITY.md` now describes the replay window and fail-open-when-full semantics of the nonce LRU and why it is not reachable by an unauthenticated caller.
+
+### Fixed
+
+- **Exec terminal resize was permanently broken in edge mode**: post-startup resizes were sent to Docker using the controller's exec ID instead of the Docker-assigned exec instance ID, so every resize after the initial one 404'd. The session now records the Docker exec ID and uses it for resizes.
+- **Exec resize no longer blocks the read pump**: `HandleResize` previously ran the Docker resize round-trip (up to ~450 ms of retries) inline on the WebSocket read pump, stalling pings and every other session. Resizes are now enqueued onto the same single per-session input drainer as keystrokes, preserving order and keeping the read pump free.
+- **Exec sessions no longer leak across reconnects**: every live exec session is torn down when a controller connection ends, and the per-session goroutines recover from panics instead of taking down the agent process.
+- **Goroutine lifecycle on shutdown**: the container-poll loop, the SIGHUP reload goroutine, and the rate-limiter / nonce-cache cleanup tickers now stop on shutdown, and the standard-mode audit log file is flushed and closed.
+- **Container refresh no longer issues a Docker inspect per container every poll**: the periodic inventory refresh caches the built container and re-inspects only when the list entry's state/status/image changes (initial inventory still inspects every container).
+- Removed two dead struct fields (`SSEClient.done`, `Collector.prevTime`); constrained the MCP route to `POST`; switched several `io.EOF` string/`==` comparisons to `errors.Is`; pooled the 32 KiB proxy stream buffer; and dropped an unnecessary `[]byte`→`string` copy on the request-body path.
+
+### Changed
+
+- **Security-model docs truthed up**: removed fabricated `CVE-2026-*` identifiers and a fake "Arcane Docker Manager" advisory from `docs/security-model.md` and the docs-site `security-model.mdx`, replacing them with described vulnerability classes; corrected the Compose-guard control reference to "Control 8 — Compose input guards"; fixed a recurring "misonfigure" typo; and synced stale version strings. The marketing comparison now lists edge mode as early-access (Drydock 1.5+) instead of planned.
+- **Tooling**: enabled the `unused` linter in `.golangci.yml`, pinned GoReleaser to an exact release (`v2.16.0`) instead of the floating `~> v2`, and converted `interface{}` to `any` across the codebase.
 
 ## [0.4.0] - 2026-06-22
 

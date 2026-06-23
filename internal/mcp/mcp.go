@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,7 +50,7 @@ type rpcRequest struct {
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
-	Result  interface{}     `json:"result,omitempty"`
+	Result  any             `json:"result,omitempty"`
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
@@ -112,7 +113,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// One-way notification — acknowledge with 202 and no body.
 		w.WriteHeader(http.StatusAccepted)
 	case "ping":
-		writeResult(w, req.ID, map[string]interface{}{})
+		writeResult(w, req.ID, map[string]any{})
 	case "tools/list":
 		writeResult(w, req.ID, h.toolsList())
 	case "tools/call":
@@ -124,12 +125,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleInitialize responds to the MCP initialization handshake.
 func (h *Handler) handleInitialize(w http.ResponseWriter, req rpcRequest) {
-	result := map[string]interface{}{
+	result := map[string]any{
 		"protocolVersion": protocolVersion,
-		"capabilities": map[string]interface{}{
-			"tools": map[string]interface{}{},
+		"capabilities": map[string]any{
+			"tools": map[string]any{},
 		},
-		"serverInfo": map[string]interface{}{
+		"serverInfo": map[string]any{
 			"name":    "portwing",
 			"version": protocol.AgentVersion,
 		},
@@ -138,24 +139,24 @@ func (h *Handler) handleInitialize(w http.ResponseWriter, req rpcRequest) {
 }
 
 // toolsList returns the MCP tools/list result body.
-func (h *Handler) toolsList() map[string]interface{} {
-	return map[string]interface{}{
-		"tools": []interface{}{
-			map[string]interface{}{
+func (h *Handler) toolsList() map[string]any {
+	return map[string]any{
+		"tools": []any{
+			map[string]any{
 				"name":        "list_containers",
 				"description": "List all Docker containers (running and stopped) with id, names, image, state, status, and labels.",
-				"inputSchema": map[string]interface{}{
+				"inputSchema": map[string]any{
 					"type":                 "object",
 					"additionalProperties": false,
 				},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"name":        "inspect_container",
 				"description": "Inspect a container: state, image, env var count (no values), mounts, network names, and restart policy.",
-				"inputSchema": map[string]interface{}{
+				"inputSchema": map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"id": map[string]interface{}{
+					"properties": map[string]any{
+						"id": map[string]any{
 							"type":        "string",
 							"description": "Container ID or name.",
 						},
@@ -163,17 +164,17 @@ func (h *Handler) toolsList() map[string]interface{} {
 					"required": []string{"id"},
 				},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"name":        "container_logs",
 				"description": "Return the last N lines (max 500) of stdout/stderr from a container.",
-				"inputSchema": map[string]interface{}{
+				"inputSchema": map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"id": map[string]interface{}{
+					"properties": map[string]any{
+						"id": map[string]any{
 							"type":        "string",
 							"description": "Container ID or name.",
 						},
-						"tail": map[string]interface{}{
+						"tail": map[string]any{
 							"type":        "integer",
 							"description": "Number of log lines to return (1–500, default 100).",
 							"minimum":     1,
@@ -183,21 +184,21 @@ func (h *Handler) toolsList() map[string]interface{} {
 					"required": []string{"id"},
 				},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"name":        "host_metrics",
 				"description": "Return a snapshot of host-level resource metrics: CPU, memory, disk, network, and uptime.",
-				"inputSchema": map[string]interface{}{
+				"inputSchema": map[string]any{
 					"type":                 "object",
 					"additionalProperties": false,
 				},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"name":        "container_stats",
 				"description": "Return a one-shot CPU/memory/network stats snapshot for a single container.",
-				"inputSchema": map[string]interface{}{
+				"inputSchema": map[string]any{
 					"type": "object",
-					"properties": map[string]interface{}{
-						"id": map[string]interface{}{
+					"properties": map[string]any{
+						"id": map[string]any{
 							"type":        "string",
 							"description": "Container ID or name.",
 						},
@@ -320,7 +321,7 @@ func (h *Handler) toolInspectContainer(ctx context.Context, w http.ResponseWrite
 		restartPolicy = info.HostConfig.RestartPolicy.Name
 	}
 
-	out := map[string]interface{}{
+	out := map[string]any{
 		"id":            info.ID,
 		"name":          info.Name,
 		"state":         info.State,
@@ -372,7 +373,7 @@ func (h *Handler) toolContainerLogs(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 
-	out := map[string]interface{}{
+	out := map[string]any{
 		"id":    p.ID,
 		"lines": lines,
 	}
@@ -423,7 +424,7 @@ func (h *Handler) toolContainerStats(ctx context.Context, w http.ResponseWriter,
 		networks[name] = netIface{RxBytes: iface.RxBytes, TxBytes: iface.TxBytes}
 	}
 
-	out := map[string]interface{}{
+	out := map[string]any{
 		"id":            p.ID,
 		"cpuTotalUsage": stats.CPUStats.CPUUsage.TotalUsage,
 		"memUsage":      stats.MemoryStats.Usage,
@@ -432,6 +433,11 @@ func (h *Handler) toolContainerStats(ctx context.Context, w http.ResponseWriter,
 	}
 	writeToolResult(w, id, out)
 }
+
+// maxLogFrameSize is the maximum per-frame payload we'll allocate from the
+// Docker log stream header. Frames larger than this are skipped rather than
+// causing an unbounded allocation.
+const maxLogFrameSize = 256 << 10 // 256 KiB
 
 // demuxLogs reads the Docker multiplexed log stream format and returns
 // a slice of log line strings with a "stdout:" / "stderr:" prefix.
@@ -444,7 +450,7 @@ func demuxLogs(r io.Reader) ([]string, error) {
 	for {
 		_, err := io.ReadFull(r, hdr)
 		if err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				break
 			}
 			return nil, err
@@ -453,6 +459,14 @@ func demuxLogs(r io.Reader) ([]string, error) {
 		streamType := hdr[0]
 		size := binary.BigEndian.Uint32(hdr[4:8])
 		if size == 0 {
+			continue
+		}
+
+		if size > maxLogFrameSize {
+			// Skip the oversized frame rather than allocating an attacker-controlled buffer.
+			if _, err := io.CopyN(io.Discard, r, int64(size)); err != nil {
+				return nil, fmt.Errorf("skipping oversized log frame (%d bytes): %w", size, err)
+			}
 			continue
 		}
 
@@ -476,7 +490,7 @@ func demuxLogs(r io.Reader) ([]string, error) {
 }
 
 // writeResult encodes a successful JSON-RPC response.
-func writeResult(w http.ResponseWriter, id json.RawMessage, result interface{}) {
+func writeResult(w http.ResponseWriter, id json.RawMessage, result any) {
 	resp := rpcResponse{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -500,15 +514,15 @@ func writeError(w http.ResponseWriter, id json.RawMessage, code int, message str
 }
 
 // writeToolResult writes a successful tools/call result with a text content block.
-func writeToolResult(w http.ResponseWriter, id json.RawMessage, data interface{}) {
+func writeToolResult(w http.ResponseWriter, id json.RawMessage, data any) {
 	b, err := json.Marshal(data)
 	if err != nil {
 		writeToolError(w, id, fmt.Sprintf("marshal result: %v", err))
 		return
 	}
-	result := map[string]interface{}{
-		"content": []interface{}{
-			map[string]interface{}{
+	result := map[string]any{
+		"content": []any{
+			map[string]any{
 				"type": "text",
 				"text": string(b),
 			},
@@ -520,9 +534,9 @@ func writeToolResult(w http.ResponseWriter, id json.RawMessage, data interface{}
 
 // writeToolError writes a tools/call result with isError: true.
 func writeToolError(w http.ResponseWriter, id json.RawMessage, message string) {
-	result := map[string]interface{}{
-		"content": []interface{}{
-			map[string]interface{}{
+	result := map[string]any{
+		"content": []any{
+			map[string]any{
 				"type": "text",
 				"text": message,
 			},

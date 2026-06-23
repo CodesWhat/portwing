@@ -4,7 +4,7 @@ description: Portwing's layered defenses — from socket-level filtering and cry
 ---
 
 <Callout type="warn">
-Portwing is in **alpha** (v0.2.x). The controls documented here are implemented and tested, but the API surface, configuration keys, and deployment model may change before a stable release. Do not rely on this page as a compliance artifact for production systems until v1.0.
+Portwing is in **alpha** (v0.4.x). The controls documented here are implemented and tested, but the API surface, configuration keys, and deployment model may change before a stable release. Do not rely on this page as a compliance artifact for production systems until v1.0.
 </Callout>
 
 The Docker socket is root-equivalent on the host that runs it. Anything that can write to `/var/run/docker.sock` can create a privileged container, mount the host filesystem, and escape to the underlying machine. Portwing is a privileged agent: an **authenticated** caller has full Docker API access. The controls described here prevent *unauthenticated or improperly authorized* access and certain classes of injection attacks; they do not limit what an authenticated caller can do with the Docker API. Treat the Portwing token as a root-equivalent credential.
@@ -38,9 +38,9 @@ The catch-all mux entry is registered last and is wrapped with the same auth mid
 mux.Handle("/", auth(s.handleDockerProxy))
 ```
 
-A missing or misconfigured auth middleware causes a build-time or startup-time failure rather than a silent security gap — there is no per-path allowlist to misonfigure by omission.
+A missing or misconfigured auth middleware causes a build-time or startup-time failure rather than a silent security gap — there is no per-path allowlist to misconfigure by omission.
 
-This architecture structurally prevents the class of Docker AuthZ plugin bypass vulnerabilities (CVE-2024-41110, CVE-2026-34040, CVE-2026-23944, CVE-2026-44848) where authentication is delegated to a plugin that can be bypassed by crafted requests. Portwing does not use Docker's AuthZ plugin mechanism at all.
+This architecture structurally prevents the class of Docker AuthZ plugin bypass vulnerabilities (e.g. unauthenticated Docker socket exposure, request smuggling / header injection into the daemon) where authentication is delegated to a plugin that can be bypassed by crafted requests. Portwing does not use Docker's AuthZ plugin mechanism at all.
 
 ---
 
@@ -281,7 +281,7 @@ Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0
 Verify a release before running it:
 
 ```bash
-TAG=v0.3.0
+TAG=v0.4.0
 
 # Verify the checksums file
 cosign verify-blob \
@@ -308,10 +308,10 @@ The table below maps publicly known vulnerability classes to the Portwing contro
 | CVE / Advisory | Vulnerability class | Portwing control | Why it cannot apply |
 |----------------|---------------------|-----------------|----------------------|
 | CVE-2024-41110 | Docker AuthZ plugin bypass via zero-length `Content-Length` body (CVSS 9.9) | Control 1 — proxy-first | Portwing does not use Docker's AuthZ plugin mechanism; authentication is at the Portwing HTTP layer before the request reaches Docker |
-| CVE-2026-34040 | Docker AuthZ plugin bypass via oversized body silently dropped before the plugin sees it (CVSS 8.8) | Control 1 — proxy-first | Same as CVE-2024-41110; the body-stripping behaviour in Docker's plugin dispatch path is irrelevant because Portwing's auth decision is enforced upstream of it |
-| CVE-2026-23944 | Arcane Docker Manager: proxy forwards to remote agent before verifying the original request is authenticated (CVSS 9.8) | Control 1 — proxy-first | Portwing's auth middleware wraps the handler, not the other way around; it cannot be bypassed by ordering |
-| CVE-2026-44848 | Portainer: `/plugins/*` paths absent from the proxy authorization map, allowing non-admin users to install arbitrary Docker plugins (CVSS 9.4) | Control 1 — proxy-first | Portwing's catch-all handler authenticates all paths including `/plugins/*`; there is no per-path allowlist to misonfigure by omission |
-| CVE-2025-64419 / CVE-2025-66209–66213 | Coolify: command injection via docker-compose.yaml content allowing root RCE (CVSS up to 10.0) | Controls 4, 5, 6 — Compose guards | Path-traversal protection, env-var key/denylist validation, and service-name flag-injection filter cover this attack surface |
+| Docker AuthZ plugin bypass via oversized body | Oversized request body silently dropped before the AuthZ plugin sees it while the daemon still executes the request (incomplete fix for the zero-length-body class above) | Control 1 — proxy-first | Same as CVE-2024-41110; the body-stripping behaviour in Docker's plugin dispatch path is irrelevant because Portwing's auth decision is enforced upstream of it |
+| Unauthenticated Docker socket exposure | Proxy forwards to remote agent before verifying the original request is authenticated | Control 1 — proxy-first | Portwing's auth middleware wraps the handler, not the other way around; it cannot be bypassed by ordering |
+| Registry-credential exfiltration / request smuggling | Plugin API paths absent from the proxy authorization map, allowing unauthorized users to call privileged endpoints | Control 1 — proxy-first | Portwing's catch-all handler authenticates all paths; there is no per-path allowlist to misconfigure by omission |
+| CVE-2025-64419 / CVE-2025-66209–66213 | Coolify: command injection via docker-compose.yaml content allowing root RCE (CVSS up to 10.0) | Control 8 — Compose input guards | Path-traversal protection, env-var key/denylist validation, and service-name flag-injection filter cover this attack surface |
 
 <Callout type="warn">
 Portwing is a privileged agent: an authenticated caller has full Docker API access. The controls above prevent unauthenticated or improperly authorized access and certain classes of injection attacks. They do not restrict what a legitimately authenticated caller can do with the Docker API. Treat the Portwing token or private key as root-equivalent.

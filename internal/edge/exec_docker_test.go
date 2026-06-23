@@ -125,34 +125,43 @@ func TestStartExecStartFailure(t *testing.T) {
 	}
 }
 
-// HandleResize forwards a single successful resize to the Docker client.
+// HandleResize forwards a resize to the Docker client, targeting the
+// Docker-issued exec id (dockerExecID) rather than the controller's protocol
+// exec id. The resize is drained asynchronously by the session's inputWriter,
+// off the read pump, so the assertion polls.
 func TestHandleResizeForwardsToDocker(t *testing.T) {
 	t.Parallel()
 
 	c, _ := newTestClient(t)
 	fd := &fakeDocker{}
 	c.dockerClient = fd
-	newExecSession(c, "e1", &fakeConn{})
+	s := newReadySession(c, "e1", &fakeConn{})
+	s.dockerExecID = "docker-e1" // distinct from the controller execID "e1"
 
 	c.HandleResize(context.Background(), protocol.ExecResizeMessage{ExecID: "e1", Cols: 100, Rows: 30})
 
-	if got := fd.resizeCallList(); len(got) != 1 || got[0] != (resizeCall{"e1", 100, 30}) {
-		t.Errorf("resize calls = %+v, want one {e1 100 30}", got)
+	waitFor(t, "resize forwarded to docker", func() bool { return len(fd.resizeCallList()) == 1 })
+	if got := fd.resizeCallList(); got[0] != (resizeCall{"docker-e1", 100, 30}) {
+		t.Errorf("resize call = %+v, want {docker-e1 100 30} (the Docker exec id, not the controller id)", got)
 	}
 }
 
-// A transient resize error is retried until it succeeds.
+// A transient resize error is retried until it succeeds, on the session's
+// inputWriter goroutine (never the read pump). resizeCalls is appended on every
+// attempt, so its length is the attempt count.
 func TestHandleResizeRetriesUntilSuccess(t *testing.T) {
 	t.Parallel()
 
 	c, _ := newTestClient(t)
 	fd := &fakeDocker{resizeFailFirst: 1}
 	c.dockerClient = fd
-	newExecSession(c, "e1", &fakeConn{})
+	s := newReadySession(c, "e1", &fakeConn{})
+	s.dockerExecID = "docker-e1"
 
 	c.HandleResize(context.Background(), protocol.ExecResizeMessage{ExecID: "e1", Cols: 80, Rows: 24})
 
-	if fd.resizeAttempts != 2 {
-		t.Errorf("resize attempts = %d, want 2 (one failure then success)", fd.resizeAttempts)
+	waitFor(t, "resize retried to success", func() bool { return len(fd.resizeCallList()) >= 2 })
+	if got := len(fd.resizeCallList()); got != 2 {
+		t.Errorf("resize attempts = %d, want 2 (one failure then success)", got)
 	}
 }

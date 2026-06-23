@@ -140,7 +140,7 @@ func newExecSession(c *Client, execID string, conn net.Conn) *ExecSession {
 		conn:      conn,
 		client:    c,
 		connReady: make(chan struct{}),
-		inbox:     make(chan []byte, execInputQueue),
+		inbox:     make(chan execItem, execInputQueue),
 		done:      make(chan struct{}),
 	}
 	c.execSessions.Store(execID, s)
@@ -154,7 +154,7 @@ func newExecSession(c *Client, execID string, conn net.Conn) *ExecSession {
 func newReadySession(c *Client, execID string, conn net.Conn) *ExecSession {
 	s := newExecSession(c, execID, conn)
 	close(s.connReady)
-	go s.inputWriter()
+	go s.inputWriter(context.Background())
 	return s
 }
 
