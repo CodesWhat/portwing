@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"time"
@@ -126,7 +127,7 @@ func (es *EventStream) readEvents(ctx context.Context, ch chan<- DockerEvent) er
 
 		var event DockerEvent
 		if err := dec.Decode(&event); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
