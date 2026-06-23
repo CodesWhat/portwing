@@ -18,10 +18,10 @@ import (
 
 type captureSender struct {
 	msgType string
-	data    interface{}
+	data    any
 }
 
-func (s *captureSender) SendTypedMessage(msgType string, data interface{}) error {
+func (s *captureSender) SendTypedMessage(msgType string, data any) error {
 	s.msgType = msgType
 	s.data = data
 	return nil
@@ -31,7 +31,7 @@ type failingSender struct {
 	err error
 }
 
-func (s *failingSender) SendTypedMessage(string, interface{}) error {
+func (s *failingSender) SendTypedMessage(string, any) error {
 	return s.err
 }
 
@@ -41,7 +41,7 @@ type blockingSender struct {
 	calls   atomic.Int32
 }
 
-func (s *blockingSender) SendTypedMessage(string, interface{}) error {
+func (s *blockingSender) SendTypedMessage(string, any) error {
 	s.calls.Add(1)
 	select {
 	case s.started <- struct{}{}:

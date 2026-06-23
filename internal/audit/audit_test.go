@@ -29,9 +29,9 @@ func captureLogger(t *testing.T) (*Logger, func() string) {
 	return l, read
 }
 
-func decodeEvent(t *testing.T, line string) map[string]interface{} {
+func decodeEvent(t *testing.T, line string) map[string]any {
 	t.Helper()
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &m); err != nil {
 		t.Fatalf("json.Unmarshal(%q): %v", line, err)
 	}

@@ -243,7 +243,7 @@ func TestContainerListWithAuth(t *testing.T) {
 	// visible after the next poll cycle. Poll with a deadline rather than relying
 	// on a fixed delay, whose adequacy varies with load on CI runners.
 	deadline := time.Now().Add(startupMax)
-	var containers []map[string]interface{}
+	var containers []map[string]any
 	var found bool
 	for time.Now().Before(deadline) {
 		resp := get(t, base, "/api/containers")
@@ -353,7 +353,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	var listResp struct {
 		JSONRPC string `json:"jsonrpc"`
 		Result  struct {
-			Tools []map[string]interface{} `json:"tools"`
+			Tools []map[string]any `json:"tools"`
 		} `json:"result"`
 	}
 	if err := json.NewDecoder(resp2.Body).Decode(&listResp); err != nil {
