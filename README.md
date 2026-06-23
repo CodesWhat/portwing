@@ -40,7 +40,7 @@
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/security-vuln-weekly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/security-vuln-weekly.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
   <br>
   <a href="https://goreportcard.com/report/github.com/codeswhat/portwing"><img src="https://goreportcard.com/badge/github.com/codeswhat/portwing" alt="Go Report Card"></a>
