@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-23
+
 ### Added
 
 - **Application/request Prometheus metrics**: `/metrics` and `/_portwing/metrics` now also expose `portwing_http_requests_total{method,code}`, `portwing_http_request_duration_seconds` (histogram), `portwing_http_requests_in_flight` (gauge), `portwing_auth_failures_total{reason}`, and `portwing_rate_limited_total`. The endpoints and their existing build/host/per-container series are unchanged.
 - **Audit ring buffer and `GET /_portwing/audit`**: setting `AUDIT_BUFFER_SIZE` (default 256, 0 disables) retains the most recent audit records in memory for pull-based retrieval at the new authenticated endpoint `GET /_portwing/audit`, which returns `{"records":[...],"count":N}` newest-first with an optional `?limit=N` query parameter. The buffer is independent of `AUDIT_LOG` and works even when the slog sink is off. The JSON record schema is unchanged (ts/event/actor/method/path/outcome/status/duration_ms plus event-specific fields).
 - **Kubernetes deployment examples**: hardened DaemonSet manifests for standard and edge mode under `examples/kubernetes/` (read-only rootfs, dropped capabilities, non-root, node-socket mount, health probes).
-- **Broadened test coverage**: a fuzz target for the wire `Envelope` parser (`FuzzEnvelope`), HTTP handler tests for the server (auth wrap, compose body limit, MCP method gating), drydock `HandleMessage` branch tests, and compose `validateRequest` injection-vector tests.
+- **Broadened test coverage**: a fuzz target for the wire `Envelope` parser (`FuzzEnvelope`), HTTP handler tests for the server (auth wrap, compose body limit, MCP method gating), drydock `HandleMessage` branch tests, and compose `validateRequest` injection-vector tests. A second cross-package unit backfill (edge wire contract, docker client/compose/events, config, metrics, server, generic, pool, drydock adapter) lifts overall coverage from ~46% to ~70%.
+- **Configurable exec TTY**: the edge `exec_start` frame now honors a `tty` field, letting the controller request a non-TTY exec; it defaults to `true` when the field is absent, preserving the previous always-TTY behavior.
+- **Codecov coverage ratchet**: CI uploads `coverage.out` to Codecov on every run, and `codecov.yml` enforces a no-regression project gate (`target: auto`, 1% wobble) plus an 80% patch gate on new/changed lines. The fuzz/soak/integration tiers are excluded from the accounting, so the number is a floor.
 
 ### Security
 
@@ -31,11 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Goroutine lifecycle on shutdown**: the container-poll loop, the SIGHUP reload goroutine, and the rate-limiter / nonce-cache cleanup tickers now stop on shutdown, and the standard-mode audit log file is flushed and closed.
 - **Container refresh no longer issues a Docker inspect per container every poll**: the periodic inventory refresh caches the built container and re-inspects only when the list entry's state/status/image changes (initial inventory still inspects every container).
 - Removed two dead struct fields (`SSEClient.done`, `Collector.prevTime`); constrained the MCP route to `POST`; switched several `io.EOF` string/`==` comparisons to `errors.Is`; pooled the 32 KiB proxy stream buffer; and dropped an unnecessary `[]byte`→`string` copy on the request-body path.
+- **Edge client aligned with the Drydock controller wire contract**: an Ed25519 hello-signing failure is now fatal instead of silently falling back to a token hash and reconnecting forever against a controller that only accepts Ed25519; a 404 on the WebSocket upgrade fails fast (naming `DD_EXPERIMENTAL_PORTWING` as the likely cause) rather than retrying indefinitely; the `welcome` frame is parsed so the agent honors the controller's `pollInterval` and warns on a `serverCompatLevel` mismatch; and inbound `error` frames are surfaced in the read pump instead of being dropped to the adapter default.
 
 ### Changed
 
 - **Security-model docs truthed up**: removed fabricated `CVE-2026-*` identifiers and a fake "Arcane Docker Manager" advisory from `docs/security-model.md` and the docs-site `security-model.mdx`, replacing them with described vulnerability classes; corrected the Compose-guard control reference to "Control 8 — Compose input guards"; fixed a recurring "misonfigure" typo; and synced stale version strings. The marketing comparison now lists edge mode as early-access (Drydock 1.5+) instead of planned.
 - **Tooling**: enabled the `unused` linter in `.golangci.yml`, pinned GoReleaser to an exact release (`v2.16.0`) instead of the floating `~> v2`, and converted `interface{}` to `any` across the codebase.
+- **Edge mode now requires `PRIVATE_KEY_FILE`.** The Drydock controller is Ed25519-only and rejects token-only agents, so the agent fails fast at startup when running in edge mode without a signing key instead of looping on a rejected hello. **Breaking for token-only edge deployments:** provision a `PRIVATE_KEY_FILE` (and enroll its public key) before upgrading. Standard mode is unaffected.
 
 ## [0.4.0] - 2026-06-22
 
