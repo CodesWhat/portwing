@@ -66,7 +66,14 @@ jobs:
         run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o portwing ./cmd/portwing
 
       - name: Test
-        run: go test -race -coverprofile=coverage.out ./...
+        # Coverage measures PRODUCT code only: internal/* + cmd/*. The three tool
+        # mains — benchmarks/cmd/loadgen, benchmarks/cmd/mockdocker, and the
+        # internal/banner/gen art generator — are dev/build tooling, not shipped
+        # code, so they're excluded from the coverprofile (and the floor below).
+        # `go vet ./...` above still compiles them, so they can't silently rot.
+        run: |
+          PKGS=$(go list ./internal/... ./cmd/... | grep -v '/internal/banner/gen')
+          go test -race -covermode=atomic -coverprofile=coverage.out $PKGS
 
       - name: Publish coverage to Qlty
         # Org-wide coverage consolidated on Qlty Cloud (replaces Codecov).
@@ -82,12 +89,13 @@ jobs:
           format: coverprofile
 
       - name: Coverage gate
-        # Vendor-free floor: fails when the weighted statement total drops below
-        # COVERAGE_MIN (real total ~69.7% as of 2026-06). Replaces the Codecov
-        # project ratchet; ratchet up as coverage climbs. go.mod is at the repo
-        # root, so coverprofile paths need no rewrite (unlike sockguard's app/).
+        # Vendor-free floor: fails when the weighted statement total (product
+        # packages only — see the Test step) drops below COVERAGE_MIN. Real total
+        # ~96.4% as of 2026-06. Replaces the Codecov project ratchet; ratchet up
+        # as coverage climbs. go.mod is at the repo root, so coverprofile paths
+        # need no rewrite (unlike sockguard's app/).
         env:
-          COVERAGE_MIN: "68"
+          COVERAGE_MIN: "96"
         run: |
           total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')
           echo "Total statement coverage: ${total}% (floor ${COVERAGE_MIN}%)"

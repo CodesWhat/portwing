@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -51,6 +52,18 @@ type Collector struct {
 	dockerDataRoot string
 	skipDisk       bool
 	prevCPU        *cpuStats
+	// procRoot overrides the /proc filesystem root used for reading system
+	// files. Leave empty to use the default /proc (production behaviour).
+	// Tests inject a temp directory with fixture files here.
+	procRoot string
+}
+
+// proc returns the effective proc root (defaults to /proc when empty).
+func (c *Collector) proc() string {
+	if c.procRoot != "" {
+		return c.procRoot
+	}
+	return "/proc"
 }
 
 // NewCollector creates a new metrics collector.
@@ -86,7 +99,7 @@ func (c *Collector) Collect() (*HostMetrics, error) {
 // collectCPU reads /proc/stat and calculates delta-based CPU usage percentage.
 // Returns 0 on the first call (no previous sample to compare against).
 func (c *Collector) collectCPU() float64 {
-	f, err := os.Open("/proc/stat")
+	f, err := os.Open(filepath.Join(c.proc(), "stat"))
 	if err != nil {
 		return 0
 	}
@@ -145,7 +158,7 @@ func (c *Collector) collectCPU() float64 {
 
 // collectMemory reads /proc/meminfo and populates memory metrics.
 func (c *Collector) collectMemory(m *HostMetrics) {
-	f, err := os.Open("/proc/meminfo")
+	f, err := os.Open(filepath.Join(c.proc(), "meminfo"))
 	if err != nil {
 		return
 	}
@@ -231,7 +244,7 @@ func statfsBytes(blocks uint64, blockSize int64) uint64 {
 
 // collectNetwork reads /proc/net/dev and sums rx/tx bytes across all non-lo interfaces.
 func (c *Collector) collectNetwork(m *HostMetrics) {
-	f, err := os.Open("/proc/net/dev")
+	f, err := os.Open(filepath.Join(c.proc(), "net", "dev"))
 	if err != nil {
 		return
 	}
@@ -284,7 +297,7 @@ func (c *Collector) collectNetwork(m *HostMetrics) {
 
 // collectUptime reads /proc/uptime and returns the system uptime in seconds.
 func (c *Collector) collectUptime() uint64 {
-	data, err := os.ReadFile("/proc/uptime")
+	data, err := os.ReadFile(filepath.Join(c.proc(), "uptime"))
 	if err != nil {
 		return 0
 	}

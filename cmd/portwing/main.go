@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -29,23 +30,25 @@ import (
 )
 
 func main() {
-	if len(os.Args) >= 2 && os.Args[1] == "hash-token" {
-		runHashToken()
-		return
+	os.Exit(run(os.Args, os.Stdin, os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) >= 2 && args[1] == "hash-token" {
+		return runHashToken(stdin, stdout, stderr)
 	}
 
-	if len(os.Args) >= 2 && os.Args[1] == "keygen" {
-		runKeygen(os.Args[2:])
-		return
+	if len(args) >= 2 && args[1] == "keygen" {
+		return runKeygen(args[2:], stdout, stderr)
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
-	banner.Render(os.Stderr, banner.Info{
+	banner.Render(stderr, banner.Info{
 		Version: protocol.AgentVersion,
 		Mode:    modeString(cfg),
 		Adapter: cfg.Adapter,
@@ -58,13 +61,13 @@ func main() {
 	dockerClient, err := docker.NewClient(cfg.DockerSocket, cfg.RequestTimeout)
 	if err != nil {
 		slog.Error("failed to create docker client", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	version, err := dockerClient.GetVersion(context.Background())
 	if err != nil {
 		slog.Error("failed to connect to docker", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	slog.Info("connected to docker", "version", version)
 
@@ -83,7 +86,7 @@ func main() {
 		auditor, auditClose, err := audit.New(cfg.AuditLog, cfg.AuditBufferSize)
 		if err != nil {
 			slog.Error("failed to open audit log", "error", err)
-			os.Exit(1)
+			return 1
 		}
 		defer auditClose()
 		edgeClient := edge.NewClient(cfg, dockerClient, a, auditor)
@@ -94,14 +97,14 @@ func main() {
 		}()
 		if err := edgeClient.Run(ctx); err != nil && ctx.Err() == nil {
 			slog.Error("edge client error", "error", err)
-			os.Exit(1)
+			return 1
 		}
 	} else {
 		slog.Info("starting in standard mode", "address", cfg.BindAddress+":"+cfg.Port)
 		srv, err := server.NewServer(cfg, dockerClient, a)
 		if err != nil {
 			slog.Error("failed to create server", "error", err)
-			os.Exit(1)
+			return 1
 		}
 		go func() {
 			<-sigCh
@@ -115,11 +118,12 @@ func main() {
 		}()
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
-			os.Exit(1)
+			return 1
 		}
 	}
 
 	slog.Info("portwing stopped")
+	return 0
 }
 
 func selectAdapter(cfg *config.Config, dockerClient *docker.Client) adapter.Adapter {
@@ -149,76 +153,79 @@ func modeString(cfg *config.Config) string {
 //
 //	portwing keygen [-comment <text>]
 //	portwing keygen -pub-from <private.pem> [-comment <text>]
-func runKeygen(args []string) {
-	fs := flag.NewFlagSet("keygen", flag.ExitOnError)
+func runKeygen(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("keygen", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	comment := fs.String("comment", "", "Comment to embed in the authorized_keys line (optional)")
 	pubFrom := fs.String("pub-from", "", "Re-derive the authorized_keys line from an existing private key PEM file")
 
 	// Print usage to stderr.
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: portwing keygen [-comment <text>]")
-		fmt.Fprintln(os.Stderr, "       portwing keygen -pub-from <private.pem> [-comment <text>]")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Generates an Ed25519 keypair for use with AUTHORIZED_KEYS authentication.")
-		fmt.Fprintln(os.Stderr, "The private key (PEM PKCS#8) and authorized_keys line are written to stdout.")
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(stderr, "Usage: portwing keygen [-comment <text>]")
+		fmt.Fprintln(stderr, "       portwing keygen -pub-from <private.pem> [-comment <text>]")
+		fmt.Fprintln(stderr)
+		fmt.Fprintln(stderr, "Generates an Ed25519 keypair for use with AUTHORIZED_KEYS authentication.")
+		fmt.Fprintln(stderr, "The private key (PEM PKCS#8) and authorized_keys line are written to stdout.")
+		fmt.Fprintln(stderr)
 		fs.PrintDefaults()
 	}
 
 	if err := fs.Parse(args); err != nil {
-		os.Exit(1)
+		return 1
 	}
 
 	if *pubFrom != "" {
 		// Re-derive the authorized_keys line from an existing private key.
 		priv, err := auth.LoadPrivateKey(*pubFrom)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "keygen: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "keygen: %v\n", err)
+			return 1
 		}
 		pub := priv.Public().(ed25519.PublicKey)
 		line := auth.AuthorizedKeyLine(pub, *comment)
-		fmt.Fprintln(os.Stderr, "# authorized_keys line (add to AUTHORIZED_KEYS file on agent host):")
-		fmt.Println(line)
-		return
+		fmt.Fprintln(stderr, "# authorized_keys line (add to AUTHORIZED_KEYS file on agent host):")
+		fmt.Fprintln(stdout, line)
+		return 0
 	}
 
 	// Generate a new keypair.
-	fmt.Fprintln(os.Stderr, "Generating Ed25519 keypair...")
+	fmt.Fprintln(stderr, "Generating Ed25519 keypair...")
 	privPEM, authKeyLine, err := auth.GenerateKeyPair(*comment)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "keygen: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "keygen: %v\n", err)
+		return 1
 	}
 
-	fmt.Fprintln(os.Stderr, "# Private key (PKCS#8 PEM) — store securely; set as PRIVATE_KEY_FILE on the client:")
-	fmt.Print(string(privPEM))
-	fmt.Fprintln(os.Stderr, "# authorized_keys line — add to AUTHORIZED_KEYS file on agent host:")
-	fmt.Println(authKeyLine)
+	fmt.Fprintln(stderr, "# Private key (PKCS#8 PEM) — store securely; set as PRIVATE_KEY_FILE on the client:")
+	fmt.Fprint(stdout, string(privPEM))
+	fmt.Fprintln(stderr, "# authorized_keys line — add to AUTHORIZED_KEYS file on agent host:")
+	fmt.Fprintln(stdout, authKeyLine)
+	return 0
 }
 
 // runHashToken reads a token from stdin, hashes it with Argon2id, and prints
 // the resulting PHC string. The result can be stored as TOKEN_HASH.
-func runHashToken() {
-	fmt.Fprint(os.Stderr, "Enter token: ")
-	scanner := bufio.NewScanner(os.Stdin)
+func runHashToken(stdin io.Reader, stdout, stderr io.Writer) int {
+	fmt.Fprint(stderr, "Enter token: ")
+	scanner := bufio.NewScanner(stdin)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(os.Stderr, "error reading input: %v\n", err)
+			fmt.Fprintf(stderr, "error reading input: %v\n", err)
 		} else {
-			fmt.Fprintln(os.Stderr, "no input provided")
+			fmt.Fprintln(stderr, "no input provided")
 		}
-		os.Exit(1)
+		return 1
 	}
 	token := strings.TrimSpace(scanner.Text())
 	if token == "" {
-		fmt.Fprintln(os.Stderr, "token must not be empty")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "token must not be empty")
+		return 1
 	}
 	phc, err := server.HashToken(token)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "hash-token: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "hash-token: %v\n", err)
+		return 1
 	}
-	fmt.Println(phc)
+	fmt.Fprintln(stdout, phc)
+	return 0
 }
