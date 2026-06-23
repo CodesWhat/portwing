@@ -352,6 +352,331 @@ func (s *syncRecorder) BodyString() string {
 	return s.rec.Body.String()
 }
 
+// ---------------------------------------------------------------------------
+// Adapter accessor / lifecycle method tests
+// ---------------------------------------------------------------------------
+
+func TestCapabilities(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+	caps := a.Capabilities()
+
+	want := []string{"containers", "logs", "events", "version"}
+	if len(caps) != len(want) {
+		t.Fatalf("capabilities length: got %d want %d", len(caps), len(want))
+	}
+	for i, v := range want {
+		if caps[i] != v {
+			t.Fatalf("capabilities[%d]: got %q want %q", i, caps[i], v)
+		}
+	}
+}
+
+func TestHelloExtensionIsNil(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+	if got := a.HelloExtension(); got != nil {
+		t.Fatalf("HelloExtension: expected nil, got %+v", got)
+	}
+}
+
+func TestPollIntervalIsZero(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+	if got := a.PollInterval(); got != 0 {
+		t.Fatalf("PollInterval: got %d want 0", got)
+	}
+}
+
+func TestOnConnectReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+	if err := a.OnConnect(context.Background(), nil); err != nil {
+		t.Fatalf("OnConnect: unexpected error: %v", err)
+	}
+}
+
+func TestOnContainerRefreshReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+	if err := a.OnContainerRefresh(context.Background(), nil, nil, nil, nil); err != nil {
+		t.Fatalf("OnContainerRefresh: unexpected error: %v", err)
+	}
+}
+
+func TestHandleMessageReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+	handled := a.HandleMessage(context.Background(), nil, "some-message", json.RawMessage(`{}`))
+	if handled {
+		t.Fatal("HandleMessage: expected false, got true")
+	}
+}
+
+func TestRefreshContainers(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+	added, updated, removed, err := a.RefreshContainers(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshContainers: unexpected error: %v", err)
+	}
+	// First refresh: one container should appear as added.
+	if len(added) == 0 {
+		t.Fatalf("expected at least one added container, got 0")
+	}
+	if len(updated) != 0 {
+		t.Fatalf("expected 0 updated containers, got %d", len(updated))
+	}
+	if len(removed) != 0 {
+		t.Fatalf("expected 0 removed containers, got %d", len(removed))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RegisterRoutes — wires four routes and makes them reachable
+// ---------------------------------------------------------------------------
+
+func TestRegisterRoutes(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+
+	// Build initial inventory so the containers route has something to return.
+	if _, err := a.containers.BuildInventory(context.Background()); err != nil {
+		t.Fatalf("build inventory: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	// passthrough auth: just calls the handler directly.
+	noAuth := func(h http.HandlerFunc) http.Handler { return h }
+	a.RegisterRoutes(mux, noAuth)
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	paths := []struct {
+		path       string
+		wantStatus int
+	}{
+		{"/api/v1/containers", http.StatusOK},
+		{"/api/v1/version", http.StatusOK},
+	}
+	for _, tc := range paths {
+		resp, err := http.Get(srv.URL + tc.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != tc.wantStatus {
+			t.Fatalf("GET %s: want %d got %d", tc.path, tc.wantStatus, resp.StatusCode)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleContainerLogs — success and no-tail paths
+// ---------------------------------------------------------------------------
+
+func TestHandleContainerLogsSuccess(t *testing.T) {
+	t.Parallel()
+
+	client, calls, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/containers/container-1/logs?tail=10", nil)
+	req.SetPathValue("id", "container-1")
+	rec := httptest.NewRecorder()
+
+	a.handleContainerLogs(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	if calls.logsCalls.Load() == 0 {
+		t.Fatal("expected docker logs to be called")
+	}
+	ct := rec.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/plain") {
+		t.Fatalf("Content-Type: got %q, want text/plain prefix", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "log line") {
+		t.Fatalf("body missing expected log content, got: %q", rec.Body.String())
+	}
+}
+
+func TestHandleContainerLogsNoTail(t *testing.T) {
+	t.Parallel()
+
+	client, calls, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/containers/container-1/logs", nil)
+	req.SetPathValue("id", "container-1")
+	rec := httptest.NewRecorder()
+
+	a.handleContainerLogs(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	if calls.logsCalls.Load() == 0 {
+		t.Fatal("expected docker logs to be called")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// filterLabels — full branch coverage
+// ---------------------------------------------------------------------------
+
+func TestFilterLabelsEmpty(t *testing.T) {
+	t.Parallel()
+
+	if got := filterLabels(nil); got != nil {
+		t.Fatalf("filterLabels(nil): expected nil, got %v", got)
+	}
+	if got := filterLabels(map[string]string{}); got != nil {
+		t.Fatalf("filterLabels({}): expected nil, got %v", got)
+	}
+}
+
+func TestFilterLabelsAllSynthetic(t *testing.T) {
+	t.Parallel()
+
+	attrs := map[string]string{
+		"name":  "my-container",
+		"image": "nginx:latest",
+	}
+	if got := filterLabels(attrs); got != nil {
+		t.Fatalf("filterLabels(all synthetic): expected nil, got %v", got)
+	}
+}
+
+func TestFilterLabelsMixed(t *testing.T) {
+	t.Parallel()
+
+	attrs := map[string]string{
+		"name":             "my-container",
+		"image":            "nginx:latest",
+		"com.example.app":  "backend",
+		"com.example.tier": "prod",
+	}
+	got := filterLabels(attrs)
+	if got == nil {
+		t.Fatal("filterLabels(mixed): expected non-nil map")
+	}
+	if got["com.example.app"] != "backend" {
+		t.Fatalf("label com.example.app: got %q want %q", got["com.example.app"], "backend")
+	}
+	if got["com.example.tier"] != "prod" {
+		t.Fatalf("label com.example.tier: got %q want %q", got["com.example.tier"], "prod")
+	}
+	if _, found := got["name"]; found {
+		t.Fatal("synthetic key 'name' should have been stripped")
+	}
+	if _, found := got["image"]; found {
+		t.Fatal("synthetic key 'image' should have been stripped")
+	}
+}
+
+func TestFilterLabelsOCIKeys(t *testing.T) {
+	t.Parallel()
+
+	attrs := map[string]string{
+		"org.opencontainers.image.version":  "1.0.0",
+		"org.opencontainers.image.revision": "abc",
+		"org.opencontainers.image.source":   "https://github.com/example",
+		"org.opencontainers.image.title":    "My App",
+		"org.opencontainers.image.url":      "https://example.com",
+		"org.opencontainers.image.created":  "2026-01-01",
+	}
+	if got := filterLabels(attrs); got != nil {
+		t.Fatalf("filterLabels(all OCI synthetic): expected nil, got %v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ServeHTTP — non-flusher path (exercises "streaming not supported" branch)
+// ---------------------------------------------------------------------------
+
+// strictNonFlusher is a ResponseWriter that intentionally does NOT implement
+// http.Flusher, so we can reach the early-return error branch in ServeHTTP.
+type strictNonFlusher struct {
+	header http.Header
+	code   int
+	body   strings.Builder
+}
+
+func (r *strictNonFlusher) Header() http.Header {
+	if r.header == nil {
+		r.header = make(http.Header)
+	}
+	return r.header
+}
+
+func (r *strictNonFlusher) Write(b []byte) (int, error) {
+	return r.body.Write(b)
+}
+
+func (r *strictNonFlusher) WriteHeader(code int) {
+	r.code = code
+}
+
+func TestServeHTTPNonFlusher(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	b := NewEventBroadcaster(client)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil)
+	w := &strictNonFlusher{}
+
+	b.ServeHTTP(w, req)
+
+	if w.code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d", w.code)
+	}
+	if !strings.Contains(w.body.String(), "streaming not supported") {
+		t.Fatalf("unexpected body: %q", w.body.String())
+	}
+}
+
 func TestEventSSEWritesWellFormedEvent(t *testing.T) {
 	t.Parallel()
 
