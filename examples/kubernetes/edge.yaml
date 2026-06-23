@@ -1,0 +1,144 @@
+# Portwing — edge mode: outbound WebSocket tunnel to Drydock.
+# No inbound ports are published and no Service is created; the agent dials
+# out, so it works behind NAT and firewalls. The built-in health endpoint
+# still works (it listens container-locally in edge mode too).
+#
+# Edge mode against Drydock 1.5 is Ed25519-only: the controller's
+# /api/portwing/ws endpoint rejects token-based hellos. Generate a keypair
+# and register its public key with Drydock before applying this manifest:
+#
+#   portwing keygen -comment "edge-host-01"
+#   kubectl -n portwing create secret generic portwing-key \
+#     --from-file=portwing_ed25519.pem=portwing_ed25519.pem
+#
+# Then apply:
+#   kubectl apply -f kubernetes/edge.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: portwing
+---
+# Create this secret out-of-band; do not store real private keys in source control.
+# Command:
+#   portwing keygen -comment "edge-host-01"   # prints PKCS#8 key + authorized_keys line
+#   kubectl -n portwing create secret generic portwing-key \
+#     --from-file=portwing_ed25519.pem=portwing_ed25519.pem
+#
+# Register the authorized_keys line with Drydock (POST /api/v1/portwing/keys)
+# so the controller trusts this agent before it first connects.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: portwing-key
+  namespace: portwing
+type: Opaque
+stringData:
+  portwing_ed25519.pem: "REPLACE_WITH_PKCS8_ED25519_PRIVATE_KEY"
+---
+# DaemonSet: one edge agent per Docker-capable node, all dialing out to Drydock.
+# The AGENT_NAME is derived from the node name via the Downward API so each
+# instance self-identifies uniquely to the controller — no manual per-node config.
+#
+# Target only nodes that run Docker and expose /var/run/docker.sock.
+# Apply the label: kubectl label node <node> portwing.dev/docker=true
+# See the README caveat on containerd/CRI-O nodes.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: portwing-edge
+  namespace: portwing
+  labels:
+    app: portwing-edge
+    app.kubernetes.io/name: portwing
+    app.kubernetes.io/component: edge-agent
+spec:
+  selector:
+    matchLabels:
+      app: portwing-edge
+  template:
+    metadata:
+      labels:
+        app: portwing-edge
+        app.kubernetes.io/name: portwing
+        app.kubernetes.io/component: edge-agent
+    spec:
+      nodeSelector:
+        portwing.dev/docker: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+        # Uncomment and set to the GID of /var/run/docker.sock on the node
+        # so the non-root process can open the socket. Check with:
+        #   stat -c '%g' /var/run/docker.sock
+        # supplementalGroups: [999]
+      containers:
+        - name: portwing
+          image: ghcr.io/codeswhat/portwing:latest
+          imagePullPolicy: Always
+          # No ports published — edge mode is outbound-only.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: DRYDOCK_URL
+              value: https://drydock.example.com
+            - name: PRIVATE_KEY_FILE
+              value: /etc/portwing/portwing_ed25519.pem
+            - name: AGENT_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+              readOnly: true
+            - name: portwing-key
+              mountPath: /etc/portwing
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: stacks
+              mountPath: /data/stacks
+          livenessProbe:
+            httpGet:
+              path: /_portwing/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /_portwing/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        - name: portwing-key
+          secret:
+            secretName: portwing-key
+            items:
+              - key: portwing_ed25519.pem
+                path: portwing_ed25519.pem
+        - name: tmp
+          emptyDir: {}
+        - name: stacks
+          emptyDir: {}
