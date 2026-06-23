@@ -1,0 +1,154 @@
+# Portwing — standard mode (inbound HTTP on :3000), Kubernetes DaemonSet.
+# One agent per Docker-capable node; reachable in-cluster at portwing:3000.
+#
+# Prerequisite: create the token secret before applying this manifest.
+#   openssl rand -hex 32 > portwing_token.txt
+#   kubectl -n portwing create secret generic portwing-token --from-file=token=portwing_token.txt
+#
+# Then apply:
+#   kubectl apply -f kubernetes/standard.yaml
+#
+# Alternative: if you only have one Docker node, replace the DaemonSet below
+# with a Deployment (replicas: 1) and add a nodeSelector or nodeName to pin it.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: portwing
+---
+# Create this secret out-of-band; do not store real tokens in source control.
+# Command:
+#   kubectl -n portwing create secret generic portwing-token --from-file=token=portwing_token.txt
+apiVersion: v1
+kind: Secret
+metadata:
+  name: portwing-token
+  namespace: portwing
+type: Opaque
+stringData:
+  token: "REPLACE_WITH_openssl_rand_hex_32"
+---
+# DaemonSet: schedules one Portwing agent on every node labelled
+# portwing.dev/docker="true". Label only nodes that actually run Docker and
+# expose /var/run/docker.sock. Most modern clusters use containerd/CRI-O —
+# those nodes won't have that socket; see the README caveat.
+#
+# To target a single node instead: convert this to a Deployment (replicas: 1)
+# and set nodeSelector: kubernetes.io/hostname: <your-node>.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: portwing
+  namespace: portwing
+  labels:
+    app: portwing
+    app.kubernetes.io/name: portwing
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels:
+      app: portwing
+  template:
+    metadata:
+      labels:
+        app: portwing
+        app.kubernetes.io/name: portwing
+        app.kubernetes.io/component: agent
+    spec:
+      # Target only nodes that run Docker and expose /var/run/docker.sock.
+      # Apply the label: kubectl label node <node> portwing.dev/docker=true
+      nodeSelector:
+        portwing.dev/docker: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+        # Uncomment and set to the GID of /var/run/docker.sock on the node
+        # so the non-root process can open the socket. Check with:
+        #   stat -c '%g' /var/run/docker.sock
+        # supplementalGroups: [999]
+      containers:
+        - name: portwing
+          image: ghcr.io/codeswhat/portwing:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: TOKEN_FILE
+              value: /etc/portwing/token
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+              readOnly: true
+            - name: portwing-token
+              mountPath: /etc/portwing
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: stacks
+              mountPath: /data/stacks
+          livenessProbe:
+            httpGet:
+              path: /_portwing/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /_portwing/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        - name: portwing-token
+          secret:
+            secretName: portwing-token
+            items:
+              - key: token
+                path: token
+        - name: tmp
+          emptyDir: {}
+        - name: stacks
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portwing
+  namespace: portwing
+  labels:
+    app: portwing
+    app.kubernetes.io/name: portwing
+    app.kubernetes.io/component: agent
+spec:
+  type: ClusterIP
+  selector:
+    app: portwing
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP

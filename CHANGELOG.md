@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Application/request Prometheus metrics**: `/metrics` and `/_portwing/metrics` now also expose `portwing_http_requests_total{method,code}`, `portwing_http_request_duration_seconds` (histogram), `portwing_http_requests_in_flight` (gauge), `portwing_auth_failures_total{reason}`, and `portwing_rate_limited_total`. The endpoints and their existing build/host/per-container series are unchanged.
 - **Audit ring buffer and `GET /_portwing/audit`**: setting `AUDIT_BUFFER_SIZE` (default 256, 0 disables) retains the most recent audit records in memory for pull-based retrieval at the new authenticated endpoint `GET /_portwing/audit`, which returns `{"records":[...],"count":N}` newest-first with an optional `?limit=N` query parameter. The buffer is independent of `AUDIT_LOG` and works even when the slog sink is off. The JSON record schema is unchanged (ts/event/actor/method/path/outcome/status/duration_ms plus event-specific fields).
+- **Kubernetes deployment examples**: hardened DaemonSet manifests for standard and edge mode under `examples/kubernetes/` (read-only rootfs, dropped capabilities, non-root, node-socket mount, health probes).
 
 ## [0.4.0] - 2026-06-22
 
