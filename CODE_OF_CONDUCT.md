@@ -6,7 +6,7 @@ In short: be respectful, be constructive, and assume good faith. Harassment, per
 
 ## Reporting
 
-Report conduct issues privately to the maintainers at **security@codeswhat.com** (this address reaches the maintainers directly and is monitored for both security and conduct reports). Reports are handled confidentially.
+Report conduct issues privately to the maintainers at **<security@codeswhat.com>** (this address reaches the maintainers directly and is monitored for both security and conduct reports). Reports are handled confidentially.
 
 ## Enforcement
 

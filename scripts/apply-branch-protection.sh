@@ -27,7 +27,8 @@ set -euo pipefail
 REPO="${REPO:-CodesWhat/portwing}"
 NAME="Main branch protection"
 
-RULESET="$(cat <<'JSON'
+RULESET="$(
+	cat <<'JSON'
 {
   "name": "Main branch protection",
   "target": "branch",
@@ -76,14 +77,14 @@ JSON
 )"
 
 existing_id="$(gh api "repos/$REPO/rulesets" \
-  --jq ".[] | select(.name == \"$NAME\") | .id" 2>/dev/null || true)"
+	--jq ".[] | select(.name == \"$NAME\") | .id" 2>/dev/null || true)"
 
 if [ -n "$existing_id" ]; then
-  echo "→ Updating existing ruleset #$existing_id on $REPO ..."
-  printf '%s' "$RULESET" | gh api --method PUT "repos/$REPO/rulesets/$existing_id" --input - >/dev/null
+	echo "→ Updating existing ruleset #$existing_id on $REPO ..."
+	printf '%s' "$RULESET" | gh api --method PUT "repos/$REPO/rulesets/$existing_id" --input - >/dev/null
 else
-  echo "→ Creating ruleset on $REPO ..."
-  printf '%s' "$RULESET" | gh api --method POST "repos/$REPO/rulesets" --input - >/dev/null
+	echo "→ Creating ruleset on $REPO ..."
+	printf '%s' "$RULESET" | gh api --method POST "repos/$REPO/rulesets" --input - >/dev/null
 fi
 
 id="$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name == \"$NAME\") | .id")"

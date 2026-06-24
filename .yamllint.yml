@@ -1,0 +1,15 @@
+---
+# qlty-managed yamllint — see .qlty/qlty.toml
+extends: default
+rules:
+  document-start: disable
+  truthy: disable
+  line-length: disable
+  comments-indentation: disable
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: -1
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: -1

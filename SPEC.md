@@ -35,7 +35,7 @@ Portwing and the Docker Engine.
 
 ### 2.1 Mode Detection
 
-```
+```text
 DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set  ->  Edge Mode (outbound WebSocket)
 Otherwise                                                              ->  Standard Mode (inbound HTTP server)
 ```
@@ -366,7 +366,7 @@ Portwing reports container inventory. Drydock controller performs registry check
 
 Standard mode `/api/events` SSE stream produces:
 
-```
+```text
 data: {"type":"dd:ack","data":{"version":"1.0.0","os":"linux","arch":"amd64",...}}
 
 data: {"type":"dd:container-added","data":{...Container...}}
@@ -411,7 +411,7 @@ See [README.md](README.md) for the full configuration reference.
 
 ### 13.1 Edge Mode Reconnection
 
-```
+```text
 Attempt 1: connect -> fail -> wait 1s (+/-25% jitter)
 Attempt 2: connect -> fail -> wait 2s (+/-25% jitter)
 ...

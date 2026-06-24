@@ -104,14 +104,14 @@ portwing keygen -comment "my-platform:prod"
 
 Copy the `authorized_keys` output line to the agent host:
 
-```
+```text
 # /etc/portwing/authorized_keys  (mode 0600)
 ed25519 AAAA... my-platform:prod
 ```
 
 The file format mirrors OpenSSH `authorized_keys`. Each non-blank, non-comment line is:
 
-```
+```text
 ed25519 <base64-public-key> [comment]
 ```
 
@@ -141,7 +141,7 @@ Clients must send four headers on every request:
 
 The canonical message is a newline-separated UTF-8 string:
 
-```
+```text
 METHOD
 /path/to/resource
 <sha256-hex-of-body>

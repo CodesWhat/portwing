@@ -18,12 +18,12 @@
 # packages even though the stage is named "-amd64".
 FROM cgr.dev/chainguard/wolfi-base:latest@sha256:e161445c05b19e668cb5cc44df2f0403329fd4f0ac892794255e328e760612a1 AS rootfs-amd64
 RUN apk add --no-cache --initdb --root /out \
-      --repository https://packages.wolfi.dev/os \
-      --keys-dir /etc/apk/keys \
-      ca-certificates-bundle busybox docker-cli docker-compose wget \
- && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >> /out/etc/passwd \
- && echo 'portwing:x:65532:' >> /out/etc/group \
- && rm -rf /out/var/cache/apk/*
+    --repository https://packages.wolfi.dev/os \
+    --keys-dir /etc/apk/keys \
+    ca-certificates-bundle busybox docker-cli docker-compose wget \
+    && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
+    && echo 'portwing:x:65532:' >>/out/etc/group \
+    && rm -rf /out/var/cache/apk/*
 
 FROM rootfs-amd64 AS rootfs-arm64
 
@@ -32,14 +32,14 @@ FROM rootfs-amd64 AS rootfs-arm64
 # the version: Dependabot bumps the tag and the repositories follow.
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS rootfs-arm
 RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
- && apk add --no-cache --initdb --root /out \
-      --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
-      --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community" \
-      --keys-dir /etc/apk/keys \
-      ca-certificates busybox docker-cli docker-cli-compose wget \
- && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >> /out/etc/passwd \
- && echo 'portwing:x:65532:' >> /out/etc/group \
- && rm -rf /out/var/cache/apk/*
+    && apk add --no-cache --initdb --root /out \
+        --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
+        --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community" \
+        --keys-dir /etc/apk/keys \
+        ca-certificates busybox docker-cli docker-cli-compose wget \
+    && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
+    && echo 'portwing:x:65532:' >>/out/etc/group \
+    && rm -rf /out/var/cache/apk/*
 
 # Select the rootfs by target arch. TARGETARCH is a buildx-predefined global arg
 # (amd64 / arm64 / arm) usable directly in FROM without an explicit ARG.
@@ -59,6 +59,6 @@ VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["wget", "-q", "--spider", "http://localhost:3000/_portwing/health"]
+    CMD ["wget", "-q", "--spider", "http://localhost:3000/_portwing/health"]
 
 ENTRYPOINT ["/usr/bin/portwing"]

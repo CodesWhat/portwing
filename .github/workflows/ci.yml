@@ -90,10 +90,11 @@ jobs:
 
       - name: Coverage gate
         # Vendor-free floor: fails when the weighted statement total (product
-        # packages only — see the Test step) drops below COVERAGE_MIN. Real total
-        # ~96.4% as of 2026-06. Replaces the Codecov project ratchet; ratchet up
-        # as coverage climbs. go.mod is at the repo root, so coverprofile paths
-        # need no rewrite (unlike sockguard's app/).
+        # packages only — see the Test step) drops below COVERAGE_MIN. Documented
+        # ~98% floor standard: residual uncovered statements are structurally
+        # unreachable (os.Exit, crypto/rand failure, json.Marshal on safe types,
+        # etc.) or timing-dependent (5-min ticker). See COVERAGE.md for details.
+        # go.mod is at the repo root, so coverprofile paths need no rewrite.
         env:
           COVERAGE_MIN: "96"
         run: |
@@ -413,3 +414,25 @@ jobs:
           path: "**/testdata/fuzz/${{ matrix.fuzzer.name }}/"
           retention-days: 30
           if-no-files-found: ignore
+
+  qlty:
+    name: "🔍 Qlty Check"
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Qlty
+        uses: qltysh/qlty-action/install@fd52dc852530a708d68c3b7342f8d33d1df4cd55  # v2.2.1
+
+      - name: Qlty check (all plugins, enforced)
+        run: ./scripts/qlty-check-gate.sh all

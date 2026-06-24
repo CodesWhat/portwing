@@ -222,6 +222,6 @@ jobs:
           sarif_file: gosec-results.sarif
           category: gosec
 
-  # NOTE: testssl job omitted — Portwing does not operate a TLS listener of its own
+  # NOTE: testssl job omitted. Portwing does not operate a TLS listener of its own
   # (TLS is handled by a reverse proxy in front). Re-add if Portwing gains direct
   # TLS termination.

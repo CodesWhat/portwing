@@ -14,7 +14,7 @@ which an unauthenticated caller can reach the Docker daemon directly. The
 catch-all mux entry that implements the Docker API proxy is registered last
 and is wrapped with the same auth middleware as every named route:
 
-```
+```go
 mux.Handle("/", auth(s.handleDockerProxy))
 ```
 
@@ -165,6 +165,7 @@ canonical string of `METHOD\nPATH\nbody-sha256-hex\ntimestamp\nnonce` using
 `crypto/ed25519.Verify` from the Go standard library. No new dependencies.
 
 **Replay protection:** Two complementary mechanisms:
+
 1. **Timestamp window:** Requests with `|now - timestamp| > MAX_CLOCK_SKEW_SECONDS`
    (default 60 s) are rejected with `X-Portwing-Reason: timestamp-skew`.
 2. **Nonce LRU:** An in-memory nonce cache (capacity `NONCE_LRU_SIZE`, default
