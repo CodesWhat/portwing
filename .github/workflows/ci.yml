@@ -90,11 +90,13 @@ jobs:
 
       - name: Coverage gate
         # Vendor-free floor: fails when the weighted statement total (product
-        # packages only — see the Test step) drops below COVERAGE_MIN. Documented
-        # ~98% floor standard: residual uncovered statements are structurally
-        # unreachable (os.Exit, crypto/rand failure, json.Marshal on safe types,
-        # etc.) or timing-dependent (5-min ticker). See COVERAGE.md for details.
-        # go.mod is at the repo root, so coverprofile paths need no rewrite.
+        # packages only — see the Test step) drops below COVERAGE_MIN. Achieved
+        # 97.5% after systematic gap-fill (2026-06). Residual 2.5% is structurally
+        # unreachable: os.Exit in main, crypto/rand failure, json.Marshal on safe
+        # primitive-only types, WebSocket SetWriteDeadline errors, 5-min cleanup
+        # ticker, and compile-time GOOS=windows branches. See COVERAGE.md.
+        # Floor is set conservatively at 96 (~1.5% below achieved) so CI never
+        # flakes red on coverage. go.mod is at the repo root; no path rewrite needed.
         env:
           COVERAGE_MIN: "96"
         run: |
