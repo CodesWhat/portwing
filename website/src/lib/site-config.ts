@@ -36,11 +36,8 @@ export const SITE_CONFIG = {
   logo: "/portwing.png",
   /** Whether the logo inverts in dark mode (adds `dark:invert`). */
   logoInvertOnDark: true,
-  /**
-   * Default OpenGraph / Twitter share image in /public.
-   * TODO: 1200x630 OG banner — currently falling back to the square logo.
-   */
-  ogImage: "/portwing.png",
+  /** Default OpenGraph / Twitter share image in /public (1200x630 banner). */
+  ogImage: "/og-image.png",
   /** OpenGraph locale. */
   locale: "en_US",
   /** GHCR image path used in quick-start snippets. */

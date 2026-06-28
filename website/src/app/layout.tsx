@@ -35,16 +35,15 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        // TODO: 1200x630 OG banner — currently using the square logo (1102x1102)
         url: SITE_CONFIG.ogImage,
-        width: 1102,
-        height: 1102,
+        width: 1200,
+        height: 630,
         alt: `${SITE_CONFIG.name} — ${SITE_CONFIG.tagline}`,
       },
     ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: `${SITE_CONFIG.name} — ${SITE_CONFIG.tagline}`,
     description: SITE_CONFIG.description,
     creator: SITE_CONFIG.twitterCreator,
