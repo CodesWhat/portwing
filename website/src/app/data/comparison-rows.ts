@@ -25,13 +25,13 @@ export const comparisonRows: ComparisonRow[] = [
     portwing: "Yes",
   },
   {
-    feature: "Default-deny socket (no raw socket)",
+    feature: "Default-deny socket (via sockguard)",
     portainer: "No",
     komodo: "No",
     hawser: "No",
     watchtower: "No",
     diun: "No",
-    portwing: "Yes",
+    portwing: "Yes (with sockguard)",
   },
   {
     feature: "Per-client key auth (Ed25519)",

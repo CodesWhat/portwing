@@ -1,14 +1,13 @@
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
 import { GithubIcon } from "@/components/github-icon";
 import { iconButtonCn, navLinkCn } from "@/lib/class-names";
-import { GITHUB_RELEASES_URL, GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
+import { GITHUB_ORG_URL, GITHUB_RELEASES_URL, GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 
-const CODESWHAT = "https://github.com/CodesWhat";
+const CODESWHAT = GITHUB_ORG_URL;
 const YEAR = new Date().getFullYear();
 const BLURB =
-  "Security-first remote Docker agent. Lightweight Go binary, Ed25519 auth, default-deny socket, tamper-evident audit log.";
+  "Security-first remote Docker agent. Lightweight Go binary, Ed25519 auth, sockguard-ready socket filter, tamper-evident audit log.";
 
 type FooterLink = { label: string; href: string; external?: boolean };
 
@@ -36,9 +35,9 @@ function FooterLinkEl({ link, className }: { link: FooterLink; className?: strin
     );
   }
   return (
-    <Link href={link.href} className={className ?? navLinkCn}>
+    <a href={link.href} className={className ?? navLinkCn}>
       {link.label}
-    </Link>
+    </a>
   );
 }
 
@@ -67,9 +66,9 @@ function SocialIcons() {
       >
         <GithubIcon className="h-5 w-5" />
       </a>
-      <Link href="/docs" className={iconButtonCn} aria-label="Documentation">
+      <a href="/docs" className={iconButtonCn} aria-label="Documentation">
         <BookOpen className="h-5 w-5" />
-      </Link>
+      </a>
     </div>
   );
 }

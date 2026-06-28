@@ -8,6 +8,7 @@ import { MarketingShell } from "@/components/marketing-shell";
 import { PortwingMascot } from "@/components/portwing-mascot";
 import { SectionHeading } from "@/components/section-heading";
 import { Badge } from "@/components/ui/badge";
+import { GITHUB_ORG_URL, SITE_CONFIG } from "@/lib/site-config";
 import { comparisonRows } from "./data/comparison-rows";
 import { type FeatureCategory, features } from "./data/features";
 
@@ -35,7 +36,7 @@ const categoryLabels: Record<FeatureCategory, { label: string; color: string; bo
 
 // ── Ecosystem stack pills ─────────────────────────────────────────────────────
 
-const GH = "https://github.com/CodesWhat";
+const GH = GITHUB_ORG_URL;
 
 type StackItem = {
   name: string;
@@ -77,7 +78,7 @@ docker run -d \\
   -v /var/run/docker.sock:/var/run/docker.sock \\
   -e TOKEN_FILE=/run/secrets/portwing_token \\
   -v ./portwing_token.txt:/run/secrets/portwing_token:ro \\
-  ghcr.io/codeswhat/portwing:latest`;
+  ${SITE_CONFIG.dockerImage}:latest`;
 
 const dockerCompose = `# Portwing + sockguard — two-layer defense.
 # Generate a token first:  openssl rand -hex 32 > portwing_token.txt
@@ -96,7 +97,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:latest
+    image: ${SITE_CONFIG.dockerImage}:latest
     restart: unless-stopped
     depends_on: [sockguard]
     read_only: true
@@ -225,7 +226,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-4">
           <div className="flex flex-col items-center gap-6 text-center">
             <Badge variant="secondary" className="font-mono text-xs">
-              v0.5.0 &middot; Open Source &middot; AGPL-3.0
+              v{SITE_CONFIG.version} &middot; Open Source &middot; AGPL-3.0
             </Badge>
 
             <h1 className="max-w-3xl text-6xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 sm:text-7xl lg:text-8xl">
@@ -235,10 +236,10 @@ export default function Home() {
             </h1>
 
             <p className="max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
-              We built Portwing to give Drydock a secure foothold on every host. It talks to Docker
-              over a default-deny socket, proves every request with Ed25519 auth, and records
-              everything it touches in a tamper-evident audit log — so you control your fleet
-              without exposing it.
+              We built Portwing to give Drydock a secure foothold on every host. Pair it with
+              sockguard and it never touches the raw Docker socket. Ed25519 auth proves every
+              request, and a tamper-evident audit log records everything it touches, so you control
+              your fleet without exposing it.
             </p>
 
             <CtaButtons align="center" />
@@ -269,7 +270,7 @@ export default function Home() {
             <SectionHeading
               eyebrow="Ecosystem"
               title="Part of the CodesWhat stack"
-              subtitle="Three tools, one job each — they compose."
+              subtitle="Three tools, one job each. Built to work together."
               align="left"
             />
             <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50">
@@ -505,7 +506,7 @@ export default function Home() {
             <SectionHeading
               eyebrow="Alternatives"
               title="How we compare"
-              subtitle="Other tools in the remote Docker control space — scoped to each tool's published, default behaviour."
+              subtitle="We compared against each tool's published, default behaviour. Not worst-case configurations, not upsell tiers."
               align="left"
             />
 

@@ -22,9 +22,9 @@ export function SiteHeader({ maxWidthClassName = "max-w-6xl" }: { maxWidthClassN
           </span>
         </Link>
         <nav className="flex items-center gap-1 sm:gap-2">
-          <Link href="/docs" className={`hidden px-3 py-2 sm:inline-block ${navLinkCn}`}>
+          <a href="/docs" className={`hidden px-3 py-2 sm:inline-block ${navLinkCn}`}>
             Docs
-          </Link>
+          </a>
           <a
             href={GITHUB_URL}
             target="_blank"

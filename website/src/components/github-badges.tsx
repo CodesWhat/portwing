@@ -1,4 +1,4 @@
-import { GITHUB_URL, REPO_SLUG, SITE_CONFIG } from "@/lib/site-config";
+import { GHCR_PACKAGE_URL, GITHUB_URL, REPO_SLUG, SITE_CONFIG } from "@/lib/site-config";
 
 // Portwing quality + distribution badges.
 // Quality row: shields.io pills — machine-generated, verifiable trust.
@@ -36,17 +36,17 @@ const quality: Badge[] = [
 
 const distribution: Badge[] = [
   {
-    href: `https://github.com/orgs/CodesWhat/packages/container/package/portwing`,
+    href: GHCR_PACKAGE_URL,
     src: `https://img.shields.io/badge/GHCR-${encodeURIComponent(SITE_CONFIG.dockerImage)}-2ea44f?logo=github&logoColor=white`,
     alt: "GHCR image",
   },
   {
-    href: `https://github.com/orgs/CodesWhat/packages/container/package/portwing`,
+    href: GHCR_PACKAGE_URL,
     src: "https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white",
     alt: "Multi-arch: amd64 | arm64 | arm/v7",
   },
   {
-    href: `https://github.com/orgs/CodesWhat/packages/container/package/portwing`,
+    href: GHCR_PACKAGE_URL,
     src: "https://img.shields.io/badge/image%20size-~10%20MB-informational?logo=docker&logoColor=white",
     alt: "Image size ~10 MB",
   },

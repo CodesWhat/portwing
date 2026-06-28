@@ -1,5 +1,4 @@
 import { BookOpen } from "lucide-react";
-import Link from "next/link";
 import { GithubIcon } from "@/components/github-icon";
 import { Button } from "@/components/ui/button";
 import { GITHUB_URL } from "@/lib/site-config";
@@ -15,10 +14,10 @@ export function CtaButtons({ align = "center" }: { align?: "center" | "start" } 
         </a>
       </Button>
       <Button variant="outline" size="lg" className="w-full sm:w-auto" asChild>
-        <Link href="/docs">
+        <a href="/docs">
           <BookOpen className="h-4 w-4" />
           Read the docs
-        </Link>
+        </a>
       </Button>
     </div>
   );
