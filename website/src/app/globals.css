@@ -171,12 +171,12 @@
 @keyframes bird-hop {
   0%   { transform: translateX(0)    translateY(0)     scaleY(1);    }
   7%   { transform: translateX(-4px) translateY(4px)   scaleY(0.96); }  /* squat */
-  22%  { transform: translateX(-28px) translateY(-28px) scaleY(1.05); } /* airborne */
+  22%  { transform: translateX(-28px) translateY(-28px) scaleY(1.05); animation-timing-function: ease-in; } /* airborne */
   36%  { transform: translateX(-22px) translateY(0)    scaleY(0.93); } /* land squash */
   44%  { transform: translateX(-22px) translateY(0)    scaleY(1);    } /* recover */
   50%  { transform: translateX(0)    translateY(0)     scaleY(1);    } /* re-centre */
   57%  { transform: translateX(4px)  translateY(4px)   scaleY(0.96); } /* squat */
-  72%  { transform: translateX(28px) translateY(-28px) scaleY(1.05); } /* airborne */
+  72%  { transform: translateX(28px) translateY(-28px) scaleY(1.05); animation-timing-function: ease-in; } /* airborne */
   86%  { transform: translateX(22px) translateY(0)     scaleY(0.93); } /* land squash */
   93%  { transform: translateX(22px) translateY(0)     scaleY(1);    } /* recover */
   100% { transform: translateX(0)    translateY(0)     scaleY(1);    } /* re-centre */
@@ -198,15 +198,6 @@
 }
 .portwing-mascot .lk-frame {
   display: block;
-}
-
-@keyframes bounce-slow {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-12px); }
-}
-
-.animate-bounce-slow {
-  animation: bounce-slow 2s ease-in-out infinite;
 }
 
 @layer base {
@@ -272,7 +263,6 @@ html.js .reveal.visible {
 /* Reduced motion — disable decorative motion and snap reveals. */
 @media (prefers-reduced-motion: reduce) {
   .aurora-mesh,
-  .animate-bounce-slow,
   .animate-bird-hop {
     animation: none !important;
   }
