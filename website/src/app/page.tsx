@@ -1,23 +1,19 @@
-import {
-  BookOpen,
-  BookOpenText,
-  Check,
-  ChevronDown,
-  Clock,
-  Minus,
-  Terminal,
-} from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
+"use client";
+
+import { Check, Clock, Minus, Search, ShieldCheck, Terminal, X, Zap } from "lucide-react";
+import { useState } from "react";
+import { CtaButtons } from "@/components/cta-buttons";
+import { GitHubBadges } from "@/components/github-badges";
+import { MarketingShell } from "@/components/marketing-shell";
 import { PortwingMascot } from "@/components/portwing-mascot";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { SectionHeading } from "@/components/section-heading";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { comparisonRows } from "./data/comparison-rows";
 import { type FeatureCategory, features } from "./data/features";
 
-const REPO = "https://github.com/CodesWhat/portwing";
-const DOCS = "/docs";
+// ── Data ─────────────────────────────────────────────────────────────────────
+
+const categoryOrder: FeatureCategory[] = ["security", "control", "operations"];
 
 const categoryLabels: Record<FeatureCategory, { label: string; color: string; border: string }> = {
   security: {
@@ -36,6 +32,52 @@ const categoryLabels: Record<FeatureCategory, { label: string; color: string; bo
     border: "border-amber-500/30",
   },
 };
+
+// ── Ecosystem stack pills ─────────────────────────────────────────────────────
+
+const GH = "https://github.com/CodesWhat";
+
+type StackItem = {
+  name: string;
+  role: string;
+  href: string | null;
+  current?: boolean;
+};
+
+const STACK: StackItem[] = [
+  {
+    name: "Drydock",
+    role: "orchestrator",
+    href: `${GH}/drydock`,
+  },
+  {
+    name: "Portwing",
+    role: "remote agent",
+    href: null,
+    current: true,
+  },
+  {
+    name: "Sockguard",
+    role: "socket filter",
+    href: `${GH}/sockguard`,
+  },
+];
+
+// ── Quick-start snippets ──────────────────────────────────────────────────────
+
+const dockerRun = `# Generate a token first:
+openssl rand -hex 32 > portwing_token.txt
+
+docker run -d \\
+  --name portwing \\
+  -p 3000:3000 \\
+  --read-only \\
+  --cap-drop ALL \\
+  --security-opt no-new-privileges:true \\
+  -v /var/run/docker.sock:/var/run/docker.sock \\
+  -e TOKEN_FILE=/run/secrets/portwing_token \\
+  -v ./portwing_token.txt:/run/secrets/portwing_token:ro \\
+  ghcr.io/codeswhat/portwing:latest`;
 
 const dockerCompose = `# Portwing + sockguard — two-layer defense.
 # Generate a token first:  openssl rand -hex 32 > portwing_token.txt
@@ -78,6 +120,8 @@ volumes:
   sockguard-socket:
   portwing-stacks:`;
 
+// ── Comparison cell ───────────────────────────────────────────────────────────
+
 function ComparisonCell({ value, planned }: { value: string; planned?: boolean }) {
   if (planned) {
     return (
@@ -98,285 +142,175 @@ function ComparisonCell({ value, planned }: { value: string; planned?: boolean }
   if (value === "No") {
     return (
       <span className="inline-flex items-center gap-1 text-neutral-400 dark:text-neutral-600">
-        <Minus className="size-4" />
+        <X className="size-4" />
         No
       </span>
     );
   }
+  if (value === "—") {
+    return <Minus className="size-4 mx-auto text-neutral-300 dark:text-neutral-700" />;
+  }
   return <span className="text-neutral-600 dark:text-neutral-400">{value}</span>;
 }
 
-export default function Home() {
-  return (
-    <main className="relative min-h-screen bg-gradient-to-br from-background to-secondary">
-      {/* Background Pattern */}
-      <div className="bg-grid-neutral-200/50 dark:bg-grid-neutral-800/50 fixed inset-0" />
+// ── Quick-start toggle ────────────────────────────────────────────────────────
 
-      <div className="relative z-10">
-        {/* Theme Toggle */}
-        <div className="fixed top-4 right-4 z-50">
-          <ThemeToggle />
+type Preset = "quick" | "secure";
+
+const PRESETS: { id: Preset; label: string; icon: typeof Zap }[] = [
+  { id: "quick", label: "Quick", icon: Zap },
+  { id: "secure", label: "With sockguard", icon: ShieldCheck },
+];
+
+function CodeCard({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-neutral-800 bg-neutral-950 shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
+      <div className="px-6 pt-5">
+        <div className="mb-3 flex items-center gap-2 text-neutral-500">
+          <Terminal className="h-4 w-4" />
+          <span className="font-mono text-xs font-medium uppercase tracking-wider">{label}</span>
+        </div>
+        <pre className="overflow-x-auto pb-6 text-sm leading-relaxed">{children}</pre>
+      </div>
+    </div>
+  );
+}
+
+function QuickSnippet() {
+  return (
+    <CodeCard label="Quick start · docker run">
+      <code className="text-neutral-300 whitespace-pre">{dockerRun}</code>
+    </CodeCard>
+  );
+}
+
+function SecureSnippet() {
+  return (
+    <CodeCard label="Hardened · compose.yml">
+      <code className="text-neutral-300 whitespace-pre">{dockerCompose}</code>
+    </CodeCard>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function Home() {
+  const [featureQuery, setFeatureQuery] = useState("");
+  const [preset, setPreset] = useState<Preset>("quick");
+
+  const q = featureQuery.toLowerCase().trim();
+  const filtered = features.filter(
+    (f) => q === "" || f.title.toLowerCase().includes(q) || f.description.toLowerCase().includes(q),
+  );
+  const groups = categoryOrder
+    .map((cat) => ({
+      cat,
+      ...categoryLabels[cat],
+      items: filtered.filter((f) => f.category === cat),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  return (
+    <MarketingShell aurora="violet">
+      {/* ── Hero ────────────────────────────────────────────────────────────── */}
+      <section className="relative px-4 py-20">
+        {/* Background glow */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+        >
+          <div className="absolute left-1/2 top-0 h-96 w-96 -translate-x-1/2 -translate-y-1/4 rounded-full bg-[var(--au-glow)] blur-3xl opacity-60" />
         </div>
 
-        {/* Hero Section */}
-        <section className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_hsl(var(--background))_18%,_transparent_70%)]" />
-
-          <div className="relative z-10 flex flex-col items-center">
-            <div className="mb-8">
-              <PortwingMascot size={168} />
-            </div>
-
-            <Badge variant="secondary" className="mb-6 px-4 py-1.5 text-sm font-medium">
-              Open Source &middot; AGPL-3.0 &middot; Alpha
+        <div className="mx-auto max-w-6xl px-4">
+          <div className="flex flex-col items-center gap-6 text-center">
+            <Badge variant="secondary" className="font-mono text-xs">
+              v0.5.0 &middot; Open Source &middot; AGPL-3.0
             </Badge>
 
-            <div className="max-w-4xl text-center">
-              <h1 className="mb-4 text-5xl font-bold tracking-tight text-foreground sm:text-6xl lg:text-7xl">
-                Remote Docker
-                <br />
-                <span className="text-primary">Agent</span>
-              </h1>
+            <h1 className="max-w-3xl text-6xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 sm:text-7xl lg:text-8xl">
+              Remote Docker
+              <br />
+              <span className="text-neutral-400 dark:text-neutral-500">Agent</span>
+            </h1>
 
-              <p className="mx-auto mb-10 max-w-2xl text-lg text-muted-foreground sm:text-xl">
-                Control your containers from anywhere, safely. A security-first agent that talks to
-                Docker over a <strong className="text-foreground">default-deny socket</strong>, with
-                Ed25519 per-client auth, signed supply chain, and a tamper-evident audit log — the
-                remote agent for{" "}
-                <a
-                  href="https://github.com/CodesWhat/drydock"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-foreground underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
-                >
-                  Drydock
-                </a>
-                .
-              </p>
-
-              <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-                <Button size="lg" asChild>
-                  <a href={REPO} target="_blank" rel="noopener noreferrer">
-                    <svg
-                      className="h-4 w-4"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      aria-label="GitHub"
-                      role="img"
-                    >
-                      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-                    </svg>
-                    View on GitHub
-                  </a>
-                </Button>
-                <Button variant="outline" size="lg" asChild>
-                  <a href={DOCS} target="_blank" rel="noopener noreferrer">
-                    <BookOpen className="h-4 w-4" />
-                    Documentation
-                  </a>
-                </Button>
-              </div>
-
-              {/* Distribution Badges */}
-              <div className="mt-10 flex flex-wrap items-center justify-center gap-2">
-                <a
-                  href="https://github.com/CodesWhat/portwing/pkgs/container/portwing"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://img.shields.io/badge/GHCR-image-2ea44f?logo=github&logoColor=white"
-                    alt="GHCR"
-                  />
-                </a>
-                <a
-                  href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white"
-                    alt="Multi-arch"
-                  />
-                </a>
-                <a
-                  href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://img.shields.io/badge/image%20size-~10%20MB-informational?logo=docker&logoColor=white"
-                    alt="Image size"
-                  />
-                </a>
-                <a href={`${REPO}/blob/main/LICENSE`} target="_blank" rel="noopener noreferrer">
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://img.shields.io/badge/license-AGPL--3.0-C9A227"
-                    alt="License AGPL-3.0"
-                  />
-                </a>
-              </div>
-              {/* Community Badges */}
-              <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-                <a href={`${REPO}/stargazers`} target="_blank" rel="noopener noreferrer">
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://img.shields.io/github/stars/CodesWhat/portwing?style=flat"
-                    alt="Stars"
-                  />
-                </a>
-                <a href={`${REPO}/forks`} target="_blank" rel="noopener noreferrer">
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://img.shields.io/github/forks/CodesWhat/portwing?style=flat"
-                    alt="Forks"
-                  />
-                </a>
-                <a href={`${REPO}/issues`} target="_blank" rel="noopener noreferrer">
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://img.shields.io/github/issues/CodesWhat/portwing?style=flat"
-                    alt="Issues"
-                  />
-                </a>
-                <a href={`${REPO}/commits/main`} target="_blank" rel="noopener noreferrer">
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://img.shields.io/github/last-commit/CodesWhat/portwing?style=flat"
-                    alt="Last commit"
-                  />
-                </a>
-              </div>
-              {/* Quality Badges */}
-              <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-                <a
-                  href={`${REPO}/actions/workflows/ci.yml`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml/badge.svg?branch=main"
-                    alt="CI"
-                  />
-                </a>
-                <a
-                  href="https://goreportcard.com/report/github.com/codeswhat/portwing"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://goreportcard.com/badge/github.com/codeswhat/portwing"
-                    alt="Go Report Card"
-                  />
-                </a>
-                <a
-                  href="https://pkg.go.dev/github.com/codeswhat/portwing"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {/* biome-ignore lint/performance/noImgElement: external badge */}
-                  <img
-                    src="https://pkg.go.dev/badge/github.com/codeswhat/portwing.svg"
-                    alt="Go Reference"
-                  />
-                </a>
-              </div>
-            </div>
-
-            {/* Scroll Indicator */}
-            <div className="mt-20 animate-bounce">
-              <ChevronDown className="h-10 w-10 text-primary drop-shadow-[0_0_8px_hsl(var(--primary)/0.5)]" />
-            </div>
-          </div>
-        </section>
-
-        {/* Ecosystem band */}
-        <section className="border-y border-border bg-card/40 px-4 py-10 backdrop-blur-sm">
-          <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 text-center">
-            <span className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-              Part of the CodesWhat stack
-            </span>
-            <p className="text-sm text-muted-foreground sm:text-base">
-              <a
-                href="https://github.com/CodesWhat/drydock"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold text-foreground hover:text-primary"
-              >
-                Drydock
-              </a>{" "}
-              orchestrates ·{" "}
-              <span className="font-semibold text-foreground">Portwing</span> is the agent on every
-              host ·{" "}
-              <a
-                href="https://github.com/CodesWhat/sockguard"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold text-foreground hover:text-primary"
-              >
-                Sockguard
-              </a>{" "}
-              filters the socket
+            <p className="max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
+              We built Portwing to give Drydock a secure foothold on every host. It talks to Docker
+              over a default-deny socket, proves every request with Ed25519 auth, and records
+              everything it touches in a tamper-evident audit log — so you control your fleet
+              without exposing it.
             </p>
+
+            <CtaButtons align="center" />
           </div>
-        </section>
 
-        {/* Features Section */}
-        <section className="px-4 py-24">
-          <div className="mx-auto max-w-5xl">
-            <div className="relative mb-16 text-center">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_hsl(var(--background))_20%,_transparent_50%)]" />
-              <h2 className="relative text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                Features
-              </h2>
-              <p className="relative mt-4 text-muted-foreground">
-                A watchtower, not a back door — a lean Go binary that proves what it did
-              </p>
+          {/* Mascot moment */}
+          <div className="relative mt-12 flex justify-center">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 -z-10 flex items-center justify-center"
+            >
+              <div className="h-72 w-72 rounded-full bg-[var(--au-glow)] opacity-50 blur-3xl" />
             </div>
+            <PortwingMascot size={200} />
+          </div>
 
-            <div className="overflow-hidden rounded-xl border border-border">
-              <div className="flex items-center gap-2 border-b border-border bg-secondary px-5 py-3">
-                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                <span className="font-mono text-xs text-muted-foreground">portwing capabilities</span>
-                <span className="ml-auto font-mono text-xs text-muted-foreground/60">
-                  {features.length} modules
-                </span>
-              </div>
-              <div className="divide-y divide-border bg-card">
-                {features.map((feature, i) => {
-                  const cat = categoryLabels[feature.category];
-                  return (
-                    <div
-                      key={feature.title}
-                      className="group flex items-center gap-5 px-5 py-4 transition-colors hover:bg-secondary/60"
-                    >
-                      <span className="w-6 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground/40">
-                        {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <div
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${feature.bg}`}
-                      >
-                        <feature.icon className={`h-4 w-4 ${feature.color}`} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-3">
-                          <h3 className="text-sm font-semibold text-foreground">{feature.title}</h3>
+          {/* Badges */}
+          <div className="mt-12">
+            <GitHubBadges />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Ecosystem band ──────────────────────────────────────────────────── */}
+      <div className="reveal">
+        <section className="border-t border-border/60 px-4 py-14">
+          <div className="mx-auto max-w-5xl px-4">
+            <SectionHeading
+              eyebrow="Ecosystem"
+              title="Part of the CodesWhat stack"
+              subtitle="Three tools, one job each — they compose."
+              align="left"
+            />
+            <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50">
+              <div className="grid gap-0 sm:grid-cols-3 sm:divide-x sm:divide-neutral-200 sm:dark:divide-neutral-800">
+                {STACK.map((item) => {
+                  const inner = (
+                    <div key={item.name} className="flex flex-col gap-1.5 px-8 py-8">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                          {item.name}
+                        </span>
+                        {item.current && (
                           <span
-                            className={`rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${cat.border} ${cat.color}`}
+                            className="text-base leading-none"
+                            role="img"
+                            aria-label="You're here"
                           >
-                            {cat.label}
+                            📍
                           </span>
-                        </div>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {feature.description}
-                        </p>
+                        )}
                       </div>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">{item.role}</p>
+                    </div>
+                  );
+
+                  return item.href ? (
+                    <a
+                      key={item.name}
+                      href={item.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group block border-b border-neutral-200 transition-colors hover:bg-neutral-50 last:border-0 sm:border-b-0 dark:border-neutral-800 dark:hover:bg-neutral-900/60"
+                    >
+                      {inner}
+                    </a>
+                  ) : (
+                    <div
+                      key={item.name}
+                      className="border-b border-neutral-200 last:border-0 sm:border-b-0 dark:border-neutral-800"
+                    >
+                      {inner}
                     </div>
                   );
                 })}
@@ -384,97 +318,246 @@ export default function Home() {
             </div>
           </div>
         </section>
+      </div>
 
-        {/* Quick Start Section */}
-        <section className="px-4 py-24">
-          <div className="mx-auto max-w-3xl">
-            <div className="relative mb-16 text-center">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_hsl(var(--background))_20%,_transparent_50%)]" />
-              <h2 className="relative text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                Quick Start
-              </h2>
-              <p className="relative mt-4 text-muted-foreground">
-                Two hardened containers sharing a filtered socket — and you&apos;re done
-              </p>
-            </div>
+      {/* ── Features ─────────────────────────────────────────────────────────── */}
+      <div className="reveal">
+        <section className="border-t border-border/60 px-4 py-16">
+          <div className="mx-auto max-w-6xl px-4">
+            <SectionHeading
+              eyebrow="What it does"
+              title="14 reasons your Docker hosts are safer"
+              subtitle="Security isn't a checkbox — it's every layer. Here's what we built."
+              align="left"
+            />
 
-            <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl">
-              <div className="flex items-center gap-2 border-b border-neutral-800 px-4 py-3">
-                <Terminal className="h-4 w-4 text-neutral-500" />
-                <span className="text-xs font-medium text-neutral-500">
-                  docker-compose.with-sockguard.yml
-                </span>
+            <div className="mx-auto max-w-2xl">
+              {/* Command-palette panel */}
+              <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white/50 shadow-xl shadow-black/5 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50 dark:shadow-black/20">
+                {/* Search row */}
+                <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+                  <Search className="h-4 w-4 shrink-0 text-neutral-400 dark:text-neutral-500" />
+                  <input
+                    type="text"
+                    value={featureQuery}
+                    onChange={(e) => setFeatureQuery(e.target.value)}
+                    placeholder="Search capabilities…"
+                    aria-label="Search capabilities"
+                    className="flex-1 bg-transparent text-sm text-neutral-700 placeholder-neutral-400 outline-none dark:text-neutral-300 dark:placeholder-neutral-600"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <kbd className="shrink-0 rounded border border-neutral-200 bg-neutral-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-neutral-400 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-500">
+                    ⌘K
+                  </kbd>
+                </div>
+
+                {/* Results */}
+                <div className="max-h-[560px] overflow-y-auto py-2">
+                  {groups.length === 0 && (
+                    <p className="px-4 py-8 text-center text-sm text-neutral-400 dark:text-neutral-600">
+                      No capabilities match &ldquo;{featureQuery}&rdquo;
+                    </p>
+                  )}
+                  {groups.map((group) => (
+                    <div key={group.cat}>
+                      <div className="px-4 pb-1 pt-3">
+                        <span
+                          className={`font-mono text-[10px] font-semibold uppercase tracking-widest ${group.color}`}
+                        >
+                          {group.label}
+                        </span>
+                      </div>
+                      {group.items.map((feature) => (
+                        <div
+                          key={feature.title}
+                          className="group flex cursor-default items-center gap-3 px-3 py-2.5 hover:bg-neutral-100/70 dark:hover:bg-neutral-800/70"
+                        >
+                          <div
+                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${feature.bg}`}
+                          >
+                            <feature.icon size={15} className={feature.color} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
+                              {feature.title}
+                            </p>
+                            <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                              {feature.description}
+                            </p>
+                          </div>
+                          <span className="shrink-0 font-mono text-xs text-neutral-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-neutral-600">
+                            ↵
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Footer bar */}
+                <div className="flex items-center gap-4 border-t border-neutral-200 px-4 py-2.5 dark:border-neutral-800">
+                  <span className="font-mono text-[10px] text-neutral-400 dark:text-neutral-600">
+                    {filtered.length} of {features.length} capabilities
+                  </span>
+                  <div className="ml-auto flex items-center gap-3">
+                    <span className="flex items-center gap-1 font-mono text-[10px] text-neutral-400 dark:text-neutral-600">
+                      <kbd className="rounded border border-neutral-200 bg-neutral-100 px-1 py-px font-mono text-[9px] dark:border-neutral-700 dark:bg-neutral-800">
+                        ↑↓
+                      </kbd>{" "}
+                      navigate
+                    </span>
+                    <span className="flex items-center gap-1 font-mono text-[10px] text-neutral-400 dark:text-neutral-600">
+                      <kbd className="rounded border border-neutral-200 bg-neutral-100 px-1 py-px font-mono text-[9px] dark:border-neutral-700 dark:bg-neutral-800">
+                        esc
+                      </kbd>{" "}
+                      close
+                    </span>
+                  </div>
+                </div>
               </div>
-              <pre className="overflow-x-auto p-6 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-neutral-300">
-                {dockerCompose}
-              </pre>
             </div>
           </div>
         </section>
+      </div>
 
-        {/* Comparison Section */}
-        <section className="px-4 py-24">
-          <div className="mx-auto max-w-5xl">
-            <div className="relative mb-16 text-center">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_hsl(var(--background))_20%,_transparent_50%)]" />
-              <h2 className="relative text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                Comparison
-              </h2>
-              <p className="relative mt-4 text-muted-foreground">
-                How Portwing stacks up against other remote Docker agents
-              </p>
+      {/* ── Quick Start ───────────────────────────────────────────────────────── */}
+      <div className="reveal">
+        <section className="border-t border-border/60 px-4 py-20">
+          <div className="mx-auto max-w-3xl">
+            <SectionHeading
+              eyebrow="Get running"
+              title="Up in two commands"
+              subtitle="Quick path or hardened path — pick one and go."
+              align="right"
+            />
+
+            {/* Toggle */}
+            <div className="mb-5 flex justify-center">
+              <div
+                role="tablist"
+                aria-label="Install preset"
+                className="inline-flex gap-1 rounded-xl border border-neutral-200 bg-white/60 p-1 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/60"
+                onKeyDown={(e) => {
+                  const currentIndex = PRESETS.findIndex((p) => p.id === preset);
+                  if (e.key === "ArrowRight") {
+                    e.preventDefault();
+                    setPreset(PRESETS[(currentIndex + 1) % PRESETS.length].id);
+                  } else if (e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    setPreset(PRESETS[(currentIndex - 1 + PRESETS.length) % PRESETS.length].id);
+                  }
+                }}
+              >
+                {PRESETS.map(({ id, label, icon: Icon }) => {
+                  const active = preset === id;
+                  return (
+                    <button
+                      key={id}
+                      id={`tab-${id}`}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      aria-controls="preset-panel"
+                      tabIndex={active ? 0 : -1}
+                      onClick={() => setPreset(id)}
+                      className={[
+                        "flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors",
+                        active
+                          ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+                          : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100",
+                      ].join(" ")}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-border bg-card/50 backdrop-blur-sm">
-              <table className="w-full text-sm">
+            <div role="tabpanel" id="preset-panel" aria-labelledby={`tab-${preset}`}>
+              {preset === "quick" ? <QuickSnippet /> : <SecureSnippet />}
+
+              <div className="mt-4 flex items-start justify-center gap-2 px-2 text-center text-sm">
+                {preset === "quick" ? (
+                  <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
+                    <Zap className="h-4 w-4 shrink-0 text-amber-500" />
+                    Mounts the raw socket — fine for a local try, swap in sockguard for production.
+                  </p>
+                ) : (
+                  <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-500" />
+                    Portwing never touches the raw socket. Sockguard enforces a Docker API allowlist
+                    at the socket level.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* ── Comparison ────────────────────────────────────────────────────────── */}
+      <div className="reveal">
+        <section id="compare" className="border-t border-border/60 px-4 py-16">
+          <div className="mx-auto max-w-5xl px-4">
+            <SectionHeading
+              eyebrow="Alternatives"
+              title="How we compare"
+              subtitle="Other tools in the remote Docker control space — scoped to each tool's published, default behaviour."
+              align="left"
+            />
+
+            <div className="overflow-x-auto rounded-2xl border border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50">
+              <table className="w-full min-w-[780px] text-sm">
                 <thead>
-                  <tr className="border-b border-border">
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <tr className="border-b border-neutral-200 dark:border-neutral-800">
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500 sm:px-5 dark:text-neutral-400">
                       Feature
                     </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Portainer
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Komodo
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Hawser
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Watchtower
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Diun
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-foreground">
+                    {["Portainer", "Komodo", "Hawser", "Watchtower", "Diun"].map((name) => (
+                      <th
+                        key={name}
+                        className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400"
+                      >
+                        {name}
+                      </th>
+                    ))}
+                    <th className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
                       Portwing
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {comparisonRows.map((row) => (
+                  {comparisonRows.map((row, i) => (
                     <tr
                       key={row.feature}
-                      className="border-b border-border/60 transition-colors hover:bg-secondary/50 last:border-0"
+                      className={
+                        i < comparisonRows.length - 1
+                          ? "border-b border-neutral-100 transition-colors hover:bg-neutral-50 dark:border-neutral-800/50 dark:hover:bg-neutral-900/30"
+                          : "transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-900/30"
+                      }
                     >
-                      <td className="px-4 py-3 font-medium text-foreground">{row.feature}</td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-4 py-3 font-medium text-neutral-900 sm:px-5 dark:text-neutral-100">
+                        {row.feature}
+                      </td>
+                      <td className="px-3 py-3 text-center">
                         <ComparisonCell value={row.portainer} />
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-3 text-center">
                         <ComparisonCell value={row.komodo} />
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-3 text-center">
                         <ComparisonCell value={row.hawser} />
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-3 text-center">
                         <ComparisonCell value={row.watchtower} />
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-3 text-center">
                         <ComparisonCell value={row.diun} />
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-3 text-center">
                         <ComparisonCell value={row.portwing} planned={row.planned} />
                       </td>
                     </tr>
@@ -484,50 +567,7 @@ export default function Home() {
             </div>
           </div>
         </section>
-
-        {/* Footer */}
-        <footer className="px-4 py-8">
-          <div className="mx-auto flex max-w-5xl items-center justify-between">
-            <div className="flex items-center gap-3">
-              <a href="https://github.com/CodesWhat" target="_blank" rel="noopener noreferrer">
-                <Image
-                  src="/codeswhat-logo.png"
-                  alt="CodesWhat"
-                  width={28}
-                  height={28}
-                  className="dark:invert"
-                />
-              </a>
-              <span className="text-sm text-muted-foreground">
-                &copy; 2026 CodesWhat. AGPL-3.0 License.
-              </span>
-            </div>
-            <div className="flex items-center gap-4">
-              {/* biome-ignore lint/a11y/useAnchorContent: aria-label provides accessible name */}
-              <a
-                href={REPO}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-muted-foreground transition-colors hover:text-foreground"
-                aria-label="GitHub"
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-                </svg>
-              </a>
-              <a
-                href={DOCS}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-muted-foreground transition-colors hover:text-foreground"
-                aria-label="Documentation"
-              >
-                <BookOpenText className="h-5 w-5" />
-              </a>
-            </div>
-          </div>
-        </footer>
       </div>
-    </main>
+    </MarketingShell>
   );
 }
