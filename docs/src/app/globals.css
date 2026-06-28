@@ -39,7 +39,7 @@
   --card-foreground: 265 25% 11%;
   --popover: 0 0% 100%;
   --popover-foreground: 265 25% 11%;
-  --primary: 13 100% 56%;
+  --primary: 13 100% 60%;
   --primary-foreground: 0 0% 100%;
   --secondary: 280 16% 95.5%;
   --secondary-foreground: 265 25% 11%;
@@ -51,7 +51,7 @@
   --destructive-foreground: 0 0% 98%;
   --border: 275 16% 89%;
   --input: 275 16% 89%;
-  --ring: 13 100% 56%;
+  --ring: 13 100% 60%;
   --radius: 0.5rem;
 
   --color-fd-primary: hsl(13 100% 52%);
@@ -93,20 +93,6 @@
    by .aurora-mesh and the --au-glow used by accent glows.
    Violet is the primary palette for Portwing.
 ---------------------------------------------------------------------------- */
-[data-bg="ember"] {
-  --au-1: rgba(249, 115, 22, 0.22);
-  --au-2: rgba(251, 191, 36, 0.16);
-  --au-3: rgba(244, 63, 94, 0.1);
-  --au-4: rgba(249, 115, 22, 0.08);
-  --au-glow: rgba(251, 146, 60, 0.2);
-}
-[data-bg="ocean"] {
-  --au-1: rgba(14, 165, 233, 0.2);
-  --au-2: rgba(34, 211, 238, 0.15);
-  --au-3: rgba(99, 102, 241, 0.1);
-  --au-4: rgba(59, 130, 246, 0.08);
-  --au-glow: rgba(56, 189, 248, 0.2);
-}
 [data-bg="violet"] {
   --au-1: rgba(139, 92, 246, 0.2);
   --au-2: rgba(217, 70, 239, 0.14);
@@ -114,55 +100,13 @@
   --au-4: rgba(168, 85, 247, 0.08);
   --au-glow: rgba(167, 139, 250, 0.2);
 }
-[data-bg="forest"] {
-  --au-1: rgba(16, 185, 129, 0.18);
-  --au-2: rgba(45, 212, 191, 0.14);
-  --au-3: rgba(132, 204, 22, 0.1);
-  --au-4: rgba(34, 197, 94, 0.08);
-  --au-glow: rgba(52, 211, 153, 0.2);
-}
-[data-bg="mono"] {
-  --au-1: rgba(100, 116, 139, 0.14);
-  --au-2: rgba(148, 163, 184, 0.1);
-  --au-3: rgba(100, 116, 139, 0.07);
-  --au-4: rgba(148, 163, 184, 0.06);
-  --au-glow: rgba(148, 163, 184, 0.16);
-}
 
-.dark [data-bg="ember"] {
-  --au-1: rgba(249, 115, 22, 0.28);
-  --au-2: rgba(251, 191, 36, 0.18);
-  --au-3: rgba(244, 63, 94, 0.12);
-  --au-4: rgba(249, 115, 22, 0.1);
-  --au-glow: rgba(249, 115, 22, 0.15);
-}
-.dark [data-bg="ocean"] {
-  --au-1: rgba(14, 165, 233, 0.26);
-  --au-2: rgba(34, 211, 238, 0.18);
-  --au-3: rgba(99, 102, 241, 0.12);
-  --au-4: rgba(59, 130, 246, 0.1);
-  --au-glow: rgba(14, 165, 233, 0.16);
-}
 .dark [data-bg="violet"] {
   --au-1: rgba(139, 92, 246, 0.26);
   --au-2: rgba(217, 70, 239, 0.16);
   --au-3: rgba(99, 102, 241, 0.12);
   --au-4: rgba(168, 85, 247, 0.1);
   --au-glow: rgba(139, 92, 246, 0.16);
-}
-.dark [data-bg="forest"] {
-  --au-1: rgba(16, 185, 129, 0.24);
-  --au-2: rgba(45, 212, 191, 0.16);
-  --au-3: rgba(132, 204, 22, 0.12);
-  --au-4: rgba(34, 197, 94, 0.1);
-  --au-glow: rgba(16, 185, 129, 0.16);
-}
-.dark [data-bg="mono"] {
-  --au-1: rgba(148, 163, 184, 0.12);
-  --au-2: rgba(203, 213, 225, 0.08);
-  --au-3: rgba(148, 163, 184, 0.06);
-  --au-4: rgba(203, 213, 225, 0.05);
-  --au-glow: rgba(148, 163, 184, 0.12);
 }
 
 @layer utilities {
@@ -180,6 +124,17 @@
   .aurora-grain {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
   }
+}
+
+/* Aurora drift animation */
+@keyframes aurora-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-2%, 1.5%, 0) scale(1.08); }
+}
+[data-aurora-motion="true"] .aurora-mesh {
+  transform-origin: 50% 0%;
+  will-change: transform;
+  animation: aurora-drift 30s ease-in-out infinite;
 }
 
 /* Reduced motion — disable decorative aurora animation. */

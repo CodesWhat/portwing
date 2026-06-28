@@ -8,15 +8,11 @@ const githubOwner = "CodesWhat";
 const githubRepo = "portwing";
 
 // Aurora palette options: "ember" | "ocean" | "violet" | "forest" | "mono"
-export type AuroraPalette = "ember" | "ocean" | "violet" | "forest" | "mono";
+type AuroraPalette = "ember" | "ocean" | "violet" | "forest" | "mono";
 
 export const SITE_CONFIG = {
   /** Brand name shown in the header, footer, and metadata. */
   name: "Portwing",
-  /** Current release version shown in the hero badge. */
-  version: "0.5.0",
-  /** Short product tagline used in page titles and OG metadata. */
-  tagline: "Security-first remote Docker agent",
   /**
    * Default meta / OpenGraph / Twitter description.
    * Standard mode: HTTP/SSE. Edge mode: outbound WebSocket (for NAT/firewalled hosts).
@@ -30,21 +26,10 @@ export const SITE_CONFIG = {
   githubOwner,
   /** GitHub repository name. */
   githubRepo,
-  /** Twitter/X handle for the twitter:creator card. */
-  twitterCreator: "@codeswhat",
   /** Logo asset in /public. */
   logo: "/portwing.png",
   /** Whether the logo inverts in dark mode (adds `dark:invert`). */
   logoInvertOnDark: true,
-  /**
-   * Default OpenGraph / Twitter share image in /public.
-   * TODO: 1200x630 OG banner — currently falling back to the square logo.
-   */
-  ogImage: "/portwing.png",
-  /** OpenGraph locale. */
-  locale: "en_US",
-  /** GHCR image path used in quick-start snippets. */
-  dockerImage: "ghcr.io/codeswhat/portwing",
   /** License link shown in the footer. */
   licenseUrl: "https://www.gnu.org/licenses/agpl-3.0.html",
   /** Aurora background palette — violet matches the pigeon's slate palette. */
@@ -53,16 +38,14 @@ export const SITE_CONFIG = {
 
 export type SiteConfig = typeof SITE_CONFIG;
 
-/** "owner/repo" slug — used in shields.io / OpenSSF scorecard badge URLs. */
-export const REPO_SLUG = `${SITE_CONFIG.githubOwner}/${SITE_CONFIG.githubRepo}`;
+/** "owner/repo" slug — used to build GitHub URLs. */
+const REPO_SLUG = `${SITE_CONFIG.githubOwner}/${SITE_CONFIG.githubRepo}`;
 /** Canonical GitHub repository URL. */
 export const GITHUB_URL = `https://github.com/${REPO_SLUG}`;
 /** GitHub releases page. */
 export const GITHUB_RELEASES_URL = `${GITHUB_URL}/releases`;
 /** CodesWhat org GitHub URL. */
 export const GITHUB_ORG_URL = `https://github.com/${SITE_CONFIG.githubOwner}`;
-/** GHCR package page (portwing ships to GHCR, not Docker Hub). */
-export const GHCR_PACKAGE_URL = `https://github.com/orgs/CodesWhat/packages/container/package/portwing`;
 
 /**
  * Site base URL. Prefers NEXT_PUBLIC_SITE_URL (Vercel/preview deploys),

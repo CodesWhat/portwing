@@ -51,8 +51,18 @@ export default function RootLayout({
          * next-themes instance — no separate ThemeProvider needed.
          */}
         <RootProvider>
-          <div data-bg={SITE_CONFIG.aurora} className="relative min-h-screen">
+          <div
+            data-bg={SITE_CONFIG.aurora}
+            data-aurora-motion="true"
+            className="relative min-h-screen"
+          >
             <SiteBackground />
+            <a
+              href="#main-content"
+              className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-neutral-900 focus:shadow-lg dark:focus:bg-neutral-900 dark:focus:text-neutral-100"
+            >
+              Skip to content
+            </a>
             <div className="relative z-10 flex min-h-screen flex-col">
               <SiteHeader />
               <main id="main-content" className="flex-1">

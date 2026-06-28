@@ -8,10 +8,10 @@ import { GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 // href with /docs, which would send the logo to /docs instead of the marketing
 // site root. All cross-app navigation uses plain <a> anchors that ignore
 // basePath and resolve at the origin root.
-export function SiteHeader({ maxWidthClassName = "max-w-6xl" }: { maxWidthClassName?: string }) {
+export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-white/70 backdrop-blur-md dark:bg-neutral-950/70">
-      <div className={`mx-auto flex h-14 items-center justify-between px-4 ${maxWidthClassName}`}>
+      <div className="mx-auto flex h-14 items-center justify-between px-4 max-w-6xl">
         {/* Plain anchor — goes to the marketing site root, not /docs */}
         <a href="/" className="flex items-center gap-2.5">
           <Image

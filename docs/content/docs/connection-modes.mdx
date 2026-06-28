@@ -8,7 +8,7 @@ Portwing supports two connection modes. The active mode is determined at startup
 ## Mode Detection
 
 ```text
-DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set
+DRYDOCK_URL set + PRIVATE_KEY_FILE set
     → Edge Mode   (agent dials outbound WebSocket to controller)
 
 Otherwise
@@ -83,20 +83,20 @@ In Edge mode the agent initiates an outbound WebSocket connection to the Drydock
 Edge mode is active when **both** of the following are true:
 
 1. `DRYDOCK_URL` is set.
-2. At least one of `TOKEN`, `AUTHORIZED_KEYS` / `AUTHORIZED_KEYS_FILE`, or `PRIVATE_KEY_FILE` is set.
+2. `PRIVATE_KEY_FILE` is set.
 
-Setting only `TOKEN_HASH` with `DRYDOCK_URL` is explicitly rejected at startup — the controller needs a verifiable credential, not a stored hash.
+Setting `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is rejected at startup with a fatal error — the Drydock controller endpoint is Ed25519-only, so the agent enforces `PRIVATE_KEY_FILE` at startup rather than looping forever on a rejected hello. `TOKEN` and `AUTHORIZED_KEYS` are not accepted for edge mode.
 
 ### Key environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `DRYDOCK_URL` | — | Controller base URL, e.g. `https://drydock.example.com` |
+| `PRIVATE_KEY_FILE` | — | **Required.** Ed25519 private key (PEM PKCS#8); the hello message is signed with this key |
+| `TOKEN` | — | Not accepted for edge mode — startup fails if set with `DRYDOCK_URL` and no `PRIVATE_KEY_FILE` |
+| `AUTHORIZED_KEYS` | — | Not accepted for edge mode |
 | `AGENT_NAME` | hostname | Human-readable label sent in the hello message |
 | `AGENT_ID` | random UUID | Stable identity across reconnects (persist this) |
-| `TOKEN` | — | Shared secret hashed and sent in the hello |
-| `AUTHORIZED_KEYS` | — | Path to an authorized-keys file for Ed25519 auth |
-| `PRIVATE_KEY_FILE` | — | Ed25519 private key; hello is signed instead of hashed |
 | `RECONNECT_DELAY` | `1` | Initial reconnect delay in seconds |
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect delay in seconds |
 | `HEARTBEAT_INTERVAL` | `30` | Ping interval in seconds |

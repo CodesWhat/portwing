@@ -72,6 +72,25 @@ These metrics are emitted once per running container and carry `id`, `name`, and
 
 The `container_` prefix is intentionally compatible with cAdvisor label conventions so the metrics slot into existing Grafana dashboards without relabelling.
 
+### Request metrics
+
+These metrics track HTTP request activity and are the most operationally relevant signals for latency alerting and security monitoring.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `portwing_http_requests_total` | counter | `method`, `code` | Total HTTP requests completed, by method and response status code. |
+| `portwing_http_request_duration_seconds` | histogram | — | HTTP request latency in seconds. Exposes `_bucket`, `_sum`, and `_count` series. |
+| `portwing_http_requests_in_flight` | gauge | — | Number of HTTP requests currently being processed. |
+| `portwing_auth_failures_total` | counter | `reason` | Total authentication failures, labelled by failure reason (e.g. `bad-token`, `missing-token`). |
+| `portwing_rate_limited_total` | counter | — | Total requests blocked by the IP rate limiter. |
+
+Sample lines:
+
+```text
+portwing_http_requests_total{method="POST",code="200"} 42
+portwing_auth_failures_total{reason="bad-token"} 3
+```
+
 ### Sample output
 
 ```text

@@ -75,7 +75,8 @@ function SocialIcons() {
 
 function Coin({ size }: { size: number }) {
   return (
-    <Image
+    // biome-ignore lint/performance/noImgElement: intentional — basePath="/docs" makes next/image prepend /docs to root-relative src; this asset lives at the marketing-site origin root (/codeswhat-logo.png), so a plain <img> is required.
+    <img
       src="/codeswhat-logo.png"
       alt="CodesWhat"
       width={size}
@@ -120,10 +121,10 @@ function LicenseLine({ className }: { className?: string }) {
   );
 }
 
-export function Footer({ maxWidthClassName = "max-w-6xl" }: { maxWidthClassName?: string }) {
+export function Footer() {
   return (
     <footer className="border-t border-border/60">
-      <div className={`mx-auto px-4 py-12 ${maxWidthClassName}`}>
+      <div className="mx-auto px-4 py-12 max-w-6xl">
         <div className="flex flex-col gap-10 lg:flex-row lg:justify-between">
           {/* Brand */}
           <div className="flex max-w-xs flex-col gap-4">

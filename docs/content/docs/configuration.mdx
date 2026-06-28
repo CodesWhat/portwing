@@ -81,6 +81,7 @@ The following variables govern how Portwing authenticates incoming requests. `TO
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff delay in seconds. |
 | `SKIP_DF_COLLECTION` | `false` | Set to `true` (or `1`/`yes`) to disable disk-usage metric collection. Useful when the host filesystem is inaccessible or collection is slow. |
 | `AUDIT_LOG` | — | Audit log destination. Accepted values: `stdout`, `stderr`, or an absolute file path. When unset, audit logging is disabled. |
+| `AUDIT_BUFFER_SIZE` | `256` | Number of audit records retained in the in-memory ring buffer for pull-based retrieval at `GET /_portwing/audit`. Set to `0` to disable the buffer. Independent of `AUDIT_LOG`. |
 
 ---
 
