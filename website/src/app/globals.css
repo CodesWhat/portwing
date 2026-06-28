@@ -151,28 +151,50 @@
   --au-glow: rgba(148, 163, 184, 0.12);
 }
 
-/* ── Portwing mascot: lean-in ─────────────────────────────────────────────────
- * Drives <PortwingMascot>. transform-origin is at the feet so scaling
- * cranes the top up and brings the eyes toward the viewer.
+/* ── Portwing mascot: bird hop ────────────────────────────────────────────────
+ * Drives <PortwingMascot>. The bird hops left, pauses, hops back right,
+ * pauses, repeat. transform-origin near the feet so the whole body lifts
+ * off the ground rather than pivoting around its centre.
+ *
+ * Keyframe breakdown (one full cycle = 5.4 s):
+ *   0%       rest at centre, feet planted
+ *   8%       push-off: slight squat then launch left and up
+ *   22%      peak of hop-left: max translateX(-28px) translateY(-28px)
+ *   36%      land left: settle with a small squash (scaleY 0.93)
+ *   44%      recover upright — beat/pause
+ *   52%      push-off right
+ *   65%      peak of hop-right: max translateX(+28px) translateY(-28px)
+ *   79%      land right: squash
+ *   87%      recover upright — beat/pause
+ *   100%     back to centre rest
  */
+@keyframes bird-hop {
+  0%   { transform: translateX(0)    translateY(0)     scaleY(1);    }
+  7%   { transform: translateX(-4px) translateY(4px)   scaleY(0.96); }  /* squat */
+  22%  { transform: translateX(-28px) translateY(-28px) scaleY(1.05); } /* airborne */
+  36%  { transform: translateX(-22px) translateY(0)    scaleY(0.93); } /* land squash */
+  44%  { transform: translateX(-22px) translateY(0)    scaleY(1);    } /* recover */
+  50%  { transform: translateX(0)    translateY(0)     scaleY(1);    } /* re-centre */
+  57%  { transform: translateX(4px)  translateY(4px)   scaleY(0.96); } /* squat */
+  72%  { transform: translateX(28px) translateY(-28px) scaleY(1.05); } /* airborne */
+  86%  { transform: translateX(22px) translateY(0)     scaleY(0.93); } /* land squash */
+  93%  { transform: translateX(22px) translateY(0)     scaleY(1);    } /* recover */
+  100% { transform: translateX(0)    translateY(0)     scaleY(1);    } /* re-centre */
+}
+
+.animate-bird-hop {
+  animation: bird-hop 5.4s cubic-bezier(0.33, 1, 0.68, 1) infinite;
+}
+
 .portwing-mascot {
   position: relative;
+  /* pivot at the feet (bottom centre) so the body lifts, not pivots */
   transform-origin: 50% 100%;
-  transition:
-    transform 0.62s cubic-bezier(0.34, 1.32, 0.46, 1),
-    filter 0.62s ease;
   will-change: transform, filter;
   filter: drop-shadow(0 14px 24px rgb(0 0 0 / 0.16));
 }
 .dark .portwing-mascot {
   filter: drop-shadow(0 16px 28px rgb(0 0 0 / 0.55));
-}
-.portwing-mascot.is-big {
-  transform: translateY(-7%) scaleX(1.08) scaleY(1.2);
-  filter: drop-shadow(0 26px 40px rgb(0 0 0 / 0.26));
-}
-.dark .portwing-mascot.is-big {
-  filter: drop-shadow(0 30px 48px rgb(0 0 0 / 0.6));
 }
 .portwing-mascot .lk-frame {
   display: block;
@@ -250,7 +272,8 @@ html.js .reveal.visible {
 /* Reduced motion — disable decorative motion and snap reveals. */
 @media (prefers-reduced-motion: reduce) {
   .aurora-mesh,
-  .animate-bounce-slow {
+  .animate-bounce-slow,
+  .animate-bird-hop {
     animation: none !important;
   }
   .reveal {
@@ -258,9 +281,9 @@ html.js .reveal.visible {
     opacity: 1 !important;
     transform: none !important;
   }
-  .portwing-mascot,
-  .portwing-mascot.is-big {
-    transform: none;
-    transition: none;
+  .portwing-mascot {
+    transform: none !important;
+    transition: none !important;
+    animation: none !important;
   }
 }

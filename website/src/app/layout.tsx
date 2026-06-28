@@ -17,7 +17,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 // Bump this whenever the favicon/app icons change so browsers re-fetch them.
-const ICON_VERSION = "1";
+const ICON_VERSION = "2";
 
 export const metadata: Metadata = {
   title: {
@@ -50,9 +50,13 @@ export const metadata: Metadata = {
     creator: SITE_CONFIG.twitterCreator,
     images: [SITE_CONFIG.ogImage],
   },
+  manifest: "/site.webmanifest",
   icons: {
-    icon: [{ url: `/portwing.png?v=${ICON_VERSION}` }],
-    apple: [{ url: `/portwing.png?v=${ICON_VERSION}` }],
+    icon: [
+      { url: `/favicon.ico?v=${ICON_VERSION}`, sizes: "any" },
+      { url: `/favicon-96x96.png?v=${ICON_VERSION}`, sizes: "96x96", type: "image/png" },
+    ],
+    apple: [{ url: `/apple-touch-icon.png?v=${ICON_VERSION}`, sizes: "180x180" }],
   },
 };
 
