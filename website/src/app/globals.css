@@ -218,6 +218,11 @@
 }
 
 @layer utilities {
+  /* CLI banner art print-in */
+  .animate-print-down {
+    animation: print-down 0.6s steps(16) both;
+  }
+
   /* Aurora mesh — palette colors come from the --au-* vars set per [data-bg] */
   .aurora-mesh {
     background:
@@ -232,6 +237,13 @@
   .aurora-grain {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
   }
+}
+
+/* Print-down: wipe the CLI banner art top-to-bottom so it draws like a
+   terminal printing it row by row. Stepped so it reads as printed lines. */
+@keyframes print-down {
+  from { clip-path: inset(0 0 100% 0); }
+  to   { clip-path: inset(0 0 0 0); }
 }
 
 /* ── Aurora drift + scroll reveal ────────────────────────────────────────────*/
@@ -263,8 +275,10 @@ html.js .reveal.visible {
 /* Reduced motion — disable decorative motion and snap reveals. */
 @media (prefers-reduced-motion: reduce) {
   .aurora-mesh,
-  .animate-bird-hop {
+  .animate-bird-hop,
+  .animate-print-down {
     animation: none !important;
+    clip-path: none !important;
   }
   .reveal {
     transition: none !important;

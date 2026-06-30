@@ -879,6 +879,12 @@ Exec tunnel events:
   </a>
 </div>
 
+## Community
+
+Questions, feedback, and early support: [CodesWhat Discord](https://discord.gg/mWHCPJRzSx)
+
+Please file concrete bugs and feature requests in [GitHub Issues](https://github.com/CodesWhat/portwing/issues) so they do not get lost in chat.
+
 ---
 
 <div align="center">

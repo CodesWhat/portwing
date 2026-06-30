@@ -9,5 +9,17 @@
     "enabled": true,
     "rules": { "recommended": true }
   },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } }
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "overrides": [
+    {
+      "includes": ["website/src/app/page.tsx"],
+      "linter": {
+        "rules": {
+          "security": {
+            "noDangerouslySetInnerHtml": "off"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -32,6 +32,8 @@ export const SITE_CONFIG = {
   githubRepo,
   /** Twitter/X handle for the twitter:creator card. */
   twitterCreator: "@codeswhat",
+  /** Discord community invite. */
+  discordUrl: "https://discord.gg/mWHCPJRzSx",
   /** Logo asset in /public. */
   logo: "/portwing.png",
   /** Whether the logo inverts in dark mode (adds `dark:invert`). */

@@ -1,5 +1,6 @@
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import Image from "next/image";
+import { DiscordIcon } from "@/components/discord-icon";
 import { GithubIcon } from "@/components/github-icon";
 import { iconButtonCn, navLinkCn } from "@/lib/class-names";
 import { GITHUB_ORG_URL, GITHUB_RELEASES_URL, GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
@@ -65,6 +66,15 @@ function SocialIcons() {
         aria-label="GitHub"
       >
         <GithubIcon className="h-5 w-5" />
+      </a>
+      <a
+        href={SITE_CONFIG.discordUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={iconButtonCn}
+        aria-label="Discord community"
+      >
+        <DiscordIcon className="h-5 w-5" />
       </a>
       <a href="/docs" className={iconButtonCn} aria-label="Documentation">
         <BookOpen className="h-5 w-5" />
