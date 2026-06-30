@@ -27,13 +27,15 @@ export function DockerRunSnippet({
         <pre className="overflow-x-auto text-sm">
           <code className="text-neutral-300">
             <span className="text-neutral-500">$</span>{" "}
-            <span className="text-[#C4FF00]">docker run</span> -d \{"\n"}
-            {"  "}--name portwing \{"\n"}
-            {"  "}-v /var/run/docker.sock:/var/run/docker.sock \{"\n"}
-            {"  "}-p 3000:3000 \{"\n"}
+            <span className="text-violet-400">docker run</span> -d \{"\n"}
+            {"  "}--name <span className="text-fuchsia-400">portwing</span> \{"\n"}
+            {"  "}-v{" "}
+            <span className="text-fuchsia-400">/var/run/docker.sock:/var/run/docker.sock</span> \
+            {"\n"}
+            {"  "}-p <span className="text-fuchsia-400">3000:3000</span> \{"\n"}
             {"  "}-e TOKEN=$(openssl rand -hex 24) \{"\n"}
             {"  "}
-            {SITE_CONFIG.dockerImage}:latest
+            <span className="text-fuchsia-400">{SITE_CONFIG.dockerImage}:latest</span>
           </code>
         </pre>
       </CardContent>
