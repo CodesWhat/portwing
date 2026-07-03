@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hermetic artifact builds**: `setup-go` caching is disabled in the release workflow and the GoReleaser config check, so no restored module/build cache can influence published artifacts. This clears zizmor's cache-poisoning findings at the root, and the now-redundant suppression config (`.github/zizmor.yml`, whose rationale predated the repo going public) is deleted — the workflow audit runs suppression-free.
+
 ## [0.5.1] - 2026-07-03
 
 ### Changed

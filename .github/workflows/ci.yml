@@ -240,6 +240,10 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
+          # This job only runs `goreleaser check` (no build), and a restored
+          # module cache in an artifact-adjacent job is a cache-poisoning
+          # surface (zizmor cache-poisoning).
+          cache: false
 
       - name: Run GoReleaser check
         uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
