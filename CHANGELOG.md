@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-03
+
 ### Changed
 
 - **Coverage reporting moved from Codecov to Qlty Cloud.** Part of the org-wide consolidation onto Qlty (one vendor for code quality and coverage). CI now publishes the Go coverprofile to Qlty Cloud via GitHub OIDC — no stored coverage token — and enforces a vendor-free statement-coverage floor (96%) with `go tool cover`, replacing the Codecov project ratchet and `codecov.yml`. A coverage badge was added to the README.
+- **Blocking `qlty check` gate in CI.** A new CI job fails the build on any new qlty finding (shellcheck, hadolint, markdownlint, yamllint, and friends), with the linter configs (`.qlty/qlty.toml`, `.markdownlint.json`, `.yamllint.yml`) checked in and the existing scripts and Dockerfiles cleaned up to pass it. Standardizes the quality tooling with the sibling CodesWhat repos.
+- **Marketing and docs sites converted to the shared CodesWhat web shell**, bringing chrome parity with the sibling project sites (CLI demo, comparison hub, OG/share imagery, favicons), and the configured site domain corrected from `getportwing.dev` to `getportwing.com`. Source-only — nothing is deployed yet.
+
+### Fixed
+
+- **Spurious edge compat-level mismatch warning**: the `welcome`-frame `serverCompatLevel` was compared to the agent's compat level as an exact string, so any minor/patch difference (e.g. Drydock's `1.4` vs the agent's `1.4.0`) logged a "controller compat level mismatch" warning on every connect. The comparison is now major-version-only, matching Drydock's semantics.
+- **Container-poll startup/shutdown race**: `ListenAndServe` created the poll context and wrote the cancel field after startup, racing a concurrent `Shutdown` that reads it — a shutdown arriving early could also observe nil and leak the polling goroutine. Both fields are now set once at construction and never reassigned.
 
 ## [0.5.0] - 2026-06-23
 
