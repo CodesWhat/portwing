@@ -72,8 +72,8 @@ jobs:
         # code, so they're excluded from the coverprofile (and the floor below).
         # `go vet ./...` above still compiles them, so they can't silently rot.
         run: |
-          PKGS=$(go list ./internal/... ./cmd/... | grep -v '/internal/banner/gen')
-          go test -race -covermode=atomic -coverprofile=coverage.out $PKGS
+          mapfile -t PKGS < <(go list ./internal/... ./cmd/... | grep -v '/internal/banner/gen')
+          go test -race -covermode=atomic -coverprofile=coverage.out "${PKGS[@]}"
 
       - name: Publish coverage to Qlty
         # Org-wide coverage consolidated on Qlty Cloud (replaces Codecov).
