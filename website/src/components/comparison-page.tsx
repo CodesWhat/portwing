@@ -201,7 +201,7 @@ export function ComparisonPage({
                 Key Differentiators
               </h2>
               <p className="mx-auto max-w-2xl text-neutral-600 dark:text-neutral-400">
-                What we built that {competitorName} doesn&apos;t cover.
+                {`What we built that ${competitorName} doesn't cover.`}
               </p>
             </div>
 
