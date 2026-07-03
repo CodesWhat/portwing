@@ -34,7 +34,7 @@ export const features: Feature[] = [
     color: "text-rose-500 dark:text-rose-400",
     bg: "bg-rose-100 dark:bg-rose-900/50",
     description:
-      "Portwing never has to touch the raw Docker socket. Bundle sibling project sockguard and the agent talks to a filtered unix socket instead — even a fully compromised agent is constrained to an explicit Docker API allowlist enforced at the socket level.",
+      "Pair us with sockguard and we never touch the raw Docker socket. The agent talks to a filtered unix socket instead, so even a fully compromised agent is constrained to an explicit Docker API allowlist enforced at the socket level.",
     category: "security",
   },
   {
@@ -70,7 +70,7 @@ export const features: Feature[] = [
     color: "text-rose-500 dark:text-rose-400",
     bg: "bg-rose-100 dark:bg-rose-900/50",
     description:
-      "Ships to run `read_only`, `cap_drop: ALL`, and `no-new-privileges`, with tokens delivered as mounted secrets rather than env vars. Root-by-default for socket compatibility, with an opt-in non-root UID 65532 path documented honestly.",
+      "We ship hardened by default: `read_only`, `cap_drop: ALL`, `no-new-privileges`, and tokens mounted as secrets instead of env vars. We run as root for socket compatibility and document the opt-in UID 65532 path honestly. No security theater.",
     category: "security",
   },
   {
@@ -79,7 +79,7 @@ export const features: Feature[] = [
     color: "text-indigo-500 dark:text-indigo-400",
     bg: "bg-indigo-100 dark:bg-indigo-900/50",
     description:
-      "Speaks Drydock's `dd:*` WebSocket protocol with full SSE compatibility, including watcher-snapshot streaming. Portwing is the remote agent that lets one Drydock controller manage containers across every one of your hosts.",
+      "We speak Drydock's wire protocol (portwing/1.0 over WebSocket in edge mode; dd:* SSE events in standard mode) with full watcher-snapshot streaming, letting one Drydock controller manage containers across every host we're deployed on.",
     category: "control",
   },
   {
@@ -88,7 +88,7 @@ export const features: Feature[] = [
     color: "text-indigo-500 dark:text-indigo-400",
     bg: "bg-indigo-100 dark:bg-indigo-900/50",
     description:
-      "Run in standard mode behind a TLS reverse proxy (the controller dials in), or — for hosts with no inbound port — outbound edge mode where the agent dials the controller. Edge is implemented agent-side; the controller endpoint is in progress.",
+      "Run in standard mode behind a TLS reverse proxy (the controller dials in), or, for hosts with no inbound port, outbound edge mode where the agent dials the controller. Both modes are implemented end-to-end as of v0.5.0 (Drydock 1.5+, early access); full exec robustness under load is still being hardened.",
     category: "control",
   },
   {
@@ -97,7 +97,7 @@ export const features: Feature[] = [
     color: "text-indigo-500 dark:text-indigo-400",
     bg: "bg-indigo-100 dark:bg-indigo-900/50",
     description:
-      "Don't run Drydock? Use Portwing standalone. A generic REST + Bearer-auth surface lets any client list, inspect, start, stop, and stream logs from containers — no controller required.",
+      "Don't run Drydock? We work standalone too. Our REST + Bearer-auth surface lets any client list, inspect, start, stop, and stream logs from containers. No controller required.",
     category: "control",
   },
   {
@@ -106,7 +106,7 @@ export const features: Feature[] = [
     color: "text-indigo-500 dark:text-indigo-400",
     bg: "bg-indigo-100 dark:bg-indigo-900/50",
     description:
-      "A built-in Model Context Protocol server exposes host and container state to MCP-aware agents — read-only by design, so your assistant can see everything and change nothing.",
+      "We ship a built-in Model Context Protocol server that exposes host and container state to MCP-aware agents. Read-only by design, so your assistant can see everything and change nothing.",
     category: "control",
   },
   {
@@ -115,7 +115,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "A zero-dependency `/metrics` endpoint exports container and agent telemetry in cAdvisor-compatible form, so it drops straight into the dashboards and alerts you already run.",
+      "Our zero-dependency `/metrics` endpoint exports container and agent telemetry in cAdvisor-compatible form, so it drops straight into the dashboards and alerts you already run.",
     category: "operations",
   },
   {
@@ -124,7 +124,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "Every action the agent takes is recorded as structured, tamper-evident JSON — who asked, what ran, and what the daemon answered. Authentication and key-enrollment events are first-class.",
+      "Every action we take is recorded as structured, tamper-evident JSON: who asked, what ran, and what the daemon answered. Authentication and key-enrollment events are first-class.",
     category: "operations",
   },
   {
@@ -133,7 +133,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "A single static Go binary, ~10 MB, with zero runtime dependencies. amd64 · arm64 · arm/v7 — it runs on the Raspberry Pi at the edge as happily as the server in the rack.",
+      "We ship as a single static Go binary, ~10 MB, with zero runtime dependencies. amd64, arm64, arm/v7 — runs on the Raspberry Pi at the edge as happily as the server in the rack.",
     category: "operations",
   },
   {
@@ -142,7 +142,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "The full agent API is documented as a machine-readable OpenAPI 3.1 spec — generate clients, drive contract tests, and never guess at the wire format.",
+      "We publish the full agent API as a machine-readable OpenAPI 3.1 spec. Generate clients, drive contract tests, and never guess at the wire format.",
     category: "operations",
   },
   {
@@ -151,7 +151,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "Coming from Watchtower? A dedicated migration guide maps the update-on-a-host workflow onto Portwing + Drydock, so you trade a cron-like updater for an auditable, controllable agent.",
+      "Coming from Watchtower? We wrote a migration guide that maps the update-on-a-host workflow onto Portwing + Drydock, so you trade a cron-like updater for an auditable, controllable agent.",
     category: "operations",
   },
 ];

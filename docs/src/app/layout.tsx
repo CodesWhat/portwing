@@ -3,9 +3,11 @@ import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
-import Image from "next/image";
+import { Footer } from "@/components/footer";
+import { SiteBackground } from "@/components/site-background";
+import { SiteHeader } from "@/components/site-header";
+import { BASE_URL, SITE_CONFIG } from "@/lib/site-config";
 import { source } from "@/lib/source";
-import logo from "../../public/portwing.png";
 import "./globals.css";
 
 const ibmPlexSans = IBM_Plex_Sans({
@@ -20,9 +22,12 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Portwing Docs",
-  description: "Documentation for Portwing, the security-first remote Docker agent.",
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://getportwing.dev"),
+  title: {
+    default: `${SITE_CONFIG.name} Docs`,
+    template: `%s | ${SITE_CONFIG.name} Docs`,
+  },
+  description: SITE_CONFIG.description,
+  metadataBase: new URL(BASE_URL),
 };
 
 export const viewport: Viewport = {
@@ -40,28 +45,44 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${ibmPlexSans.className} ${ibmPlexMono.variable}`}>
+        {/*
+         * RootProvider (fumadocs-ui/provider/next) already initialises next-themes
+         * with attribute="class". ThemeToggle uses useTheme() from the same
+         * next-themes instance — no separate ThemeProvider needed.
+         */}
         <RootProvider>
-          <DocsLayout
-            tree={source.pageTree}
-            nav={{
-              title: (
-                <span className="flex items-center gap-2">
-                  <Image src={logo} alt="Portwing" width={28} height={28} priority className="dark:invert" />
-                  <span className="font-semibold tracking-tight">Portwing</span>
-                </span>
-              ),
-              url: "/",
-            }}
-            links={[
-              {
-                text: "GitHub",
-                url: "https://github.com/CodesWhat/portwing",
-                external: true,
-              },
-            ]}
+          <div
+            data-bg={SITE_CONFIG.aurora}
+            data-aurora-motion="true"
+            className="relative min-h-screen"
           >
-            {children}
-          </DocsLayout>
+            <SiteBackground />
+            <a
+              href="#main-content"
+              className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-neutral-900 focus:shadow-lg dark:focus:bg-neutral-900 dark:focus:text-neutral-100"
+            >
+              Skip to content
+            </a>
+            <div className="relative z-10 flex min-h-screen flex-col">
+              <SiteHeader />
+              <main id="main-content" className="flex-1">
+                {/*
+                 * DocsLayout owns the sidebar. The built-in fumadocs nav header,
+                 * theme switch, and search toggle are disabled so the SiteHeader
+                 * above is the sole chrome — no double-header.
+                 */}
+                <DocsLayout
+                  tree={source.pageTree}
+                  nav={{ enabled: false }}
+                  themeSwitch={{ enabled: false }}
+                  searchToggle={{ enabled: false }}
+                >
+                  {children}
+                </DocsLayout>
+              </main>
+              <Footer />
+            </div>
+          </div>
         </RootProvider>
         <Analytics />
       </body>

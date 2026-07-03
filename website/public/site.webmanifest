@@ -1,0 +1,23 @@
+{
+  "name": "Portwing",
+  "short_name": "Portwing",
+  "description": "Security-first remote Docker agent",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#FF5F33",
+  "background_color": "#FDFCFE",
+  "icons": [
+    {
+      "src": "/web-app-manifest-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/web-app-manifest-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

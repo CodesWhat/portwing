@@ -1,0 +1,46 @@
+import Image from "next/image";
+import { GithubIcon } from "@/components/github-icon";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { iconButtonCn, navLinkCn } from "@/lib/class-names";
+import { GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
+
+// NOTE: The docs app runs under basePath="/docs". Next <Link> prefixes every
+// href with /docs, which would send the logo to /docs instead of the marketing
+// site root. All cross-app navigation uses plain <a> anchors that ignore
+// basePath and resolve at the origin root.
+export function SiteHeader() {
+  return (
+    <header className="sticky top-0 z-50 border-b border-border/60 bg-white/70 backdrop-blur-md dark:bg-neutral-950/70">
+      <div className="mx-auto flex h-14 items-center justify-between px-4 max-w-6xl">
+        {/* Plain anchor — goes to the marketing site root, not /docs */}
+        <a href="/" className="flex items-center gap-2.5">
+          <Image
+            src={SITE_CONFIG.logo}
+            alt=""
+            width={43}
+            height={43}
+            className={SITE_CONFIG.logoInvertOnDark ? "dark:invert" : undefined}
+          />
+          <span className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+            {SITE_CONFIG.name}
+          </span>
+        </a>
+        <nav className="flex items-center gap-1 sm:gap-2">
+          <a href="/docs" className={`hidden px-3 py-2 sm:inline-block ${navLinkCn}`}>
+            Docs
+          </a>
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub"
+            className={iconButtonCn}
+          >
+            <GithubIcon className="h-5 w-5" />
+          </a>
+          <ThemeToggle />
+        </nav>
+      </div>
+    </header>
+  );
+}
