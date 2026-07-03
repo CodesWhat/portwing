@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/metrics"
 )
 
 type SSEClient struct {
@@ -24,19 +25,30 @@ type ContainerProvider interface {
 	GetContainers() []adapter.Container
 }
 
+// AgentInfo carries the static agent runtime details reported in the dd:ack
+// event alongside the values derived at runtime.
+type AgentInfo struct {
+	LogLevel     string
+	PollInterval string
+}
+
 type SSEBroadcaster struct {
 	mu           sync.RWMutex
 	clients      map[string]*SSEClient
 	manager      ContainerProvider
 	agentVersion string
+	agentInfo    AgentInfo
+	memoryGB     float64
 	startTime    time.Time
 }
 
-func NewSSEBroadcaster(manager ContainerProvider, agentVersion string) *SSEBroadcaster {
+func NewSSEBroadcaster(manager ContainerProvider, agentVersion string, info AgentInfo) *SSEBroadcaster {
 	return &SSEBroadcaster{
 		clients:      make(map[string]*SSEClient),
 		manager:      manager,
 		agentVersion: agentVersion,
+		agentInfo:    info,
+		memoryGB:     metrics.MemoryTotalGB(),
 		startTime:    time.Now(),
 	}
 }
@@ -120,9 +132,11 @@ type ackDataBody struct {
 	OS            string        `json:"os"`
 	Arch          string        `json:"arch"`
 	CPUs          int           `json:"cpus"`
-	MemoryGB      int           `json:"memoryGb"`
+	MemoryGB      float64       `json:"memoryGb"`
 	UptimeSeconds int64         `json:"uptimeSeconds"`
 	LastSeen      string        `json:"lastSeen"`
+	LogLevel      string        `json:"logLevel,omitempty"`
+	PollInterval  string        `json:"pollInterval,omitempty"`
 	Containers    ackContainers `json:"containers"`
 	Images        int           `json:"images"`
 }
@@ -158,9 +172,11 @@ func (b *SSEBroadcaster) buildAckPayload() []byte {
 			OS:            runtime.GOOS,
 			Arch:          runtime.GOARCH,
 			CPUs:          runtime.NumCPU(),
-			MemoryGB:      0, // Memory not easily available without cgo/sysinfo
+			MemoryGB:      b.memoryGB,
 			UptimeSeconds: uptimeSeconds,
 			LastSeen:      time.Now().UTC().Format(time.RFC3339),
+			LogLevel:      b.agentInfo.LogLevel,
+			PollInterval:  b.agentInfo.PollInterval,
 			Containers: ackContainers{
 				Total:   len(containers),
 				Running: running,

@@ -127,14 +127,18 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func selectAdapter(cfg *config.Config, dockerClient *docker.Client) adapter.Adapter {
+	info := drydock.AgentInfo{
+		LogLevel:     cfg.LogLevel,
+		PollInterval: (time.Duration(cfg.DDPollInterval) * time.Second).String(),
+	}
 	switch cfg.Adapter {
 	case "generic":
 		return generic.New(dockerClient, cfg.AgentName)
 	case "drydock":
-		return drydock.NewAdapter(dockerClient, cfg.AgentName)
+		return drydock.NewAdapter(dockerClient, cfg.AgentName, info)
 	default:
 		slog.Warn("unknown adapter, falling back to drydock", "adapter", cfg.Adapter)
-		return drydock.NewAdapter(dockerClient, cfg.AgentName)
+		return drydock.NewAdapter(dockerClient, cfg.AgentName, info)
 	}
 }
 

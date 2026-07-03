@@ -39,7 +39,7 @@ func TestHandleContainersUsesCachedInventory(t *testing.T) {
 	client, calls, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	if _, err := a.containers.BuildInventory(context.Background()); err != nil {
 		t.Fatalf("build inventory: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestHandleContainerLogsRejectsInvalidTail(t *testing.T) {
 	client, calls, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	tests := []struct {
 		name string
@@ -123,7 +123,7 @@ func TestHandleContainerLogsAcceptsPositiveTail(t *testing.T) {
 	client, calls, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs?tail=5", nil)
 	req.SetPathValue("id", "container-1")
@@ -148,7 +148,7 @@ func TestHandleWatcherGetReturnsKnownWatcher(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/watchers/docker/docker", nil)
 	req.SetPathValue("type", "docker")
@@ -182,7 +182,7 @@ func TestHandleWatcherGetReturns404ForUnknown(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/watchers/unknown/missing", nil)
 	req.SetPathValue("type", "unknown")
@@ -202,7 +202,7 @@ func TestHandleLogEntriesReturnsEmptyArray(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/log/entries", nil)
 	rec := httptest.NewRecorder()

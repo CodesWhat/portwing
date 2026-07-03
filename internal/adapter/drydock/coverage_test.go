@@ -90,7 +90,7 @@ func TestContainersAccessor(t *testing.T) {
 	t.Parallel()
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	if got := a.Containers(); got == nil {
 		t.Fatal("Containers() returned nil")
 	}
@@ -100,7 +100,7 @@ func TestSSEAccessor(t *testing.T) {
 	t.Parallel()
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	if got := a.SSE(); got == nil {
 		t.Fatal("SSE() returned nil")
 	}
@@ -110,7 +110,7 @@ func TestDockerClientAccessor(t *testing.T) {
 	t.Parallel()
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	if got := a.DockerClient(); got == nil {
 		t.Fatal("DockerClient() returned nil")
 	}
@@ -156,7 +156,7 @@ func TestOnConnect_SendsContainerSyncThenComponentSync(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	if _, err := a.containers.BuildInventory(context.Background()); err != nil {
 		t.Fatalf("BuildInventory: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestRefreshContainers_DelegatesToManager(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	if _, err := a.containers.BuildInventory(context.Background()); err != nil {
 		t.Fatalf("BuildInventory: %v", err)
@@ -213,7 +213,7 @@ func TestOnContainerRefresh_EdgeMode_SendsAllEventTypes(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	c1 := adapterpkg.Container{ID: "c1", Name: "one", Status: "running"}
 	c2 := adapterpkg.Container{ID: "c2", Name: "two", Status: "exited"}
@@ -245,7 +245,7 @@ func TestOnContainerRefresh_StandardMode_NilSenderNoOp(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	c1 := adapterpkg.Container{ID: "c1", Status: "running"}
 
 	// nil sender = standard (SSE) mode — must not panic.
@@ -319,7 +319,7 @@ func TestHandleContainerLogRequest_SuccessPath(t *testing.T) {
 	client, calls, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	sender := newSyncCaptureSender()
 
 	payload := json.RawMessage(`{"containerId":"container-1","tail":10}`)
@@ -348,7 +348,7 @@ func TestHandleContainerLogRequest_ZeroTailCallsDocker(t *testing.T) {
 	client, calls, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	sender := newSyncCaptureSender()
 
 	// tail=0 means "all logs" — docker client still called.
@@ -378,7 +378,7 @@ func TestRegisterRoutes_RegistrationCoversKeyPaths(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	mux := http.NewServeMux()
 	noopAuth := func(h http.HandlerFunc) http.Handler { return h }
 	a.RegisterRoutes(mux, noopAuth)
@@ -483,7 +483,7 @@ func TestHandleContainerDelete_Success(t *testing.T) {
 	client, shutdown := newDeleteServer(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodDelete, "/api/containers/container-1", nil)
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
@@ -546,7 +546,7 @@ func TestHandleContainerDelete_NotFound(t *testing.T) {
 		t.Fatalf("new docker client: %v", err)
 	}
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodDelete, "/api/containers/missing", nil)
 	req.SetPathValue("id", "missing")
 	rec := httptest.NewRecorder()
@@ -607,7 +607,7 @@ func TestHandleContainerDelete_Conflict(t *testing.T) {
 		t.Fatalf("new docker client: %v", err)
 	}
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodDelete, "/api/containers/busy-container", nil)
 	req.SetPathValue("id", "busy-container")
 	rec := httptest.NewRecorder()
@@ -628,7 +628,7 @@ func TestHandleWatchers_ReturnsWatcherArray(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodGet, "/api/watchers", nil)
 	rec := httptest.NewRecorder()
 	a.handleWatchers(rec, req)
@@ -658,7 +658,7 @@ func TestHandleTriggers_ReturnsEmptyArray(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodGet, "/api/triggers", nil)
 	rec := httptest.NewRecorder()
 	a.handleTriggers(rec, req)
@@ -685,7 +685,7 @@ func TestHandleWatcherPoll_Returns501(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodPost, "/api/watchers/docker/docker", nil)
 	req.SetPathValue("type", "docker")
 	req.SetPathValue("name", "docker")
@@ -714,7 +714,7 @@ func TestHandleContainerLogs_NoTailParam(t *testing.T) {
 	client, calls, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs", nil)
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
@@ -740,7 +740,7 @@ func TestSSEBroadcast_AllEventTypes(t *testing.T) {
 			{ID: "c1", Status: "running", Image: adapterpkg.ContainerImage{ID: "img-a"}},
 		},
 	}
-	b := NewSSEBroadcaster(provider, "v-test")
+	b := NewSSEBroadcaster(provider, "v-test", AgentInfo{})
 
 	ch := make(chan []byte, 16)
 	b.mu.Lock()
@@ -776,7 +776,7 @@ func TestSSEBroadcast_DropsBroadcastWhenBufferFull(t *testing.T) {
 	t.Parallel()
 
 	provider := fakeContainerProvider{}
-	b := NewSSEBroadcaster(provider, "v-test")
+	b := NewSSEBroadcaster(provider, "v-test", AgentInfo{})
 
 	// Unbuffered channel with no receiver, so any non-blocking broadcast is
 	// immediately dropped.
@@ -812,7 +812,7 @@ func TestSSEServeHTTP_DeliversInitialAckAndSnapshot(t *testing.T) {
 			{ID: "c1", Status: "running", Image: adapterpkg.ContainerImage{ID: "img-a"}},
 		},
 	}
-	b := NewSSEBroadcaster(provider, "v-test")
+	b := NewSSEBroadcaster(provider, "v-test", AgentInfo{})
 
 	srv := httptest.NewServer(http.HandlerFunc(b.ServeHTTP))
 	defer srv.Close()
@@ -943,7 +943,7 @@ func TestOnConnect_StillSendsComponentSyncWhenContainerSyncFails(t *testing.T) {
 	client, shutdown := newErrorDockerServer(t, http.StatusInternalServerError, http.StatusInternalServerError)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	coll := &collectingSender{}
 
 	// Cancel the context immediately so BuildInventory fails.
@@ -977,7 +977,7 @@ func TestHandleContainerLogs_DockerError(t *testing.T) {
 	client, shutdown := newErrorDockerServer(t, http.StatusInternalServerError, http.StatusNoContent)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs?tail=5", nil)
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
@@ -998,7 +998,7 @@ func TestHandleContainerDelete_InternalError(t *testing.T) {
 	client, shutdown := newErrorDockerServer(t, http.StatusOK, http.StatusInternalServerError)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	req := httptest.NewRequest(http.MethodDelete, "/api/containers/container-1", nil)
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
@@ -1019,7 +1019,7 @@ func TestHandleContainerLogRequest_DockerErrorSendsResponse(t *testing.T) {
 	client, shutdown := newErrorDockerServer(t, http.StatusInternalServerError, http.StatusNoContent)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 	sender := newSyncCaptureSender()
 
 	payload := json.RawMessage(`{"containerId":"container-1","tail":5}`)

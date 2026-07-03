@@ -206,7 +206,7 @@ func TestHandleContainerLogs_InvalidChunkError(t *testing.T) {
 	client, shutdown := newInvalidChunkDockerServer(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs", nil)
 	req.SetPathValue("id", "container-1")

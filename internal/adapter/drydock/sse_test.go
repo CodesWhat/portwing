@@ -37,7 +37,7 @@ func TestBuildAckPayloadWithContainerProvider(t *testing.T) {
 		},
 	}
 
-	b := NewSSEBroadcaster(provider, "v-test")
+	b := NewSSEBroadcaster(provider, "v-test", AgentInfo{})
 	b.startTime = time.Now().Add(-3 * time.Second)
 
 	var payload ackPayload
@@ -71,6 +71,46 @@ func TestBuildAckPayloadWithContainerProvider(t *testing.T) {
 	}
 }
 
+// TestBuildAckPayloadAgentInfo verifies logLevel and pollInterval are present
+// in the marshaled dd:ack payload when AgentInfo is populated.
+func TestBuildAckPayloadAgentInfo(t *testing.T) {
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{LogLevel: "debug", PollInterval: "5m0s"})
+
+	var payload struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(b.buildAckPayload(), &payload); err != nil {
+		t.Fatalf("unmarshal ack payload: %v", err)
+	}
+
+	if got, _ := payload.Data["logLevel"].(string); got != "debug" {
+		t.Fatalf("unexpected logLevel: got %v want %q", payload.Data["logLevel"], "debug")
+	}
+	if got, _ := payload.Data["pollInterval"].(string); got != "5m0s" {
+		t.Fatalf("unexpected pollInterval: got %v want %q", payload.Data["pollInterval"], "5m0s")
+	}
+}
+
+// TestBuildAckPayloadAgentInfoOmittedWhenZero verifies logLevel and
+// pollInterval are absent (omitempty) when AgentInfo is the zero value.
+func TestBuildAckPayloadAgentInfoOmittedWhenZero(t *testing.T) {
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
+
+	var payload struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(b.buildAckPayload(), &payload); err != nil {
+		t.Fatalf("unmarshal ack payload: %v", err)
+	}
+
+	if _, ok := payload.Data["logLevel"]; ok {
+		t.Fatalf("expected logLevel to be omitted, got %v", payload.Data["logLevel"])
+	}
+	if _, ok := payload.Data["pollInterval"]; ok {
+		t.Fatalf("expected pollInterval to be omitted, got %v", payload.Data["pollInterval"])
+	}
+}
+
 func TestBuildWatcherSnapshotPayload(t *testing.T) {
 	provider := fakeContainerProvider{
 		containers: []adapter.Container{
@@ -79,7 +119,7 @@ func TestBuildWatcherSnapshotPayload(t *testing.T) {
 		},
 	}
 
-	b := NewSSEBroadcaster(provider, "v-test")
+	b := NewSSEBroadcaster(provider, "v-test", AgentInfo{})
 
 	raw, err := b.buildWatcherSnapshotPayload()
 	if err != nil {
@@ -115,7 +155,7 @@ func TestBuildWatcherSnapshotPayload(t *testing.T) {
 }
 
 func TestBuildWatcherSnapshotPayloadEmptyInventory(t *testing.T) {
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 
 	raw, err := b.buildWatcherSnapshotPayload()
 	if err != nil {

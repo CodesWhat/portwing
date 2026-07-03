@@ -38,12 +38,13 @@ type Adapter struct {
 	semInit    sync.Once
 }
 
-// NewAdapter creates a Drydock adapter.
-func NewAdapter(dockerClient *docker.Client, agentName string) *Adapter {
+// NewAdapter creates a Drydock adapter. info carries the static agent
+// runtime details reported to the controller in the dd:ack event.
+func NewAdapter(dockerClient *docker.Client, agentName string, info AgentInfo) *Adapter {
 	cm := adapter.NewContainerManager(dockerClient, agentName, ParseLabels)
 	return &Adapter{
 		containers:   cm,
-		sse:          NewSSEBroadcaster(cm, protocol.AgentVersion),
+		sse:          NewSSEBroadcaster(cm, protocol.AgentVersion, info),
 		dockerClient: dockerClient,
 		messageSem:   make(chan struct{}, defaultMessageHandlerConcurrency),
 	}

@@ -67,7 +67,7 @@ Drydock parses SSE frames as `data: <json>\n\n`. Each frame is a JSON object wit
 
 ### `dd:ack`
 
-Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, and `lastSeen` from the payload.
+Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, `lastSeen`, `logLevel`, and `pollInterval` from the payload.
 
 ```json
 {
@@ -77,9 +77,11 @@ Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`,
     "os": "linux",
     "arch": "amd64",
     "cpus": 4,
-    "memoryGb": 0,
+    "memoryGb": 15.6,
     "uptimeSeconds": 123,
     "lastSeen": "2026-06-11T12:00:00Z",
+    "logLevel": "info",
+    "pollInterval": "5m0s",
     "containers": {"total": 3, "running": 2, "stopped": 1},
     "images": 2
   }
@@ -87,7 +89,7 @@ Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`,
 ```
 
 <Callout type="info">
-`memoryGb` is `0` on Portwing 0.3.0 and earlier — the current release keeps the binary cgo-free and does not read host memory. Drydock accepts `0` as valid. A later release reports real memory on Linux by reading `/proc/meminfo` (still no cgo).
+`memoryGb` is read from `/proc/meminfo` (the binary stays cgo-free) and rounded to one decimal GiB; non-Linux hosts report `0`, which Drydock accepts. `pollInterval` is the agent's `DD_POLL_INTERVAL` rendered as a Go duration string — the field is informational and displayed as-is. Portwing 0.5.x and earlier sent `memoryGb: 0` and omitted `logLevel`/`pollInterval`.
 </Callout>
 
 ### `dd:container-added` / `dd:container-updated`
