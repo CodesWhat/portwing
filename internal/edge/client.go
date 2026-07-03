@@ -287,11 +287,18 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		if welcome.PollInterval > 0 {
 			c.welcomePollInterval = welcome.PollInterval
 		}
-		if compat, ok := welcome.Config["serverCompatLevel"]; ok && compat != protocol.DrydockCompat {
-			slog.Warn("controller compat level mismatch",
-				"serverCompatLevel", compat,
-				"agentExpects", protocol.DrydockCompat,
-			)
+		if compat, ok := welcome.Config["serverCompatLevel"]; ok {
+			// Compare major version only so patch-level bumps on either side
+			// do not trigger spurious warnings. This matches the drydock
+			// controller's comparison semantics (major-version-only check).
+			serverMajor := strings.SplitN(compat, ".", 2)[0]
+			agentMajor := strings.SplitN(protocol.DrydockCompat, ".", 2)[0]
+			if serverMajor != agentMajor {
+				slog.Warn("controller compat level mismatch",
+					"serverCompatLevel", compat,
+					"agentExpects", protocol.DrydockCompat,
+				)
+			}
 		}
 	}
 

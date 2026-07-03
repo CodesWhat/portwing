@@ -15,7 +15,9 @@
 </div>
 
 > [!WARNING]
+>
 > ### 🚧 Alpha software — not yet production-ready
+>
 > Portwing is in **active alpha** (`v0.3.x`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
 
 <p align="center">
@@ -40,7 +42,7 @@
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/security-vuln-weekly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/security-vuln-weekly.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
   <br>
   <a href="https://goreportcard.com/report/github.com/codeswhat/portwing"><img src="https://goreportcard.com/badge/github.com/codeswhat/portwing" alt="Go Report Card"></a>
@@ -336,7 +338,7 @@ portwing keygen -comment "my-platform:prod"
 
 **Copy the `authorized_keys` line to the agent host:**
 
-```
+```text
 # /etc/portwing/authorized_keys  (mode 0600)
 ed25519 AAAA... my-platform:prod
 ```
@@ -392,7 +394,7 @@ Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRY
 - Targets hosts behind NAT, firewalls, and dynamic IPs
 - Auto-reconnect with exponential backoff + jitter; signed hello via `PRIVATE_KEY_FILE`
 
-```
+```text
 DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set  →  Edge Mode (outbound WebSocket)
 Otherwise                                                              →  Standard Mode (inbound HTTP server)
 ```

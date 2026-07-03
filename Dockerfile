@@ -15,12 +15,12 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwin
 # in the final image; the apk database is retained for scanners/SBOM).
 FROM cgr.dev/chainguard/wolfi-base:latest@sha256:e161445c05b19e668cb5cc44df2f0403329fd4f0ac892794255e328e760612a1 AS rootfs
 RUN apk add --no-cache --initdb --root /out \
-      --repository https://packages.wolfi.dev/os \
-      --keys-dir /etc/apk/keys \
-      ca-certificates-bundle busybox docker-cli docker-compose wget \
- && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >> /out/etc/passwd \
- && echo 'portwing:x:65532:' >> /out/etc/group \
- && rm -rf /out/var/cache/apk/*
+    --repository https://packages.wolfi.dev/os \
+    --keys-dir /etc/apk/keys \
+    ca-certificates-bundle busybox docker-cli docker-compose wget \
+    && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
+    && echo 'portwing:x:65532:' >>/out/etc/group \
+    && rm -rf /out/var/cache/apk/*
 
 # Stage 3: Final image — Wolfi rootfs plus the binary. No USER directive — the
 # agent runs as root by default so it can reach the host Docker socket; drop to
@@ -33,6 +33,6 @@ VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["wget", "-q", "--spider", "http://localhost:3000/_portwing/health"]
+    CMD ["wget", "-q", "--spider", "http://localhost:3000/_portwing/health"]
 
 ENTRYPOINT ["/usr/bin/portwing"]

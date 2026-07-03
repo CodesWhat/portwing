@@ -72,8 +72,8 @@ jobs:
         # code, so they're excluded from the coverprofile (and the floor below).
         # `go vet ./...` above still compiles them, so they can't silently rot.
         run: |
-          PKGS=$(go list ./internal/... ./cmd/... | grep -v '/internal/banner/gen')
-          go test -race -covermode=atomic -coverprofile=coverage.out $PKGS
+          mapfile -t PKGS < <(go list ./internal/... ./cmd/... | grep -v '/internal/banner/gen')
+          go test -race -covermode=atomic -coverprofile=coverage.out "${PKGS[@]}"
 
       - name: Publish coverage to Qlty
         # Org-wide coverage consolidated on Qlty Cloud (replaces Codecov).
@@ -90,10 +90,13 @@ jobs:
 
       - name: Coverage gate
         # Vendor-free floor: fails when the weighted statement total (product
-        # packages only — see the Test step) drops below COVERAGE_MIN. Real total
-        # ~96.4% as of 2026-06. Replaces the Codecov project ratchet; ratchet up
-        # as coverage climbs. go.mod is at the repo root, so coverprofile paths
-        # need no rewrite (unlike sockguard's app/).
+        # packages only — see the Test step) drops below COVERAGE_MIN. Achieved
+        # 97.5% after systematic gap-fill (2026-06). Residual 2.5% is structurally
+        # unreachable: os.Exit in main, crypto/rand failure, json.Marshal on safe
+        # primitive-only types, WebSocket SetWriteDeadline errors, 5-min cleanup
+        # ticker, and compile-time GOOS=windows branches. See COVERAGE.md.
+        # Floor is set conservatively at 96 (~1.5% below achieved) so CI never
+        # flakes red on coverage. go.mod is at the repo root; no path rewrite needed.
         env:
           COVERAGE_MIN: "96"
         run: |
@@ -413,3 +416,25 @@ jobs:
           path: "**/testdata/fuzz/${{ matrix.fuzzer.name }}/"
           retention-days: 30
           if-no-files-found: ignore
+
+  qlty:
+    name: "🔍 Qlty Check"
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Qlty
+        uses: qltysh/qlty-action/install@fd52dc852530a708d68c3b7342f8d33d1df4cd55  # v2.2.1
+
+      - name: Qlty check (all plugins, enforced)
+        run: ./scripts/qlty-check-gate.sh all

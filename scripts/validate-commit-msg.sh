@@ -10,31 +10,31 @@ first_line="$(head -n 1 "$msg_file")"
 
 # Merge/revert/autosquash commits are exempt.
 case "$first_line" in
-  Merge\ * | Revert\ * | fixup!* | squash!*)
-    exit 0
-    ;;
+Merge\ * | Revert\ * | fixup!* | squash!*)
+	exit 0
+	;;
 esac
 
 pairs=(
-  "🐛 fix"
-  "✨ feat"
-  "🔄 refactor"
-  "🔧 config"
-  "📝 docs"
-  "🧪 test"
-  "📦 deps"
-  "🎨 style"
-  "🚀 deploy"
-  "🗑️ remove"
+	"🐛 fix"
+	"✨ feat"
+	"🔄 refactor"
+	"🔧 config"
+	"📝 docs"
+	"🧪 test"
+	"📦 deps"
+	"🎨 style"
+	"🚀 deploy"
+	"🗑️ remove"
 )
 
 for pair in "${pairs[@]}"; do
-  emoji="${pair%% *}"
-  ctype="${pair##* }"
-  if printf '%s\n' "$first_line" |
-    grep -qE "^${emoji} ${ctype}(\([A-Za-z0-9._/-]+\))?!?: .+"; then
-    exit 0
-  fi
+	emoji="${pair%% *}"
+	ctype="${pair##* }"
+	if printf '%s\n' "$first_line" |
+		grep -qE "^${emoji} ${ctype}(\([A-Za-z0-9._/-]+\))?!?: .+"; then
+		exit 0
+	fi
 done
 
 echo "✗ Invalid commit message:" >&2
@@ -45,6 +45,6 @@ echo "  Example:  ✨ feat(auth): add Ed25519 enrollment" >&2
 echo "" >&2
 echo "  Allowed emoji/type pairs:" >&2
 for pair in "${pairs[@]}"; do
-  echo "    $pair" >&2
+	echo "    $pair" >&2
 done
 exit 1

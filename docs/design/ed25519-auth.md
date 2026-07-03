@@ -40,6 +40,7 @@ Three enrollment models are considered. A recommendation follows the threat anal
 The agent exposes a one-time enrollment endpoint. The first caller presents an Ed25519 public key; the agent accepts and persists it. Subsequent calls to the enrollment endpoint are rejected.
 
 **Flow (hypothetical):**
+
 1. Operator starts Portwing with `TOFU_ENROLLMENT=1` (hypothetical) and `ENROLLMENT_TIMEOUT=300` (hypothetical, seconds).
 2. Within the timeout window, the caller `POST /api/portwing/enroll` with `{"public_key": "<base64url ed25519 pubkey>"}`.
 3. Agent writes the key to the authorized-keys file and disables the enrollment endpoint.
@@ -61,6 +62,7 @@ The agent exposes a one-time enrollment endpoint. The first caller presents an E
 The operator writes an `authorized_keys`-style file listing trusted public keys before the agent starts. No enrollment API is needed.
 
 **Flow:**
+
 1. Operator generates an Ed25519 keypair on the platform side: `openssl genpkey -algorithm ed25519`.
 2. Operator writes the public key (plus optional comment and permissions) into the authorized-keys file on the agent host.
 3. Agent loads the file at startup (and on `SIGHUP`).
@@ -82,6 +84,7 @@ The operator writes an `authorized_keys`-style file listing trusted public keys 
 The agent is pre-configured with a short-lived `ENROLLMENT_TOKEN` (a random secret). A caller presents the token once and in exchange registers their public key. The token is burned after first use.
 
 **Flow:**
+
 1. Operator generates a random enrollment token and sets `ENROLLMENT_TOKEN=<hex>` on the agent.
 2. Platform calls `POST /api/portwing/enroll` with `{"enrollment_token": "<hex>", "public_key": "<base64url>"}`.
 3. Agent verifies the token (constant-time), appends the public key to the authorized-keys file, clears the token from memory, and acknowledges.
@@ -116,7 +119,7 @@ Every request from an authenticated client carries three headers that together c
 
 The client signs the following canonical byte string (UTF-8, no trailing newline):
 
-```
+```text
 <METHOD>\n
 <PATH>\n
 <SHA-256 of request body, hex-encoded, or the full 64-char SHA-256 of the empty string "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" for empty body>\n
@@ -126,7 +129,7 @@ The client signs the following canonical byte string (UTF-8, no trailing newline
 
 Example for `POST /api/portwing/containers` with a JSON body:
 
-```
+```text
 POST
 /api/portwing/containers
 9f86d081884c7d659a2feaa0c55ad015...
@@ -238,7 +241,7 @@ The agent logs a warning when a valid request arrives with timestamp skew >30s: 
 
 The file format mirrors OpenSSH's `authorized_keys` for familiarity. Each line is one of:
 
-```
+```text
 # comment
 <algorithm> <base64-public-key> [comment]
 ```
@@ -247,7 +250,7 @@ Only one algorithm is recognized in this design: `ed25519`.
 
 Examples:
 
-```
+```text
 # Drydock platform - provisioned 2026-06-11
 ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB3... drydock-prod
 
@@ -284,7 +287,7 @@ Revocation takes effect within seconds (the time for SIGHUP + file parse). There
 
 The comment field in the authorized-keys line is the primary human-readable identifier. The agent logs key additions/removals using the comment field. Operators should treat comments as required documentation:
 
-```
+```text
 ed25519 <pubkey> platform:drydock:prod:2026-06-11
 ```
 
@@ -400,6 +403,7 @@ This means the authorized-keys file remains the single source of truth regardles
 | mTLS composability | Explicit forward path (same pubkey) | Not documented | Native design |
 
 Sources consulted:
+
 - Komodo v2.0.0 release notes: [v2.0.0 | Komodo](https://komo.do/docs/releases/v2.0.0)
 - Komodo key exchange discussion: [Discussion #1319](https://github.com/moghtech/komodo/discussions/1319)
 - Komodo authentication improvement issue: [Issue #123](https://github.com/moghtech/komodo/issues/123)
@@ -417,6 +421,7 @@ Each item is scoped to be a reviewable, mergeable PR. Files that may conflict wi
 ### PR 1 — `internal/auth` package: key registry and verifier
 
 **Files:**
+
 - `internal/auth/keys.go` — `AuthorizedKey` struct, `KeyRegistry` (loads file, SIGHUP reload, `LookupByID(keyID string) (*AuthorizedKey, bool)`)
 - `internal/auth/keys_test.go` — parse valid/invalid files, SIGHUP reload, multiple keys
 - `internal/auth/nonce.go` — `NonceLRU` (map + Mutex + background cleanup, same pattern as `RateLimiter`)
@@ -429,6 +434,7 @@ No changes to existing files. Zero deps beyond stdlib.
 ### PR 2 — `internal/auth/verify.go`: Ed25519 request verifier
 
 **Files:**
+
 - `internal/auth/verify.go` — `Ed25519Verifier` implementing the `tokenVerifier` interface from `internal/server/middleware.go`; `CanonicalMessage(method, path, bodyHash, timestamp, nonce string) []byte`; `VerifyRequest(r *http.Request, registry *KeyRegistry, lru *NonceLRU) (keyID string, err error)`
 - `internal/auth/verify_test.go` — happy path, bad signature, expired timestamp, replayed nonce, missing headers
 
@@ -437,6 +443,7 @@ No changes to existing files. Zero deps beyond stdlib.
 ### PR 3 — `internal/server/middleware.go`: wire Ed25519 verifier into auth middleware
 
 **Files (modified):**
+
 - `internal/server/middleware.go` — `AuthMiddleware` gains an optional `*auth.Ed25519Verifier` parameter (or wraps both verifiers in a `compositeVerifier`). Ed25519 check runs first; if `X-Portwing-Signature` is absent, falls through to existing `tokenVerifier` path.
 
 **Conflict flag:** HIGH — this file is the most likely to be touched by other teams (rate limiter changes, new middleware, etc.). Coordinate merge order.
@@ -446,6 +453,7 @@ No changes to existing files. Zero deps beyond stdlib.
 ### PR 4 — `internal/config/config.go`: new config fields
 
 **Files (modified):**
+
 - `internal/config/config.go` — add `AuthorizedKeysFile string`, `MaxClockSkewSeconds int`, `NonceLRUSize int`, `EnrollmentToken string`; update `IsEdgeMode()` to accept either `Token` or `AuthorizedKeysFile`; load `ENROLLMENT_TOKEN_FILE`
 
 **Conflict flag:** MEDIUM — `config.go` is likely touched by any team adding a new env var. Check for conflicts before merging.
@@ -453,6 +461,7 @@ No changes to existing files. Zero deps beyond stdlib.
 ### PR 5 — `internal/edge/client.go`: signed hello in edge mode
 
 **Files (modified):**
+
 - `internal/edge/client.go` — `sendHello` reads private key path from config, loads the Ed25519 private key, signs the canonical hello string, populates new `HelloMessage` fields. Gracefully degrades to `tokenHash` if no private key configured.
 - `internal/protocol/messages.go` — add `PubKeyID`, `Timestamp`, `Nonce`, `Signature` fields to `HelloMessage`
 
@@ -463,9 +472,11 @@ No changes to existing files. Zero deps beyond stdlib.
 ### PR 6 — `internal/auth/enroll.go`: Model C enrollment endpoint (optional)
 
 **Files (new):**
+
 - `internal/auth/enroll.go` — `EnrollmentHandler(cfg *config.Config, registry *KeyRegistry) http.Handler`; validates `ENROLLMENT_TOKEN`, appends key to authorized-keys file, burns token
 
 **Files (modified):**
+
 - `internal/server/http.go` — register `POST /api/portwing/enroll` if `cfg.EnrollmentToken != ""`
 
 **Conflict flag:** `internal/server/http.go` — HIGH conflict risk with other Wave 2 teams adding routes. Coordinate.
@@ -477,9 +488,11 @@ Add Control 11 entry covering key registry, per-request signature verification, 
 ### PR 8 — CLI: `portwing keygen` subcommand
 
 **Files (new):**
+
 - `cmd/keygen/keygen.go` — generate Ed25519 keypair, write private key to stdout in PEM (`PRIVATE KEY` block), write public key in authorized-keys line format
 
 **Files (modified):**
+
 - `cmd/main.go` (or equivalent entrypoint) — register `keygen` subcommand
 
 ### Total scope estimate
@@ -517,7 +530,7 @@ func CanonicalMessage(method, path string, body []byte, timestampUnix int64, non
 
 ## Appendix B — Authorized-Keys File Grammar (EBNF)
 
-```
+```text
 file       = { line "\n" }
 line       = comment | key-line | blank
 comment    = "#" { any-char-except-newline }

@@ -4,14 +4,14 @@
 
 1. **Clean tree on `main`**
 
-   ```
+   ```sh
    git status            # must be clean
    git log --oneline -3  # confirm HEAD is what you intend to tag
    ```
 
 2. **Go checks**
 
-   ```
+   ```sh
    gofmt -l . | grep -v '^.claude/' || true   # must print nothing
    go vet ./...
    go test -race ./...
@@ -20,14 +20,14 @@
 
 3. **Vulnerability scan** — zero reachable vulnerabilities required before tagging
 
-   ```
+   ```sh
    # Install once: go install golang.org/x/vuln/cmd/govulncheck@latest
    govulncheck ./...
    ```
 
 4. **Release pipeline dry-run**
 
-   ```
+   ```sh
    goreleaser check
    goreleaser release --snapshot --clean --skip=sign,docker,publish,sbom
    ```
@@ -61,7 +61,7 @@ This requires the **`RELEASE_PAT`** secret (fine-grained PAT, Contents: read/wri
 
 **Manual path** (if you need to override the computed version):
 
-```
+```sh
 git tag -a v<version> -m "release: v<version>"
 git push origin v<version>
 ```

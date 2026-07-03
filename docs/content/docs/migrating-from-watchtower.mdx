@@ -159,19 +159,19 @@ Edge mode requires `DRYDOCK_URL` and, for the Drydock 1.5 controller, an Ed25519
 docker stop watchtower && docker rm watchtower
 ```
 
-2. **Deploy Portwing** using the Standard or Edge compose snippet above. See [Getting Started](/getting-started) for the hardened sockguard configuration.
+1. **Deploy Portwing** using the Standard or Edge compose snippet above. See [Getting Started](/getting-started) for the hardened sockguard configuration.
 
-3. **Update container labels** — replace `com.centurylinklabs.watchtower.*` labels with their `dd.*` equivalents from the mapping table above.
+2. **Update container labels** — replace `com.centurylinklabs.watchtower.*` labels with their `dd.*` equivalents from the mapping table above.
 
-4. **Add Portwing to Drydock** — configure the agent endpoint in the Drydock UI, or let Edge mode auto-register.
+3. **Add Portwing to Drydock** — configure the agent endpoint in the Drydock UI, or let Edge mode auto-register.
 
-5. **Verify** — check that `/_portwing/health` returns `{"status":"healthy"}` and the Drydock UI shows the host and its containers.
+4. **Verify** — check that `/_portwing/health` returns `{"status":"healthy"}` and the Drydock UI shows the host and its containers.
 
 ```bash
 curl http://your-host:3000/_portwing/health
 ```
 
-6. **Remove the Watchtower image.**
+1. **Remove the Watchtower image.**
 
 ```bash
 docker rmi containrrr/watchtower

@@ -59,6 +59,7 @@ sequenceDiagram
 ```
 
 Source citation:
+
 - `AgentClient.ts:506` — `handshake()` deduplication guard
 - `AgentClient.ts:519` — `GET /api/containers`
 - `AgentClient.ts:547` — `GET /api/watchers`
@@ -123,6 +124,7 @@ Drydock reads: `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, `la
 (`AgentClient.ts:744–763`)
 
 Portwing sends:
+
 ```json
 {
   "type": "dd:ack",
@@ -192,6 +194,7 @@ Drydock expects these fields:
 Drydock reads: `type`, `name`, `configuration`, `metadata` (`AgentClient.ts:489–503`).
 
 Portwing returns:
+
 ```json
 [{
   "type": "docker",
@@ -351,6 +354,7 @@ services:
 ```
 
 In Drydock agent component configuration:
+
 ```yaml
 agent:
   my-server:

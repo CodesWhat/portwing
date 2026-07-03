@@ -10,6 +10,6 @@ VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget -q --spider http://localhost:3000/_portwing/health
+    CMD wget -q --spider http://localhost:3000/_portwing/health
 
 ENTRYPOINT ["/portwing"]
