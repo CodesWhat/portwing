@@ -53,3 +53,9 @@ website/public/docs/
 
 # Throwaway design mockups
 /.mockups/
+
+# Qlty local cache (symlinks into ~/.qlty/cache)
+.qlty/logs
+.qlty/out
+.qlty/plugin_cachedir
+.qlty/results
