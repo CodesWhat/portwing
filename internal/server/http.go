@@ -83,7 +83,10 @@ type Server struct {
 	httpServer   *http.Server
 	startTime    time.Time
 
-	// pollCancel stops the pollContainers goroutine on Shutdown.
+	// pollCtx bounds the pollContainers goroutine started by ListenAndServe;
+	// pollCancel stops it on Shutdown. Both are set at construction so a
+	// Shutdown racing server startup never sees a half-written field.
+	pollCtx    context.Context
 	pollCancel context.CancelFunc
 	// hupDone is closed by Shutdown to stop the SIGHUP goroutine.
 	hupDone chan struct{}
@@ -160,6 +163,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		startTime:    time.Now(),
 		hupDone:      make(chan struct{}),
 	}
+	s.pollCtx, s.pollCancel = context.WithCancel(context.Background())
 
 	// Reload authorized_keys on SIGHUP so keys can be rotated or revoked
 	// without a restart. The nonce LRU is preserved across reloads.
@@ -536,9 +540,7 @@ func (s *Server) streamResponse(w http.ResponseWriter, body io.Reader) {
 // ListenAndServe starts the HTTP server. It launches background container
 // polling and uses TLS if certificates are configured.
 func (s *Server) ListenAndServe() error {
-	pollCtx, pollCancel := context.WithCancel(context.Background())
-	s.pollCancel = pollCancel
-	go s.pollContainers(pollCtx)
+	go s.pollContainers(s.pollCtx)
 
 	if s.cfg.TLSCert != "" && s.cfg.TLSKey != "" {
 		return s.httpServer.ListenAndServeTLS(s.cfg.TLSCert, s.cfg.TLSKey)
