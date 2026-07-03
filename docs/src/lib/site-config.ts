@@ -21,7 +21,7 @@ export const SITE_CONFIG = {
   description:
     "Lightweight Go agent that gives Drydock a secure foothold on every Docker host. Exposes Docker control via HTTP/SSE (standard mode) or an outbound WebSocket tunnel (edge mode for NAT/firewalled hosts), with Ed25519 per-client auth and a tamper-evident audit log. Part of the CodesWhat stack: Drydock orchestrates, Portwing is the agent, sockguard filters the socket.",
   /** Production domain (no protocol, no trailing slash). */
-  domain: "getportwing.dev",
+  domain: "getportwing.com",
   /** GitHub owner/org. */
   githubOwner,
   /** GitHub repository name. */

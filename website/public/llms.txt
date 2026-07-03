@@ -30,18 +30,18 @@ AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 
 ## Links
 
-- Website: https://getportwing.dev
+- Website: https://getportwing.com
 - GitHub: https://github.com/CodesWhat/portwing
 - Releases: https://github.com/CodesWhat/portwing/releases
-- Documentation: https://getportwing.dev/docs
-- Getting started: https://getportwing.dev/docs/getting-started
-- Connection modes: https://getportwing.dev/docs/connection-modes
-- Authentication: https://getportwing.dev/docs/authentication
-- Audit logging: https://getportwing.dev/docs/audit-logging
-- Configuration: https://getportwing.dev/docs/configuration
-- Compare to alternatives: https://getportwing.dev/compare
-- vs Portainer: https://getportwing.dev/compare/portainer
-- vs Komodo: https://getportwing.dev/compare/komodo
-- vs Hawser: https://getportwing.dev/compare/hawser
-- vs Watchtower: https://getportwing.dev/compare/watchtower
-- vs Diun: https://getportwing.dev/compare/diun
+- Documentation: https://getportwing.com/docs
+- Getting started: https://getportwing.com/docs/getting-started
+- Connection modes: https://getportwing.com/docs/connection-modes
+- Authentication: https://getportwing.com/docs/authentication
+- Audit logging: https://getportwing.com/docs/audit-logging
+- Configuration: https://getportwing.com/docs/configuration
+- Compare to alternatives: https://getportwing.com/compare
+- vs Portainer: https://getportwing.com/compare/portainer
+- vs Komodo: https://getportwing.com/compare/komodo
+- vs Hawser: https://getportwing.com/compare/hawser
+- vs Watchtower: https://getportwing.com/compare/watchtower
+- vs Diun: https://getportwing.com/compare/diun
