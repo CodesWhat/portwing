@@ -51,7 +51,7 @@ func (w *nonFlusherWriter) Write(b []byte) (int, error) { return w.body.Write(b)
 func TestSSEServeHTTP_NonFlusher_Returns500(t *testing.T) {
 	t.Parallel()
 
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 
 	w := newNonFlusherWriter()
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
@@ -72,7 +72,7 @@ func TestSSEServeHTTP_NonFlusher_Returns500(t *testing.T) {
 func TestSSERemoveClient_Idempotent(t *testing.T) {
 	t.Parallel()
 
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 	// Must not panic or block when the ID doesn't exist.
 	b.removeClient("nonexistent-client-id")
 	// Call twice to confirm idempotency.
@@ -110,7 +110,7 @@ func (w *errorOnNthWrite) Write(b []byte) (int, error) {
 func TestSSEServeHTTP_AckWriteError_RemovesClient(t *testing.T) {
 	t.Parallel()
 
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 
 	// The first Write call in ServeHTTP writes the ack event — fail it.
 	w := newErrorOnNthWrite(1)
@@ -131,7 +131,7 @@ func TestSSEServeHTTP_SnapshotWriteError_RemovesClient(t *testing.T) {
 	t.Parallel()
 
 	// fmt.Fprintf for the snapshot is the 2nd Write call (after the ack).
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 
 	w := newErrorOnNthWrite(2)
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
@@ -160,7 +160,7 @@ func TestSSEServeHTTP_StreamsEventFromChannel(t *testing.T) {
 			{ID: "c1", Status: "running", Image: adapterpkg.ContainerImage{ID: "img-a"}},
 		},
 	}
-	b := NewSSEBroadcaster(provider, "v-test")
+	b := NewSSEBroadcaster(provider, "v-test", AgentInfo{})
 
 	srv := httptest.NewServer(http.HandlerFunc(b.ServeHTTP))
 	defer srv.Close()
@@ -230,7 +230,7 @@ func TestSSEServeHTTP_StreamsEventFromChannel(t *testing.T) {
 func TestSSEServeHTTP_ChannelClosed_ExitsLoop(t *testing.T) {
 	t.Parallel()
 
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 
 	srv := httptest.NewServer(http.HandlerFunc(b.ServeHTTP))
 	defer srv.Close()
@@ -342,7 +342,7 @@ func TestHandleContainerLogs_FollowSetsChunkedHeader(t *testing.T) {
 	client, calls, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	// follow=1 should set Transfer-Encoding: chunked.
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs?follow=1", nil)
@@ -367,7 +367,7 @@ func TestHandleContainerLogs_FollowTrueKeyword(t *testing.T) {
 	client, _, shutdown := newRouteTestDockerClient(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs?follow=true", nil)
 	req.SetPathValue("id", "container-1")
@@ -481,7 +481,7 @@ func TestHandleContainerLogs_ZeroSizeFrame(t *testing.T) {
 	client, shutdown := newZeroFrameDockerServer(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs", nil)
 	req.SetPathValue("id", "container-1")
@@ -620,7 +620,7 @@ func TestHandleContainerLogs_UnexpectedEOF(t *testing.T) {
 	client, shutdown := newReadErrorDockerServer(t, "unexpected_eof")
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs", nil)
 	req.SetPathValue("id", "container-1")
@@ -642,7 +642,7 @@ func TestHandleContainerLogs_ReadError(t *testing.T) {
 	client, shutdown := newReadErrorDockerServer(t, "rst")
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs", nil)
 	req.SetPathValue("id", "container-1")
@@ -770,7 +770,7 @@ func TestHandleContainerLogs_CopyNError(t *testing.T) {
 	client, shutdown := newCopyNErrorDockerServer(t)
 	defer shutdown()
 
-	a := NewAdapter(client, "test-agent")
+	a := NewAdapter(client, "test-agent", AgentInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs", nil)
 	req.SetPathValue("id", "container-1")
@@ -835,7 +835,7 @@ func TestSendContainerEvent_ContainerIsAlwaysMarshalable(t *testing.T) {
 func TestBroadcast_MarshalErrorPathsAreUnreachable(t *testing.T) {
 	t.Parallel()
 
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 	c := adapterpkg.Container{ID: "c1", Status: "running"}
 
 	// None of these should log an error; they all succeed silently.
@@ -892,7 +892,7 @@ func (w *writeErrorWriter) Flush() {
 func TestSSEServeHTTP_EventWriteError_Handled(t *testing.T) {
 	t.Parallel()
 
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 
 	// Allow 2 writes (ack + snapshot), fail on the 3rd (event from broadcast).
 	handler := &writeErrorAfterNHandler{broadcaster: b, failAfter: 2}
@@ -991,7 +991,7 @@ func (w *errorWriterFlusher) Write(b []byte) (int, error) {
 func TestSSEServeHTTP_EventWriteError_UnitLevel(t *testing.T) {
 	t.Parallel()
 
-	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test")
+	b := NewSSEBroadcaster(fakeContainerProvider{}, "v-test", AgentInfo{})
 
 	// errorWriterFlusher: maxWrites=2 so 3rd write (event payload) fails.
 	w := newErrorWriterFlusher(2)

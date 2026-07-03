@@ -120,8 +120,8 @@ with `type` and `data` fields (`AgentClient.ts:659`).
 
 ### `dd:ack` (sent on every new SSE connection)
 
-Drydock reads: `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, `lastSeen`
-(`AgentClient.ts:744–763`)
+Drydock reads: `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, `lastSeen`,
+`logLevel`, `pollInterval` (`AgentClient.ts:755–782`)
 
 Portwing sends:
 
@@ -133,16 +133,18 @@ Portwing sends:
     "os": "linux",
     "arch": "amd64",
     "cpus": 4,
-    "memoryGb": 0,
+    "memoryGb": 15.6,
     "uptimeSeconds": 123,
     "lastSeen": "2026-06-11T12:00:00Z",
+    "logLevel": "info",
+    "pollInterval": "5m0s",
     "containers": {"total": 3, "running": 2, "stopped": 1},
     "images": 2
   }
 }
 ```
 
-Note: `memoryGb` is 0 on Portwing 0.3.0 and earlier (cgo/sysinfo omitted); Drydock accepts 0. A later release reports real memory on Linux via `/proc/meminfo` (still no cgo).
+Note: `memoryGb` is read from `/proc/meminfo` (no cgo) and rounded to one decimal GiB; non-Linux hosts report 0, which Drydock accepts. `pollInterval` is the agent's `DD_POLL_INTERVAL` as a Go duration string (Drydock's own agent sends a cron expression here — the field is informational, displayed as-is). Portwing 0.5.x and earlier sent `memoryGb: 0` and omitted `logLevel`/`pollInterval`.
 
 ### `dd:container-added` / `dd:container-updated`
 
@@ -256,8 +258,8 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 |---|---|---|
 | `GET /api/events` SSE stream | COMPATIBLE | Portwing: `sse.go:48`; Drydock: `AgentClient.ts:717` |
 | `dd:ack` event on connect | COMPATIBLE | Portwing: `sse.go:74`; Drydock: `AgentClient.ts:1299` |
-| `dd:ack` fields (version, os, arch, cpus, memoryGb, uptimeSeconds, lastSeen) | COMPATIBLE | Drydock `AgentClient.ts:744–763` reads exactly these fields |
-| `dd:ack memoryGb=0` | COMPATIBLE | Drydock treats 0 as valid (no assertion on non-zero) |
+| `dd:ack` fields (version, os, arch, cpus, memoryGb, uptimeSeconds, lastSeen, logLevel, pollInterval) | COMPATIBLE | Drydock `AgentClient.ts:755–782` reads exactly these fields |
+| `dd:ack memoryGb=0` (non-Linux hosts) | COMPATIBLE | Drydock treats 0 as valid (no assertion on non-zero) |
 | `dd:container-added` SSE | COMPATIBLE | Portwing: `sse.go:174`; Drydock: `AgentClient.ts:1303` |
 | `dd:container-updated` SSE | COMPATIBLE | Portwing: `sse.go:187`; Drydock: `AgentClient.ts:1303` |
 | `dd:container-removed` SSE (`{id, name}`) | COMPATIBLE | Drydock only reads `.id` (`AgentClient.ts:782`); extra `name` is harmless |

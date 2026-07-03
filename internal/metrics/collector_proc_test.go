@@ -472,6 +472,48 @@ func TestCollectUptimeFixtureSingleField(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// memoryTotalGB / MemoryTotalGB tests
+// ---------------------------------------------------------------------------
+
+// TestMemoryTotalGBFixtureRounds verifies memoryTotalGB converts kB to GiB
+// and rounds to one decimal place.
+func TestMemoryTotalGBFixtureRounds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mkProcFixture(t, dir, "meminfo", `MemTotal:       16384000 kB
+MemFree:         1024000 kB
+MemAvailable:    2048000 kB
+`)
+
+	// 16384000 kB * 1024 bytes/kB / 2^30 bytes/GiB, rounded to 1 decimal.
+	want := 15.6
+	if got := memoryTotalGB(dir); got != want {
+		t.Errorf("memoryTotalGB() = %v, want %v", got, want)
+	}
+}
+
+// TestMemoryTotalGBFixtureMissingFile verifies memoryTotalGB returns 0 when
+// meminfo is absent, exercising readMemInfo's error path.
+func TestMemoryTotalGBFixtureMissingFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir() // empty — no meminfo file written.
+
+	if got := memoryTotalGB(dir); got != 0 {
+		t.Errorf("memoryTotalGB() = %v, want 0 for missing meminfo", got)
+	}
+}
+
+// TestMemoryTotalGBReal exercises the exported MemoryTotalGB() against the
+// real /proc filesystem. On macOS this is 0 (no /proc); on Linux it's the
+// actual host memory. Either way it must be non-negative.
+func TestMemoryTotalGBReal(t *testing.T) {
+	t.Parallel()
+	if got := MemoryTotalGB(); got < 0 {
+		t.Errorf("MemoryTotalGB() = %v, want >= 0", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // proc() helper test
 // ---------------------------------------------------------------------------
 

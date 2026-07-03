@@ -156,22 +156,26 @@ func (c *Collector) collectCPU() float64 {
 	return 0
 }
 
-// collectMemory reads /proc/meminfo and populates memory metrics.
-func (c *Collector) collectMemory(m *HostMetrics) {
-	f, err := os.Open(filepath.Join(c.proc(), "meminfo"))
+// memInfo holds the /proc/meminfo fields the collector cares about, in bytes.
+type memInfo struct {
+	total        uint64
+	free         uint64
+	available    uint64
+	buffers      uint64
+	cached       uint64
+	hasAvailable bool
+}
+
+// readMemInfo parses /proc/meminfo under the given proc root.
+func readMemInfo(procRoot string) (memInfo, error) {
+	var mi memInfo
+
+	// #nosec G304 -- procRoot is the fixed "/proc" in production; tests inject a fixture temp dir.
+	f, err := os.Open(filepath.Join(procRoot, "meminfo"))
 	if err != nil {
-		return
+		return mi, err
 	}
 	defer f.Close()
-
-	var (
-		memTotal     uint64
-		memFree      uint64
-		memAvailable uint64
-		buffers      uint64
-		cached       uint64
-		hasAvailable bool
-	)
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -195,28 +199,53 @@ func (c *Collector) collectMemory(m *HostMetrics) {
 
 		switch key {
 		case "MemTotal":
-			memTotal = valBytes
+			mi.total = valBytes
 		case "MemFree":
-			memFree = valBytes
+			mi.free = valBytes
 		case "MemAvailable":
-			memAvailable = valBytes
-			hasAvailable = true
+			mi.available = valBytes
+			mi.hasAvailable = true
 		case "Buffers":
-			buffers = valBytes
+			mi.buffers = valBytes
 		case "Cached":
-			cached = valBytes
+			mi.cached = valBytes
 		}
 	}
 
-	m.MemoryTotal = memTotal
-	if hasAvailable {
-		m.MemoryFree = memAvailable
+	return mi, nil
+}
+
+// collectMemory reads /proc/meminfo and populates memory metrics.
+func (c *Collector) collectMemory(m *HostMetrics) {
+	mi, err := readMemInfo(c.proc())
+	if err != nil {
+		return
+	}
+
+	m.MemoryTotal = mi.total
+	if mi.hasAvailable {
+		m.MemoryFree = mi.available
 	} else {
-		m.MemoryFree = memFree + buffers + cached
+		m.MemoryFree = mi.free + mi.buffers + mi.cached
 	}
 	if m.MemoryTotal > m.MemoryFree {
 		m.MemoryUsed = m.MemoryTotal - m.MemoryFree
 	}
+}
+
+// MemoryTotalGB returns the total system memory in GiB rounded to one decimal
+// place, or 0 when it cannot be determined (hosts without /proc/meminfo).
+func MemoryTotalGB() float64 {
+	return memoryTotalGB("/proc")
+}
+
+func memoryTotalGB(procRoot string) float64 {
+	mi, err := readMemInfo(procRoot)
+	if err != nil {
+		return 0
+	}
+	gib := float64(mi.total) / (1 << 30)
+	return math.Round(gib*10) / 10
 }
 
 // collectDisk uses syscall.Statfs on the Docker data root to get disk usage.
