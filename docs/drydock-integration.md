@@ -261,6 +261,8 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 
 ## Compatibility Matrix
 
+> For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](../COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages are implemented and verified against a specific Drydock build.
+
 | Feature | Status | Evidence |
 |---|---|---|
 | `GET /api/events` SSE stream | COMPATIBLE | Portwing: `sse.go:48`; Drydock: `AgentClient.ts:717` |
