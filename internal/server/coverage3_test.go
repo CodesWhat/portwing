@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/signal"
 	"strings"
 	"syscall"
 	"testing"
@@ -745,7 +746,19 @@ func TestHupChannelClosed(t *testing.T) {
 	}()
 
 	// Close the hupCh directly — the goroutine should exit cleanly via the !ok branch.
+	//
+	// hupCh is still registered with the OS via signal.Notify (done in
+	// NewServer), and signal.Notify fans a real SIGHUP out to every channel
+	// ever registered for it — including ones owned by other tests running
+	// in parallel in this same process (e.g. TestSIGHUPReloadsKeys sends a
+	// real SIGHUP via syscall.Kill). Per the os/signal contract, a channel
+	// must be unregistered with signal.Stop before it is closed, otherwise
+	// the signal-delivery goroutine can attempt a send on an already-closed
+	// channel and panic. signal.Stop blocks until delivery to this channel
+	// has definitively stopped, so calling it first makes the close safe
+	// regardless of what other parallel tests are doing.
 	if s.hupCh != nil {
+		signal.Stop(s.hupCh)
 		close(s.hupCh)
 		// Give the goroutine time to process the closed channel.
 		time.Sleep(50 * time.Millisecond)
