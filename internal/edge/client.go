@@ -275,6 +275,14 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		closeWebSocket(conn, "parse welcome failure")
 		return false, fmt.Errorf("parsing welcome envelope: %w", err)
 	}
+	if env.Type == protocol.TypeError {
+		var errMsg protocol.ErrorMessage
+		if err := json.Unmarshal(env.Data, &errMsg); err == nil {
+			slog.Warn("controller rejected hello", "code", errMsg.Code, "message", errMsg.Message)
+		}
+		closeWebSocket(conn, "controller rejected hello")
+		return false, fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, errMsg.Code)
+	}
 	if env.Type != protocol.TypeWelcome {
 		closeWebSocket(conn, "unexpected welcome type")
 		return false, fmt.Errorf("expected welcome, got %q", env.Type)
@@ -291,6 +299,9 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 			// Compare major version only so patch-level bumps on either side
 			// do not trigger spurious warnings. This matches the drydock
 			// controller's comparison semantics (major-version-only check).
+			// Any major-version mismatch (either direction) is diagnostic-only —
+			// the wire connection is still accepted; this warns operators to
+			// check the compat matrix.
 			serverMajor := strings.SplitN(compat, ".", 2)[0]
 			agentMajor := strings.SplitN(protocol.DrydockCompat, ".", 2)[0]
 			if serverMajor != agentMajor {
