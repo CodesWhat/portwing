@@ -88,7 +88,7 @@ sequenceDiagram
 The edge-mode hello is Ed25519-signed (`pubKeyId`/`timestamp`/`nonce`/`signature`); the controller endpoint is Ed25519-only and rejects token-hash hellos. The full `hello` payload (exact field set) is in [SPEC.md §3.2](../SPEC.md#32-hello-message).
 
 > **Drydock version:** the `/api/portwing/ws` controller endpoint and the `portwing/1.0` protocol string require a Drydock build that ships them. Drydock 1.5 is the first controller release with this endpoint, so edge mode needs Drydock 1.5+; older controllers do not expose it.
-
+>
 > **Requires `DD_EXPERIMENTAL_PORTWING=true`:** the Drydock controller must be started with this flag set — otherwise `/api/portwing/ws` returns 404 and the agent loops reconnect failures indefinitely.
 
 ---

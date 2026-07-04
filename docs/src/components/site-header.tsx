@@ -4,7 +4,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { iconButtonCn, navLinkCn } from "@/lib/class-names";
 import { GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 
-// NOTE: The docs app runs under basePath="/docs". Next <Link> prefixes every
+// The docs app runs under basePath="/docs". Next <Link> prefixes every
 // href with /docs, which would send the logo to /docs instead of the marketing
 // site root. All cross-app navigation uses plain <a> anchors that ignore
 // basePath and resolve at the origin root.
