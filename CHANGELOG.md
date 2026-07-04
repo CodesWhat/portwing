@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Agent info in the Drydock UI**: the `dd:ack` event now reports real host memory (`memoryGb`, read from `/proc/meminfo` with no cgo, rounded to one decimal GiB; 0 on non-Linux hosts), the agent's `logLevel`, and its `pollInterval` (as a Go duration string), so standard-mode agents no longer show 0 GB / blank runtime details in Drydock.
+- **Edge-mode container deletion**: added the `dd:container_delete_request` / `dd:container_delete_response` wire message pair so Drydock's edge-mode `AgentClient.deleteContainer()` can remove containers over the WebSocket tunnel, matching the existing `dd:container_log_request` support for logs.
+- **Container environment variables**: `RuntimeDetails` now includes `env` (`[]{key, value}`), parsed from Docker's `Config.Env`, matching Drydock's `ContainerRuntimeEnv` shape. Redaction of sensitive values remains Drydock's responsibility.
+- **`COMPATIBILITY.md`**: canonical cross-repo version matrix (portwing × Drydock × sockguard preset × wire-compat constant) at the repo root.
+
+### Fixed
+
+- **Edge-mode hello rejection diagnostics**: when the Drydock controller rejects an agent's hello (bad signature, unknown agent, etc.), the agent now logs and surfaces the controller's `code` and `message` instead of a generic "expected welcome, got \"error\"" message.
 
 ### Security
 
