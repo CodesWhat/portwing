@@ -172,6 +172,17 @@ func (a *Adapter) HandleMessage(ctx context.Context, sender adapter.MessageSende
 			a.handleContainerLogRequest(ctx, sender, msg)
 		})
 		return true
+
+	case protocol.TypeDDContainerDeleteRequest:
+		var msg protocol.DDContainerDeleteRequestMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			slog.Warn("invalid container_delete_request message", "error", err)
+			return true
+		}
+		a.spawnMessageHandler(ctx, msgType, func() {
+			a.handleContainerDeleteRequest(ctx, sender, msg)
+		})
+		return true
 	}
 
 	return false
@@ -268,6 +279,24 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 	a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
 		ContainerID: msg.ContainerID,
 		Logs:        string(data),
+	})
+}
+
+func (a *Adapter) handleContainerDeleteRequest(ctx context.Context, sender adapter.MessageSender, msg protocol.DDContainerDeleteRequestMessage) {
+	err := a.dockerClient.RemoveContainer(ctx, msg.ContainerID, true)
+	if err != nil {
+		slog.Warn("failed to delete container", "container", msg.ContainerID, "error", err)
+		a.sendTypedMessage(sender, protocol.TypeDDContainerDeleteResponse, protocol.DDContainerDeleteResponseMessage{
+			ContainerID: msg.ContainerID,
+			Success:     false,
+			Error:       err.Error(),
+		})
+		return
+	}
+
+	a.sendTypedMessage(sender, protocol.TypeDDContainerDeleteResponse, protocol.DDContainerDeleteResponseMessage{
+		ContainerID: msg.ContainerID,
+		Success:     true,
 	})
 }
 
