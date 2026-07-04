@@ -98,7 +98,12 @@ jobs:
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
           egress-policy: block
+          # 9236a389bd48b984df91adc1bc924620.r2.cloudflarestorage.com is the R2
+          # bucket Chainguard currently serves cgr.dev/chainguard/wolfi-base blob
+          # layers from. Pinned to the exact host rather than a *.r2.cloudflarestorage.com
+          # wildcard; if the bucket hash rotates, widen to the wildcard instead.
           allowed-endpoints: >
+            9236a389bd48b984df91adc1bc924620.r2.cloudflarestorage.com:443
             api.github.com:443
             auth.docker.io:443
             cgr.dev:443
