@@ -91,7 +91,7 @@ Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`,
 <Callout type="info">
 `memoryGb` is read from `/proc/meminfo` (the binary stays cgo-free) and rounded to one decimal GiB; non-Linux hosts report `0`, which Drydock accepts. `pollInterval` is the agent's `DD_POLL_INTERVAL` rendered as a Go duration string — the field is informational and displayed as-is. Portwing 0.5.x and earlier sent `memoryGb: 0` and omitted `logLevel`/`pollInterval`.
 
-`pollInterval` actually takes three different string shapes today depending on the source — a Go duration (`"5m0s"`, Standard Mode `dd:ack`), a cron expression (Drydock's own legacy Node.js agent), and a bare integer string (`"300"`, Edge Mode's `welcome` frame — see below). Treat it as an opaque, display-only string in all three cases; do not parse it.
+`pollInterval` takes several different shapes depending on the source: a Go duration string (`"5m0s"`, Standard Mode `dd:ack`), a cron expression (Drydock's own legacy Node.js agent), and a bare integer string (`"300"`) on Drydock's REST `AgentInfo` surface. Edge Mode's `welcome` frame is different again — it sends `pollInterval` as a JSON *number* (e.g. `300`), not a string (see below). Treat it as an opaque, display-only value in all cases; do not parse it.
 </Callout>
 
 ### `dd:container-added` / `dd:container-updated`
@@ -208,7 +208,7 @@ The sequence below is the production handshake, implemented on the agent side in
 </Callout>
 
 <Callout type="warn">
-Requires the Drydock controller to be started with `DD_EXPERIMENTAL_PORTWING=true` — otherwise `/api/portwing/ws` returns 404 and the agent loops reconnect failures indefinitely.
+Requires the Drydock controller to be started with `DD_EXPERIMENTAL_PORTWING=true` — otherwise `/api/portwing/ws` returns 404, which the agent treats as fatal and exits immediately (it does not retry).
 </Callout>
 
 Handshake sequence:
