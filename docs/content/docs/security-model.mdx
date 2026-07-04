@@ -20,7 +20,7 @@ Portwing's security design layers independent controls so that a failure in any 
 | **Socket filter** | [Sockguard](https://github.com/codeswhat/sockguard) sits between Portwing and the Docker daemon; only explicitly allowlisted Docker API operations pass through |
 | **Authentication** | Every request is authenticated before it reaches the proxy — per-client Ed25519 signatures or an Argon2id-hashed shared token |
 | **Transport** | TLS 1.2+ with AEAD-only cipher suites; ECDHE forward secrecy |
-| **Container hardening** | `read_only`, `cap_drop: ALL`, `no-new-privileges`, non-root user, secrets via mounted files |
+| **Container hardening** | `read_only`, `cap_drop: ALL`, `no-new-privileges`, non-root by default (UID 65532), secrets via mounted files |
 | **Input validation** | Path-traversal guard, env-var denylist, and service-name flag-injection filter on all Compose requests |
 | **Resource limits** | Bounded WebSocket frames, response bodies, exec sessions, and an IP rate limiter to resist DoS |
 | **Audit trail** | Structured JSON audit log for every auth event, Compose operation, and exec session |
@@ -114,7 +114,7 @@ Both containers in the hardened stack run with the same security options:
 | `read_only: true` | The container filesystem is read-only; writes to unexpected paths fail at the kernel level |
 | `cap_drop: ALL` | All Linux capabilities are dropped; the process cannot perform privileged syscalls |
 | `no-new-privileges: true` | The process cannot regain capabilities via setuid binaries or `execve` |
-| Non-root user | The Portwing binary runs as a non-root UID inside the container |
+| Non-root user | The image runs as the dedicated `portwing` user (UID 65532) by default; the Docker socket's group is granted narrowly via `group_add` / `supplementalGroups` |
 | Secrets via files | `TOKEN_FILE` / `TOKEN_HASH_FILE` / `PRIVATE_KEY_FILE` are mounted as Docker secrets; plaintext tokens never appear in environment variable dumps or `docker inspect` output |
 | `/tmp` via tmpfs | A writable tmpfs is mounted at `/tmp` so scratch space is available without a writable layer |
 

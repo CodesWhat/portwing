@@ -1,10 +1,19 @@
 FROM golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648
-RUN apk add --no-cache git docker-cli docker-compose
+# Mirror the release images: dedicated portwing user (UID 65532). Reaching
+# the host Docker socket requires --group-add with the socket's GID.
+RUN apk add --no-cache git docker-cli docker-compose \
+    && addgroup -g 65532 portwing \
+    && adduser -D -H -u 65532 -G portwing -h /home/portwing -s /sbin/nologin portwing \
+    && install -d -o 65532 -g 65532 /home/portwing /data/stacks
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /portwing ./cmd/portwing
+
+ENV HOME=/home/portwing \
+    DOCKER_CONFIG=/tmp/.docker
+USER 65532:65532
 
 VOLUME /data/stacks
 EXPOSE 3000

@@ -61,9 +61,13 @@ services:
   portwing:
     image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
+    # The image runs as non-root UID 65532; grant the Docker socket's group:
+    #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /data/stacks:/data/stacks        # Compose stack files
+      - /data/stacks:/data/stacks        # Compose stack files (host dir must be writable by UID 65532)
     ports:
       - "3000:3000"
     environment:
@@ -110,9 +114,13 @@ services:
   portwing:
     image: ghcr.io/codeswhat/portwing:latest
     restart: unless-stopped
+    # The image runs as non-root UID 65532; grant the Docker socket's group:
+    #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /data/stacks:/data/stacks
+      - /data/stacks:/data/stacks        # host dir must be writable by UID 65532
     environment:
       DRYDOCK_URL: "wss://your-drydock.example.com:3001"
       TOKEN: "${PORTWING_TOKEN}"

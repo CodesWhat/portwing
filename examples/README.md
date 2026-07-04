@@ -8,10 +8,12 @@ Ready-to-run Docker Compose and Kubernetes examples, hardened by default (`read_
 | [`docker-compose.edge.yml`](docker-compose.edge.yml) | Edge (outbound WebSocket, no inbound ports) | Agent is behind NAT/firewall; it dials out to your Drydock instance |
 | [`docker-compose.with-sockguard.yml`](docker-compose.with-sockguard.yml) | Standard + [sockguard](https://github.com/CodesWhat/sockguard) socket filter | Two-layer defense: even a compromised agent is constrained to an explicit Docker API allowlist |
 
-Before starting any of them, generate a token:
+Before starting any of them, generate a token and export the Docker socket's group ID (the images run as the non-root `portwing` user, UID 65532, and need `group_add` to reach the socket):
 
 ```bash
 openssl rand -hex 32 > portwing_token.txt
+sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 ```
 
 Validate a file without starting anything:
@@ -44,7 +46,8 @@ kubectl apply -f kubernetes/standard.yaml
 Edge mode:
 
 ```bash
-portwing keygen -comment "edge-host-01"   # prints PKCS#8 key + authorized_keys line
+portwing keygen -comment "edge-host-01" > portwing_ed25519.pem   # PKCS#8 key; also prints an authorized_keys line
+chmod 0600 portwing_ed25519.pem   # kubectl reads this file, so keep it owned by you (no chown needed here)
 # Register the authorized_keys line with Drydock (POST /api/v1/portwing/keys)
 kubectl -n portwing create secret generic portwing-key --from-file=portwing_ed25519.pem=portwing_ed25519.pem
 kubectl apply -f kubernetes/edge.yaml

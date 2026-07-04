@@ -19,6 +19,8 @@ For the strongest auth posture, upgrade to Ed25519 per-request keys after the in
 
 ```bash
 openssl rand -hex 32 > portwing_token.txt
+sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.with-sockguard.yml
 curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/sockguard.yaml
 ```
@@ -46,8 +48,15 @@ This starts sockguard and Portwing as two separate containers sharing a filtered
 # create, volume create, build) — extend sockguard.yaml deliberately if you
 # use stacks, rather than bypassing the filter.
 #
-# Generate a token first:
+# Generate a token first and make it readable by the container user:
 #   openssl rand -hex 32 > portwing_token.txt
+#   sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+#
+# Both images run as UID 65532. Sockguard needs the numeric group ID of the
+# host Docker socket to open it:
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+# Portwing itself needs no group_add here — it talks only to sockguard's
+# filtered socket, which sockguard creates 0600 under the same UID.
 
 services:
   sockguard:
@@ -58,6 +67,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./sockguard.yaml:/etc/sockguard/sockguard.yaml:ro
@@ -77,6 +88,7 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
     ports:
       - "3000:3000"
     volumes:
@@ -109,6 +121,8 @@ If you want a simpler setup — Drydock or another client connects inbound to po
 
 ```bash
 openssl rand -hex 32 > portwing_token.txt
+sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.standard.yml
 docker compose -f docker-compose.standard.yml up -d
 ```
@@ -116,12 +130,15 @@ docker compose -f docker-compose.standard.yml up -d
 ```yaml filename="docker-compose.standard.yml"
 # Portwing — standard mode (inbound HTTP on :3000), hardened defaults.
 #
-# Generate a token first:
+# The image runs as the non-root `portwing` user (UID 65532). Before starting,
+# generate a token and make it readable by that user, and export the numeric
+# group ID of your Docker socket so the agent can reach it:
 #   openssl rand -hex 32 > portwing_token.txt
+#   sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 #
 # The image ships a built-in HEALTHCHECK against /_portwing/health.
-# To run non-root, uncomment `user:` and add your docker socket's numeric
-# group ID via group_add — see SECURITY.md ("container runtime identity").
+# See SECURITY.md ("container runtime identity") for why group_add is needed.
 
 services:
   portwing:
@@ -134,9 +151,9 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
-    # user: "65532:65532"
-    # group_add:
-    #   - "999"   # $(stat -c '%g' /var/run/docker.sock)
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     ports:
       - "3000:3000"
     volumes:
@@ -170,6 +187,8 @@ Edge mode lets Portwing dial **out** to your Drydock controller over a WebSocket
 
 ```bash
 portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 # Register the printed public key with your Drydock controller, then:
 curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.edge.yml
 # Edit DRYDOCK_URL and AGENT_NAME, then:
@@ -185,8 +204,19 @@ docker compose -f docker-compose.edge.yml up -d
 # Edge mode against Drydock 1.5 is Ed25519-only: the controller's
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a
 # keypair and register its public key with Drydock before starting:
+#
 #   portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
-# Register the printed public key (POST /api/v1/portwing/keys).
+#   sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+#
+# keygen prints the PKCS#8 private key (used below as PRIVATE_KEY_FILE)
+# plus an authorized_keys line. Register that public key with your
+# Drydock controller (POST /api/v1/portwing/keys) so it trusts this agent.
+#
+# The chown/chmod matters twice over: the agent refuses to load a
+# world-readable key file, and the non-root container user (UID 65532) must
+# be able to read the bind-mounted secret. Also export the numeric group ID
+# of your Docker socket so the agent can reach it:
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 
 services:
   portwing:
@@ -199,6 +229,9 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
@@ -232,6 +265,7 @@ If you just want to try Portwing locally without setting up compose files, you c
 ```bash
 docker run -d \
   --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
@@ -239,6 +273,8 @@ docker run -d \
 ```
 
 Without `TOKEN` (or `TOKEN_HASH` / `AUTHORIZED_KEYS`) the API is **unauthenticated** — anyone who can reach the port controls your Docker daemon.
+
+The image runs as the non-root `portwing` user (UID 65532); `--group-add` grants it the Docker socket's group so it can reach the daemon.
 
 ---
 

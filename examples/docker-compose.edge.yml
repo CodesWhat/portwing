@@ -8,10 +8,17 @@
 # keypair and register its public key with Drydock before starting:
 #
 #   portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+#   sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
 #
 # keygen prints the PKCS#8 private key (used below as PRIVATE_KEY_FILE)
 # plus an authorized_keys line. Register that public key with your
 # Drydock controller (POST /api/v1/portwing/keys) so it trusts this agent.
+#
+# The chown/chmod matters twice over: the agent refuses to load a
+# world-readable key file, and the non-root container user (UID 65532) must
+# be able to read the bind-mounted secret. Also export the numeric group ID
+# of your Docker socket so the agent can reach it:
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 
 services:
   portwing:
@@ -24,6 +31,9 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks

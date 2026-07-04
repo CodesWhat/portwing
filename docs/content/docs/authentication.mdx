@@ -18,6 +18,7 @@ Set `TOKEN` to a random secret. Every request must supply it in one of the accep
 ```bash
 TOKEN=$(openssl rand -hex 32)
 docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 3000:3000 \
@@ -37,9 +38,10 @@ docker run -d --name portwing \
 ```bash
 TOKEN=$(openssl rand -hex 32)
 printf '%s' "$TOKEN" > /run/secrets/portwing-token
-chmod 600 /run/secrets/portwing-token
+chown 65532:65532 /run/secrets/portwing-token && chmod 0400 /run/secrets/portwing-token
 
 docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
   -e TOKEN_FILE=/run/secrets/portwing-token \
@@ -65,6 +67,7 @@ HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
 
 # Start the agent with the hash
 docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN_HASH="$HASH" \
   -p 3000:3000 \
@@ -75,7 +78,7 @@ To keep the hash out of the environment entirely, write it to a file and use `TO
 
 ```bash
 printf '%s' "$TOKEN" | portwing hash-token > /run/secrets/portwing-token-hash
-chmod 600 /run/secrets/portwing-token-hash
+chown 65532:65532 /run/secrets/portwing-token-hash && chmod 0400 /run/secrets/portwing-token-hash
 
 docker run -d --name portwing \
   -v /run/secrets/portwing-token-hash:/run/secrets/portwing-token-hash:ro \
@@ -105,7 +108,8 @@ portwing keygen -comment "my-platform:prod"
 Copy the `authorized_keys` output line to the agent host:
 
 ```text
-# /etc/portwing/authorized_keys  (mode 0600)
+# /etc/portwing/authorized_keys  (root:65532, mode 0640 — readable by the
+# container's non-root user, not world-readable)
 ed25519 AAAA... my-platform:prod
 ```
 
@@ -121,6 +125,7 @@ Comment out or remove a line to revoke that key. The agent refuses to start if t
 
 ```bash
 docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \

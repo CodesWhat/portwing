@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: the container image now runs as the non-root `portwing` user (UID 65532) by default.** Previously the agent ran as root inside the container and could open the host Docker socket implicitly; deployments must now grant the socket's group explicitly — `group_add: ["${DOCKER_SOCK_GID}"]` in compose, `--group-add $(stat -c '%g' /var/run/docker.sock)` with `docker run`, or `supplementalGroups` in Kubernetes (the shipped k8s manifests already ran non-root and need no change). Mounted credential files must be readable by UID 65532 (`chown 65532:65532` + `chmod 0400`). `/data/stacks` and `/home/portwing` are pre-owned by the user so read-only-rootfs deployments and volume initialization keep working, and `DOCKER_CONFIG` defaults to `/tmp/.docker` so `docker login` during compose deploys works with a read-only root filesystem. `user: "0:0"` restores the old behavior. All examples and docs updated; this closes the last open finding from the June security audit.
 - **Hermetic artifact builds**: `setup-go` caching is disabled in the release workflow and the GoReleaser config check, so no restored module/build cache can influence published artifacts. This clears zizmor's cache-poisoning findings at the root, and the now-redundant suppression config (`.github/zizmor.yml`, whose rationale predated the repo going public) is deleted — the workflow audit runs suppression-free.
 
 ## [0.5.1] - 2026-07-03
