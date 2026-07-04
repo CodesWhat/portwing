@@ -277,7 +277,9 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	}
 	if env.Type == protocol.TypeError {
 		var errMsg protocol.ErrorMessage
-		if err := json.Unmarshal(env.Data, &errMsg); err == nil {
+		if err := json.Unmarshal(env.Data, &errMsg); err != nil {
+			slog.Warn("controller rejected hello with an unparseable error payload", "error", err, "raw", string(env.Data))
+		} else {
 			slog.Warn("controller rejected hello", "code", errMsg.Code, "message", errMsg.Message)
 		}
 		closeWebSocket(conn, "controller rejected hello")
