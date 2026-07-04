@@ -319,6 +319,14 @@ Portwing is a privileged agent: an authenticated caller has full Docker API acce
 
 ---
 
+## Container env vars are not redacted on `/api/containers`
+
+`GET /api/containers` and the container inventory synced to Drydock over the edge WebSocket (`dd:container_sync` / `dd:container_added` / `_updated`) include each container's environment variables as plaintext key/value pairs (`RuntimeDetails.Env` in `internal/adapter/containers.go`). This is deliberate: Portwing does not redact or filter env values on this surface, and leaves that responsibility to Drydock (or another downstream consumer) if redaction before display or storage is required.
+
+This is distinct from the MCP `inspect_container` tool, which reports only an env-var *count* and never the values — see the [README](https://github.com/codeswhat/portwing#mcp--ai-assistant-integration). Any authenticated caller of `/api/containers`, and any system that receives the edge sync, sees full env var values. This is most relevant to standalone or no-Sockguard deployments, where the caller/consumer trust boundary is wider than "operator only."
+
+---
+
 ## Related pages
 
 - [Authentication](/authentication) — token, Argon2id hash, and Ed25519 key setup

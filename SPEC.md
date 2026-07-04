@@ -142,6 +142,8 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 | `dd:trigger_response` | Agent -> Server | Trigger result |
 | `dd:container_log_request` | Server -> Agent | Request container logs |
 | `dd:container_log_response` | Agent -> Server | Container log data |
+| `dd:container_delete_request` | Server -> Agent | Request container removal |
+| `dd:container_delete_response` | Agent -> Server | Removal result (`success`/`error`) |
 
 ## 4. Standard Mode HTTP API
 

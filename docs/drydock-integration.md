@@ -89,7 +89,7 @@ The edge-mode hello is Ed25519-signed (`pubKeyId`/`timestamp`/`nonce`/`signature
 
 > **Drydock version:** the `/api/portwing/ws` controller endpoint and the `portwing/1.0` protocol string require a Drydock build that ships them. Drydock 1.5 is the first controller release with this endpoint, so edge mode needs Drydock 1.5+; older controllers do not expose it.
 >
-> **Requires `DD_EXPERIMENTAL_PORTWING=true`:** the Drydock controller must be started with this flag set — otherwise `/api/portwing/ws` returns 404 and the agent loops reconnect failures indefinitely.
+> **Requires `DD_EXPERIMENTAL_PORTWING=true`:** the Drydock controller must be started with this flag set — otherwise `/api/portwing/ws` returns 404, which the agent treats as fatal and exits immediately (it does not retry).
 
 ---
 
@@ -148,7 +148,7 @@ Portwing sends:
 
 Note: `memoryGb` is read from `/proc/meminfo` (no cgo) and rounded to one decimal GiB; non-Linux hosts report 0, which Drydock accepts. `pollInterval` is the agent's `DD_POLL_INTERVAL` as a Go duration string (Drydock's own agent sends a cron expression here — the field is informational, displayed as-is). Portwing 0.5.x and earlier sent `memoryGb: 0` and omitted `logLevel`/`pollInterval`.
 
-`pollInterval` actually appears in three different string shapes depending on the source, and none of them should be parsed as anything but an opaque, display-only string: a Go duration (`"5m0s"`, from Portwing's Standard-mode `dd:ack`), a cron expression (from Drydock's own legacy Node.js agent), and a bare integer string (`"300"`, from Drydock's Edge Mode `welcome` frame — see the Edge Mode section below).
+`pollInterval` appears in several shapes depending on the source, and none of them should be parsed as anything but opaque, display-only values: a Go duration string (`"5m0s"`, from Portwing's Standard-mode `dd:ack`), a cron expression (from Drydock's own legacy Node.js agent), and a bare integer string (`"300"`) on Drydock's REST `AgentInfo` surface. Drydock's Edge Mode `welcome` frame is different again — it sends `pollInterval` as a JSON *number* (e.g. `300`), not a string (see the Edge Mode section below).
 
 ### `dd:container-added` / `dd:container-updated`
 

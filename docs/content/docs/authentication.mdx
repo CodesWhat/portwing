@@ -87,7 +87,7 @@ docker run -d --name portwing \
 ```
 
 <Callout type="info">
-`TOKEN_HASH` is the recommended choice when you need shared-secret token auth. The plaintext token exists only on the caller side; the agent stores and compares only the Argon2id hash.
+`TOKEN_HASH` is the recommended *token-based* option — among the three shared-secret mechanisms above, it's the one to reach for, since the plaintext token exists only on the caller side and the agent stores and compares only the Argon2id hash. [Ed25519 per-client keys](#4-ed25519-per-client-keys) below remain the recommended mechanism overall for production, since they avoid a shared secret entirely; use `TOKEN_HASH` when a caller can't do per-request signing.
 </Callout>
 
 ---
@@ -186,7 +186,7 @@ The hello carries `pubKeyId`, `timestamp`, `nonce`, and `signature` fields. The 
 See [Connection Modes](/connection-modes) for a full description of edge mode.
 
 <Callout type="warn">
-Edge mode requires the Drydock controller to be started with `DD_EXPERIMENTAL_PORTWING=true` — otherwise `/api/portwing/ws` returns 404 and the agent loops reconnect failures indefinitely.
+Edge mode requires the Drydock controller to be started with `DD_EXPERIMENTAL_PORTWING=true` — otherwise `/api/portwing/ws` returns 404, which the agent treats as fatal and exits immediately (it does not retry).
 </Callout>
 
 <Callout type="warn">

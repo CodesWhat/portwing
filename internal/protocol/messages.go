@@ -1,6 +1,10 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+)
 
 // Core message types.
 const (
@@ -70,6 +74,45 @@ type HelloMessage struct {
 type WelcomeMessage struct {
 	PollInterval int               `json:"pollInterval"`
 	Config       map[string]string `json:"config,omitempty"`
+}
+
+// UnmarshalJSON tolerates pollInterval arriving as either a JSON number (the
+// shape Drydock's Edge Mode welcome frame actually sends) or a numeric
+// string (a shape seen elsewhere in the ecosystem, e.g. Drydock's REST
+// AgentInfo surface). Without this, a numeric-string welcome frame would
+// fail to unmarshal entirely, silently dropping the serverCompatLevel
+// mismatch warning along with the poll interval.
+func (w *WelcomeMessage) UnmarshalJSON(data []byte) error {
+	type alias WelcomeMessage
+	aux := struct {
+		PollInterval json.RawMessage `json:"pollInterval"`
+		*alias
+	}{
+		alias: (*alias)(w),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if len(aux.PollInterval) == 0 {
+		return nil
+	}
+
+	var n int
+	if err := json.Unmarshal(aux.PollInterval, &n); err == nil {
+		w.PollInterval = n
+		return nil
+	}
+
+	var s string
+	if err := json.Unmarshal(aux.PollInterval, &s); err != nil {
+		return fmt.Errorf("pollInterval: neither a number nor a string: %w", err)
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return fmt.Errorf("pollInterval: %q is not a valid integer: %w", s, err)
+	}
+	w.PollInterval = n
+	return nil
 }
 
 type RequestMessage struct {

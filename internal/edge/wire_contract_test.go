@@ -267,7 +267,14 @@ func TestConnectFatal404(t *testing.T) {
 // rather than the generic "expected welcome, got ..." string, and logs both
 // fields.
 func TestConnectHelloRejectedByController(t *testing.T) {
-	t.Parallel()
+	// Deliberately NOT t.Parallel(): this test mutates the process-global
+	// slog default (slog.SetDefault) to capture log output, which races
+	// with any other test in this package that logs concurrently via the
+	// package-level slog.* helpers. Go only runs parallel subtests
+	// concurrently with each other; keeping this test sequential guarantees
+	// no other test observes or contends on the global logger while it's
+	// swapped out. Don't "fix" this by re-adding t.Parallel() and widening
+	// a sleep — that masks the race instead of removing it.
 
 	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
 		readAndAckHello(t, ctrl)
