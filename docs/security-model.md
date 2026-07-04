@@ -253,3 +253,19 @@ access. The controls above prevent *unauthenticated or improperly authorized*
 access and certain classes of *injection* attacks against the Compose path.
 They do not limit what an authenticated caller can do with the Docker API.
 Operators should treat the Portwing token as a root-equivalent credential.
+
+### Container Env Vars Are Not Redacted on `/api/containers`
+
+`GET /api/containers` and the container inventory synced to Drydock over the
+edge WebSocket (`dd:container_sync` / `dd:container_added` / `_updated`)
+include each container's environment variables as plaintext key/value pairs
+(`RuntimeDetails.Env` in `internal/adapter/containers.go`). This is a
+deliberate design decision — Portwing does not redact or filter env values on
+this surface; that responsibility belongs to Drydock (or another downstream
+consumer) if redaction before display or storage is required. This is
+distinct from the MCP `inspect_container` tool, which reports only an env-var
+*count* and never the values (see the [README](../README.md#mcp--ai-assistant-integration)).
+Any authenticated caller of `/api/containers`, and any system that receives
+the edge sync, sees full env var values — this is most relevant to
+standalone or no-Sockguard deployments where the caller/consumer trust
+boundary is wider than "operator only."

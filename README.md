@@ -611,13 +611,16 @@ live container state through this endpoint using their standard tool-call flow.
 | Tool | Description |
 |------|-------------|
 | `list_containers` | All containers — id, names, image, state, status, labels |
-| `inspect_container(id)` | State, image, env-var count (values never exposed), mounts, networks, restart policy |
+| `inspect_container(id)` | State, image, env-var count (values never exposed via this MCP tool), mounts, networks, restart policy |
 | `container_logs(id, tail)` | Last N lines of stdout/stderr (max 500) |
 | `host_metrics` | CPU, memory, disk, network, uptime snapshot |
 | `container_stats(id)` | One-shot CPU/memory/network stats for a container |
 
 **Credential hygiene:** `inspect_container` returns only the *count* of environment variables —
-values are never transmitted, preventing accidental secret leakage.
+values are never transmitted through this MCP tool, preventing accidental secret leakage. This
+scoping applies only to `inspect_container`: the sibling `GET /api/containers` REST endpoint (and
+the container inventory synced over the edge WebSocket) returns full container env var values by
+design — see [Security Model](docs/security-model.md) for details.
 
 #### Add to Claude Desktop (claude_desktop_config.json)
 
