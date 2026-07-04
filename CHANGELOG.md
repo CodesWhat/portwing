@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Agent info in the Drydock UI**: the `dd:ack` event now reports real host memory (`memoryGb`, read from `/proc/meminfo` with no cgo, rounded to one decimal GiB; 0 on non-Linux hosts), the agent's `logLevel`, and its `pollInterval` (as a Go duration string), so standard-mode agents no longer show 0 GB / blank runtime details in Drydock.
 
+### Security
+
+- **CI egress lockdown**: every workflow job now runs harden-runner with `egress-policy: block` and a per-job `allowed-endpoints` allowlist (24 jobs across 11 workflows) — previously all jobs ran in audit mode, which logs but does not stop exfiltration. Allowlists were derived from harden-runner audit telemetry across recent runs of every workflow, cross-checked against StepSecurity's recommended per-job policies, and adversarially reviewed per file (notably: `sum.golang.org` is allowed only for jobs that `go install` a tool outside the repo's `go.sum`; Docker Hub's dual CDN hostnames are both listed for image-pulling jobs; speculative endpoints were dropped). A compromised action or dependency can no longer phone home from CI.
+
 ### Changed
 
 - **Hermetic artifact builds**: `setup-go` caching is disabled in the release workflow and the GoReleaser config check, so no restored module/build cache can influence published artifacts. This clears zizmor's cache-poisoning findings at the root, and the now-redundant suppression config (`.github/zizmor.yml`, whose rationale predated the repo going public) is deleted — the workflow audit runs suppression-free.

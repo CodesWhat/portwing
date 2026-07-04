@@ -35,7 +35,19 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            o4506826106929152.ingest.us.sentry.io:443
+            proxy.golang.org:443
+            qlty-releases.s3.amazonaws.com:443
+            qlty.sh:443
+            release-assets.githubusercontent.com:443
+            s3.us-east-1.amazonaws.com:443
+            tmaproduction.blob.core.windows.net:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -116,7 +128,13 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            proxy.golang.org:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -139,7 +157,16 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          # sum.golang.org: `go install <tool>@<version>` fetches a module
+          # outside the repo's go.sum, so GOSUMDB verification goes online.
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            sum.golang.org:443
+            vuln.go.dev:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -169,7 +196,11 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            ghcr.io:443
+            github.com:443
+            pkg-containers.githubusercontent.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -194,7 +225,9 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -229,7 +262,12 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            goreleaser.com:443
+            release-assets.githubusercontent.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -271,7 +309,13 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            uploads.github.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -310,7 +354,14 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          # api.deps.dev + api.securityscorecards.dev: dependency-review-action
+          # enriches the diff with deps.dev metadata and OpenSSF Scorecard data.
+          allowed-endpoints: >
+            api.deps.dev:443
+            api.github.com:443
+            api.securityscorecards.dev:443
+            github.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -343,7 +394,14 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          # One allowlist shared by all 5 matrix variants (harden-runner config
+          # is per-step, not per-matrix-value).
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
@@ -430,7 +488,33 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          egress-policy: audit
+          # Broadest list in CI: qlty fetches per-language plugin toolchains
+          # (Go, Node, Python) and vuln databases at runtime. All observed
+          # across 3 audited runs; trimming means a plugin fails closed.
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            api.osv.dev:443
+            api.segment.io:443
+            api0.prismacloud.io:443
+            check.trivy.dev:443
+            dl.google.com:443
+            files.pythonhosted.org:443
+            github-proxy.qlty.sh:443
+            github.com:443
+            go.dev:443
+            mirror.gcr.io:443
+            nodejs.org:443
+            proxy.golang.org:443
+            pypi.org:443
+            qlty-releases.s3.amazonaws.com:443
+            radarlint-releases.s3.amazonaws.com:443
+            registry.npmjs.org:443
+            release-assets.githubusercontent.com:443
+            sum.golang.org:443
+            tmaproduction.blob.core.windows.net:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
