@@ -90,6 +90,8 @@ Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`,
 
 <Callout type="info">
 `memoryGb` is read from `/proc/meminfo` (the binary stays cgo-free) and rounded to one decimal GiB; non-Linux hosts report `0`, which Drydock accepts. `pollInterval` is the agent's `DD_POLL_INTERVAL` rendered as a Go duration string — the field is informational and displayed as-is. Portwing 0.5.x and earlier sent `memoryGb: 0` and omitted `logLevel`/`pollInterval`.
+
+`pollInterval` actually takes three different string shapes today depending on the source — a Go duration (`"5m0s"`, Standard Mode `dd:ack`), a cron expression (Drydock's own legacy Node.js agent), and a bare integer string (`"300"`, Edge Mode's `welcome` frame — see below). Treat it as an opaque, display-only string in all three cases; do not parse it.
 </Callout>
 
 ### `dd:container-added` / `dd:container-updated`
@@ -144,7 +146,7 @@ Portwing's `GET /api/containers` and all container events return objects in this
 | `updateAvailable` | bool | Always `false` — Drydock controller performs registry checks |
 | `updateKind` | string | Always `"unknown"` |
 | `labels` | object? | All Docker labels |
-| `details` | object? | Runtime details: ports, networks, volumes, health |
+| `details` | object? | Runtime details: ports, networks, volumes, env, health |
 
 ---
 
@@ -203,6 +205,10 @@ When `DRYDOCK_URL` is set, Portwing dials outbound to `DRYDOCK_URL/api/portwing/
 
 <Callout type="info">
 The sequence below is the production handshake, implemented on the agent side in `internal/edge/client.go` and `internal/protocol/messages.go` and on the controller side in Drydock 1.5's `/api/portwing/ws` endpoint. The controller requires an Ed25519-signed hello.
+</Callout>
+
+<Callout type="warn">
+Requires the Drydock controller to be started with `DD_EXPERIMENTAL_PORTWING=true` — otherwise `/api/portwing/ws` returns 404 and the agent loops reconnect failures indefinitely.
 </Callout>
 
 Handshake sequence:
@@ -273,6 +279,8 @@ When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `
 | `dd:trigger_response` | Agent → Controller | Trigger result |
 | `dd:container_log_request` | Controller → Agent | Request container logs |
 | `dd:container_log_response` | Agent → Controller | Container log data |
+| `dd:container_delete_request` | Controller → Agent | Request container removal |
+| `dd:container_delete_response` | Agent → Controller | Removal result (`success`/`error`) |
 
 ---
 
@@ -297,6 +305,14 @@ When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `
 | `AGENT_NAME` | Display name (default: hostname) | Drydock agent component `name` |
 | `DD_POLL_INTERVAL` | Container refresh interval in seconds (default `300`) | n/a |
 | `ADAPTER` | `drydock` (default) or `generic` | n/a |
+
+<Callout type="info">
+`AGENT_NAME`: in Edge Mode the (sanitized) `hello.agentName` sent by Portwing is now honored by Drydock as the agent's display name, as of Drydock dev/v1.6. Sanitization lowercases the name, replaces runs of non-`[a-z0-9-]` characters with a single `-`, trims leading/trailing `-`, and truncates to 63 characters; an empty result falls back to `portwing-edge-<agentId>`.
+</Callout>
+
+<Callout type="warn">
+`DD_POLL_INTERVAL` is ignored in Edge Mode — the controller's `welcome` frame `pollInterval` is authoritative there (Drydock intentionally owns the refresh cadence in Edge Mode; this is deliberate, not a bug). It still applies as documented in Standard Mode.
+</Callout>
 
 For the full variable reference including Docker socket, metrics, and reconnect settings, see [Configuration](/configuration).
 

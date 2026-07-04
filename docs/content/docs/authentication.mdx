@@ -92,7 +92,7 @@ docker run -d --name portwing \
 
 ---
 
-## 4. Ed25519 per-client keys (recommended)
+## 4. Ed25519 per-client keys
 
 Ed25519 keypairs give each client a distinct cryptographic identity. Every request carries a detached signature over the HTTP method, path, a SHA-256 body hash, a Unix timestamp, and a 128-bit random nonce. The agent verifies the signature, rejects requests with a timestamp skew greater than 60 seconds, and tracks nonces in an in-memory LRU to prevent replay within the timestamp window.
 
@@ -185,8 +185,12 @@ The hello carries `pubKeyId`, `timestamp`, `nonce`, and `signature` fields. The 
 
 See [Connection Modes](/connection-modes) for a full description of edge mode.
 
-<Callout type="info">
-Ed25519 auth is the recommended option for production. Per-request signatures with nonce replay protection remain strong even when TLS terminates at a load balancer the operator does not fully trust, because each request is independently bound to a timestamp and a one-time nonce.
+<Callout type="warn">
+Edge mode requires the Drydock controller to be started with `DD_EXPERIMENTAL_PORTWING=true` — otherwise `/api/portwing/ws` returns 404 and the agent loops reconnect failures indefinitely.
+</Callout>
+
+<Callout type="warn">
+Drydock's bundled `AgentClient` (the HTTP-polling client used in Standard Mode) does not implement Ed25519 request signing today — it authenticates only via `X-Dd-Agent-Secret` (token-hash auth, see [3. Argon2id hash-at-rest](#3-argon2id-hash-at-rest) above). Per-request Ed25519 signing is available today only for custom, non-Drydock HTTP clients calling Portwing's Standard Mode API directly. Edge Mode's Ed25519 *hello* signing described above is a separate mechanism — it is required and used by Drydock 1.5+ regardless of which client library talks to Standard Mode.
 </Callout>
 
 ---
