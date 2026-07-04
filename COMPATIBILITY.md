@@ -41,7 +41,7 @@ usage as of the Portwing version in the row above:
 |---|---|
 | `app/configs/portwing.yaml` | Base preset: container lifecycle, image pull/inspect/remove, `/events`, narrow network/volume/distribution/service reads. No exec, no compose-stack network/volume creation, no build. |
 | `app/configs/portwing-with-exec.yaml` | `portwing.yaml` plus the exec/attach paths Portwing's interactive terminal feature needs. |
-| `app/configs/portwing-with-compose.yaml` | `portwing.yaml` plus `POST /networks/create`, `DELETE /networks/*`, `POST /networks/*/disconnect`, `POST /volumes/create`, `DELETE /volumes/*` — what compose-stack deploys through Portwing need. Still denies `/build`; BuildKit fallback needs `/session` + `/grpc`, which no preset here models yet. |
+| `app/configs/portwing-with-compose.yaml` | `portwing.yaml` plus `POST /networks/create`, `POST /networks/*/connect`, `DELETE /networks/*`, `POST /networks/*/disconnect`, `POST /volumes/create`, `DELETE /volumes/*` — what compose-stack deploys through Portwing need. Still denies `/build`; BuildKit fallback needs `/session` + `/grpc`, which no preset here models yet. |
 
 Portwing's `examples/sockguard.yaml` is a manually-synced copy of sockguard's
 `app/configs/portwing.yaml` (the no-exec, no-compose base preset) — update
