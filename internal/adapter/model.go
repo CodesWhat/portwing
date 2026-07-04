@@ -64,9 +64,15 @@ type RuntimeDetails struct {
 	Ports    []PortMapping `json:"ports,omitempty"`
 	Network  []NetworkInfo `json:"network,omitempty"`
 	Volumes  []VolumeInfo  `json:"volumes,omitempty"`
+	Env      []EnvVar      `json:"env,omitempty"`
 	Created  string        `json:"created,omitempty"`
 	Started  string        `json:"started,omitempty"`
 	Health   string        `json:"health,omitempty"`
+}
+
+type EnvVar struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 type PortMapping struct {
