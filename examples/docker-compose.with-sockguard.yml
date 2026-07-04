@@ -6,11 +6,13 @@
 # a fully compromised agent is constrained to the explicit API allowlist in
 # sockguard.yaml.
 #
-# The bundled sockguard.yaml mirrors sockguard's drydock preset: container
-# lifecycle, image pull/inspect/remove, events, and narrow network/volume
-# reads. Compose stack deploys through Portwing need broader rules (network
-# create, volume create, build) — extend sockguard.yaml deliberately if you
-# use stacks, rather than bypassing the filter.
+# The bundled sockguard.yaml is a copy of sockguard's own portwing.yaml preset:
+# container lifecycle, image pull/inspect/remove, events, and narrow network/
+# volume reads. Exec is denied by this preset — swap in sockguard's
+# portwing-with-exec.yaml to opt into interactive exec sessions. Compose stack
+# deploys through Portwing need broader rules (network create, volume create,
+# build) — extend sockguard.yaml deliberately if you use stacks, rather than
+# bypassing the filter.
 #
 # Generate a token first and make it readable by the container user:
 #   openssl rand -hex 32 > portwing_token.txt
