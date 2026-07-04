@@ -23,6 +23,7 @@ RUN apk add --no-cache --initdb --root /out \
     ca-certificates-bundle busybox docker-cli docker-compose wget \
     && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
     && echo 'portwing:x:65532:' >>/out/etc/group \
+    && install -d -o 65532 -g 65532 /out/home/portwing /out/data/stacks \
     && rm -rf /out/var/cache/apk/*
 
 FROM rootfs-amd64 AS rootfs-arm64
@@ -39,15 +40,17 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
         ca-certificates busybox docker-cli docker-cli-compose wget \
     && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
     && echo 'portwing:x:65532:' >>/out/etc/group \
+    && install -d -o 65532 -g 65532 /out/home/portwing /out/data/stacks \
     && rm -rf /out/var/cache/apk/*
 
 # Select the rootfs by target arch. TARGETARCH is a buildx-predefined global arg
 # (amd64 / arm64 / arm) usable directly in FROM without an explicit ARG.
 FROM rootfs-${TARGETARCH} AS rootfs
 
-# Final image: selected rootfs plus the prebuilt binary. No USER directive — the
-# agent runs as root by default so it can reach the host Docker socket; drop to
-# UID 65532 at deploy time (see examples/ and SECURITY.md).
+# Final image: selected rootfs plus the prebuilt binary. Runs as the dedicated
+# `portwing` user (UID 65532); reaching the host Docker socket requires adding
+# the socket's group at deploy time via group_add / --group-add (see examples/
+# and SECURITY.md).
 FROM scratch
 COPY --from=rootfs /out /
 # TARGETPLATFORM is a global-scope predefined arg; redeclare it inside this
@@ -55,6 +58,15 @@ COPY --from=rootfs /out /
 ARG TARGETPLATFORM
 COPY $TARGETPLATFORM/portwing /usr/bin/portwing
 
+# DOCKER_CONFIG points at the /tmp tmpfs so `docker login` during compose
+# deploys can write config.json under a read-only root filesystem.
+ENV HOME=/home/portwing \
+    DOCKER_CONFIG=/tmp/.docker
+
+USER 65532:65532
+
+# /data/stacks is pre-created owned by 65532 in the rootfs stages, so volumes
+# initialized from it are writable by the non-root user.
 VOLUME /data/stacks
 EXPOSE 3000
 

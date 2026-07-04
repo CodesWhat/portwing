@@ -195,6 +195,28 @@ registry, and burns the token (refusing further enrollment until restart).
 See `docs/design/ed25519-auth.md` for full threat analysis, key rotation
 procedures, and migration path from token auth.
 
+### 12. Non-Root Runtime Identity
+
+The published image runs as the dedicated `portwing` user (UID 65532) — the
+final stage sets `USER 65532:65532`, and `/data/stacks` plus the user's home
+directory are pre-owned by that UID so read-only-rootfs deployments work
+without a writable layer. `DOCKER_CONFIG` points at the `/tmp` tmpfs so
+`docker login` during Compose deploys works under `read_only: true`.
+
+Because the agent must open the host's Docker socket (`root:docker 0660` on
+typical hosts), deployments grant the socket's group explicitly: `group_add`
+in Compose, `--group-add $(stat -c '%g' /var/run/docker.sock)` with
+`docker run`, or `supplementalGroups` in Kubernetes. Mounted credential files
+must be readable by UID 65532 (`chown 65532:65532` + `chmod 0400` on the host
+file). `user: "0:0"` restores the old root-in-container behavior where an
+environment requires it.
+
+Root-vs-non-root is not the load-bearing boundary for a Docker-socket agent —
+any process that reaches the socket can pivot to the host through the daemon —
+but the non-root default removes root-owned files on shared volumes, blocks
+accidental privileged access through other mounts, and satisfies
+`runAsNonRoot` admission policies without overrides.
+
 ---
 
 ## CVE Mapping

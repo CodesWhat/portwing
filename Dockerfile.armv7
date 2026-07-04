@@ -25,13 +25,25 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
         ca-certificates busybox docker-cli docker-cli-compose wget \
     && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
     && echo 'portwing:x:65532:' >>/out/etc/group \
+    && install -d -o 65532 -g 65532 /out/home/portwing /out/data/stacks \
     && rm -rf /out/var/cache/apk/*
 
-# Stage 3: Final image.
+# Stage 3: Final image. Runs as the dedicated `portwing` user (UID 65532);
+# reaching the host Docker socket requires adding the socket's group at deploy
+# time via group_add / --group-add (see examples/ and SECURITY.md).
 FROM scratch
 COPY --from=rootfs /out /
 COPY --from=builder /portwing /usr/bin/portwing
 
+# DOCKER_CONFIG points at the /tmp tmpfs so `docker login` during compose
+# deploys can write config.json under a read-only root filesystem.
+ENV HOME=/home/portwing \
+    DOCKER_CONFIG=/tmp/.docker
+
+USER 65532:65532
+
+# /data/stacks is pre-created owned by 65532 in the rootfs stage, so volumes
+# initialized from it are writable by the non-root user.
 VOLUME /data/stacks
 EXPOSE 3000
 

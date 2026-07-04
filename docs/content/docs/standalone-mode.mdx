@@ -16,6 +16,7 @@ Pass `ADAPTER=generic` when starting the container. You must also configure at l
 ```bash
 docker run -d \
   --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \

@@ -1,11 +1,14 @@
 # Portwing — standard mode (inbound HTTP on :3000), hardened defaults.
 #
-# Generate a token first:
+# The image runs as the non-root `portwing` user (UID 65532). Before starting,
+# generate a token and make it readable by that user, and export the numeric
+# group ID of your Docker socket so the agent can reach it:
 #   openssl rand -hex 32 > portwing_token.txt
+#   sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 #
 # The image ships a built-in HEALTHCHECK against /_portwing/health.
-# To run non-root, uncomment `user:` and add your docker socket's numeric
-# group ID via group_add — see SECURITY.md ("container runtime identity").
+# See SECURITY.md ("container runtime identity") for why group_add is needed.
 
 services:
   portwing:
@@ -18,9 +21,9 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
-    # user: "65532:65532"
-    # group_add:
-    #   - "999"   # $(stat -c '%g' /var/run/docker.sock)
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     ports:
       - "3000:3000"
     volumes:

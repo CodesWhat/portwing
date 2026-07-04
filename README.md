@@ -114,6 +114,8 @@ The strongest posture combines three controls: **sockguard** (socket-level reque
 
 ```bash
 openssl rand -hex 32 > portwing_token.txt
+sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 # Download the hardened compose file and its sockguard policy
 curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.with-sockguard.yml
 curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/sockguard.yaml
@@ -136,8 +138,15 @@ This runs sockguard and Portwing as separate containers sharing a filtered socke
 # a fully compromised agent is constrained to the explicit API allowlist in
 # sockguard.yaml.
 #
-# Generate a token first:
+# Generate a token first and make it readable by the container user:
 #   openssl rand -hex 32 > portwing_token.txt
+#   sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+#
+# Both images run as UID 65532. Sockguard needs the numeric group ID of the
+# host Docker socket to open it:
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+# Portwing itself needs no group_add here — it talks only to sockguard's
+# filtered socket, which sockguard creates 0600 under the same UID.
 
 services:
   sockguard:
@@ -148,6 +157,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./sockguard.yaml:/etc/sockguard/sockguard.yaml:ro
@@ -167,6 +178,7 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
     ports:
       - "3000:3000"
     volumes:
@@ -238,6 +250,7 @@ volumes:
 ```bash
 docker run -d \
   --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
@@ -245,6 +258,8 @@ docker run -d \
 ```
 
 Without `TOKEN` (or `TOKEN_HASH`/`AUTHORIZED_KEYS`) the API is **unauthenticated** — anyone who can reach the port controls your Docker daemon.
+
+The image runs as the non-root `portwing` user (UID 65532); `--group-add` grants it the Docker socket's group so it can reach the daemon.
 
 </details>
 
@@ -315,6 +330,7 @@ Set `TOKEN` to a random secret. All requests must supply it via
 ```bash
 TOKEN=$(openssl rand -hex 32)
 docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 3000:3000 \
@@ -339,7 +355,8 @@ portwing keygen -comment "my-platform:prod"
 **Copy the `authorized_keys` line to the agent host:**
 
 ```text
-# /etc/portwing/authorized_keys  (mode 0600)
+# /etc/portwing/authorized_keys  (root:65532, mode 0640 — readable by the
+# container's non-root user, not world-readable)
 ed25519 AAAA... my-platform:prod
 ```
 
@@ -347,6 +364,7 @@ ed25519 AAAA... my-platform:prod
 
 ```bash
 docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
@@ -415,6 +433,7 @@ Docker daemon — no Drydock account required.
 ```bash
 docker run -d \
   --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
@@ -709,7 +728,7 @@ docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:latest
 ```bash
 TOKEN=$(openssl rand -hex 32)
 printf '%s' "$TOKEN" > /run/secrets/portwing-token
-chmod 600 /run/secrets/portwing-token
+chown 65532:65532 /run/secrets/portwing-token && chmod 0400 /run/secrets/portwing-token
 docker run -e TOKEN_FILE=/run/secrets/portwing-token \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
   ... ghcr.io/codeswhat/portwing:latest

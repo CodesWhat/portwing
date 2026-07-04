@@ -12,8 +12,15 @@
 # create, volume create, build) — extend sockguard.yaml deliberately if you
 # use stacks, rather than bypassing the filter.
 #
-# Generate a token first:
+# Generate a token first and make it readable by the container user:
 #   openssl rand -hex 32 > portwing_token.txt
+#   sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+#
+# Both images run as UID 65532. Sockguard needs the numeric group ID of the
+# host Docker socket to open it:
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+# Portwing itself needs no group_add here — it talks only to sockguard's
+# filtered socket, which sockguard creates 0600 under the same UID.
 
 services:
   sockguard:
@@ -24,6 +31,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./sockguard.yaml:/etc/sockguard/sockguard.yaml:ro
@@ -43,6 +52,7 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
     ports:
       - "3000:3000"
     volumes:
