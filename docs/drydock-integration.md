@@ -88,6 +88,8 @@ sequenceDiagram
 The edge-mode hello is Ed25519-signed (`pubKeyId`/`timestamp`/`nonce`/`signature`); the controller endpoint is Ed25519-only and rejects token-hash hellos. The full `hello` payload (exact field set) is in [SPEC.md §3.2](../SPEC.md#32-hello-message).
 
 > **Drydock version:** the `/api/portwing/ws` controller endpoint and the `portwing/1.0` protocol string require a Drydock build that ships them. Drydock 1.5 is the first controller release with this endpoint, so edge mode needs Drydock 1.5+; older controllers do not expose it.
+>
+> **Requires `DD_EXPERIMENTAL_PORTWING=true`:** the Drydock controller must be started with this flag set — otherwise `/api/portwing/ws` returns 404 and the agent loops reconnect failures indefinitely.
 
 ---
 
@@ -146,6 +148,8 @@ Portwing sends:
 
 Note: `memoryGb` is read from `/proc/meminfo` (no cgo) and rounded to one decimal GiB; non-Linux hosts report 0, which Drydock accepts. `pollInterval` is the agent's `DD_POLL_INTERVAL` as a Go duration string (Drydock's own agent sends a cron expression here — the field is informational, displayed as-is). Portwing 0.5.x and earlier sent `memoryGb: 0` and omitted `logLevel`/`pollInterval`.
 
+`pollInterval` actually appears in three different string shapes depending on the source, and none of them should be parsed as anything but an opaque, display-only string: a Go duration (`"5m0s"`, from Portwing's Standard-mode `dd:ack`), a cron expression (from Drydock's own legacy Node.js agent), and a bare integer string (`"300"`, from Drydock's Edge Mode `welcome` frame — see the Edge Mode section below).
+
 ### `dd:container-added` / `dd:container-updated`
 
 ```json
@@ -185,7 +189,7 @@ Drydock expects these fields:
 | `updateAvailable` | bool | Always `false` (Drydock controller performs registry checks) |
 | `updateKind` | string | Always `"unknown"` |
 | `labels` | object? | All Docker labels |
-| `details` | object? | Runtime details (ports, networks, volumes, health) |
+| `details` | object? | Runtime details (ports, networks, volumes, env, health) |
 
 ---
 
@@ -244,15 +248,20 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `TLS_SKIP_VERIFY` | Skip TLS verification in edge mode | n/a |
 | `DRYDOCK_URL` | Edge mode controller URL (agent dials out to `/api/portwing/ws`) | n/a |
 | `AGENT_ID` | UUID for this agent | Drydock registers via `hello.agentId` |
-| `AGENT_NAME` | Display name (default: hostname) | Drydock agent component `name` |
-| `DD_POLL_INTERVAL` | Container refresh interval in s (default 300) | n/a |
+| `AGENT_NAME` [^agent-name] | Display name (default: hostname) | Drydock agent component `name` |
+| `DD_POLL_INTERVAL` [^poll-interval] | Container refresh interval in s (default 300) | n/a |
 | `DOCKER_SOCKET` | Docker socket path | n/a |
 | `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | n/a |
 | `TRUSTED_PROXIES` | CIDR list for X-Forwarded-For | n/a |
 
+[^agent-name]: In Edge Mode, the (sanitized) `hello.agentName` sent by Portwing is now honored by Drydock as the agent's display name, as of Drydock dev/v1.6. Sanitization lowercases the name, replaces runs of non-`[a-z0-9-]` characters with a single `-`, trims leading/trailing `-`, and truncates to 63 characters; an empty result falls back to `portwing-edge-<agentId>`.
+[^poll-interval]: `DD_POLL_INTERVAL` is ignored in Edge Mode — the controller's `welcome` frame `pollInterval` is authoritative there (Drydock intentionally owns the refresh cadence in Edge Mode; this is a deliberate design, not a bug). It still applies as documented in Standard Mode.
+
 ---
 
 ## Compatibility Matrix
+
+> For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](../COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages are implemented and verified against a specific Drydock build.
 
 | Feature | Status | Evidence |
 |---|---|---|

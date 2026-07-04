@@ -503,4 +503,33 @@ func TestBuildRuntimeDetailsOptionalFields(t *testing.T) {
 			t.Fatalf("expected Destination='/app', got %q", d.Volumes[1].Destination)
 		}
 	})
+
+	t.Run("env nil produces no entries", func(t *testing.T) {
+		t.Parallel()
+		inspect := baseInspect
+		inspect.Config.Env = nil
+		d := BuildRuntimeDetails(&inspect)
+		if len(d.Env) != 0 {
+			t.Fatalf("expected no env entries, got %d", len(d.Env))
+		}
+	})
+
+	t.Run("env populated splits on first equals only", func(t *testing.T) {
+		t.Parallel()
+		inspect := baseInspect
+		inspect.Config.Env = []string{"PATH=/usr/bin", "KEY=a=b", "EMPTY="}
+		d := BuildRuntimeDetails(&inspect)
+		if len(d.Env) != 3 {
+			t.Fatalf("expected 3 env entries, got %d", len(d.Env))
+		}
+		if d.Env[0] != (EnvVar{Key: "PATH", Value: "/usr/bin"}) {
+			t.Fatalf("expected PATH=/usr/bin, got %+v", d.Env[0])
+		}
+		if d.Env[1] != (EnvVar{Key: "KEY", Value: "a=b"}) {
+			t.Fatalf("expected KEY=a=b (only first '=' splits), got %+v", d.Env[1])
+		}
+		if d.Env[2] != (EnvVar{Key: "EMPTY", Value: ""}) {
+			t.Fatalf("expected EMPTY= to produce empty value, got %+v", d.Env[2])
+		}
+	})
 }

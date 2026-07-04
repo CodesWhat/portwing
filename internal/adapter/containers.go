@@ -283,6 +283,13 @@ func BuildRuntimeDetails(inspect *docker.ContainerInspect) *RuntimeDetails {
 		details.Command = strings.Join(inspect.Config.Cmd, " ")
 	}
 
+	// Environment variables. Each entry is "KEY=VALUE"; split on the first
+	// "=" so values containing "=" are preserved intact.
+	for _, entry := range inspect.Config.Env {
+		key, value, _ := strings.Cut(entry, "=")
+		details.Env = append(details.Env, EnvVar{Key: key, Value: value})
+	}
+
 	// Health status.
 	if inspect.State.Health != nil {
 		details.Health = inspect.State.Health.Status

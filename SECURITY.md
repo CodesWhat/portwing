@@ -55,6 +55,8 @@ The controls that materially harden a deployment:
 - **Edge mode** — `DRYDOCK_URL` makes the agent dial out over WebSocket instead of listening; no inbound port exists to attack.
 - **Rootless Docker on the host** — reduces the daemon's authority at the actual trust boundary.
 
+**sockguard idle-session timeout:** when sockguard fronts the Docker socket, its `HijackHandler` force-closes any hijacked bidirectional stream — interactive `exec`/`attach` sessions — after 10 minutes with zero bytes of traffic in either direction (`hijackInactivityTimeout` in sockguard's `internal/proxy/hijack.go`). This limit doesn't exist when Portwing talks directly to `/var/run/docker.sock`. Operators pairing Portwing with sockguard should expect an idle terminal session (e.g. one left open with no keystrokes or output) to be dropped after 10 minutes of inactivity; send periodic traffic or reconnect if you need longer-lived idle sessions.
+
 ## Security measures
 
 Portwing implements the following:

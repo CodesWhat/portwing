@@ -144,6 +144,7 @@ func TestHandleMessage_MalformedPayloadIsHandledGracefully(t *testing.T) {
 		{protocol.TypeDDWatchContainerRequest, json.RawMessage(`not json`)},
 		{protocol.TypeDDTriggerRequest, json.RawMessage(`not json`)},
 		{protocol.TypeDDContainerLogRequest, json.RawMessage(`not json`)},
+		{protocol.TypeDDContainerDeleteRequest, json.RawMessage(`not json`)},
 	}
 
 	for _, tc := range recognizedTypes {
@@ -178,5 +179,31 @@ func TestHandleMessage_ContainerLogRequestRecognized(t *testing.T) {
 	handled := a.HandleMessage(ctx, sender, protocol.TypeDDContainerLogRequest, payload)
 	if !handled {
 		t.Fatal("HandleMessage(dd:container_log_request): expected true (handled), got false")
+	}
+}
+
+// TestHandleMessage_ContainerDeleteRequestRecognized verifies that the
+// container_delete_request type is recognized (returns true) by HandleMessage.
+// The actual Docker removal is intentionally not exercised here because it
+// requires a live Docker client; invoking the goroutine would nil-deref.
+// We cancel the context immediately so spawnMessageHandler exits before the
+// goroutine body calls dockerClient (see TestHandleContainerDeleteRequest_Success
+// and _Error in adapter_test.go for the exercised-handler coverage).
+func TestHandleMessage_ContainerDeleteRequestRecognized(t *testing.T) {
+	t.Parallel()
+
+	a := &Adapter{
+		messageSem:   make(chan struct{}, defaultMessageHandlerConcurrency),
+		dockerClient: nil,
+	}
+	sender := &captureSender{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	payload := json.RawMessage(`{"containerId":"nonexistent"}`)
+	handled := a.HandleMessage(ctx, sender, protocol.TypeDDContainerDeleteRequest, payload)
+	if !handled {
+		t.Fatal("HandleMessage(dd:container_delete_request): expected true (handled), got false")
 	}
 }

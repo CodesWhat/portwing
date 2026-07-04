@@ -26,6 +26,7 @@ func FuzzEnvelope(f *testing.F) {
 	f.Add([]byte(`{"type":"dd:watch_request","data":{"watcherType":"docker","watcherName":"main"}}`))
 	f.Add([]byte(`{"type":"dd:trigger_request","data":{"triggerType":"restart","triggerName":"web","containerId":"c1"}}`))
 	f.Add([]byte(`{"type":"dd:container_log_request","data":{"containerId":"c1","tail":100}}`))
+	f.Add([]byte(`{"type":"dd:container_delete_request","data":{"containerId":"c1"}}`))
 	// Hostile / edge-case seeds.
 	f.Add([]byte(``))
 	f.Add([]byte(`{}`))
@@ -120,6 +121,12 @@ func FuzzEnvelope(f *testing.F) {
 			_ = json.Unmarshal(env.Data, &m)
 		case TypeDDContainerLogResponse:
 			var m DDContainerLogResponseMessage
+			_ = json.Unmarshal(env.Data, &m)
+		case TypeDDContainerDeleteRequest:
+			var m DDContainerDeleteRequestMessage
+			_ = json.Unmarshal(env.Data, &m)
+		case TypeDDContainerDeleteResponse:
+			var m DDContainerDeleteResponseMessage
 			_ = json.Unmarshal(env.Data, &m)
 		case TypeDDContainerSync:
 			var m DDContainerSyncMessage

@@ -25,19 +25,21 @@ const (
 
 // Drydock-specific message types.
 const (
-	TypeDDContainerSync          = "dd:container_sync"
-	TypeDDContainerAdded         = "dd:container_added"
-	TypeDDContainerUpdated       = "dd:container_updated"
-	TypeDDContainerRemoved       = "dd:container_removed"
-	TypeDDComponentSync          = "dd:component_sync"
-	TypeDDWatchRequest           = "dd:watch_request"
-	TypeDDWatchResponse          = "dd:watch_response"
-	TypeDDWatchContainerRequest  = "dd:watch_container_request"
-	TypeDDWatchContainerResponse = "dd:watch_container_response"
-	TypeDDTriggerRequest         = "dd:trigger_request"
-	TypeDDTriggerResponse        = "dd:trigger_response"
-	TypeDDContainerLogRequest    = "dd:container_log_request"
-	TypeDDContainerLogResponse   = "dd:container_log_response"
+	TypeDDContainerSync           = "dd:container_sync"
+	TypeDDContainerAdded          = "dd:container_added"
+	TypeDDContainerUpdated        = "dd:container_updated"
+	TypeDDContainerRemoved        = "dd:container_removed"
+	TypeDDComponentSync           = "dd:component_sync"
+	TypeDDWatchRequest            = "dd:watch_request"
+	TypeDDWatchResponse           = "dd:watch_response"
+	TypeDDWatchContainerRequest   = "dd:watch_container_request"
+	TypeDDWatchContainerResponse  = "dd:watch_container_response"
+	TypeDDTriggerRequest          = "dd:trigger_request"
+	TypeDDTriggerResponse         = "dd:trigger_response"
+	TypeDDContainerLogRequest     = "dd:container_log_request"
+	TypeDDContainerLogResponse    = "dd:container_log_response"
+	TypeDDContainerDeleteRequest  = "dd:container_delete_request"
+	TypeDDContainerDeleteResponse = "dd:container_delete_response"
 )
 
 type Envelope struct {
@@ -253,4 +255,14 @@ type DDContainerLogRequestMessage struct {
 type DDContainerLogResponseMessage struct {
 	ContainerID string `json:"containerId"`
 	Logs        string `json:"logs"`
+}
+
+type DDContainerDeleteRequestMessage struct {
+	ContainerID string `json:"containerId"`
+}
+
+type DDContainerDeleteResponseMessage struct {
+	ContainerID string `json:"containerId"`
+	Success     bool   `json:"success"`
+	Error       string `json:"error,omitempty"`
 }

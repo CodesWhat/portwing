@@ -10,14 +10,17 @@ package edge
 // expectType, decodeData, waitFor). No production source files are touched.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -251,6 +254,69 @@ func TestConnectFatal404(t *testing.T) {
 	}
 	if !errors.Is(err, errFatal) {
 		t.Errorf("error does not wrap errFatal: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// connect — hello rejected with an error envelope instead of welcome
+// ---------------------------------------------------------------------------
+
+// TestConnectHelloRejectedByController verifies that when the controller
+// responds to hello with an "error" envelope (e.g. a signature/auth failure)
+// instead of "welcome", connect surfaces the controller's code and message
+// rather than the generic "expected welcome, got ..." string, and logs both
+// fields.
+func TestConnectHelloRejectedByController(t *testing.T) {
+	t.Parallel()
+
+	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+		readAndAckHello(t, ctrl)
+		sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{
+			Code:    "bad-signature",
+			Message: "hello signature verification failed",
+		})
+	})
+
+	cfg := &config.Config{
+		DrydockURL:        srv,
+		HeartbeatInterval: 30,
+		WelcomeTimeout:    5,
+		ReconnectDelay:    1,
+		MaxReconnectDelay: 60,
+		DDPollInterval:    300,
+		SkipDFCollection:  true,
+	}
+	c := newWireClient(t, cfg)
+
+	logBuf := &bytes.Buffer{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
+	defer slog.SetDefault(oldLogger)
+
+	established, err := c.connect(context.Background())
+
+	if established {
+		t.Error("established = true, want false (controller rejected hello)")
+	}
+	if err == nil {
+		t.Fatal("connect returned nil error, want an error surfacing the rejection")
+	}
+	if !strings.Contains(err.Error(), "bad-signature") {
+		t.Errorf("error = %q, want it to contain the controller's code %q", err.Error(), "bad-signature")
+	}
+	if !strings.Contains(err.Error(), "hello signature verification failed") {
+		t.Errorf("error = %q, want it to contain the controller's message", err.Error())
+	}
+	if strings.Contains(err.Error(), `expected welcome, got "error"`) {
+		t.Errorf("error = %q, should not fall back to the generic unexpected-welcome-type message", err.Error())
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "bad-signature") {
+		t.Errorf("log output missing code: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "hello signature verification failed") {
+		t.Errorf("log output missing message: %s", logOutput)
 	}
 }
 
