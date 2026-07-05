@@ -56,11 +56,21 @@ jobs:
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
           egress-policy: block
+          # The 4-hour soak needs runner control/log/artifact traffic throughout
+          # the job, not just checkout/setup traffic.
           allowed-endpoints: >
+            168.63.129.16:80
             api.github.com:443
+            agent.api.stepsecurity.io:443
+            codeload.github.com:443
             github.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            *.githubapp.com:443
+            prod.app-api.stepsecurity.io:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
 
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
