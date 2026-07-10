@@ -223,25 +223,29 @@ Handshake sequence:
 ```json
 {
   "type": "hello",
-  "version": "1.0.0",
-  "protocol": "portwing/1.0",
-  "agentId": "uuid",
-  "agentName": "my-server",
-  "pubKeyId": "a3f2b1c9d8e7f6a4",
-  "timestamp": 1749820800,
-  "nonce": "0123456789abcdef0123456789abcdef",
-  "signature": "<base64url-ed25519-signature>",
-  "dockerVersion": "27.0.3",
-  "hostname": "my-server",
-  "capabilities": [
-    "compose", "exec", "metrics", "events",
-    "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"
-  ],
-  "drydockCompat": "1.4.0",
-  "watcherTypes": ["docker"],
-  "triggerTypes": []
+  "data": {
+    "version": "1.0.0",
+    "protocol": "portwing/1.0",
+    "agentId": "uuid",
+    "agentName": "my-server",
+    "pubKeyId": "a3f2b1c9d8e7f6a4",
+    "timestamp": 1749820800,
+    "nonce": "0123456789abcdef0123456789abcdef",
+    "signature": "<base64url-ed25519-signature>",
+    "dockerVersion": "27.0.3",
+    "hostname": "my-server",
+    "capabilities": [
+      "compose", "exec", "metrics", "events",
+      "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"
+    ],
+    "drydockCompat": "1.4.0",
+    "watcherTypes": ["docker"],
+    "triggerTypes": []
+  }
 }
 ```
+
+All Edge Mode JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`, `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `nonce`, and `signature` fields shown above, and Drydock verifies the signature against the agent's registered public key. The `tokenHash` field (SHA-256 of the shared token) is only a fallback for non-edge endpoints — the Drydock `/api/portwing/ws` endpoint rejects token-hash hellos with `ed25519-required`.
 

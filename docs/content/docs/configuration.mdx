@@ -55,8 +55,9 @@ The following variables govern how Portwing authenticates incoming requests. `TO
 | Variable | Default | Description |
 |---|---|---|
 | `DOCKER_SOCKET` | Auto-detect | Path to the Docker Unix socket. Portwing checks `/var/run/docker.sock`, `~/.docker/run/docker.sock`, `~/.orbstack/run/docker.sock`, and `/run/docker.sock` in that order; falls back to `/var/run/docker.sock` if none exist. |
-| `DOCKER_HOST` | — | Docker TCP host (e.g. `tcp://192.168.1.10:2375`). Alternative to socket-based access. |
 | `STACKS_DIR` | `/data/stacks` | Directory where Compose stack files are stored and managed. |
+
+Portwing talks to the Docker daemon over the Unix socket only — there is no `DOCKER_HOST` TCP transport.
 
 ---
 

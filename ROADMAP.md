@@ -1,75 +1,61 @@
 # Portwing Roadmap
 
-> Portwing is **alpha** software (`v0.5.x`). This roadmap describes direction and
-> priorities — not commitments. Items and ordering may change between releases.
-> For the authoritative record of what has shipped, see the
+> Portwing is pre-`v1.0.0` software (currently `v0.6.0`). This roadmap describes
+> direction and priorities — not commitments. Items and ordering may change
+> between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
 
-## Now — `v0.5.x` (hardening the alpha)
+## Shipped — edge mode, hardening, and quality gates
 
-The current line prioritizes production-readiness of the existing feature set
-over new surface area.
+The security-hardening, release/supply-chain, test-coverage, and edge-tunnel
+work previously tracked here as "in progress" landed across v0.5.0, v0.5.1,
+and v0.6.0 — see [CHANGELOG.md](CHANGELOG.md) for the itemized history. In
+particular:
 
-- **Security hardening** — credential handling, replay protection, per-request
-  signing, and resource limits across the Docker proxy and the edge tunnel.
-  Active items from the latest hardening pass: tightening pre-auth body limits,
-  validating registry-auth and proxy query parameters before they reach the
-  daemon, private-key file-permission parity, a consistent outbound TLS posture,
-  and goroutine-lifecycle cleanup on shutdown.
-- **Release & supply chain** — reproducible multi-arch builds, cosign-signed
-  images, SBOMs, build provenance, and a CI-gated tag → release pipeline.
-- **Test coverage & quality gates** — broaden unit, integration, and fuzz
-  coverage across the auth, MCP, and adapter paths — including the wire-protocol
-  envelope parser and the HTTP handlers — and bring the CI quality posture to
-  parity with sockguard's:
-  - **Three-tier fuzzing** — *shipped.* 60s smoke per PR (`ci.yml go-fuzz`),
-    5m nightly (`quality-fuzz-nightly.yml`), and a 1h monthly deep pass
-    (`quality-fuzz-monthly.yml`).
-  - **Soak testing** — *shipped.* `quality-soak-weekly.yml` drives the agent
-    (generic adapter, mock Docker upstream) under a sustained mix of inventory/
-    version/proxy reads plus SSE subscriber connect/hold/disconnect churn, and
-    fails if its resident set grows past a budget (64 MiB default) over a
-    multi-hour soak — the long-lived-agent leak profile the unit/integration
-    tiers don't catch. Harness: `benchmarks/cmd/{mockdocker,loadgen}` +
-    `scripts/soak.sh`.
-  - **Benchmark tracking** — *shipped.* Go benchmarks cover the per-request hot
-    paths (auth middleware, Argon2id verify — cold derivation and warm SHA-256
-    cache, client-IP extraction, rate limiter) and the parse paths (PHC,
-    image-ref, Drydock labels, trusted-proxy CIDRs, MCP dispatch).
-    `quality-bench-monthly.yml` reruns them with `-benchmem -count=5` on the
-    first of each month and keeps the results as a 90-day artifact, so a ns/op
-    or allocs/op regression is visible month over month.
-- **Documentation** — keep `SPEC.md`, `README.md`, and the design docs in sync
-  with the code as behavior settles. Near-term clean-up of the docs site:
-  replace illustrative/placeholder CVE identifiers in the security model with
-  described vulnerability classes, correct the security-model control numbering,
-  document the nonce-cache replay-window behavior in `SECURITY.md`, and sync the
-  docs site and marketing copy to the current release.
-
-## Next — hardening edge mode
-
-- **End-to-end edge mode** — *shipped.* Drydock 1.5 added the matching
+- **End-to-end edge mode.** Drydock 1.5 (GA, 2026-06-22) added the matching
   `/api/portwing/ws` controller endpoint (Ed25519-only), so the agent can dial
-  out and manage NAT'd / firewalled hosts with no inbound port. Both Drydock 1.5
-  and the paired Portwing release are pre-release.
-- **Edge tunnel robustness** — *shipped.* Ordered exec I/O (input that races
-  ahead of the Docker exec coming up is buffered in arrival order and replayed,
-  not dropped), outbound backpressure (a single writer goroutine fronts a
-  bounded send queue with a per-frame write deadline and evicts a controller
-  that can't keep up, so one slow consumer can't head-of-line-block every
-  session or stall the read pump), and a dedicated unit test harness for the
-  tunnel (auth hello, request fan-out, exec sessions) built on a consumer-side
-  Docker seam.
-- **Reproducible base images** — *shipped.* Both `Dockerfile` and
-  `Dockerfile.release` pin every base image by digest (`wolfi-base`, `alpine`,
-  `golang`), and Dependabot tracks the `docker` ecosystem weekly for updates.
+  out and manage NAT'd / firewalled hosts with no inbound port. Drydock 1.5 is
+  released; Portwing itself remains pre-`v1.0.0`, and edge mode is still early
+  access — see the edge-mode graduation gate in "Toward `v1.0`" below.
+- **Edge tunnel robustness.** Ordered exec I/O, a single-writer outbound
+  backpressure path with per-frame write deadlines and slow-consumer eviction,
+  and a dedicated wire-contract test harness (`internal/edge/wire_contract_test.go`).
+- **Three-tier fuzzing, soak testing, and benchmark tracking** in CI, at
+  parity with sockguard's quality posture — `quality-fuzz-nightly.yml` /
+  `quality-fuzz-monthly.yml`, `quality-soak-weekly.yml`
+  (`benchmarks/cmd/{mockdocker,loadgen}` + `scripts/soak.sh`), and
+  `quality-bench-monthly.yml`.
+- **Reproducible base images.** `Dockerfile` and `Dockerfile.release` pin
+  every base image by digest, with Dependabot tracking the `docker` ecosystem.
 
-## Later — toward `v1.0`
+## Toward `v1.0`
 
-- **Stable API & wire formats** — freeze the HTTP API, environment-variable
-  surface, and the agent ↔ controller protocol under semantic-versioning
-  guarantees.
-- **Operational ergonomics** — richer health/metrics, structured audit export,
+The path to `v1.0.0` is gated on concrete, verifiable items rather than a
+calendar date:
+
+- **Edge-mode graduation out of early access.** Drydock currently gates
+  `/api/portwing/ws` behind the `DD_EXPERIMENTAL_PORTWING` flag. Flipping that
+  flag on by default requires cross-repo load/soak evidence (not just
+  Portwing's own single-agent `quality-soak-weekly.yml`) covering reconnect
+  storms, sustained exec sessions, and controller-side backpressure against a
+  realistic multi-agent fleet.
+- **A drafted wire/API stability policy.** Semantic-versioning guarantees for
+  the HTTP API surface, the environment-variable surface, and the
+  `DrydockCompat` wire contract (`internal/protocol/messages.go`), so
+  downstream integrators know what counts as breaking once `v1.0.0` ships.
+  Not yet drafted.
+- **Package-manager distribution.** A Homebrew tap and `apt`/`rpm` packages
+  built through the existing GoReleaser pipeline, so installation doesn't
+  require a container image or pulling the raw binary off GitHub Releases.
+- **Remaining edge wire-protocol gaps.** `dd:container_log_request` and
+  `dd:container_delete_request` carry no `requestId`, so two concurrent
+  requests for the same container can't be correlated to their responses (the
+  core `request`/`response` pair already has this). Separately, the log
+  request's `follow` field is accepted on the wire but currently ignored —
+  `handleContainerLogRequest` calls `GetContainerLogs` with `follow=false,
+  timestamps=false` unconditionally — and there is no `timestamps` option on
+  the message at all.
+- **Operational ergonomics.** Richer health/metrics, structured audit export,
   and ready-to-run deployment examples for common topologies.
 
 ## Non-goals

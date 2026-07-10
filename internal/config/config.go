@@ -24,7 +24,6 @@ type Config struct {
 
 	// Docker
 	DockerSocket string
-	DockerHost   string
 	StacksDir    string
 
 	// Identity
@@ -165,7 +164,6 @@ func Load() (*Config, error) {
 		TrustedProxies: splitCSV(getEnv("TRUSTED_PROXIES", "")),
 
 		DockerSocket: dockerSocket,
-		DockerHost:   getEnv("DOCKER_HOST", ""),
 		StacksDir:    getEnv("STACKS_DIR", "/data/stacks"),
 
 		AgentID:   agentID,

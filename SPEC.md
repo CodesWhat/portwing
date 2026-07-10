@@ -51,7 +51,7 @@ Portwing runs an HTTP(S) server. The Drydock controller connects inbound.
 
 ### 2.3 Edge Mode
 
-Portwing initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/portwing/ws`). All communication is multiplexed over this single connection. Both sides are implemented: Drydock 1.5 ships the controller endpoint (Ed25519-only, `portwing/1.0`) and Portwing signs its hello with Ed25519. Edge mode is usable end-to-end as of the current release; full exec robustness under load is still being hardened. Drydock 1.5 and the current Portwing release are both pre-release.
+Portwing initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/portwing/ws`). All communication is multiplexed over this single connection. Both sides are implemented: Drydock 1.5 ships the controller endpoint (Ed25519-only, `portwing/1.0`) and Portwing signs its hello with Ed25519. Edge mode is usable end-to-end as of the current release; full exec robustness under load is still being hardened. Drydock 1.5 is released (GA); Portwing itself remains pre-`v1.0.0`.
 
 - Works behind NAT, firewalls, dynamic IPs
 - Auto-reconnect with exponential backoff + jitter
@@ -82,23 +82,27 @@ sequenceDiagram
 ```json
 {
   "type": "hello",
-  "version": "1.0.0",
-  "protocol": "portwing/1.0",
-  "agentId": "uuid",
-  "agentName": "my-server",
-  "pubKeyId": "a3f2b1c9d8e7f6a4",
-  "timestamp": 1749820800,
-  "nonce": "0123456789abcdef0123456789abcdef",
-  "signature": "<base64url-ed25519-signature>",
-  "dockerVersion": "27.0.3",
-  "hostname": "my-server",
-  "capabilities": ["compose", "exec", "metrics", "events",
-                    "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"],
-  "drydockCompat": "1.4.0",
-  "watcherTypes": ["docker"],
-  "triggerTypes": []
+  "data": {
+    "version": "1.0.0",
+    "protocol": "portwing/1.0",
+    "agentId": "uuid",
+    "agentName": "my-server",
+    "pubKeyId": "a3f2b1c9d8e7f6a4",
+    "timestamp": 1749820800,
+    "nonce": "0123456789abcdef0123456789abcdef",
+    "signature": "<base64url-ed25519-signature>",
+    "dockerVersion": "27.0.3",
+    "hostname": "my-server",
+    "capabilities": ["compose", "exec", "metrics", "events",
+                      "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"],
+    "drydockCompat": "1.4.0",
+    "watcherTypes": ["docker"],
+    "triggerTypes": []
+  }
 }
 ```
+
+All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
 
