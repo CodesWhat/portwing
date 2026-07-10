@@ -10,15 +10,15 @@
 
 **Security-first remote Docker agent — control your containers from anywhere, safely.**
 
-<img src="https://img.shields.io/badge/status-ALPHA-FF6B00?style=for-the-badge&labelColor=000000" alt="Status: Alpha" height="34">
+<img src="https://img.shields.io/badge/status-PRE--1.0-FF6B00?style=for-the-badge&labelColor=000000" alt="Status: Pre-1.0" height="34">
 
 </div>
 
 > [!WARNING]
 >
-> ### 🚧 Alpha software — not yet production-ready
+> ### 🚧 Pre-1.0 software — APIs may still change
 >
-> Portwing is in **active alpha** (`v0.3.x`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
+> Portwing is pre-`v1.0.0` (currently `v0.6.0`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
@@ -74,7 +74,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.3.0 is the current release.** Adds a startup banner, completes the rename from Lookout to Portwing, migrates the release pipeline to GoReleaser `dockers_v2`, and fixes two edge-mode bugs (reconnect backoff reset, steady-state read deadline). The security foundation from v0.2.0 is all present: Ed25519 per-client authentication, key enrollment, Argon2id token hashing, a read-only MCP server, Prometheus metrics, structured audit logging, and hardened CI/supply-chain infrastructure. See [CHANGELOG.md](CHANGELOG.md) for full release notes.
+> **v0.6.0 is the current release.** See [CHANGELOG.md](CHANGELOG.md) for the full itemized history of what has shipped.
 
 ```mermaid
 flowchart LR
@@ -102,7 +102,7 @@ flowchart LR
     DD -- "HTTPS + SSE · X-Dd-Agent-Secret" --> LB
 ```
 
-> The Drydock controller connects **inbound** to each Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). Each agent reaches the Docker Engine only through a sockguard socket filter. Outbound **edge mode** (the agent dialing the controller, for hosts with no inbound port) is usable end-to-end as of Drydock 1.5 — see [Connection Modes](#connection-modes).
+> The Drydock controller connects **inbound** to each Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). Each agent reaches the Docker Engine only through a sockguard socket filter. Outbound **edge mode** (the agent dialing the controller, for hosts with no inbound port) is usable end-to-end now that Drydock 1.5 has shipped (GA) — see [Connection Modes](#connection-modes).
 
 <h2 align="center" id="quick-start">🚀 Quick Start</h2>
 
@@ -204,7 +204,7 @@ volumes:
 <details>
 <summary>Edge mode variant (outbound WebSocket — early access)</summary>
 
-> **Early access.** Edge mode is usable end-to-end as of the current release: Drydock 1.5 ships the `/api/portwing/ws` controller endpoint (Ed25519-only) and Portwing signs its hello with an Ed25519 key. Both Drydock 1.5 and the current Portwing release are pre-release; full exec robustness under load is still being hardened.
+> **Early access.** Edge mode is usable end-to-end as of the current release: Drydock 1.5 ships the `/api/portwing/ws` controller endpoint (Ed25519-only) and Portwing signs its hello with an Ed25519 key. Drydock 1.5 is released (GA); Portwing is still pre-`v1.0.0`. Full exec robustness under load is still being hardened.
 
 For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml) has Portwing dial out to your Drydock controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`); no port is published on the remote host.
 
@@ -277,10 +277,12 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 <h2 align="center" id="recent-updates">🆕 Recent Updates</h2>
 
 <details>
-<summary><strong>Latest release highlights</strong></summary>
+<summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-- **v0.3.0 shipped on 2026-06-15** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline). See [CHANGELOG.md](CHANGELOG.md).
-- **v0.2.0 shipped on 2026-06-12** — Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`.
+For v0.4.0 and later — including v0.6.0, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+
+- **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
+- **v0.2.0** — Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`.
 - **Key enrollment** — optional single-use `ENROLLMENT_TOKEN` (`POST /api/portwing/enroll`) for bootstrapping the first Ed25519 key — burned on first use, rate-limited, and audit-logged.
 - **Argon2id token hashing** — `TOKEN_HASH` / `TOKEN_HASH_FILE` with OWASP-recommended parameters; SHA-256 success cache keeps per-request cost flat.
 - **MCP server** — read-only Model Context Protocol endpoint at `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25) for AI assistants (Claude, Cursor, Windsurf). Tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`.
@@ -288,7 +290,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 - **Structured audit logging** — `AUDIT_LOG` env var records auth events, Compose operations, and exec sessions as JSON lines.
 - **Generic REST adapter** — headless REST + SSE management API for standalone mode without a Drydock platform connection (`ADAPTER=generic`).
 - **Hardened CI & supply chain** — SHA-pinned actions, five Go fuzz targets (60s CI / 5m nightly), integration suite against a real Docker daemon, weekly vulnerability scans (govulncheck/grype/gosec), monthly mutation testing, OpenSSF Scorecard, CodeQL, and cosign keyless signing + CycloneDX SBOM + SLSA provenance on every release.
-- **v0.1.0 shipped on 2025-06-01** — initial release: transparent Docker API proxy, Edge mode WebSocket tunnel, Drydock adapter, SSE event stream, token auth, rate limiting, multi-arch image.
+- **v0.1.0** — initial release: transparent Docker API proxy, Edge mode WebSocket tunnel, Drydock adapter, SSE event stream, token auth, rate limiting, multi-arch image.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
@@ -300,7 +302,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 | | Feature | Description |
 |---|---|---|
-| 🔄 | **Connection Modes** | Standard mode (the Drydock controller connects inbound over HTTP/SSE) is the primary integration. Edge mode (agent dials out over WebSocket, for NAT/firewalled hosts) is usable end-to-end as of the current release with Drydock 1.5 (both pre-release). |
+| 🔄 | **Connection Modes** | Standard mode (the Drydock controller connects inbound over HTTP/SSE) is the primary integration. Edge mode (agent dials out over WebSocket, for NAT/firewalled hosts) is usable end-to-end as of the current release with Drydock 1.5, which is GA; Portwing itself is still pre-`v1.0.0`. |
 | 🐳 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
 | 🔑 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
 | 🔐 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
@@ -406,7 +408,7 @@ Portwing runs an HTTP(S) server; the **Drydock controller connects inbound** and
 
 ### Edge Mode — early access
 
-Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound port. Both sides are implemented — Drydock 1.5 ships the controller endpoint and Portwing signs an Ed25519 hello — so edge mode is **usable end-to-end** as of the current release. Both Drydock 1.5 and the current Portwing release are pre-release; full exec robustness under load is still being hardened. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
+Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound port. Both sides are implemented — Drydock 1.5 ships the controller endpoint and Portwing signs an Ed25519 hello — so edge mode is **usable end-to-end** as of the current release. Drydock 1.5 is released (GA); Portwing is still pre-`v1.0.0`, and full exec robustness under load is still being hardened. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
 
 - Set when `DRYDOCK_URL` is configured along with `TOKEN`, `AUTHORIZED_KEYS`, or `PRIVATE_KEY_FILE`
 - Targets hosts behind NAT, firewalls, and dynamic IPs
@@ -529,8 +531,9 @@ the connection alive through proxies.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DOCKER_SOCKET` | Auto-detect | Docker socket path |
-| `DOCKER_HOST` | -- | Docker TCP host (alternative) |
 | `STACKS_DIR` | `/data/stacks` | Compose stack file directory |
+
+Portwing talks to the Docker daemon over the Unix socket only — there is no `DOCKER_HOST` TCP transport.
 
 ### Agent Identity
 
