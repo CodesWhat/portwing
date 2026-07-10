@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-10
+
 ### Added
 
 - **Agent info in the Drydock UI**: the `dd:ack` event now reports real host memory (`memoryGb`, read from `/proc/meminfo` with no cgo, rounded to one decimal GiB; 0 on non-Linux hosts), the agent's `logLevel`, and its `pollInterval` (as a Go duration string), so standard-mode agents no longer show 0 GB / blank runtime details in Drydock.
