@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Dead `DOCKER_HOST` config surface**: the top-level `DOCKER_HOST` environment variable and the corresponding `Config.DockerHost` field never had a consumer — Portwing only ever dials the Docker daemon over the Unix socket (`DOCKER_SOCKET`). Documentation is now unix-socket-only; the unrelated `DOCKER_HOST` entry in the Compose child-process env var denylist (which blocks a stack from redirecting the daemon a compose operation targets) is unchanged.
+
 ## [0.6.0] - 2026-07-10
 
 ### Added
