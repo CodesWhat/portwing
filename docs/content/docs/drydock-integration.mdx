@@ -245,7 +245,7 @@ Handshake sequence:
 }
 ```
 
-All Edge Mode wire messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`, `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level.
+All Edge Mode JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`, `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `nonce`, and `signature` fields shown above, and Drydock verifies the signature against the agent's registered public key. The `tokenHash` field (SHA-256 of the shared token) is only a fallback for non-edge endpoints — the Drydock `/api/portwing/ws` endpoint rejects token-hash hellos with `ed25519-required`.
 

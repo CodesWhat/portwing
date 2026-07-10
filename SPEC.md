@@ -102,7 +102,7 @@ sequenceDiagram
 }
 ```
 
-All wire messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level.
+All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
 
