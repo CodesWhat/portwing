@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Edge log/delete request correlation**: the `dd:container_log_request` / `dd:container_log_response` and `dd:container_delete_request` / `dd:container_delete_response` pairs now carry an optional `requestId` that the agent echoes back on the response. This lets a controller correlate concurrent requests for the same container by id instead of matching responses in arrival order. This is an agent-side enablement: the Drydock controller must be updated to read the echoed `requestId` to benefit — its current FIFO-per-container fallback (which mismatches two in-flight requests for the same container) keeps working unchanged until then.
+- **Edge log options**: `dd:container_log_request` now honors `follow` and adds a `timestamps` field. `timestamps` prepends an RFC3339 timestamp per line. Because the response is a single buffered message, `follow` is served as a bounded live window (the daemon is asked to end the stream a few seconds out, via a Unix-timestamp `until`) rather than an indefinite stream — continuous tailing still uses the generic `request`/`stream`/`stream_end` path against `GET /containers/{id}/logs?follow=1`. Drydock does not send these options over the edge path yet; the agent honors them when a controller does.
+- **Edge reconnect classification**: a hello rejection with a terminal code (`ed25519-required`, `unknown-key`, `bad-signature`, `protocol-mismatch`, `no-auth`, `invalid-agent-name`, `parse-error`, `expected-hello`, `agent-name-claimed`) now makes the agent exit with an actionable error — a distinct `fatal connection error, not retrying` log — instead of silently reconnecting forever inside the process; timing/capacity codes and any unrecognized code are still retried with backoff. Previously every rejection, including a revoked key (`unknown-key`), retried indefinitely. Note: under a container restart policy (e.g. `restart: unless-stopped`) the container may still restart after the agent exits, so alert on the fatal log line or the restart count rather than assuming the process stays down.
+
+### Fixed
+
+- **Corrupted edge log output**: `dd:container_log_response.logs` now strips Docker's 8-byte multiplexed stream-frame headers for non-TTY containers (the same de-muxing the HTTP `/logs` route does) while passing a TTY container's raw stream through unchanged, so logs are plain text instead of text interleaved with binary frame headers (non-TTY) and are no longer garbled by demuxing a header-less stream (TTY).
+
 ### Removed
 
 - **Dead `DOCKER_HOST` config surface**: the top-level `DOCKER_HOST` environment variable and the corresponding `Config.DockerHost` field never had a consumer — Portwing only ever dials the Docker daemon over the Unix socket (`DOCKER_SOCKET`). Documentation is now unix-socket-only; the unrelated `DOCKER_HOST` entry in the Compose child-process env var denylist (which blocks a stack from redirecting the daemon a compose operation targets) is unchanged.

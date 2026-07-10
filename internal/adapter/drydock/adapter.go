@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/adapter"
 	"github.com/codeswhat/portwing/internal/docker"
@@ -25,6 +27,22 @@ const (
 	LabelLinkTemplate = "dd.link.template"
 
 	defaultMessageHandlerConcurrency = 32
+
+	// maxContainerLogBytes caps a single dd:container_log_response payload.
+	maxContainerLogBytes = 100 * 1024 * 1024 // 100 MiB
+)
+
+// followLogWindow and followLogGrace bound a dd:container_log_request with
+// follow=true. The response is a single buffered string and cannot stream, so a
+// follow request is served as a bounded live window: the daemon is asked to end
+// the log stream at now+followLogWindow (a clean server-side EOF), and
+// followLogGrace pads the handler's context deadline past that so the daemon's
+// EOF wins in the normal case — the deadline only fires if an old daemon ignores
+// `until`, preventing an indefinitely held handler semaphore slot. They are vars
+// (not consts) only so tests can shrink the window; treat them as constants.
+var (
+	followLogWindow = 5 * time.Second
+	followLogGrace  = 2 * time.Second
 )
 
 // Adapter is the Drydock adapter for Portwing. It provides container sync,
@@ -263,10 +281,30 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 		tail = fmt.Sprintf("%d", msg.Tail)
 	}
 
-	body, err := a.dockerClient.GetContainerLogs(ctx, msg.ContainerID, tail, msg.Since, msg.Until, false, false)
+	until := msg.Until
+	if msg.Follow {
+		// A dd:container_log_response carries a single buffered Logs string, so
+		// it cannot stream a live tail. Honor Follow as a bounded live window:
+		// portwing owns the end time so the handler always returns promptly and
+		// never holds a message-handler semaphore slot indefinitely. Override
+		// `until` with now+followLogWindow as Unix seconds — the grammar the
+		// Docker daemon parses for `until` (RFC3339 is rejected). A
+		// caller-supplied `until` is intentionally ignored on a follow request
+		// so the daemon's EOF and the context deadline below always agree;
+		// continuous tailing belongs on the streaming request/stream/stream_end
+		// path (docker.IsStreamingPath), not on this message pair. The context
+		// deadline is a backstop in case an old daemon ignores `until`.
+		until = strconv.FormatInt(time.Now().Add(followLogWindow).Unix(), 10)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, followLogWindow+followLogGrace)
+		defer cancel()
+	}
+
+	body, err := a.dockerClient.GetContainerLogs(ctx, msg.ContainerID, tail, msg.Since, until, msg.Follow, msg.Timestamps)
 	if err != nil {
 		slog.Warn("failed to get container logs", "container", msg.ContainerID, "error", err)
 		a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
+			RequestID:   msg.RequestID,
 			ContainerID: msg.ContainerID,
 			Logs:        fmt.Sprintf("error: %v", err),
 		})
@@ -274,9 +312,19 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 	}
 	defer body.Close()
 
-	data, _ := io.ReadAll(io.LimitReader(body, 100*1024*1024))
+	// Decode to plain text: strip Docker's 8-byte multiplex frame headers for a
+	// non-TTY container, or pass a TTY container's raw stream through unchanged
+	// (demuxing raw output would corrupt it). Matches what the HTTP /logs route
+	// returns for the same container. A trailing read error (EOF, or the follow
+	// window's deadline firing mid-read) still yields the bytes read so far, so
+	// use them and keep the error at debug.
+	data, err := docker.DecodeContainerLogs(io.LimitReader(body, maxContainerLogBytes))
+	if err != nil {
+		slog.Debug("decoding container logs", "container", msg.ContainerID, "error", err)
+	}
 
 	a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
+		RequestID:   msg.RequestID,
 		ContainerID: msg.ContainerID,
 		Logs:        string(data),
 	})
@@ -287,6 +335,7 @@ func (a *Adapter) handleContainerDeleteRequest(ctx context.Context, sender adapt
 	if err != nil {
 		slog.Warn("failed to delete container", "container", msg.ContainerID, "error", err)
 		a.sendTypedMessage(sender, protocol.TypeDDContainerDeleteResponse, protocol.DDContainerDeleteResponseMessage{
+			RequestID:   msg.RequestID,
 			ContainerID: msg.ContainerID,
 			Success:     false,
 			Error:       err.Error(),
@@ -295,6 +344,7 @@ func (a *Adapter) handleContainerDeleteRequest(ctx context.Context, sender adapt
 	}
 
 	a.sendTypedMessage(sender, protocol.TypeDDContainerDeleteResponse, protocol.DDContainerDeleteResponseMessage{
+		RequestID:   msg.RequestID,
 		ContainerID: msg.ContainerID,
 		Success:     true,
 	})

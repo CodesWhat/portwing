@@ -144,10 +144,23 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 | `dd:watch_container_response` | Agent -> Server | Single container result |
 | `dd:trigger_request` | Server -> Agent | Execute trigger |
 | `dd:trigger_response` | Agent -> Server | Trigger result |
-| `dd:container_log_request` | Server -> Agent | Request container logs |
-| `dd:container_log_response` | Agent -> Server | Container log data |
+| `dd:container_log_request` | Server -> Agent | Request container logs (`tail`, `since`, `until`, `follow`, `timestamps`) |
+| `dd:container_log_response` | Agent -> Server | Container log data (correlated by `requestId`) |
 | `dd:container_delete_request` | Server -> Agent | Request container removal |
-| `dd:container_delete_response` | Agent -> Server | Removal result (`success`/`error`) |
+| `dd:container_delete_response` | Agent -> Server | Removal result (`success`/`error`, correlated by `requestId`) |
+
+The `dd:container_log_*` and `dd:container_delete_*` pairs each carry an
+optional `requestId` that the agent echoes back on the response, so a controller
+can correlate concurrent requests for the same container instead of matching
+responses positionally (a controller must read the echo to use it; one matching
+positionally is unaffected). `dd:container_log_response.logs` is plain text —
+Docker's 8-byte stream-frame headers are stripped for a non-TTY container and a
+TTY container's header-less stream is passed through unchanged — matching the
+HTTP `/logs` route. `follow` is served as a **bounded** live window (the agent
+asks the daemon to end the stream a few seconds out, via a Unix-timestamp
+`until`) because the response is a single buffered message, not a stream —
+continuous tailing uses the `request`/`stream`/`stream_end` path against
+`GET /containers/{id}/logs?follow=1`.
 
 ## 4. Standard Mode HTTP API
 
@@ -319,6 +332,17 @@ Subscribes to Docker `/events?type=container` API.
 ### 9.3 Reconnection
 
 Dedicated non-pooled Unix socket. Exponential backoff (5s initial, 60s max), resets after 30s of stable connection.
+
+A hello rejection (`error` frame in place of `welcome`) is classified before
+reconnecting. **Terminal** codes — where retrying the same configuration cannot
+succeed (`ed25519-required`, `unknown-key`, `bad-signature`, `protocol-mismatch`,
+`no-auth`, `invalid-agent-name`, `parse-error`, `expected-hello`,
+`agent-name-claimed`) — stop the agent with an actionable error instead of
+looping forever. Everything else (timing/capacity conditions like
+`timestamp-skew`, `replay`, `rate-limited`, `registry-full`,
+`agent-already-connected`, and any unrecognized code) is retried with backoff.
+This code set mirrors the drydock controller and is not itself a versioned wire
+contract, so an unrecognized code defaults to retry rather than a hard stop.
 
 ## 10. Drydock Container Model
 

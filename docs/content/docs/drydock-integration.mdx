@@ -281,10 +281,34 @@ When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `
 | `dd:watch_container_response` | Agent → Controller | Single container result |
 | `dd:trigger_request` | Controller → Agent | Execute trigger |
 | `dd:trigger_response` | Agent → Controller | Trigger result |
-| `dd:container_log_request` | Controller → Agent | Request container logs |
-| `dd:container_log_response` | Agent → Controller | Container log data |
+| `dd:container_log_request` | Controller → Agent | Request container logs (`tail`, `since`, `until`, `follow`, `timestamps`) |
+| `dd:container_log_response` | Agent → Controller | Container log data (correlated by `requestId`) |
 | `dd:container_delete_request` | Controller → Agent | Request container removal |
-| `dd:container_delete_response` | Agent → Controller | Removal result (`success`/`error`) |
+| `dd:container_delete_response` | Agent → Controller | Removal result (`success`/`error`, correlated by `requestId`) |
+
+The `dd:container_log_*` and `dd:container_delete_*` pairs each accept an optional
+`requestId` that the agent echoes back on the response, so a controller can
+correlate concurrent requests for the same container by id rather than matching
+responses in arrival order. This is an agent-side capability: a controller must
+read the echoed `requestId` to use it, and one that still dequeues responses in
+arrival order is unaffected and can adopt it incrementally. The log response's
+`logs` is plain text — Docker's 8-byte stream-frame headers are stripped for a
+non-TTY container, and a TTY container's header-less stream is passed through
+unchanged — the same output the HTTP `/logs` route produces. `timestamps`
+prepends an RFC3339 timestamp per line.
+`follow` is served as a **bounded** live window — because the response is a
+single buffered message, the agent asks the daemon to end the stream a few
+seconds out rather than streaming indefinitely; for a continuous live tail, send
+a generic `request` for `GET /containers/{id}/logs?follow=1` and consume the
+`stream` / `stream_end` frames instead.
+
+A hello rejection is classified before the agent reconnects. Terminal codes
+(`ed25519-required`, `unknown-key`, `bad-signature`, `protocol-mismatch`,
+`no-auth`, `invalid-agent-name`, `parse-error`, `expected-hello`,
+`agent-name-claimed`) stop the agent with an actionable error instead of
+retrying forever; timing/capacity codes (`timestamp-skew`, `replay`,
+`rate-limited`, `registry-full`, `agent-already-connected`, …) and any
+unrecognized code are retried with backoff.
 
 ---
 

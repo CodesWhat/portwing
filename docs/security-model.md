@@ -134,6 +134,8 @@ AEAD suites by design.
 |----------|-------|---------|
 | WebSocket read | 16 MB | Prevent memory exhaustion from large WebSocket frames |
 | HTTP response body read | 100 MB | Bound buffered Docker API responses |
+| Edge log-request payload | 100 MB | Bound a buffered `dd:container_log_response` |
+| Edge follow-log window | ~7s | Bound a `follow=true` `dd:container_log_request` so it can't hold a message-handler slot indefinitely |
 | Exec request body | 10 MB | Limit exec payload size |
 | Concurrent exec sessions | 100 | Prevent unbounded goroutine growth |
 | Concurrent stream sessions | 100 | Prevent unbounded goroutine growth |

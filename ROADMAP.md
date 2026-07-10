@@ -47,14 +47,15 @@ calendar date:
 - **Package-manager distribution.** A Homebrew tap and `apt`/`rpm` packages
   built through the existing GoReleaser pipeline, so installation doesn't
   require a container image or pulling the raw binary off GitHub Releases.
-- **Remaining edge wire-protocol gaps.** `dd:container_log_request` and
-  `dd:container_delete_request` carry no `requestId`, so two concurrent
-  requests for the same container can't be correlated to their responses (the
-  core `request`/`response` pair already has this). Separately, the log
-  request's `follow` field is accepted on the wire but currently ignored —
-  `handleContainerLogRequest` calls `GetContainerLogs` with `follow=false,
-  timestamps=false` unconditionally — and there is no `timestamps` option on
-  the message at all.
+- **Remaining edge wire-protocol gaps.** The `dd:container_log_*` /
+  `dd:container_delete_*` pairs now echo a `requestId` for concurrent-request
+  correlation, honor `timestamps`, and serve `follow` as a bounded live window
+  (with the log payload de-multiplexed to plain text). The open piece is a
+  *true* continuous live tail under the `dd:` namespace: today that requires the
+  generic `request`/`stream`/`stream_end` path against
+  `GET /containers/{id}/logs?follow=1`. Giving `dd:container_log_request` its own
+  streaming variant is a wire-shape decision to pin jointly with the drydock
+  controller before either side builds it.
 - **Operational ergonomics.** Richer health/metrics, structured audit export,
   and ready-to-run deployment examples for common topologies.
 

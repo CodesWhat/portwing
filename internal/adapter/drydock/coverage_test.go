@@ -12,8 +12,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -313,6 +315,36 @@ func TestSendContainerEvent_UnknownTypeIsNoOp(t *testing.T) {
 // adapter.go — handleContainerLogRequest via HandleMessage + fake Docker
 // ---------------------------------------------------------------------------
 
+func waitForSyncCaptureResponse(t *testing.T, sender *syncCaptureSender, wantMsgType string) any {
+	t.Helper()
+
+	select {
+	case <-sender.ready:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for %s response", wantMsgType)
+	}
+
+	if got := sender.MsgType(); got != wantMsgType {
+		t.Fatalf("response type = %q, want %q", got, wantMsgType)
+	}
+
+	return sender.Data()
+}
+
+func lastLogsQuery(t *testing.T, calls *routeTestDockerCalls) url.Values {
+	t.Helper()
+
+	raw, ok := calls.lastLogsRawQuery.Load().(string)
+	if !ok {
+		t.Fatal("docker logs query was not recorded")
+	}
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		t.Fatalf("parse logs query %q: %v", raw, err)
+	}
+	return values
+}
+
 func TestHandleContainerLogRequest_SuccessPath(t *testing.T) {
 	t.Parallel()
 
@@ -339,6 +371,320 @@ func TestHandleContainerLogRequest_SuccessPath(t *testing.T) {
 	}
 	if calls.logsCalls.Load() == 0 {
 		t.Fatal("expected at least one docker logs call")
+	}
+}
+
+func TestHandleContainerLogRequest_RequestIDTimestampsAndDemuxSuccess(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		payload       json.RawMessage
+		wantRequestID string
+		wantTS        bool
+	}{
+		{
+			name:          "request id and timestamps",
+			payload:       json.RawMessage(`{"requestId":"req-log-success","containerId":"container-1","tail":10,"timestamps":true}`),
+			wantRequestID: "req-log-success",
+			wantTS:        true,
+		},
+		{
+			name:          "omitted request id",
+			payload:       json.RawMessage(`{"containerId":"container-1","tail":10}`),
+			wantRequestID: "",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, calls, shutdown := newRouteTestDockerClient(t)
+			defer shutdown()
+
+			a := NewAdapter(client, "test-agent", AgentInfo{})
+			sender := newSyncCaptureSender()
+
+			handled := a.HandleMessage(context.Background(), sender, protocol.TypeDDContainerLogRequest, tc.payload)
+			if !handled {
+				t.Fatal("expected dd:container_log_request to be handled")
+			}
+
+			data := waitForSyncCaptureResponse(t, sender, protocol.TypeDDContainerLogResponse)
+			resp, ok := data.(protocol.DDContainerLogResponseMessage)
+			if !ok {
+				t.Fatalf("response payload type = %T, want protocol.DDContainerLogResponseMessage", data)
+			}
+			if resp.RequestID != tc.wantRequestID {
+				t.Fatalf("RequestID = %q, want %q", resp.RequestID, tc.wantRequestID)
+			}
+			if resp.ContainerID != "container-1" {
+				t.Fatalf("ContainerID = %q, want container-1", resp.ContainerID)
+			}
+			if resp.Logs != "log line\n" {
+				t.Fatalf("Logs = %q, want demuxed payload %q", resp.Logs, "log line\n")
+			}
+
+			query := lastLogsQuery(t, calls)
+			if got := query.Get("timestamps"); tc.wantTS && got != "1" {
+				t.Fatalf("timestamps query = %q, want 1", got)
+			}
+			if got := query.Get("timestamps"); !tc.wantTS && got != "" {
+				t.Fatalf("timestamps query = %q, want omitted", got)
+			}
+		})
+	}
+}
+
+func TestHandleContainerLogRequest_RequestIDOnDockerError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		payload       json.RawMessage
+		wantRequestID string
+	}{
+		{
+			name:          "request id",
+			payload:       json.RawMessage(`{"requestId":"req-log-error","containerId":"container-1","tail":5}`),
+			wantRequestID: "req-log-error",
+		},
+		{
+			name:          "omitted request id",
+			payload:       json.RawMessage(`{"containerId":"container-1","tail":5}`),
+			wantRequestID: "",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, shutdown := newErrorDockerServer(t, http.StatusInternalServerError, http.StatusNoContent)
+			defer shutdown()
+
+			a := NewAdapter(client, "test-agent", AgentInfo{})
+			sender := newSyncCaptureSender()
+
+			handled := a.HandleMessage(context.Background(), sender, protocol.TypeDDContainerLogRequest, tc.payload)
+			if !handled {
+				t.Fatal("expected dd:container_log_request to be handled")
+			}
+
+			data := waitForSyncCaptureResponse(t, sender, protocol.TypeDDContainerLogResponse)
+			resp, ok := data.(protocol.DDContainerLogResponseMessage)
+			if !ok {
+				t.Fatalf("response payload type = %T, want protocol.DDContainerLogResponseMessage", data)
+			}
+			if resp.RequestID != tc.wantRequestID {
+				t.Fatalf("RequestID = %q, want %q", resp.RequestID, tc.wantRequestID)
+			}
+			if resp.ContainerID != "container-1" {
+				t.Fatalf("ContainerID = %q, want container-1", resp.ContainerID)
+			}
+			if !strings.HasPrefix(resp.Logs, "error: ") {
+				t.Fatalf("Logs = %q, want docker error response", resp.Logs)
+			}
+		})
+	}
+}
+
+func TestHandleContainerLogRequest_FollowCompletesWithBoundedUntil(t *testing.T) {
+	t.Parallel()
+
+	client, calls, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	sender := newSyncCaptureSender()
+
+	payload := json.RawMessage(`{"requestId":"req-follow","containerId":"container-1","follow":true,"until":"2024-12-31T00:00:00Z"}`)
+	handled := a.HandleMessage(context.Background(), sender, protocol.TypeDDContainerLogRequest, payload)
+	if !handled {
+		t.Fatal("expected dd:container_log_request to be handled")
+	}
+
+	data := waitForSyncCaptureResponse(t, sender, protocol.TypeDDContainerLogResponse)
+	resp, ok := data.(protocol.DDContainerLogResponseMessage)
+	if !ok {
+		t.Fatalf("response payload type = %T, want protocol.DDContainerLogResponseMessage", data)
+	}
+	if resp.RequestID != "req-follow" {
+		t.Fatalf("RequestID = %q, want req-follow", resp.RequestID)
+	}
+	if resp.Logs != "log line\n" {
+		t.Fatalf("Logs = %q, want demuxed payload %q", resp.Logs, "log line\n")
+	}
+
+	query := lastLogsQuery(t, calls)
+	if got := query.Get("follow"); got != "1" {
+		t.Fatalf("follow query = %q, want 1", got)
+	}
+	until := query.Get("until")
+	if until == "" {
+		t.Fatal("until query was empty for follow=true")
+	}
+	untilSeconds, err := strconv.ParseInt(until, 10, 64)
+	if err != nil {
+		t.Fatalf("until query = %q, want Unix seconds: %v", until, err)
+	}
+	wantUntil := time.Now().Add(followLogWindow).Unix()
+	if diff := untilSeconds - wantUntil; diff < -2 || diff > 2 {
+		t.Fatalf("until query = %d, want within 2s of %d", untilSeconds, wantUntil)
+	}
+}
+
+func TestHandleContainerLogRequest_NonFollowPassesUntilThrough(t *testing.T) {
+	t.Parallel()
+
+	client, calls, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	sender := newSyncCaptureSender()
+
+	const wantUntil = "2024-12-31T00:00:00Z"
+	payload := json.RawMessage(`{"requestId":"req-until","containerId":"container-1","until":"` + wantUntil + `"}`)
+	handled := a.HandleMessage(context.Background(), sender, protocol.TypeDDContainerLogRequest, payload)
+	if !handled {
+		t.Fatal("expected dd:container_log_request to be handled")
+	}
+
+	data := waitForSyncCaptureResponse(t, sender, protocol.TypeDDContainerLogResponse)
+	resp, ok := data.(protocol.DDContainerLogResponseMessage)
+	if !ok {
+		t.Fatalf("response payload type = %T, want protocol.DDContainerLogResponseMessage", data)
+	}
+	if resp.RequestID != "req-until" {
+		t.Fatalf("RequestID = %q, want req-until", resp.RequestID)
+	}
+
+	query := lastLogsQuery(t, calls)
+	if got := query.Get("follow"); got != "" {
+		t.Fatalf("follow query = %q, want omitted", got)
+	}
+	if got := query.Get("until"); got != wantUntil {
+		t.Fatalf("until query = %q, want %q", got, wantUntil)
+	}
+}
+
+func TestHandleContainerLogRequest_RawTTYLogsPassThrough(t *testing.T) {
+	t.Parallel()
+
+	client, calls, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	const rawLogs = "hello world\nline two\n"
+	calls.setLogsResponse("tty-container", []byte(rawLogs))
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	sender := newSyncCaptureSender()
+
+	payload := json.RawMessage(`{"requestId":"req-tty","containerId":"tty-container","tail":10}`)
+	handled := a.HandleMessage(context.Background(), sender, protocol.TypeDDContainerLogRequest, payload)
+	if !handled {
+		t.Fatal("expected dd:container_log_request to be handled")
+	}
+
+	data := waitForSyncCaptureResponse(t, sender, protocol.TypeDDContainerLogResponse)
+	resp, ok := data.(protocol.DDContainerLogResponseMessage)
+	if !ok {
+		t.Fatalf("response payload type = %T, want protocol.DDContainerLogResponseMessage", data)
+	}
+	if resp.RequestID != "req-tty" {
+		t.Fatalf("RequestID = %q, want req-tty", resp.RequestID)
+	}
+	if resp.Logs != rawLogs {
+		t.Fatalf("Logs = %q, want raw TTY logs %q", resp.Logs, rawLogs)
+	}
+}
+
+func TestHandleContainerLogRequest_TruncatedFrameReturnsPartialLogs(t *testing.T) {
+	t.Parallel()
+
+	client, calls, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	body := append(routeTestDockerLogHeader(1, uint32(len("partial\n"))), []byte("part")...)
+	calls.setLogsResponse("truncated-container", body)
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	sender := newSyncCaptureSender()
+
+	payload := json.RawMessage(`{"requestId":"req-truncated","containerId":"truncated-container"}`)
+	handled := a.HandleMessage(context.Background(), sender, protocol.TypeDDContainerLogRequest, payload)
+	if !handled {
+		t.Fatal("expected dd:container_log_request to be handled")
+	}
+
+	data := waitForSyncCaptureResponse(t, sender, protocol.TypeDDContainerLogResponse)
+	resp, ok := data.(protocol.DDContainerLogResponseMessage)
+	if !ok {
+		t.Fatalf("response payload type = %T, want protocol.DDContainerLogResponseMessage", data)
+	}
+	if resp.RequestID != "req-truncated" {
+		t.Fatalf("RequestID = %q, want req-truncated", resp.RequestID)
+	}
+	if resp.ContainerID != "truncated-container" {
+		t.Fatalf("ContainerID = %q, want truncated-container", resp.ContainerID)
+	}
+	if resp.Logs != "part" {
+		t.Fatalf("Logs = %q, want partial demuxed payload %q", resp.Logs, "part")
+	}
+}
+
+func TestHandleContainerLogRequest_FollowDeadlineReturnsPartialLogs(t *testing.T) {
+	originalWindow := followLogWindow
+	originalGrace := followLogGrace
+	followLogWindow = 50 * time.Millisecond
+	followLogGrace = 20 * time.Millisecond
+	defer func() {
+		followLogWindow = originalWindow
+		followLogGrace = originalGrace
+	}()
+
+	client, calls, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	const logs = "follow chunk\n"
+	calls.setBlockingLogsResponse("container-1", routeTestDockerLogFrame(1, []byte(logs)))
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	sender := newSyncCaptureSender()
+
+	start := time.Now()
+	payload := json.RawMessage(`{"requestId":"req-follow-deadline","containerId":"container-1","follow":true}`)
+	handled := a.HandleMessage(context.Background(), sender, protocol.TypeDDContainerLogRequest, payload)
+	if !handled {
+		t.Fatal("expected dd:container_log_request to be handled")
+	}
+
+	select {
+	case <-sender.ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for follow log response")
+	}
+
+	elapsed := time.Since(start)
+	maxElapsed := followLogWindow + followLogGrace + 750*time.Millisecond
+	if elapsed > maxElapsed {
+		t.Fatalf("follow log request took %s, want <= %s", elapsed, maxElapsed)
+	}
+	if got := sender.MsgType(); got != protocol.TypeDDContainerLogResponse {
+		t.Fatalf("response type = %q, want %q", got, protocol.TypeDDContainerLogResponse)
+	}
+	resp, ok := sender.Data().(protocol.DDContainerLogResponseMessage)
+	if !ok {
+		t.Fatalf("response payload type = %T, want protocol.DDContainerLogResponseMessage", sender.Data())
+	}
+	if resp.RequestID != "req-follow-deadline" {
+		t.Fatalf("RequestID = %q, want req-follow-deadline", resp.RequestID)
+	}
+	if !strings.Contains(resp.Logs, logs) {
+		t.Fatalf("Logs = %q, want to contain %q", resp.Logs, logs)
 	}
 }
 

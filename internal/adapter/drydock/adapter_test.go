@@ -326,7 +326,7 @@ func TestHandleContainerDeleteRequest_Success(t *testing.T) {
 	}
 	sender := &captureSender{}
 
-	msg := protocol.DDContainerDeleteRequestMessage{ContainerID: "container-1"}
+	msg := protocol.DDContainerDeleteRequestMessage{RequestID: "req-delete-success", ContainerID: "container-1"}
 	a.handleContainerDeleteRequest(context.Background(), sender, msg)
 
 	if calls.count.Load() != 1 {
@@ -345,6 +345,9 @@ func TestHandleContainerDeleteRequest_Success(t *testing.T) {
 	}
 	if resp.ContainerID != "container-1" {
 		t.Fatalf("expected ContainerID %q, got %q", "container-1", resp.ContainerID)
+	}
+	if resp.RequestID != "req-delete-success" {
+		t.Fatalf("expected RequestID %q, got %q", "req-delete-success", resp.RequestID)
 	}
 	if !resp.Success {
 		t.Fatalf("expected Success=true, got false (error=%q)", resp.Error)
@@ -369,7 +372,7 @@ func TestHandleContainerDeleteRequest_Error(t *testing.T) {
 	}
 	sender := &captureSender{}
 
-	msg := protocol.DDContainerDeleteRequestMessage{ContainerID: "missing-container"}
+	msg := protocol.DDContainerDeleteRequestMessage{RequestID: "req-delete-error", ContainerID: "missing-container"}
 	a.handleContainerDeleteRequest(context.Background(), sender, msg)
 
 	if calls.count.Load() != 1 {
@@ -386,10 +389,43 @@ func TestHandleContainerDeleteRequest_Error(t *testing.T) {
 	if resp.ContainerID != "missing-container" {
 		t.Fatalf("expected ContainerID %q, got %q", "missing-container", resp.ContainerID)
 	}
+	if resp.RequestID != "req-delete-error" {
+		t.Fatalf("expected RequestID %q, got %q", "req-delete-error", resp.RequestID)
+	}
 	if resp.Success {
 		t.Fatal("expected Success=false on docker error")
 	}
 	if resp.Error == "" {
 		t.Fatal("expected a populated Error on failure")
+	}
+}
+
+func TestHandleContainerDeleteRequest_EmptyRequestID(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newDeleteTestDockerClient(t, http.StatusNoContent)
+	defer shutdown()
+
+	a := &Adapter{
+		dockerClient: client,
+		messageSem:   make(chan struct{}, defaultMessageHandlerConcurrency),
+	}
+	sender := &captureSender{}
+
+	msg := protocol.DDContainerDeleteRequestMessage{ContainerID: "container-1"}
+	a.handleContainerDeleteRequest(context.Background(), sender, msg)
+
+	if sender.msgType != protocol.TypeDDContainerDeleteResponse {
+		t.Fatalf("expected message type %q, got %q", protocol.TypeDDContainerDeleteResponse, sender.msgType)
+	}
+	resp, ok := sender.data.(protocol.DDContainerDeleteResponseMessage)
+	if !ok {
+		t.Fatalf("expected response payload type protocol.DDContainerDeleteResponseMessage, got %T", sender.data)
+	}
+	if resp.RequestID != "" {
+		t.Fatalf("expected empty RequestID, got %q", resp.RequestID)
+	}
+	if !resp.Success {
+		t.Fatalf("expected Success=true, got false (error=%q)", resp.Error)
 	}
 }
