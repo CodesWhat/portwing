@@ -288,23 +288,28 @@ type DDTriggerResponseMessage struct {
 }
 
 type DDContainerLogRequestMessage struct {
+	RequestID   string `json:"requestId,omitempty"`
 	ContainerID string `json:"containerId"`
 	Tail        int    `json:"tail,omitempty"`
 	Since       string `json:"since,omitempty"`
 	Until       string `json:"until,omitempty"`
 	Follow      bool   `json:"follow,omitempty"`
+	Timestamps  bool   `json:"timestamps,omitempty"`
 }
 
 type DDContainerLogResponseMessage struct {
+	RequestID   string `json:"requestId,omitempty"`
 	ContainerID string `json:"containerId"`
 	Logs        string `json:"logs"`
 }
 
 type DDContainerDeleteRequestMessage struct {
+	RequestID   string `json:"requestId,omitempty"`
 	ContainerID string `json:"containerId"`
 }
 
 type DDContainerDeleteResponseMessage struct {
+	RequestID   string `json:"requestId,omitempty"`
 	ContainerID string `json:"containerId"`
 	Success     bool   `json:"success"`
 	Error       string `json:"error,omitempty"`

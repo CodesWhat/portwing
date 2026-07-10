@@ -31,6 +31,15 @@ DrydockCompat bumps.
 - Increment the major component only when introducing a breaking wire-protocol
   change (a field whose absence or renamed shape would break the other side's
   parsing) — not for every new optional field or message type.
+- **Hello-rejection reconnect behavior**: the agent treats a subset of the
+  controller's hello-rejection `code` values as terminal (it exits instead of
+  reconnecting): `ed25519-required`, `unknown-key`, `bad-signature`,
+  `protocol-mismatch`, `no-auth`, `invalid-agent-name`, `parse-error`,
+  `expected-hello`, `agent-name-claimed`. All other codes — including any the
+  agent doesn't recognize — are retried with backoff. This list mirrors the
+  drydock controller's `app/api/portwing-ws.ts` and is **not** a versioned wire
+  contract; if drydock renames or repurposes a rejection code, update
+  `internal/edge/hello_reject.go` in lockstep.
 
 ## Sockguard preset compatibility
 

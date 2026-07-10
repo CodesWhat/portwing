@@ -42,6 +42,12 @@ func (s *syncCaptureSender) MsgType() string {
 	return s.msgType
 }
 
+func (s *syncCaptureSender) Data() any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data
+}
+
 // TestHandleMessage_RecognizedTypes verifies that every supported message type
 // returns true (handled) and dispatches to the right internal handler by
 // checking that the sender receives the expected response message type.

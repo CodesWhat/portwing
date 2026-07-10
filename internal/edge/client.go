@@ -277,13 +277,30 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	}
 	if env.Type == protocol.TypeError {
 		var errMsg protocol.ErrorMessage
-		if err := json.Unmarshal(env.Data, &errMsg); err != nil {
-			slog.Warn("controller rejected hello with an unparseable error payload", "error", err, "raw", string(env.Data))
-		} else {
-			slog.Warn("controller rejected hello", "code", errMsg.Code, "message", errMsg.Message)
-		}
+		parsed := json.Unmarshal(env.Data, &errMsg) == nil
 		closeWebSocket(conn, "controller rejected hello")
-		return false, fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, errMsg.Code)
+		rejErr := fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, errMsg.Code)
+
+		switch {
+		case !parsed:
+			// No reliable code to classify on — treat as retryable.
+			slog.Warn("controller rejected hello with an unparseable error payload", "raw", string(env.Data))
+		case isTerminalHelloRejection(errMsg.Code):
+			// Retrying the same configuration cannot change the outcome, so fail
+			// fast (wrap errFatal) instead of reconnecting forever.
+			slog.Error("controller rejected hello with a terminal code, not retrying",
+				"code", errMsg.Code, "message", errMsg.Message)
+			return false, fmt.Errorf("%w: %w", errFatal, rejErr)
+		case !isKnownHelloRejection(errMsg.Code):
+			// Unrecognized code: default to retry (no regression vs. before this
+			// classifier), but log distinctly so a permanent-but-unknown code
+			// doesn't loop silently.
+			slog.Warn("controller rejected hello with an unrecognized code, retrying",
+				"code", errMsg.Code, "message", errMsg.Message)
+		default:
+			slog.Warn("controller rejected hello, retrying", "code", errMsg.Code, "message", errMsg.Message)
+		}
+		return false, rejErr
 	}
 	if env.Type != protocol.TypeWelcome {
 		closeWebSocket(conn, "unexpected welcome type")

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -226,9 +227,55 @@ func TestHandleLogEntriesReturnsEmptyArray(t *testing.T) {
 }
 
 type routeTestDockerCalls struct {
-	listCalls    atomic.Int64
-	inspectCalls atomic.Int64
-	logsCalls    atomic.Int64
+	listCalls        atomic.Int64
+	inspectCalls     atomic.Int64
+	logsCalls        atomic.Int64
+	lastLogsRawQuery atomic.Value // string
+	logResponses     sync.Map     // map[string]routeTestLogResponse
+}
+
+type routeTestLogResponse struct {
+	body           []byte
+	blockAfterBody bool
+}
+
+func (c *routeTestDockerCalls) setLogsResponse(containerID string, body []byte) {
+	c.storeLogsResponse(containerID, routeTestLogResponse{
+		body: append([]byte(nil), body...),
+	})
+}
+
+func (c *routeTestDockerCalls) setBlockingLogsResponse(containerID string, body []byte) {
+	c.storeLogsResponse(containerID, routeTestLogResponse{
+		body:           append([]byte(nil), body...),
+		blockAfterBody: true,
+	})
+}
+
+func (c *routeTestDockerCalls) storeLogsResponse(containerID string, response routeTestLogResponse) {
+	c.logResponses.Store(containerID, response)
+}
+
+func (c *routeTestDockerCalls) logsResponse(containerID string) routeTestLogResponse {
+	if response, ok := c.logResponses.Load(containerID); ok {
+		return response.(routeTestLogResponse)
+	}
+	return routeTestLogResponse{
+		body: routeTestDockerLogFrame(1, []byte("log line\n")),
+	}
+}
+
+func routeTestDockerLogFrame(streamType byte, payload []byte) []byte {
+	frame := routeTestDockerLogHeader(streamType, uint32(len(payload)))
+	frame = append(frame, payload...)
+	return frame
+}
+
+func routeTestDockerLogHeader(streamType byte, size uint32) []byte {
+	header := make([]byte, 8)
+	header[0] = streamType
+	binary.BigEndian.PutUint32(header[4:8], size)
+	return header
 }
 
 func newRouteTestDockerClient(t *testing.T) (*docker.Client, *routeTestDockerCalls, func()) {
@@ -300,15 +347,20 @@ func newRouteTestDockerClient(t *testing.T) (*docker.Client, *routeTestDockerCal
 			})
 		case strings.HasSuffix(r.URL.Path, "/logs"):
 			calls.logsCalls.Add(1)
+			calls.lastLogsRawQuery.Store(r.URL.RawQuery)
 			w.Header().Set("Content-Type", "application/octet-stream")
 
-			payload := []byte("log line\n")
-			header := make([]byte, 8)
-			header[0] = 1
-			binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
+			id := strings.TrimPrefix(r.URL.Path, "/v1.44/containers/")
+			id = strings.TrimSuffix(id, "/logs")
+			response := calls.logsResponse(id)
 
-			_, _ = w.Write(header)
-			_, _ = w.Write(payload)
+			_, _ = w.Write(response.body)
+			if response.blockAfterBody {
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+				<-r.Context().Done()
+			}
 		default:
 			http.NotFound(w, r)
 		}
