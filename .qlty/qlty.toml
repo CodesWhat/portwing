@@ -226,3 +226,14 @@ set.ignored = true
 match.rules = ["ripgrep:NOTE"]
 match.file_patterns = ["**/*_test.go"]
 set.ignored = true
+
+# GO-2026-5932 lives in golang.org/x/crypto/openpgp, which Portwing does not
+# import — the only x/crypto subpackage we use is argon2 (confirmed by grep;
+# govulncheck reports the finding as unreachable, "your code doesn't appear to
+# call these"). The advisory has NO fixed version: the openpgp package is
+# unmaintained and documented as "unsafe by design", so it cannot be cleared by
+# a version bump. Ignored as a non-reachable finding in an unused transitive
+# subpackage. Revisit if Portwing ever imports x/crypto/openpgp.
+[[triage]]
+match.rules = ["osv-scanner:GO-2026-5932"]
+set.ignored = true
