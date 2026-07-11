@@ -758,7 +758,6 @@ paths:
           in: query
           schema:
             type: integer
-            minimum: 1
           description: >
             Maximum number of records to return (newest-first). Omit or use a
             non-positive value to return all currently buffered records.
