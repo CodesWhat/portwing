@@ -59,7 +59,7 @@ bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool int
         Ed25519 per-request signing, sockguard integration, a tamper-evident audit log, and an MCP
         server
       </strong>
-      . Hawser ships today as a more mature option; Portwing is alpha (v0.5.x).
+      . Hawser ships today as a more mature option; Portwing is alpha (v0.6.x).
     </p>
   ),
   migrationTitle: "Coming from Hawser?",

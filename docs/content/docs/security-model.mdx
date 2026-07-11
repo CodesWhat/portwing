@@ -4,7 +4,7 @@ description: Portwing's layered defenses — from socket-level filtering and cry
 ---
 
 <Callout type="warn">
-Portwing is in **alpha** (v0.5.x). The controls documented here are implemented and tested, but the API surface, configuration keys, and deployment model may change before a stable release. Do not rely on this page as a compliance artifact for production systems until v1.0.
+Portwing is in **alpha** (v0.6.x). The controls documented here are implemented and tested, but the API surface, configuration keys, and deployment model may change before a stable release. Do not rely on this page as a compliance artifact for production systems until v1.0.
 </Callout>
 
 The Docker socket is root-equivalent on the host that runs it. Anything that can write to `/var/run/docker.sock` can create a privileged container, mount the host filesystem, and escape to the underlying machine. Portwing is a privileged agent: an **authenticated** caller has full Docker API access. The controls described here prevent *unauthenticated or improperly authorized* access and certain classes of injection attacks; they do not limit what an authenticated caller can do with the Docker API. Treat the Portwing token as a root-equivalent credential.
@@ -283,7 +283,7 @@ Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0
 Verify a release before running it:
 
 ```bash
-TAG=v0.5.0
+TAG=v0.6.0
 
 # Verify the checksums file
 cosign verify-blob \

@@ -70,7 +70,7 @@ export const features: Feature[] = [
     color: "text-rose-500 dark:text-rose-400",
     bg: "bg-rose-100 dark:bg-rose-900/50",
     description:
-      "We ship hardened by default: `read_only`, `cap_drop: ALL`, `no-new-privileges`, and tokens mounted as secrets instead of env vars. We run as root for socket compatibility and document the opt-in UID 65532 path honestly. No security theater.",
+      "We ship hardened by default: `read_only`, `cap_drop: ALL`, `no-new-privileges`, and tokens mounted as secrets instead of env vars. The image runs as non-root (UID 65532) out of the box; running as root (`user: \"0:0\"`) is an explicit opt-in for socket-group compatibility. No security theater.",
     category: "security",
   },
   {

@@ -108,6 +108,13 @@ Environment variables reference:
 Use this when your host is behind NAT, a firewall, or has a dynamic IP.
 Portwing initiates the outbound connection to the Drydock controller; no inbound port is needed. The controller-side endpoint (`/api/portwing/ws`) shipped in Drydock 1.5 — edge mode is functional end-to-end as of Portwing 0.3.0 (Ed25519 key required; treat as early access).
 
+Drydock's edge endpoint is Ed25519-only, so generate a keypair first and register the public key with your controller:
+
+```bash
+portwing keygen -comment "my-server" > portwing_ed25519.pem
+sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+```
+
 ```yaml
 # docker-compose.yml
 services:
@@ -121,9 +128,10 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /data/stacks:/data/stacks        # host dir must be writable by UID 65532
+      - ./portwing_ed25519.pem:/run/secrets/portwing_key:ro
     environment:
       DRYDOCK_URL: "wss://your-drydock.example.com:3001"
-      TOKEN: "${PORTWING_TOKEN}"
+      PRIVATE_KEY_FILE: "/run/secrets/portwing_key"
       AGENT_NAME: "my-server"
       STACKS_DIR: "/data/stacks"
       # Optional: custom CA for self-signed Drydock controller certs
@@ -138,6 +146,7 @@ Additional Edge Mode variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DRYDOCK_URL` | — | WebSocket URL (`wss://...`) — enables Edge mode (agent dials out to `/api/portwing/ws`) |
+| `PRIVATE_KEY_FILE` | — | **Required.** Ed25519 private key (PEM PKCS#8) used to sign the hello; edge mode fails to start without it |
 | `CA_CERT` | — | Custom CA certificate for Drydock controller TLS verification |
 | `TLS_SKIP_VERIFY` | `false` | Skip TLS verification (testing only) |
 | `HEARTBEAT_INTERVAL` | `30` | Ping interval (seconds) |
@@ -145,8 +154,11 @@ Additional Edge Mode variables:
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff (seconds) |
 | `WELCOME_TIMEOUT` | `30` | Seconds to wait for Drydock controller welcome message |
 
-Edge mode requires both `DRYDOCK_URL` **and** `TOKEN` to be set. If either is
-missing, Portwing falls back to Standard mode.
+Edge mode requires `DRYDOCK_URL` **and** `PRIVATE_KEY_FILE` to be set — Drydock
+rejects token-only agents, so the Ed25519-signed hello is mandatory (`TOKEN` is
+optional and only relevant as a legacy fallback credential alongside the key).
+A missing `PRIVATE_KEY_FILE` with `DRYDOCK_URL` set is a **fatal startup
+error**, not a fallback to Standard mode.
 
 ---
 

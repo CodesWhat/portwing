@@ -326,6 +326,8 @@ The migration is designed to be zero-downtime and backward-compatible:
 
 Operators who cannot migrate immediately keep Phase 1 behavior indefinitely until Phase 3 is released.
 
+> **Historical note (as of v0.6.0):** Phases 2 and 3 were never executed. The "before v0.4.0" deadline above has lapsed. `TOKEN`-based auth remains fully supported and is not deprecated — see `SECURITY.md` and `docs/security-model.md`. This section is retained as a historical design artifact of the original migration plan, not a current commitment.
+
 ### 5.3 Exact JSON for Edge Hello (with Ed25519 auth)
 
 The `HelloMessage` struct gains new fields. Fields are `omitempty` so existing controllers that do not understand Ed25519 fields are unaffected.

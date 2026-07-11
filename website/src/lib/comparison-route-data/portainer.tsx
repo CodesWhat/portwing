@@ -58,7 +58,7 @@ lock|Narrow Scope by Design|Portainer is a full management platform. Portwing is
         secure foothold agent without the management overhead
       </strong>{" "}
       — and ships Ed25519 auth, audit logging, and Prometheus metrics in the free AGPL-3.0 build
-      without requiring a Business-tier upgrade. Portwing is alpha (v0.5.x); Portainer is
+      without requiring a Business-tier upgrade. Portwing is alpha (v0.6.x); Portainer is
       production-mature.
     </p>
   ),
