@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Dead `DOCKER_HOST` config surface**: the top-level `DOCKER_HOST` environment variable and the corresponding `Config.DockerHost` field never had a consumer — Portwing only ever dials the Docker daemon over the Unix socket (`DOCKER_SOCKET`). Documentation is now unix-socket-only; the unrelated `DOCKER_HOST` entry in the Compose child-process env var denylist (which blocks a stack from redirecting the daemon a compose operation targets) is unchanged.
 
+### Documentation
+
+- **Edge-mode setup examples fixed.** The README and Watchtower-migration edge-mode compose snippets showed a token-only credential, which fails to start — `PRIVATE_KEY_FILE` has been mandatory for edge mode since v0.5.0 (config load errors when `DRYDOCK_URL` is set without it). Both now generate and mount an Ed25519 key, and the incorrect "falls back to Standard mode" claim is removed (a missing key in edge mode is a fatal startup error, not a fallback).
+- **Docs and website synced to v0.6.0.** Refreshed stale v0.5.x/alpha version badges, `cosign` verification examples, the marketing-site hero version and roadmap, and the "Hardened Runtime" copy (which still described the pre-0.6.0 root-by-default behavior). Corrected the `SECURITY.md` signed-request body cap (1 MB, not 64 MB) and its supported-versions table, and pointed the `security-model.md` control list at the docs site's fuller, independently numbered set.
+- **SPEC.md gaps filled.** Moved the edge hello-rejection classification under Edge Mode Reconnection (§13.1) where it belongs, and documented the `GET /api/watchers/:type/:name` and `GET /api/log/entries` routes, the optional `exec_start` `tty` field, and the `RuntimeDetails` wire shape (including the 0.6.0 `env` field).
+
 ## [0.6.0] - 2026-07-10
 
 ### Added

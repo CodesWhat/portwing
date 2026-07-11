@@ -47,7 +47,7 @@ A compatibility verification script is included:
 
 ```bash
 # Verify protocol compatibility with the Drydock platform
-./scripts/drydock-compat.sh
+./scripts/drydock-compat-check.sh
 ```
 
 ### Fuzz testing (Tier 0 smoke)

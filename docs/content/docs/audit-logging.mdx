@@ -6,7 +6,7 @@ description: Tamper-evident structured JSON audit trail for every security-relev
 Portwing writes a structured JSON audit log — one event per line — that records every security-relevant action: authentication attempts, key enrollments, Compose operations, exec tunnel starts, and rate-limit blocks. The audit stream is intentionally separate from the operational log so records can be routed to a dedicated sink without mingling with debug noise.
 
 <Callout type="warn">
-  The audit event schema is marked stable in `internal/audit/audit.go`, but Portwing is currently in v0.5.x alpha. Field additions are non-breaking; field renames or removals will be announced in the changelog before they ship.
+  The audit event schema is marked stable in `internal/audit/audit.go`, but Portwing is currently in v0.6.x alpha. Field additions are non-breaking; field renames or removals will be announced in the changelog before they ship.
 </Callout>
 
 ## Enabling audit logging

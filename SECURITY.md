@@ -6,8 +6,8 @@ Security fixes are shipped on the **latest release line only**.
 
 | Version        | Supported          |
 | -------------- | ------------------ |
-| 0.5.x (latest) | :white_check_mark: |
-| < 0.5          | :x:                |
+| 0.6.x (latest) | :white_check_mark: |
+| < 0.6          | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -67,7 +67,7 @@ Portwing implements the following:
 - **Audit log**: structured JSON audit trail (`AUDIT_LOG`) of auth failures, enrollment attempts, and mutating operations.
 - **TLS**: TLS 1.2+ with modern AEAD cipher suites only.
 - **Docker Compose security**: path traversal protection, env var validation and denylist, service name injection prevention.
-- **Resource limits**: WebSocket read (16 MB), response body (100 MB), exec body (10 MB), signed-request body (64 MB), concurrent sessions (100), nonce LRU (10,000).
+- **Resource limits**: WebSocket read (16 MB), response body (100 MB), exec body (10 MB), signed-request body (1 MB), concurrent sessions (100), nonce LRU (10,000).
 
 ### Nonce cache capacity and fail-open behavior
 

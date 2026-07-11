@@ -208,6 +208,13 @@ volumes:
 
 For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml) has Portwing dial out to your Drydock controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`); no port is published on the remote host.
 
+Edge mode against Drydock 1.5 is Ed25519-only — generate a keypair first and register the public key with Drydock (`POST /api/v1/portwing/keys`):
+
+```bash
+portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+```
+
 ```yaml
 services:
   portwing:
@@ -225,16 +232,14 @@ services:
       - portwing-stacks:/data/stacks
     environment:
       - DRYDOCK_URL=https://drydock.example.com
-      - TOKEN_FILE=/run/secrets/portwing_token
+      - PRIVATE_KEY_FILE=/run/secrets/portwing_key
       - AGENT_NAME=edge-host-01
-      # Key-based hello instead of a shared token:
-      #   portwing keygen  →  PRIVATE_KEY_FILE=/run/secrets/portwing_key
     secrets:
-      - portwing_token
+      - portwing_key
 
 secrets:
-  portwing_token:
-    file: ./portwing_token.txt
+  portwing_key:
+    file: ./portwing_ed25519.pem
 
 volumes:
   portwing-stacks:
@@ -410,13 +415,13 @@ Portwing runs an HTTP(S) server; the **Drydock controller connects inbound** and
 
 Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound port. Both sides are implemented — Drydock 1.5 ships the controller endpoint and Portwing signs an Ed25519 hello — so edge mode is **usable end-to-end** as of the current release. Drydock 1.5 is released (GA); Portwing is still pre-`v1.0.0`, and full exec robustness under load is still being hardened. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
 
-- Set when `DRYDOCK_URL` is configured along with `TOKEN`, `AUTHORIZED_KEYS`, or `PRIVATE_KEY_FILE`
+- Set when `DRYDOCK_URL` is configured along with `PRIVATE_KEY_FILE` — mandatory, not optional; Drydock rejects token-only agents, so `TOKEN` or `AUTHORIZED_KEYS` alone are not sufficient
 - Targets hosts behind NAT, firewalls, and dynamic IPs
 - Auto-reconnect with exponential backoff + jitter; signed hello via `PRIVATE_KEY_FILE`
 
 ```text
-DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set  →  Edge Mode (outbound WebSocket)
-Otherwise                                                              →  Standard Mode (inbound HTTP server)
+DRYDOCK_URL set + PRIVATE_KEY_FILE set  →  Edge Mode (outbound WebSocket)
+Otherwise                                →  Standard Mode (inbound HTTP server)
 ```
 
 </details>

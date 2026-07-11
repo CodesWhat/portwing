@@ -58,7 +58,7 @@ bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool int
       <strong className="text-neutral-900 dark:text-neutral-200">
         auth (Ed25519), audit logging, supply-chain artifacts, and sockguard socket filtering
       </strong>
-      . Komodo is production-mature; Portwing is alpha (v0.5.x).
+      . Komodo is production-mature; Portwing is alpha (v0.6.x).
     </p>
   ),
   migrationTitle: "Coming from Komodo Periphery?",

@@ -192,11 +192,13 @@ continuous tailing uses the `request`/`stream`/`stream_end` path against
 | `/api/containers/:id/logs` | GET | Yes | Container logs (demuxed) |
 | `/api/containers/:id` | DELETE | Yes | Remove container |
 | `/api/watchers` | GET | Yes | Watcher component descriptors |
+| `/api/watchers/:type/:name` | GET | Yes | Single watcher descriptor (404 if unknown) |
 | `/api/triggers` | GET | Yes | Trigger component descriptors |
 | `/api/watchers/:type/:name` | POST | Yes | Trigger watcher poll |
 | `/api/watchers/:type/:name/container/:id` | POST | Yes | Check single container |
 | `/api/triggers/:type/:name` | POST | Yes | Execute trigger |
 | `/api/triggers/:type/:name/batch` | POST | Yes | Execute batch trigger |
+| `/api/log/entries` | GET | Yes | Log entries — returns `[]` (Drydock `AgentClient.getLogEntries()` compatibility) |
 | `/health` | GET | No | Simple health check |
 
 ### 4.4 Authentication
@@ -255,7 +257,7 @@ sequenceDiagram
     participant D as Drydock controller
     participant L as Portwing
     participant E as Docker Engine
-    D->>L: exec_start {execId, containerId, cmd, user, cols, rows}
+    D->>L: exec_start {execId, containerId, cmd, user, cols, rows, tty?}
     L->>E: POST /containers/{id}/exec
     L->>E: POST /exec/{id}/start (hijack → 101 Switching Protocols)
     L->>D: exec_ready {execId}
@@ -265,6 +267,8 @@ sequenceDiagram
     Note over D,L: bidirectional, base64-encoded, 4096-byte pooled buffers
     L-->>D: exec_end {execId, reason} (either side may send)
 ```
+
+`tty` in `exec_start` is optional and defaults to `true`: omit it (or send `true`) to allocate a PTY, `false` to run the exec without one.
 
 ### 7.2 Standard Mode (HTTP Hijack)
 
@@ -333,17 +337,6 @@ Subscribes to Docker `/events?type=container` API.
 
 Dedicated non-pooled Unix socket. Exponential backoff (5s initial, 60s max), resets after 30s of stable connection.
 
-A hello rejection (`error` frame in place of `welcome`) is classified before
-reconnecting. **Terminal** codes — where retrying the same configuration cannot
-succeed (`ed25519-required`, `unknown-key`, `bad-signature`, `protocol-mismatch`,
-`no-auth`, `invalid-agent-name`, `parse-error`, `expected-hello`,
-`agent-name-claimed`) — stop the agent with an actionable error instead of
-looping forever. Everything else (timing/capacity conditions like
-`timestamp-skew`, `replay`, `rate-limited`, `registry-full`,
-`agent-already-connected`, and any unrecognized code) is retried with backoff.
-This code set mirrors the drydock controller and is not itself a versioned wire
-contract, so an unrecognized code defaults to retry rather than a hard stop.
-
 ## 10. Drydock Container Model
 
 ### 10.1 Container Structure
@@ -369,6 +362,49 @@ type Container struct {
     Details         *RuntimeDetails   `json:"details,omitempty"`
 }
 ```
+
+`Details` (the `details` field) carries per-container runtime information populated from Docker inspect data:
+
+```go
+type RuntimeDetails struct {
+    Platform string        `json:"platform,omitempty"`
+    Command  string        `json:"command,omitempty"`
+    Ports    []PortMapping `json:"ports,omitempty"`
+    Network  []NetworkInfo `json:"network,omitempty"`
+    Volumes  []VolumeInfo  `json:"volumes,omitempty"`
+    Env      []EnvVar      `json:"env,omitempty"`
+    Created  string        `json:"created,omitempty"`
+    Started  string        `json:"started,omitempty"`
+    Health   string        `json:"health,omitempty"`
+}
+
+type EnvVar struct {
+    Key   string `json:"key"`
+    Value string `json:"value"`
+}
+
+type PortMapping struct {
+    Container uint16 `json:"container"`
+    Host      uint16 `json:"host,omitempty"`
+    Protocol  string `json:"protocol"`
+    IP        string `json:"ip,omitempty"`
+}
+
+type NetworkInfo struct {
+    Name      string `json:"name"`
+    IPAddress string `json:"ipAddress,omitempty"`
+    Gateway   string `json:"gateway,omitempty"`
+}
+
+type VolumeInfo struct {
+    Type        string `json:"type"`
+    Source      string `json:"source"`
+    Destination string `json:"destination"`
+    ReadOnly    bool   `json:"readOnly"`
+}
+```
+
+`env` is parsed from Docker's `Config.Env` (matching Drydock's `ContainerRuntimeEnv` shape); redacting sensitive values is the Drydock controller's responsibility.
 
 ### 10.2 Label Parsing
 
@@ -448,6 +484,17 @@ Attempt 2: connect -> fail -> wait 2s (+/-25% jitter)
 Attempt N: connect -> fail -> wait min(2^N, 60s) (+/-25% jitter)
 On success: reset backoff to 1s
 ```
+
+A hello rejection (`error` frame in place of `welcome`) is classified before
+reconnecting. **Terminal** codes — where retrying the same configuration cannot
+succeed (`ed25519-required`, `unknown-key`, `bad-signature`, `protocol-mismatch`,
+`no-auth`, `invalid-agent-name`, `parse-error`, `expected-hello`,
+`agent-name-claimed`) — stop the agent with an actionable error instead of
+looping forever. Everything else (timing/capacity conditions like
+`timestamp-skew`, `replay`, `rate-limited`, `registry-full`,
+`agent-already-connected`, and any unrecognized code) is retried with backoff.
+This code set mirrors the drydock controller and is not itself a versioned wire
+contract, so an unrecognized code defaults to retry rather than a hard stop.
 
 ### 13.2 Keepalive
 

@@ -4,6 +4,14 @@ This document is the citable specification for Portwing's security controls.
 Each control is named and described precisely so downstream tools, auditors,
 and compliance checks can reference it by name.
 
+The controls below are numbered to serve as a stable citation surface
+(Control *N*) and describe what the agent enforces in its own code. The
+documentation site's security model page presents an expanded, independently
+numbered set that additionally covers the Sockguard socket filter, the hardened
+container runtime (read-only rootfs, dropped capabilities, `no-new-privileges`),
+tamper-evident audit logging, and signed/verifiable releases — the two numbering
+schemes are kept independent so these code-level control numbers don't shift.
+
 ## Controls
 
 ### 1. Proxy-First Architecture
@@ -137,6 +145,7 @@ AEAD suites by design.
 | Edge log-request payload | 100 MB | Bound a buffered `dd:container_log_response` |
 | Edge follow-log window | ~7s | Bound a `follow=true` `dd:container_log_request` so it can't hold a message-handler slot indefinitely |
 | Exec request body | 10 MB | Limit exec payload size |
+| Ed25519 signed-request body | 1 MB | Bound the request body buffered for signature verification |
 | Concurrent exec sessions | 100 | Prevent unbounded goroutine growth |
 | Concurrent stream sessions | 100 | Prevent unbounded goroutine growth |
 | Rate-limiter IP table | 10,000 entries | Prevent rate-limiter map exhaustion |
@@ -182,11 +191,14 @@ verifier. Both auth methods can coexist during migration.
 read permission (`mode & 0004 != 0`), ensuring key material is never readable
 by untrusted system users.
 
-**Edge-mode signed hello:** In edge (WebSocket) mode, when `PRIVATE_KEY_FILE`
-is configured the agent signs the WebSocket hello message with its Ed25519
-private key, embedding `pubKeyId`/`timestamp`/`nonce`/`signature` fields. The
-controller verifies these before sending `welcome`. Falls back to `tokenHash`
-when no private key is configured.
+**Edge-mode signed hello:** Edge (WebSocket) mode requires `PRIVATE_KEY_FILE` —
+configuration load fails fast when `DRYDOCK_URL` is set without it, because the
+Drydock `/api/portwing/ws` endpoint is Ed25519-only and rejects token-hash
+hellos. The agent signs the WebSocket hello with its Ed25519 private key,
+embedding `pubKeyId`/`timestamp`/`nonce`/`signature` fields, which the
+controller verifies before sending `welcome`. A `tokenHash` hello path still
+exists in the code for non-edge use, but the config gate makes it unreachable
+for a running edge agent.
 
 **Model C enrollment (optional):** When `ENROLLMENT_TOKEN` is set alongside
 `AUTHORIZED_KEYS`, the agent exposes `POST /api/portwing/enroll` (outside the

@@ -128,6 +128,19 @@ Attempt N: wait min(2^N, MAX_RECONNECT_DELAY)s  (+/- 25% jitter)
 On success: backoff resets to RECONNECT_DELAY
 ```
 
+Not every connection failure feeds this loop, though. A hello rejection is
+classified before the agent reconnects: terminal codes (`ed25519-required`,
+`unknown-key`, `bad-signature`, `protocol-mismatch`, `no-auth`,
+`invalid-agent-name`, `parse-error`, `expected-hello`, `agent-name-claimed`)
+make the agent log a fatal error and exit instead of retrying forever;
+timing/capacity codes (`timestamp-skew`, `replay`, `rate-limited`,
+`registry-full`, `agent-already-connected`, …) and any unrecognized code are
+still retried with backoff as above. Because a terminal rejection ends the
+process rather than looping, operators should alert on that fatal log line —
+or on the container restart count under a restart policy — since it usually
+points to a configuration problem (a stale or unregistered key, a name
+collision) rather than a transient network blip.
+
 During an established connection the agent sends a `ping` message every `HEARTBEAT_INTERVAL` seconds and expects a `pong` in return. The read deadline is set to `max(2 × HEARTBEAT_INTERVAL, 60s)`. A missing pong triggers an immediate close and reconnect cycle.
 
 A minimal HTTP server (`/_portwing/health`) remains running on the agent host throughout, so Docker HEALTHCHECK directives continue to work even when the WebSocket is down.
@@ -171,7 +184,7 @@ secrets:
 | Inbound port required | Yes | No |
 | Works behind NAT / firewall | No | Yes |
 | Agent-side implementation | Complete | Complete |
-| Controller-side support | Complete | Drydock 1.5+ (pre-release) |
+| Controller-side support | Complete | Drydock 1.5+ |
 | Recommended for production | Yes | Early access (Drydock 1.5+ and Portwing 0.3.0+) |
 
 If your host is reachable from the internet or your Drydock server, use Standard mode today. Edge mode is the right answer for hosts with no inbound port and is functional now on Drydock 1.5 and Portwing 0.3.0 — treat it as early access and validate it for your workload before relying on it in production.
