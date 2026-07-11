@@ -310,13 +310,22 @@ New variables (additive — all existing variables remain):
 
 The `AUTHORIZED_KEYS` variable is intentionally separate from the existing `TOKEN`/`TOKEN_HASH`/`TOKEN_FILE` variables. Both systems operate simultaneously during migration.
 
-Edge mode in `config.go` currently validates that `DRYDOCK_URL` requires a raw `TOKEN`. This must be extended: the validation passes if either `TOKEN` *or* `AUTHORIZED_KEYS` is set.
+At the time this design was written, edge mode in `config.go` validated that `DRYDOCK_URL` required a raw `TOKEN`; the plan below extended that so validation passes if either `TOKEN` *or* `AUTHORIZED_KEYS` is set. (As of v0.6.0, edge mode instead requires `PRIVATE_KEY_FILE` and is Ed25519-only — see the note in §5.2.)
 
 ### 5.2 Migration Path
 
+> **Historical note (as of v0.6.0):** The phases below are the original
+> design-time plan and describe the state *at that time*, not v0.6.0 behavior.
+> Edge mode is now Ed25519-only — `PRIVATE_KEY_FILE` is required and the
+> controller rejects token-hash hellos, so the token-based Phase 0/1 handshake
+> described here (including an edge hello that sends `tokenHash`) is superseded.
+> Phases 2 and 3 were never executed, and `TOKEN`-based auth for standard/HTTP
+> mode remains fully supported and is not deprecated. See `SECURITY.md` and
+> `docs/security-model.md` for current behavior.
+
 The migration is designed to be zero-downtime and backward-compatible:
 
-**Phase 0 (current):** `TOKEN` or `TOKEN_HASH` required. No Ed25519 support.
+**Phase 0 (original state):** `TOKEN` or `TOKEN_HASH` required. No Ed25519 support.
 
 **Phase 1 (this PR series):** `AUTHORIZED_KEYS` added. Both `TOKEN` and `AUTHORIZED_KEYS` may be set simultaneously. Middleware checks for Ed25519 headers first; if absent, falls through to token check. Edge hello sends both `tokenHash` and signature; controller accepts either.
 
@@ -325,8 +334,6 @@ The migration is designed to be zero-downtime and backward-compatible:
 **Phase 3 (removal):** Remove `rawTokenVerifier` and `argon2Verifier` paths. `AUTHORIZED_KEYS` required.
 
 Operators who cannot migrate immediately keep Phase 1 behavior indefinitely until Phase 3 is released.
-
-> **Historical note (as of v0.6.0):** Phases 2 and 3 were never executed. The "before v0.4.0" deadline above has lapsed. `TOKEN`-based auth remains fully supported and is not deprecated — see `SECURITY.md` and `docs/security-model.md`. This section is retained as a historical design artifact of the original migration plan, not a current commitment.
 
 ### 5.3 Exact JSON for Edge Hello (with Ed25519 auth)
 

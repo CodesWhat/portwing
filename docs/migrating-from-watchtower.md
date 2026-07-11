@@ -155,10 +155,10 @@ Additional Edge Mode variables:
 | `WELCOME_TIMEOUT` | `30` | Seconds to wait for Drydock controller welcome message |
 
 Edge mode requires `DRYDOCK_URL` **and** `PRIVATE_KEY_FILE` to be set — Drydock
-rejects token-only agents, so the Ed25519-signed hello is mandatory (`TOKEN` is
-optional and only relevant as a legacy fallback credential alongside the key).
-A missing `PRIVATE_KEY_FILE` with `DRYDOCK_URL` set is a **fatal startup
-error**, not a fallback to Standard mode.
+rejects token-only agents, so the Ed25519-signed hello is mandatory. (`TOKEN`
+applies only to standard/HTTP-mode authentication; it plays no part in the edge
+handshake.) A missing `PRIVATE_KEY_FILE` with `DRYDOCK_URL` set is a **fatal
+startup error**, not a fallback to Standard mode.
 
 ---
 
