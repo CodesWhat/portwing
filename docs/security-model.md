@@ -5,7 +5,7 @@ Each control is named and described precisely so downstream tools, auditors,
 and compliance checks can reference it by name.
 
 The controls below are numbered to serve as a stable citation surface
-(Control _N_) and describe what the agent enforces in its own code. The
+(Control *N*) and describe what the agent enforces in its own code. The
 documentation site's security model page presents an expanded, independently
 numbered set that additionally covers the Sockguard socket filter, the hardened
 container runtime (read-only rootfs, dropped capabilities, `no-new-privileges`),
