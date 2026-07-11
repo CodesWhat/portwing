@@ -389,12 +389,13 @@ jobs:
           - { name: FuzzParseImageRef,       pkg: ./internal/adapter/ }
           - { name: FuzzParseLabels,         pkg: ./internal/adapter/drydock/ }
           - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
+          - { name: FuzzEnvelope,           pkg: ./internal/protocol/ }
 
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
-          # One allowlist shared by all 5 matrix variants (harden-runner config
+          # One allowlist shared by all 6 matrix variants (harden-runner config
           # is per-step, not per-matrix-value).
           egress-policy: block
           allowed-endpoints: >

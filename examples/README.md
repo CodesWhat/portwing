@@ -33,6 +33,12 @@ For Ed25519 key-based auth instead of a shared token, see the Authentication sec
 
 Both manifests deploy a `DaemonSet` so one agent runs on each Docker-capable node. The Namespace and Secret are included in each file for a self-contained apply.
 
+Before applying, uncomment `supplementalGroups` in the manifest's pod `securityContext` and set it to the Docker socket's group ID on the node (the images run as the non-root `portwing` user, UID 65532, and need supplemental group access to reach the socket; `fsGroup` does not affect a `hostPath`-mounted socket):
+
+```bash
+stat -c '%g' /var/run/docker.sock
+```
+
 **Create the secret before applying:**
 
 Standard mode:

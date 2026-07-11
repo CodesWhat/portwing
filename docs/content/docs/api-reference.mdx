@@ -57,14 +57,14 @@ Returns HTTP `503` with `"status":"unhealthy","docker":"disconnected"` when Dock
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.6.0",
   "dockerVersion": "27.0.3",
   "mode": "standard",
   "uptime": "2h34m56.789s",
   "hostname": "my-server",
   "agentId": "550e8400-e29b-41d4-a716-446655440000",
   "agentName": "my-server",
-  "capabilities": ["compose", "exec", "metrics", "events", "dd:watch", "dd:trigger"]
+  "capabilities": ["compose", "exec", "metrics", "events", "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"]
 }
 ```
 
@@ -191,7 +191,7 @@ Available when `ADAPTER=generic`. These endpoints expose container management wi
 
 ```json
 {
-  "agentVersion": "0.1.0",
+  "agentVersion": "0.6.0",
   "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"

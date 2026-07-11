@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Corrupted edge log output**: `dd:container_log_response.logs` now strips Docker's 8-byte multiplexed stream-frame headers for non-TTY containers (the same de-muxing the HTTP `/logs` route does) while passing a TTY container's raw stream through unchanged, so logs are plain text instead of text interleaved with binary frame headers (non-TTY) and are no longer garbled by demuxing a header-less stream (TTY).
+- **Kubernetes example manifests**: `examples/kubernetes/standard.yaml` and `edge.yaml` mounted the Compose stacks directory (`/data/stacks`) as an `emptyDir`, which Kubernetes wipes on pod recreation — silently breaking `down`/`ps`/`stop`/`restart`/`logs` for every stack a prior `up` had deployed. Both now use a `hostPath` volume (with a note to pre-create it owned by UID 65532, since `fsGroup` does not apply to `hostPath`). The edge manifest's `portwing keygen` setup command was also missing its `> portwing_ed25519.pem` redirect, leaving the following `kubectl create secret --from-file=…` step referencing a file that was never written.
 
 ### Removed
 
@@ -26,8 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Edge-mode setup examples fixed.** The README and Watchtower-migration edge-mode compose snippets showed a token-only credential, which fails to start — `PRIVATE_KEY_FILE` has been mandatory for edge mode since v0.5.0 (config load errors when `DRYDOCK_URL` is set without it). Both now generate and mount an Ed25519 key, and the incorrect "falls back to Standard mode" claim is removed (a missing key in edge mode is a fatal startup error, not a fallback).
 - **Docs and website synced to v0.6.0.** Refreshed stale v0.5.x/alpha version badges, `cosign` verification examples, the marketing-site hero version and roadmap, and the "Hardened Runtime" copy (which still described the pre-0.6.0 root-by-default behavior). Corrected the `SECURITY.md` signed-request body cap (1 MB, not 64 MB) and its supported-versions table, and pointed the `security-model.md` control list at the docs site's fuller, independently numbered set.
 - **SPEC.md gaps filled.** Moved the edge hello-rejection classification under Edge Mode Reconnection (§13.1) where it belongs, and documented the `GET /api/watchers/:type/:name` and `GET /api/log/entries` routes, the optional `exec_start` `tty` field, and the `RuntimeDetails` wire shape (including the 0.6.0 `env` field).
+- **OpenAPI spec completeness.** `api/openapi.yaml` now documents the `GET /_portwing/audit` and `POST /_portwing/mcp` agent endpoints, the `GET /api/watchers/{type}/{name}` and `GET /api/log/entries` Drydock-compat routes, the `dd:watcher-snapshot` SSE event, the `timestamps` log query parameter, the `404`/`409` responses on `DELETE /api/containers/{id}`, and the previously-missing `digest`/`link`/`timestamp` container-result fields. The `info.version` and example version strings were bumped to 0.6.0.
+- **Docs-site drift corrected.** Fixed the `GET /_portwing/audit` response example (`ts` key, no `level`/`msg`), the `portwing_auth_failures_total` reason-label values (`bad_token`/`no_credentials`/… rather than `bad-token`/`missing-token`), the generic-adapter capabilities list, the audit `key_id` sample format, the "core fields" audit table, and remaining stale `0.1.0`/`0.3.0` example version strings across the audit-logging, observability, standalone-mode, and api-reference pages.
+- **Process docs corrected.** `CONTRIBUTING.md` now describes the actual trunk-based flow (all PRs branch from and target `main`; there is no `dev/*` branch), `RELEASING.md` no longer claims a `BREAKING CHANGE` footer triggers a major bump (the release-cut workflow only reads commit subjects), `Dockerfile.armv7`'s header comment points at the real unified `Dockerfile.release`, and `SPEC.md`'s container-image package list is split into its accurate Wolfi and Alpine variants.
 
-## [0.6.0] - 2026-07-10
+### Tests
+
+- **`FuzzEnvelope` added to every fuzz tier.** The wire-envelope fuzzer (`internal/protocol`), which exercises the `portwing/1.0` parser on the untrusted edge-WebSocket input path, existed but was wired into none of the coverage tiers. It now runs in the `ci.yml` smoke tier, the nightly and monthly deep-fuzz matrices, and the lefthook pre-push hook, and is listed in the CONTRIBUTING local-fuzz instructions.
 
 ### Added
 
