@@ -522,7 +522,10 @@ contract, so an unrecognized code defaults to retry rather than a hard stop.
 
 Chainguard Wolfi OS packages assembled into a `FROM scratch` image (Alpine on armv7). Minimal OCI image with no package manager in the runtime — packages are installed into a staging rootfs and copied into the final scratch stage, retaining the package database for scanners.
 
-Packages: `ca-certificates`, `busybox`, `docker-cli`, `docker-compose`, `wget`
+Packages:
+
+- **Wolfi (amd64/arm64):** `ca-certificates-bundle`, `busybox`, `docker-cli`, `docker-compose`, `wget`
+- **Alpine (armv7):** `ca-certificates`, `busybox`, `docker-cli`, `docker-cli-compose`, `wget`
 
 ## 15. Migration Strategy
 

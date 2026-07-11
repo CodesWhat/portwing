@@ -42,6 +42,7 @@ jobs:
           - { name: FuzzParseImageRef,       pkg: ./internal/adapter/ }
           - { name: FuzzParseLabels,         pkg: ./internal/adapter/drydock/ }
           - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
+          - { name: FuzzEnvelope,           pkg: ./internal/protocol/ }
 
     steps:
       - name: Harden Runner

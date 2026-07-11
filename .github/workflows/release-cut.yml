@@ -98,7 +98,7 @@ jobs:
           else
             # Determine bump level from conventional commits since last tag.
             # feat = minor bump, fix/anything else = patch bump.
-            # A "!" suffix or BREAKING CHANGE in body = major bump.
+            # A "!" suffix on the commit subject = major bump (body/footer not read).
             bump="patch"
             while IFS= read -r subject; do
               if echo "${subject}" | grep -qP '^.+!\s*:'; then

@@ -50,8 +50,8 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 | `msg` | string | Always `""` — use `event` for the record type |
 | `event` | string | Event type identifier — see the table below |
 | `actor` | string | Client IP address or edge peer URL |
-| `method` | string | HTTP method or message type |
-| `path` | string | HTTP path or message path |
+| `method` | string | HTTP method or message type; only present on `api_request`, `auth_failure`, and `rate_limited` events |
+| `path` | string | HTTP path or message path; only present on `api_request`, `auth_failure`, and `rate_limited` events |
 | `outcome` | string | One of `allowed`, `denied`, or `error` |
 | `status` | integer | HTTP status code; omitted when not applicable |
 | `duration_ms` | float | Request duration in milliseconds; omitted when not measured |
@@ -124,7 +124,7 @@ Exec tunnel opened:
 Ed25519 key enrolled:
 
 ```json
-{"time":"2026-01-15T10:20:00.000000000Z","level":"INFO","msg":"","event":"enrollment","actor":"203.0.113.42","key_id":"SHA256:abc123...","outcome":"allowed"}
+{"time":"2026-01-15T10:20:00.000000000Z","level":"INFO","msg":"","event":"enrollment","actor":"203.0.113.42","key_id":"3a7f9c1d2e4b5a6f","outcome":"allowed"}
 ```
 
 ## Shipping the log
@@ -162,11 +162,13 @@ Response shape:
 ```json
 {
   "records": [
-    {"time":"2026-01-15T10:24:01.500000000Z","level":"INFO","msg":"","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"},
-    {"time":"2026-01-15T10:23:50.001000000Z","level":"INFO","msg":"","event":"auth_failure","actor":"203.0.113.9","method":"GET","path":"/_portwing/info","outcome":"denied"}
+    {"ts":"2026-01-15T10:24:01.500000000Z","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"},
+    {"ts":"2026-01-15T10:23:50.001000000Z","event":"auth_failure","actor":"203.0.113.9","method":"GET","path":"/_portwing/info","outcome":"denied"}
   ],
   "count": 2
 }
 ```
+
+The ring buffer's JSON schema differs from the streamed slog log schema documented above — records are JSON-encoded directly from the internal `audit.Record` struct, which uses a `ts` field and has no `level` or `msg` field.
 
 Set `AUDIT_BUFFER_SIZE=0` to disable the in-memory buffer entirely. This does not affect the file or stream sink configured via `AUDIT_LOG`.

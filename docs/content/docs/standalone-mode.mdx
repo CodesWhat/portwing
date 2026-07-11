@@ -54,7 +54,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ```json
 {
-  "agentVersion": "0.3.0",
+  "agentVersion": "0.6.0",
   "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"
@@ -165,7 +165,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   http://localhost:3000/_portwing/info | jq .
 ```
 
-The `capabilities` array for the generic adapter lists `containers`, `logs`, `events`, and `version`.
+The base capabilities `compose`, `exec`, `metrics`, and `events` are always present regardless of adapter, followed by the generic adapter's own `containers`, `logs`, `events`, and `version`. This means the full array is `["compose", "exec", "metrics", "events", "containers", "logs", "events", "version"]` — note `events` appears twice, since it is both a base capability and one the generic adapter reports.
 
 ---
 

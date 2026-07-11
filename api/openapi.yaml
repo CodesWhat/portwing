@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Portwing Agent API
-  version: 0.1.0
+  version: 0.6.0
   description: |
     Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
@@ -128,7 +128,7 @@ components:
         version:
           type: string
           description: Portwing agent version
-          example: "0.1.0"
+          example: "0.6.0"
         dockerVersion:
           type: string
           description: Docker Engine version string
@@ -155,7 +155,7 @@ components:
           type: array
           items:
             type: string
-          example: ["compose", "exec", "metrics", "events", "dd:watch", "dd:trigger"]
+          example: ["compose", "exec", "metrics", "events", "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"]
 
     ComposeRequest:
       type: object
@@ -333,15 +333,25 @@ components:
       properties:
         tag:
           type: string
+        digest:
+          type: string
+          description: Image digest (`sha256:...`) when resolved.
         created:
           type: string
           format: date-time
+        link:
+          type: string
+          description: Optional link to the image/registry page.
 
     ContainerError:
       type: object
       properties:
         message:
           type: string
+        timestamp:
+          type: string
+          format: date-time
+          description: When the error was recorded.
 
     RuntimeDetails:
       type: object
@@ -382,7 +392,7 @@ components:
       properties:
         agentVersion:
           type: string
-          example: "0.1.0"
+          example: "0.6.0"
         protocolName:
           type: string
           example: "portwing"
@@ -430,6 +440,102 @@ components:
           description: >
             User-defined container labels from event attributes. Synthetic
             Docker keys (name, image, exitCode, etc.) are stripped.
+
+    AuditRecord:
+      type: object
+      required: [ts, event]
+      description: >
+        A single structured audit event from the in-memory ring buffer. Field
+        names match the stable on-wire JSON schema; optional fields are omitted
+        when empty. This ring-buffer schema differs from the streamed slog log
+        line, which uses `time`/`level`/`msg` keys.
+      properties:
+        ts:
+          type: string
+          format: date-time
+          description: Event timestamp (RFC3339 UTC).
+        event:
+          type: string
+          description: Event type.
+          example: "exec_start"
+        actor:
+          type: string
+          description: Authenticated principal (token label or key ID).
+        method:
+          type: string
+          description: HTTP method (api_request / auth_failure / rate_limited events only).
+        path:
+          type: string
+          description: HTTP path (api_request / auth_failure / rate_limited events only).
+        outcome:
+          type: string
+          example: "allowed"
+        status:
+          type: integer
+          example: 200
+        duration_ms:
+          type: number
+        operation:
+          type: string
+        stack:
+          type: string
+        container:
+          type: string
+        exec_id:
+          type: string
+        key_id:
+          type: string
+          description: hex(SHA-256(pubkey)[:8]).
+
+    AuditResponse:
+      type: object
+      required: [records, count]
+      properties:
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditRecord'
+        count:
+          type: integer
+          description: Number of records returned.
+
+    MCPRequest:
+      type: object
+      required: [jsonrpc, method]
+      description: JSON-RPC 2.0 request envelope.
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          description: Request ID (string, number, or null). Absent for notifications.
+        method:
+          type: string
+          example: "tools/list"
+        params:
+          type: object
+          additionalProperties: true
+
+    MCPResponse:
+      type: object
+      required: [jsonrpc, id]
+      description: JSON-RPC 2.0 response envelope.
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          description: Echoes the request ID.
+        result:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
 
 paths:
   /health:
@@ -636,6 +742,79 @@ paths:
         "500":
           description: Internal server error.
 
+  /_portwing/audit:
+    get:
+      operationId: getPortwingAudit
+      summary: Recent audit records
+      description: >
+        Returns recent structured audit records from the in-memory ring
+        buffer, newest-first. Bearer auth required.
+      tags: [Agent]
+      security:
+        - bearerToken: []
+        - portwingToken: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          description: >
+            Maximum number of records to return (newest-first). Omit or use a
+            non-positive value to return all currently buffered records.
+          example: 100
+      responses:
+        "200":
+          description: Buffered audit records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /_portwing/mcp:
+    post:
+      operationId: postPortwingMcp
+      summary: MCP server (Model Context Protocol, read-only)
+      description: >
+        Read-only MCP server over the Streamable HTTP transport (protocol
+        revision `2025-11-25`). Each POST carries a single JSON-RPC 2.0 request
+        and returns one JSON-RPC 2.0 response (`application/json`); the server
+        is stateless and assigns no `Mcp-Session-Id`. Supported methods include
+        `initialize`, `tools/list`, and `tools/call`. Bearer auth required.
+
+        `GET /_portwing/mcp` returns 405 (no server-initiated SSE stream).
+      tags: [MCP]
+      security:
+        - bearerToken: []
+        - portwingToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPRequest'
+            example:
+              jsonrpc: "2.0"
+              id: 1
+              method: tools/list
+      responses:
+        "200":
+          description: JSON-RPC 2.0 response object.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPResponse'
+        "401":
+          description: Missing or invalid token.
+        "405":
+          description: Method not allowed (POST required; GET has no SSE stream).
+        "429":
+          description: Rate limit exceeded.
+
   /api/events:
     get:
       operationId: getApiEvents
@@ -643,8 +822,11 @@ paths:
       description: >
         Server-Sent Events stream of container lifecycle events. Immediately
         emits a `dd:ack` event with agent metadata and current container
-        counts, then streams `dd:container-added`, `dd:container-updated`,
-        and `dd:container-removed` events as Docker reports them.
+        counts, followed by a `dd:watcher-snapshot` event carrying the watcher
+        descriptor and the full authoritative container inventory, then streams
+        `dd:container-added`, `dd:container-updated`, and `dd:container-removed`
+        events as Docker reports them. A fresh `dd:watcher-snapshot` is also
+        broadcast after every poll cycle.
 
         The connection is held open until the client disconnects. Each event
         is a JSON object on a `data:` line followed by a blank line (standard
@@ -655,13 +837,16 @@ paths:
         | Type | Description |
         |------|-------------|
         | `dd:ack` | Initial handshake; agent metadata + container counts |
+        | `dd:watcher-snapshot` | Watcher descriptor + full container inventory (on connect and after every poll cycle) |
         | `dd:container-added` | New container discovered |
         | `dd:container-updated` | Container state or metadata changed |
         | `dd:container-removed` | Container removed |
 
         **Example stream:**
         ```
-        data: {"type":"dd:ack","data":{"version":"0.1.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+        data: {"type":"dd:ack","data":{"version":"0.6.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+
+        data: {"type":"dd:watcher-snapshot","data":{"watcher":{...WatcherComponent...},"containers":[{...Container...}]}}
 
         data: {"type":"dd:container-added","data":{...Container...}}
 
@@ -760,6 +945,14 @@ paths:
           description: >
             Stream logs in real time. Response uses chunked transfer
             encoding when `follow=1` or `follow=true`.
+        - name: timestamps
+          in: query
+          schema:
+            type: string
+            enum: ["0", "1", "true", "false"]
+          description: >
+            Prefix each log line with Docker's RFC3339Nano timestamp when
+            `timestamps=1` or `timestamps=true`.
       responses:
         "200":
           description: Log output (plain text, demuxed).
@@ -797,6 +990,12 @@ paths:
           description: Container removed.
         "401":
           description: Missing or invalid token.
+        "404":
+          description: Container not found (Docker reported status 404).
+        "409":
+          description: >
+            Removal conflict — e.g. the container is still running and cannot
+            be removed (Docker reported status 409).
         "429":
           description: Rate limit exceeded.
         "500":
@@ -852,6 +1051,42 @@ paths:
           description: Rate limit exceeded.
 
   /api/watchers/{type}/{name}:
+    get:
+      operationId: getApiWatcher
+      summary: Single watcher descriptor
+      description: >
+        Returns the watcher component descriptor matching `type`/`name`
+        (case-insensitive). Called by Drydock's `AgentClient.getWatcher()`.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - portwingToken: []
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "docker"
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "docker"
+      responses:
+        "200":
+          description: Watcher component descriptor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatcherComponent'
+        "401":
+          description: Missing or invalid token.
+        "404":
+          description: No watcher matches the given type/name.
+        "429":
+          description: Rate limit exceeded.
     post:
       operationId: postApiWatcherPoll
       summary: Trigger watcher poll
@@ -987,6 +1222,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NotImplementedResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /api/log/entries:
+    get:
+      operationId: getApiLogEntries
+      summary: Agent log entries (compatibility stub)
+      description: >
+        Returns an empty JSON array. Drydock calls this endpoint to populate
+        its agent log viewer; Portwing keeps no in-memory log buffer, so it
+        returns `[]` to avoid 404s in Drydock's log panel.
+      tags: [Drydock Compat]
+      security:
+        - bearerToken: []
+        - portwingToken: []
+      responses:
+        "200":
+          description: Always an empty array.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {}
+                example: []
         "401":
           description: Missing or invalid token.
         "429":
@@ -1265,6 +1526,8 @@ tags:
     description: Docker Compose lifecycle management.
   - name: Metrics
     description: Prometheus-format host and agent metrics.
+  - name: MCP
+    description: Read-only Model Context Protocol server (`/_portwing/mcp`).
   - name: Drydock Compat
     description: Drydock-compatible REST and SSE endpoints (`/api/*`).
   - name: Generic

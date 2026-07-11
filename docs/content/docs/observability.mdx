@@ -81,14 +81,14 @@ These metrics track HTTP request activity and are the most operationally relevan
 | `portwing_http_requests_total` | counter | `method`, `code` | Total HTTP requests completed, by method and response status code. |
 | `portwing_http_request_duration_seconds` | histogram | — | HTTP request latency in seconds. Exposes `_bucket`, `_sum`, and `_count` series. |
 | `portwing_http_requests_in_flight` | gauge | — | Number of HTTP requests currently being processed. |
-| `portwing_auth_failures_total` | counter | `reason` | Total authentication failures, labelled by failure reason (e.g. `bad-token`, `missing-token`). |
+| `portwing_auth_failures_total` | counter | `reason` | Total authentication failures, labelled by failure reason: `bad_token`, `no_credentials`, or (for Ed25519 signature failures) `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`. |
 | `portwing_rate_limited_total` | counter | — | Total requests blocked by the IP rate limiter. |
 
 Sample lines:
 
 ```text
 portwing_http_requests_total{method="POST",code="200"} 42
-portwing_auth_failures_total{reason="bad-token"} 3
+portwing_auth_failures_total{reason="bad_token"} 3
 ```
 
 ### Sample output
@@ -96,7 +96,7 @@ portwing_auth_failures_total{reason="bad-token"} 3
 ```text
 # HELP portwing_build_info Portwing agent build metadata.
 # TYPE portwing_build_info gauge
-portwing_build_info{version="0.3.0"} 1
+portwing_build_info{version="0.6.0"} 1
 # HELP portwing_uptime_seconds Seconds since the agent started.
 # TYPE portwing_uptime_seconds gauge
 portwing_uptime_seconds 3842.7

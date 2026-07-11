@@ -1,6 +1,6 @@
 # From-source build for linux/arm/v7: `docker build -f Dockerfile.armv7 .`
 # Wolfi does not support armv7, so the runtime packages come from Alpine.
-# (Release images are built by GoReleaser via Dockerfile.release.armv7.)
+# (Release images are built by GoReleaser via the unified Dockerfile.release.)
 
 # Stage 1: Build the binary from source.
 FROM golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS builder

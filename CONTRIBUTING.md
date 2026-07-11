@@ -19,9 +19,7 @@ Questions or help? Open an [issue](https://github.com/CodesWhat/portwing/issues)
    go mod download
    ```
 
-4. **Create a branch** from the appropriate base:
-   - Bug fixes for the current release: branch from `main`
-   - New features targeting the next release: branch from the active dev branch (e.g. `dev/0.4.0`)
+4. **Create a branch** from `main`. Portwing uses a trunk-based flow: both bug fixes and features branch from and merge back into `main` (there is no long-lived `dev/*` branch).
 
 ## Development loop
 
@@ -60,6 +58,7 @@ go test -run=^$ -fuzz=^FuzzParseTrustedProxies$ -fuzztime=5s ./internal/server/
 go test -run=^$ -fuzz=^FuzzParseImageRef$       -fuzztime=5s ./internal/adapter/
 go test -run=^$ -fuzz=^FuzzParseLabels$         -fuzztime=5s ./internal/adapter/drydock/
 go test -run=^$ -fuzz=^FuzzMCPHandler$          -fuzztime=5s ./internal/mcp/
+go test -run=^$ -fuzz=^FuzzEnvelope$            -fuzztime=5s ./internal/protocol/
 ```
 
 ## Code style
@@ -95,7 +94,7 @@ Multi-change commits: lead emoji+type on first line, bulleted sub-changes in bod
 
 ## Pull request guidelines
 
-- Target `main` for bug fixes; target `dev/<version>` for features.
+- Target `main` for all PRs (bug fixes and features alike).
 - Keep PRs focused — one feature or fix per PR.
 - Include tests for non-trivial changes.
 - Update `CHANGELOG.md` under `[Unreleased]` for user-visible changes.

@@ -78,7 +78,7 @@ pre-push:
       priority: 4
       timeout: 2m
 
-    # Fuzz smoke — 5 s per fuzzer, all 5 in series. Keep a finite Go
+    # Fuzz smoke — 5 s per fuzzer, all 6 in series. Keep a finite Go
     # watchdog above the tiny smoke budget so a hung input fails with a
     # stack dump instead of consuming the hook timeout.
     #
@@ -118,7 +118,8 @@ pre-push:
           "FuzzParseTrustedProxies ./internal/server/" \
           "FuzzParseImageRef ./internal/adapter/" \
           "FuzzParseLabels ./internal/adapter/drydock/" \
-          "FuzzMCPHandler ./internal/mcp/"; do
+          "FuzzMCPHandler ./internal/mcp/" \
+          "FuzzEnvelope ./internal/protocol/"; do
           set -- $entry
           run_fuzz "$1" "$2"
         done

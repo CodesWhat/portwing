@@ -131,8 +131,16 @@ spec:
                 path: token
         - name: tmp
           emptyDir: {}
+        # Compose stacks must survive pod restarts: down/ps/stop/restart/logs
+        # reuse the compose file an earlier `up` wrote here, so this must NOT be
+        # an emptyDir (which is wiped on pod recreation). hostPath keeps each
+        # node's stacks on that node's disk. fsGroup does not apply to hostPath,
+        # so pre-create the directory owned by the non-root UID on each node:
+        #   sudo install -d -o 65532 -g 65532 /var/lib/portwing/stacks
         - name: stacks
-          emptyDir: {}
+          hostPath:
+            path: /var/lib/portwing/stacks
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
