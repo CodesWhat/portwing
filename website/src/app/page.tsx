@@ -116,8 +116,8 @@ export default function Home() {
               <p className="max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
                 We built Portwing to give Drydock a secure foothold on every host. Pair it with
                 sockguard and it never touches the raw Docker socket. Ed25519 auth proves every
-                request, and a tamper-evident audit log records everything it touches, so you
-                control your fleet without exposing it.
+                request, and a structured audit log records everything it touches for export to
+                immutable storage, so you control your fleet without exposing it.
               </p>
 
               <CtaButtons align="center" />

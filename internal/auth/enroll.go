@@ -2,16 +2,21 @@ package auth
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"sync"
 )
+
+const maxEnrollmentBodyBytes int64 = 64 * 1024
 
 // enrollRequest is the JSON body for POST /api/portwing/enroll.
 type enrollRequest struct {
@@ -28,7 +33,8 @@ type enrollResponse struct {
 // Enroller handles one-shot Model C enrollment. It is safe for concurrent use.
 type Enroller struct {
 	mu             sync.Mutex
-	token          string // burned after first successful use; zero-valued when burned
+	tokenDigest    [sha256.Size]byte
+	tokenAvailable bool
 	authorizedFile string // path to the authorized_keys file to append to
 	registry       *KeyRegistry
 	burned         bool
@@ -44,7 +50,8 @@ type Enroller struct {
 // registry is the live key registry to reload after enrollment.
 func NewEnroller(token, authorizedFile string, registry *KeyRegistry) *Enroller {
 	return &Enroller{
-		token:          token,
+		tokenDigest:    sha256.Sum256([]byte(token)),
+		tokenAvailable: token != "",
 		authorizedFile: authorizedFile,
 		registry:       registry,
 	}
@@ -62,8 +69,19 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxEnrollmentBodyBytes)
+	decoder := json.NewDecoder(r.Body)
 	var req enrollRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decoder.Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -74,15 +92,17 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer e.mu.Unlock()
 
 	// Refuse if token already burned.
-	if e.burned || e.token == "" {
+	if e.burned || !e.tokenAvailable {
 		slog.Warn("enrollment attempt after token burned", "actor", actor)
 		e.notify(actor, "", "denied")
 		http.Error(w, "enrollment token already used", http.StatusUnauthorized)
 		return
 	}
 
-	// Constant-time token comparison.
-	if subtle.ConstantTimeCompare([]byte(req.EnrollmentToken), []byte(e.token)) != 1 {
+	// Hash both sides before the timing-safe comparison so submitted token
+	// length cannot change the comparison duration.
+	presentedTokenDigest := sha256.Sum256([]byte(req.EnrollmentToken))
+	if subtle.ConstantTimeCompare(presentedTokenDigest[:], e.tokenDigest[:]) != 1 {
 		slog.Warn("enrollment failed: wrong token", "actor", actor)
 		e.notify(actor, "", "denied")
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -117,9 +137,9 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Key was written; continue — next SIGHUP will pick it up.
 	}
 
-	// Burn the token. Go strings are immutable so the secret cannot be wiped
-	// in place; dropping the only reference is the best available.
-	e.token = ""
+	// Burn the token digest after its one successful use.
+	e.tokenDigest = [sha256.Size]byte{}
+	e.tokenAvailable = false
 	e.burned = true
 
 	slog.Info("enrollment successful", "key_id", keyID, "actor", actor)

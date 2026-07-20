@@ -98,7 +98,7 @@ func BenchmarkArgon2VerifierVerify(b *testing.B) {
 // BenchmarkRawTokenVerifierVerify measures the plain-text constant-time compare
 // used when TOKEN (not TOKEN_HASH) is configured — the cheapest auth path.
 func BenchmarkRawTokenVerifierVerify(b *testing.B) {
-	v := &rawTokenVerifier{token: "correct-horse-battery-staple"}
+	v := newRawTokenVerifier("correct-horse-battery-staple")
 	cases := []struct {
 		name  string
 		token string

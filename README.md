@@ -18,7 +18,7 @@
 >
 > ### 🚧 Pre-1.0 software — APIs may still change
 >
-> Portwing is pre-`v1.0.0` (currently `v0.6.0`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
+> Portwing is pre-`v1.0.0` (currently `v0.7.0`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
@@ -74,7 +74,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.6.0 is the current release.** See [CHANGELOG.md](CHANGELOG.md) for the full itemized history of what has shipped.
+> **v0.7.0 is the current release.** Standard mode now fails closed without credentials, Ed25519 HTTP signatures bind the full request target, and unauthenticated development requires explicit opt-in. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
@@ -262,7 +262,12 @@ docker run -d \
   ghcr.io/codeswhat/portwing:latest
 ```
 
-Without `TOKEN` (or `TOKEN_HASH`/`AUTHORIZED_KEYS`) the API is **unauthenticated** — anyone who can reach the port controls your Docker daemon.
+Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
+`TOKEN_HASH`, or `AUTHORIZED_KEYS`. For local-only development, an explicitly
+unauthenticated loopback listener requires `ALLOW_UNAUTHENTICATED=true` and
+`BIND_ADDRESS=127.0.0.1` (or `::1`). A non-loopback unauthenticated listener
+additionally requires `ALLOW_UNAUTHENTICATED_REMOTE=true`; never use that
+second override on a shared or production network.
 
 The image runs as the non-root `portwing` user (UID 65532); `--group-add` grants it the Docker socket's group so it can reach the daemon.
 
@@ -284,7 +289,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-For v0.4.0 and later — including v0.6.0, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+For v0.4.0 and later — including v0.7.0, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 - **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
 - **v0.2.0** — the security & observability release. Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`. Also shipped in v0.2.0:
@@ -391,6 +396,10 @@ docker run -d --name portwing \
 Token auth (`TOKEN`/`TOKEN_HASH`) continues to work alongside Ed25519 — both
 can be set simultaneously during migration. The middleware checks for
 `X-Portwing-Signature` first; if absent, it falls back to the token check.
+HTTP signature version 2 also requires
+`X-Portwing-Signature-Version: 2` and signs the complete request target,
+including the escaped path and exact raw query string. Legacy unversioned
+signatures are accepted only on query-free requests.
 
 </details>
 
@@ -530,6 +539,11 @@ the connection alive through proxies.
 | `TLS_CERT` | -- | Server TLS certificate (Standard mode) |
 | `TLS_KEY` | -- | Server TLS key (Standard mode) |
 | `TRUSTED_PROXIES` | -- | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` is trusted; unset means forwarding headers are ignored |
+| `ALLOW_UNAUTHENTICATED` | `false` | Explicit local-development opt-in when no credential is configured; otherwise startup fails closed |
+| `ALLOW_UNAUTHENTICATED_REMOTE` | `false` | Additional dangerous opt-in required for unauthenticated non-loopback binds |
+
+`TLS_CERT` and `TLS_KEY` must be configured together. Setting only one is a
+startup error.
 
 ### Docker
 
@@ -818,10 +832,10 @@ checksums file.
 <details>
 <summary><strong>Security model summary</strong></summary>
 
-- **Authentication**: Token-based with timing-safe comparison (`crypto/subtle`); hash-at-rest via `TOKEN_HASH` (Argon2id); Ed25519 per-client keypairs with per-request signatures and replay protection
-- **Rate Limiting**: 10 failed auth attempts per IP per minute
+- **Authentication**: Fail-closed startup; raw tokens stored as fixed-size SHA-256 digests and compared timing-safely; hash-at-rest via `TOKEN_HASH` (Argon2id); Ed25519 per-client keypairs with versioned full-request-target signatures and replay protection
+- **Rate Limiting**: 10 failed auth attempts per IP per minute, plus a two-request cap on concurrent cold Argon2id derivations
 - **TLS**: TLS 1.2+ with modern AEAD cipher suites
-- **Compose Security**: Path traversal protection, env var denylist, service name injection prevention
+- **Compose Security**: Root-confined, symlink-resistant file writes; path traversal protection; env var denylist; service name injection prevention
 - **Resource Limits**: WebSocket (16 MB), response body (100 MB), exec sessions (100 concurrent)
 
 See [docs/security-model.md](docs/security-model.md) for the full citable spec and CVE mapping.

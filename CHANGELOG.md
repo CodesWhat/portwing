@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-07-20
+
 ### Added
 
 - **Edge log/delete request correlation**: the `dd:container_log_request` / `dd:container_log_response` and `dd:container_delete_request` / `dd:container_delete_response` pairs now carry an optional `requestId` that the agent echoes back on the response. This lets a controller correlate concurrent requests for the same container by id instead of matching responses in arrival order. This is an agent-side enablement: the Drydock controller must be updated to read the echoed `requestId` to benefit — its current FIFO-per-container fallback (which mismatches two in-flight requests for the same container) keeps working unchanged until then.
@@ -14,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Edge reconnect classification**: a hello rejection with a terminal code (`ed25519-required`, `unknown-key`, `bad-signature`, `protocol-mismatch`, `no-auth`, `invalid-agent-name`, `parse-error`, `expected-hello`, `agent-name-claimed`) now makes the agent exit with an actionable error — a distinct `fatal connection error, not retrying` log — instead of silently reconnecting forever inside the process; timing/capacity codes and any unrecognized code are still retried with backoff. Previously every rejection, including a revoked key (`unknown-key`), retried indefinitely. Note: under a container restart policy (e.g. `restart: unless-stopped`) the container may still restart after the agent exits, so alert on the fatal log line or the restart count rather than assuming the process stays down.
 
 ### Fixed
+
+- **Security hardening pass (PW-SEC-001–010).** Standard mode now fails closed without credentials, with separate explicit opt-ins for loopback and remote unauthenticated development. Ed25519 HTTP signature version 2 covers the escaped path and exact raw query; legacy signatures are query-free only. Cold Argon2id verification is capped at two agent-wide derivations and two in-flight attempts per IP, raw-token verifiers retain only fixed-size digests, and credential files are validated as regular files with safe Unix permissions on the opened descriptor. Enrollment bodies are capped at 64 KiB with malformed-request abuse accounting, Compose uploads use symlink-resistant `os.Root` writes, partial TLS configuration fails at startup, audit-copy claims now distinguish local append-only logging from external tamper evidence, and the exported website/docs routes ship generated CSP plus browser security headers. Every from-source Docker builder now uses the patched Go 1.26.5 toolchain, removing the last High-severity finding from the container scan.
 
 - **Corrupted edge log output**: `dd:container_log_response.logs` now strips Docker's 8-byte multiplexed stream-frame headers for non-TTY containers (the same de-muxing the HTTP `/logs` route does) while passing a TTY container's raw stream through unchanged, so logs are plain text instead of text interleaved with binary frame headers (non-TTY) and are no longer garbled by demuxing a header-less stream (TTY).
 - **Kubernetes example manifests**: `examples/kubernetes/standard.yaml` and `edge.yaml` mounted the Compose stacks directory (`/data/stacks`) as an `emptyDir`, which Kubernetes wipes on pod recreation — silently breaking `down`/`ps`/`stop`/`restart`/`logs` for every stack a prior `up` had deployed. Both now use a `hostPath` volume (with a note to pre-create it owned by UID 65532, since `fsGroup` does not apply to `hostPath`). The edge manifest's `portwing keygen` setup command was also missing its `> portwing_ed25519.pem` redirect, leaving the following `kubectl create secret --from-file=…` step referencing a file that was never written.
@@ -34,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 
 - **`FuzzEnvelope` added to every fuzz tier.** The wire-envelope fuzzer (`internal/protocol`), which exercises the `portwing/1.0` parser on the untrusted edge-WebSocket input path, existed but was wired into none of the coverage tiers. It now runs in the `ci.yml` smoke tier, the nightly and monthly deep-fuzz matrices, and the lefthook pre-push hook, and is listed in the CONTRIBUTING local-fuzz instructions.
+
+## [0.6.0] - 2026-07-10
 
 ### Added
 

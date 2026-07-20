@@ -70,7 +70,22 @@ export const roadmap: Milestone[] = [
     ],
   },
   {
-    version: "v0.7",
+    version: "v0.7.0",
+    title: "Fail-Closed Security",
+    emoji: "🛡️",
+    status: "released",
+    items: [
+      "Standard mode fails closed without credentials — unauthenticated development requires explicit loopback and remote opt-ins",
+      "Ed25519 HTTP signature v2 binds the escaped path and exact raw query; legacy signatures are query-free only",
+      "Cold Argon2id work is capped agent-wide and per IP; raw-token verifiers retain fixed-size digests",
+      "Credential files require regular-file descriptors and safe Unix permissions, checked after open",
+      "Enrollment bodies are capped and abuse-limited; Compose uploads use root-confined, symlink-resistant writes",
+      "Edge request correlation, bounded log-follow options, and terminal hello-rejection classification",
+      "Generated CSP and browser security headers cover every exported website and docs route",
+    ],
+  },
+  {
+    version: "v0.8.0",
     title: "Toward v1.0",
     emoji: "🧭",
     status: "next",

@@ -141,8 +141,8 @@ func TestLoadPrivateKey_WriteOnlyFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission check not applicable on Windows")
 	}
-	// Mode 0200: no world-read bit (passes checkFilePermissions) but owner
-	// has no read permission, so os.ReadFile fails.
+	// Mode 0200 has safe group/world bits but no owner read permission, so the
+	// credential open fails.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "private.pem")
 	if err := os.WriteFile(path, []byte("content"), 0o600); err != nil {
@@ -155,7 +155,7 @@ func TestLoadPrivateKey_WriteOnlyFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for write-only (unreadable) private key file")
 	}
-	if !strings.Contains(err.Error(), "reading private key") {
+	if !strings.Contains(err.Error(), "opening private key") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -259,7 +259,7 @@ func TestCheckFilePermissions_StatError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent file")
 	}
-	if !strings.Contains(err.Error(), "stat authorized_keys") {
+	if !strings.Contains(err.Error(), "opening authorized_keys") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -439,9 +439,7 @@ func TestParseAuthorizedKeys_ScannerError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("not applicable on Windows")
 	}
-	// A directory with 0700 permissions: stat passes world-read check (bit 0004=0),
-	// os.Open succeeds, but bufio.Scanner.Scan() returns "is a directory" error,
-	// so scanner.Err() returns non-nil.
+	// A directory with 0700 permissions must be rejected before scanning.
 	dir := t.TempDir()
 	// Use a subdirectory as the "file" path.
 	subdir := filepath.Join(dir, "authorized_keys")
@@ -452,7 +450,7 @@ func TestParseAuthorizedKeys_ScannerError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when path is a directory")
 	}
-	if !strings.Contains(err.Error(), "reading authorized_keys") {
+	if !strings.Contains(err.Error(), "not a regular file") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -465,8 +463,8 @@ func TestParseAuthorizedKeys_OpenError(t *testing.T) {
 		t.Skip("permission check not applicable on Windows")
 	}
 	// Create a 0600 file, then chmod it to 0200 (write-only, no read).
-	// checkFilePermissions only checks world-read bit (0o004), so 0200 passes.
-	// But os.Open for reading will fail with permission denied.
+	// Mode 0200 passes the group/world permission policy, but opening for read
+	// fails because the owner read bit is absent.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "authorized_keys")
 	if err := os.WriteFile(path, []byte("# empty\n"), 0o600); err != nil {

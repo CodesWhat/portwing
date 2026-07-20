@@ -2,8 +2,10 @@ package server
 
 import (
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestParsePHCRoundTrip verifies that HashToken produces a PHC string that
@@ -190,6 +192,64 @@ func TestArgon2VerifierSuccessCache(t *testing.T) {
 	// Wrong token should return false and not update the cache count.
 	if cv.Verify("wrongtoken") {
 		t.Fatal("wrong token should not verify")
+	}
+}
+
+func TestArgon2VerifierBoundsConcurrentSlowVerifications(t *testing.T) {
+	const requests = 12
+	release := make(chan struct{})
+	var active atomic.Int64
+	var maximum atomic.Int64
+	v := &argon2Verifier{
+		slowVerify: func(string) bool {
+			current := active.Add(1)
+			for {
+				seen := maximum.Load()
+				if current <= seen || maximum.CompareAndSwap(seen, current) {
+					break
+				}
+			}
+			<-release
+			active.Add(-1)
+			return false
+		},
+		slowSlots: make(chan struct{}, 2),
+	}
+
+	start := make(chan struct{})
+	var rejected atomic.Int64
+	var wg sync.WaitGroup
+	for i := 0; i < requests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, attempted := v.VerifyWithCapacity("wrong")
+			if !attempted {
+				rejected.Add(1)
+			}
+		}()
+	}
+	close(start)
+
+	deadline := time.After(time.Second)
+	for maximum.Load() < 2 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for Argon2 verification slots")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	time.Sleep(25 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := maximum.Load(); got > 2 {
+		t.Fatalf("maximum concurrent slow verifications = %d, want at most 2", got)
+	}
+	if rejected.Load() == 0 {
+		t.Fatal("expected excess slow verifications to be rejected before allocation")
 	}
 }
 

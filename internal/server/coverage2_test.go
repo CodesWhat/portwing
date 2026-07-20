@@ -925,7 +925,7 @@ func TestAuthMiddlewareWithMetricsRateLimited(t *testing.T) {
 	reg := newMetricsRegistry()
 	rl := NewRateLimiter()
 	defer rl.Stop()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	// Exhaust limit.
@@ -954,7 +954,7 @@ func TestAuthMiddlewareWithMetricsAuthFailure(t *testing.T) {
 	reg := newMetricsRegistry()
 	rl := NewRateLimiter()
 	defer rl.Stop()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -973,7 +973,7 @@ func TestAuthMiddlewareWithMetricsSuccess(t *testing.T) {
 	reg := newMetricsRegistry()
 	rl := NewRateLimiter()
 	defer rl.Stop()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1199,7 +1199,7 @@ func TestEd25519MiddlewareBadTokenFallback(t *testing.T) {
 	ed, _ := setupEd25519(t)
 	rl := NewRateLimiter()
 	defer rl.Stop()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddlewareWithEd25519(verifier, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1220,7 +1220,7 @@ func TestEd25519MiddlewareBadTokenFallbackWithMetrics(t *testing.T) {
 	ed, _ := setupEd25519(t)
 	rl := NewRateLimiter()
 	defer rl.Stop()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddlewareWithEd25519(verifier, ed, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1241,7 +1241,7 @@ func TestEd25519MiddlewareTokenFallbackSuccessWithMetrics(t *testing.T) {
 	ed, _ := setupEd25519(t)
 	rl := NewRateLimiter()
 	defer rl.Stop()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddlewareWithEd25519(verifier, ed, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

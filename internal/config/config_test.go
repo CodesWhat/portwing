@@ -34,6 +34,27 @@ func TestLoadBothTokenAndHashErrors(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsPartialTLSKeypair(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  string
+	}{
+		{name: "certificate only", key: "TLS_CERT"},
+		{name: "private key only", key: "TLS_KEY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.key, "/run/secrets/tls")
+			_, err := Load()
+			if err == nil {
+				t.Fatal("expected partial TLS keypair to fail configuration load")
+			}
+			if !strings.Contains(err.Error(), "TLS_CERT and TLS_KEY") {
+				t.Fatalf("expected paired TLS guidance, got: %v", err)
+			}
+		})
+	}
+}
+
 // TestLoadEdgeModeWithHashOnlyErrors ensures that DRYDOCK_URL + TOKEN_HASH
 // (without TOKEN) returns an error.
 func TestLoadEdgeModeWithHashOnlyErrors(t *testing.T) {

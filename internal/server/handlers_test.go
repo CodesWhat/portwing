@@ -35,7 +35,7 @@ func buildTestMux(t *testing.T, token string) (*http.ServeMux, *RateLimiter) {
 
 	var verifier tokenVerifier
 	if token != "" {
-		verifier = &rawTokenVerifier{token: token}
+		verifier = newRawTokenVerifier(token)
 	}
 
 	authWrap := func(h http.HandlerFunc) http.Handler {

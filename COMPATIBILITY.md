@@ -14,7 +14,7 @@ DrydockCompat bumps.
 
 | Portwing version | Drydock version | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|
-| v0.6.0 (latest release) / `main` (unreleased) | 1.5.x / `dev/v1.6` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v0.7.0 (latest release) / `main` | 1.5.x / `dev/v1.6` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 
 ## What "wire compat" means
 
@@ -40,6 +40,15 @@ DrydockCompat bumps.
   drydock controller's `app/api/portwing-ws.ts` and is **not** a versioned wire
   contract; if drydock renames or repurposes a rejection code, update
   `internal/edge/hello_reject.go` in lockstep.
+
+## HTTP signature compatibility
+
+Portwing v0.7.0 introduces Ed25519 HTTP signature version 2. Clients set
+`X-Portwing-Signature-Version: 2` and sign the escaped path plus the exact raw
+query string as the request target. Legacy unversioned signatures remain valid
+only for query-free requests. This does not change `DrydockCompat`: it affects
+the Standard Mode HTTP authentication contract, not the edge WebSocket wire
+protocol.
 
 ## Sockguard preset compatibility
 

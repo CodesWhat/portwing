@@ -18,7 +18,7 @@ License|Zlib (core) / proprietary (Business)|AGPL-3.0|tie
 `,
   highlightsTable: `
 key|Ed25519 Per-Request Auth|Portainer agents authenticate with a shared secret or Edge key. Portwing uses Ed25519 asymmetric signing on every request — no secret on the wire, and each client gets its own key pair.
-shield|Structured Audit Log (Free)|Portainer locks audit logging to its Business tier. Portwing ships tamper-evident, structured JSON audit logging in every build under AGPL-3.0 — no paid upgrade required.
+shield|Structured Audit Log (Free)|Portainer locks audit logging to its Business tier. Portwing ships structured JSON audit logging in every build under AGPL-3.0 — no paid upgrade required. Export to immutable storage for tamper evidence.
 packagecheck|Signed Images + SBOM|Portwing's build pipeline generates a CycloneDX SBOM, cosign image signatures, and SLSA build provenance on every release. Portainer has no supply-chain artifacts.
 activity|Prometheus Metrics (Free)|Portainer exposes metrics only in its Business tier. Portwing includes a Prometheus metrics endpoint in the base build, covering agent health, request counts, and latency.
 bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server so AI tools can inspect containers, images, and events without a browser. Portainer has no MCP integration.
@@ -58,7 +58,7 @@ lock|Narrow Scope by Design|Portainer is a full management platform. Portwing is
         secure foothold agent without the management overhead
       </strong>{" "}
       — and ships Ed25519 auth, audit logging, and Prometheus metrics in the free AGPL-3.0 build
-      without requiring a Business-tier upgrade. Portwing is alpha (v0.6.x); Portainer is
+      without requiring a Business-tier upgrade. Portwing is alpha (v0.7.x); Portainer is
       production-mature.
     </p>
   ),

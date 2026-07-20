@@ -30,6 +30,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/codeswhat/portwing/internal/auth"
 )
 
 const (
@@ -511,10 +513,10 @@ func TestEd25519Auth(t *testing.T) {
 	}
 	nonce := hex.EncodeToString(nonceBytes) // 32 hex characters
 
-	// Canonical message: METHOD\nPATH\nbody-sha256-hex\nunix-timestamp\nnonce.
+	// Version 2 canonical message covers the complete origin-form target.
 	emptyBodyHash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	msg := []byte(fmt.Sprintf("%s\n%s\n%s\n%d\n%s",
-		req.Method, req.URL.Path, emptyBodyHash, tsUnix, nonce))
+		req.Method, auth.CanonicalRequestTarget(req.URL), emptyBodyHash, tsUnix, nonce))
 	sig := ed25519.Sign(priv, msg)
 
 	// Key ID: hex(SHA-256(pubkey)[:8]), matching auth.deriveKeyID.
@@ -525,6 +527,7 @@ func TestEd25519Auth(t *testing.T) {
 	req.Header.Set("X-Portwing-Timestamp", strconv.FormatInt(tsUnix, 10))
 	req.Header.Set("X-Portwing-Nonce", nonce)
 	req.Header.Set("X-Portwing-Signature", base64.RawURLEncoding.EncodeToString(sig))
+	req.Header.Set("X-Portwing-Signature-Version", auth.SignatureVersion2)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

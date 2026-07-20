@@ -157,6 +157,46 @@ func TestEnroller_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestEnroller_OversizedBodyRejected(t *testing.T) {
+	t.Parallel()
+	e, _, _ := setupEnroller(t, "secrettok")
+	body := `{"enrollment_token":"` + strings.Repeat("x", 70*1024) + `","public_key":""}`
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized enrollment body, got %d", rec.Code)
+	}
+}
+
+func TestEnrollerStoresFixedLengthTokenDigest(t *testing.T) {
+	e := NewEnroller("a variable-length bootstrap secret", "/unused", nil)
+	if e.tokenDigest == ([32]byte{}) {
+		t.Fatal("expected enrollment token digest to be initialized")
+	}
+	if !e.tokenAvailable {
+		t.Fatal("expected non-empty enrollment token to be available")
+	}
+}
+
+func TestEnroller_TrailingJSONRejected(t *testing.T) {
+	t.Parallel()
+	e, reg, _ := setupEnroller(t, "secrettok")
+	_, b64 := genPubKeyB64(t)
+	body := enrollBody(t, "secrettok", b64).String() + `{}`
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for trailing JSON value, got %d", rec.Code)
+	}
+	if reg.Len() != 0 {
+		t.Fatal("trailing JSON request must not enroll a key")
+	}
+}
+
 func TestEnroller_MethodNotAllowed(t *testing.T) {
 	t.Parallel()
 	e, _, _ := setupEnroller(t, "secrettok")

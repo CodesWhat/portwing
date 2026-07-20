@@ -169,12 +169,20 @@ func HashToken(password string) (string, error) {
 // argon2Verifier wraps a parsed PHC and caches the SHA-256 of the first
 // successfully verified token to avoid full Argon2id on every request.
 type argon2Verifier struct {
-	params    *Argon2idParams
-	cacheOnce atomic.Pointer[[sha256.Size]byte]
+	params     *Argon2idParams
+	cacheOnce  atomic.Pointer[[sha256.Size]byte]
+	slowVerify func(string) bool
+	slowSlots  chan struct{}
 }
 
 func newArgon2Verifier(params *Argon2idParams) *argon2Verifier {
-	return &argon2Verifier{params: params}
+	return &argon2Verifier{
+		params:     params,
+		slowVerify: params.Verify,
+		// A production server owns one verifier, so these slots bound expensive
+		// work globally across all source IPs handled by that agent.
+		slowSlots: make(chan struct{}, 2),
+	}
 }
 
 // Verify returns true if the presented token matches the stored hash.
@@ -183,20 +191,41 @@ func newArgon2Verifier(params *Argon2idParams) *argon2Verifier {
 // Failed attempts always run through the rate limiter before this function is
 // called, so the cache does not weaken the brute-force protection path.
 func (v *argon2Verifier) Verify(token string) bool {
+	valid, attempted := v.VerifyWithCapacity(token)
+	return attempted && valid
+}
+
+// VerifyWithCapacity rejects excess cold Argon2 work before the derivation
+// allocates memory. The bools report (valid, attempted); attempted is false
+// only when all agent-wide verifier slots are occupied.
+func (v *argon2Verifier) VerifyWithCapacity(token string) (bool, bool) {
 	sum := sha256.Sum256([]byte(token))
 
 	// Fast path: compare against cached sum.
 	if cached := v.cacheOnce.Load(); cached != nil {
-		return subtle.ConstantTimeCompare(sum[:], cached[:]) == 1
+		return subtle.ConstantTimeCompare(sum[:], cached[:]) == 1, true
+	}
+
+	select {
+	case v.slowSlots <- struct{}{}:
+		defer func() { <-v.slowSlots }()
+	default:
+		return false, false
+	}
+
+	// Another successful request may have primed the verifier while this one
+	// was acquiring a slow slot.
+	if cached := v.cacheOnce.Load(); cached != nil {
+		return subtle.ConstantTimeCompare(sum[:], cached[:]) == 1, true
 	}
 
 	// Slow path: full Argon2id derivation.
-	if !v.params.Verify(token) {
-		return false
+	if !v.slowVerify(token) {
+		return false, true
 	}
 
 	// Cache the sum on first success; ignore races — both goroutines would
 	// cache the same value for the same correct token.
 	v.cacheOnce.Store(&sum)
-	return true
+	return true, true
 }

@@ -14,7 +14,7 @@ export const SITE_CONFIG = {
   /** Brand name shown in the header, footer, and metadata. */
   name: "Portwing",
   /** Current release version shown in the hero badge. */
-  version: "0.6.0",
+  version: "0.7.0",
   /** Short product tagline used in page titles and OG metadata. */
   tagline: "Security-first remote Docker agent",
   /**
@@ -23,7 +23,7 @@ export const SITE_CONFIG = {
    * Auth: Ed25519 per-client (or token/TOKEN_HASH). sockguard is an optional sibling.
    */
   description:
-    "Lightweight Go agent that gives Drydock a secure foothold on every Docker host. Exposes Docker control via HTTP/SSE (standard mode) or an outbound WebSocket tunnel (edge mode for NAT/firewalled hosts), with Ed25519 per-client auth and a tamper-evident audit log. Part of the CodesWhat stack: Drydock orchestrates, Portwing is the agent, sockguard filters the socket.",
+    "Lightweight Go agent that gives Drydock a secure foothold on every Docker host. Exposes Docker control via HTTP/SSE (standard mode) or an outbound WebSocket tunnel (edge mode for NAT/firewalled hosts), with Ed25519 per-client auth and a structured audit log ready for immutable export. Part of the CodesWhat stack: Drydock orchestrates, Portwing is the agent, sockguard filters the socket.",
   /** Production domain (no protocol, no trailing slash). */
   domain: "getportwing.com",
   /** GitHub owner/org. */

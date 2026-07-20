@@ -1,10 +1,10 @@
 ---
 title: Security Model
-description: Portwing's layered defenses — from socket-level filtering and cryptographic auth to hardened runtime and tamper-evident audit logging.
+description: Portwing's layered defenses — from socket-level filtering and cryptographic auth to hardened runtime and structured audit logging.
 ---
 
 <Callout type="warn">
-Portwing is in **alpha** (v0.6.x). The controls documented here are implemented and tested, but the API surface, configuration keys, and deployment model may change before a stable release. Do not rely on this page as a compliance artifact for production systems until v1.0.
+Portwing is in **alpha** (v0.7.x). The controls documented here are implemented and tested, but the API surface, configuration keys, and deployment model may change before a stable release. Do not rely on this page as a compliance artifact for production systems until v1.0.
 </Callout>
 
 The Docker socket is root-equivalent on the host that runs it. Anything that can write to `/var/run/docker.sock` can create a privileged container, mount the host filesystem, and escape to the underlying machine. Portwing is a privileged agent: an **authenticated** caller has full Docker API access. The controls described here prevent *unauthenticated or improperly authorized* access and certain classes of injection attacks; they do not limit what an authenticated caller can do with the Docker API. Treat the Portwing token as a root-equivalent credential.
@@ -18,11 +18,11 @@ Portwing's security design layers independent controls so that a failure in any 
 | Layer | Mechanism |
 |-------|-----------|
 | **Socket filter** | [Sockguard](https://github.com/codeswhat/sockguard) sits between Portwing and the Docker daemon; only explicitly allowlisted Docker API operations pass through |
-| **Authentication** | Every request is authenticated before it reaches the proxy — per-client Ed25519 signatures or an Argon2id-hashed shared token |
+| **Authentication** | Standard mode fails closed without credentials; every protected request is authenticated before it reaches the proxy — per-client Ed25519 signatures or a shared token |
 | **Transport** | TLS 1.2+ with AEAD-only cipher suites; ECDHE forward secrecy |
 | **Container hardening** | `read_only`, `cap_drop: ALL`, `no-new-privileges`, non-root by default (UID 65532), secrets via mounted files |
-| **Input validation** | Path-traversal guard, env-var denylist, and service-name flag-injection filter on all Compose requests |
-| **Resource limits** | Bounded WebSocket frames, response bodies, exec sessions, and an IP rate limiter to resist DoS |
+| **Input validation** | Root-confined symlink-resistant writes, path-traversal guard, env-var denylist, and service-name flag-injection filter on Compose requests |
+| **Resource limits** | Bounded WebSocket frames, response bodies, exec sessions, enrollment bodies, and Argon2 concurrency, plus an IP rate limiter to resist DoS |
 | **Audit trail** | Structured JSON audit log for every auth event, Compose operation, and exec session |
 | **Supply chain** | Cosign keyless signatures, CycloneDX SBOM, and SLSA provenance on every release |
 
@@ -39,6 +39,11 @@ mux.Handle("/", auth(s.handleDockerProxy))
 ```
 
 A missing or misconfigured auth middleware causes a build-time or startup-time failure rather than a silent security gap — there is no per-path allowlist to misconfigure by omission.
+
+Standard mode refuses to start when no raw token, Argon2id token hash, or
+authorized-keys registry is configured. Local unauthenticated development is
+an explicit opt-in (`ALLOW_UNAUTHENTICATED=true`), and a non-loopback bind
+requires the separate `ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
 
 This architecture structurally prevents the class of Docker AuthZ plugin bypass vulnerabilities (e.g. unauthenticated Docker socket exposure, request smuggling / header injection into the daemon) where authentication is delegated to a plugin that can be bypassed by crafted requests. Portwing does not use Docker's AuthZ plugin mechanism at all.
 
@@ -126,14 +131,18 @@ Both containers in the hardened stack run with the same security options:
 Ed25519 key auth is the recommended option for production. Per-request signatures with nonce replay protection remain strong even when TLS terminates at a load balancer the operator does not fully trust.
 </Callout>
 
-When `AUTHORIZED_KEYS` is configured, each client has a distinct Ed25519 keypair. Every authenticated request carries four headers (`X-Portwing-Key-ID`, `X-Portwing-Timestamp`, `X-Portwing-Nonce`, `X-Portwing-Signature`). The agent verifies the Ed25519 signature over a canonical string of `METHOD\nPATH\nbody-sha256-hex\ntimestamp\nnonce` using `crypto/ed25519.Verify` from the Go standard library.
+When `AUTHORIZED_KEYS` is configured, each client has a distinct Ed25519 keypair. Signature version 2 requests carry `X-Portwing-Key-ID`, `X-Portwing-Timestamp`, `X-Portwing-Nonce`, `X-Portwing-Signature`, and `X-Portwing-Signature-Version: 2`. The agent signs `METHOD\nREQUEST-TARGET\nbody-sha256-hex\ntimestamp\nnonce`, where the request target contains the escaped path and exact raw query string. Unversioned signatures remain accepted only for query-free requests.
 
 Replay protection uses two complementary mechanisms:
 
 1. **Timestamp window** — requests with a timestamp skew greater than `MAX_CLOCK_SKEW_SECONDS` (default 60 s) are rejected with `X-Portwing-Reason: timestamp-skew`.
 2. **Nonce LRU** — an in-memory cache (capacity `NONCE_LRU_SIZE`, default 10,000) tracks nonces within the timestamp window. Repeated nonces return `X-Portwing-Reason: replay`.
 
-The authorized-keys file is refused at startup if it is world-readable (`mode & 0004 != 0`). Hot reload on `SIGHUP` adds or removes keys from the in-memory map without restarting; the nonce LRU is preserved across reloads.
+Authorized-keys and private-key paths must resolve to regular files. On Unix,
+world-readable and group/world-writable credential files are refused; mode
+`0640` is supported for group-readable secret mounts. The permission check is
+made on the opened descriptor to prevent a path-swap race. Hot reload on
+`SIGHUP` adds or removes keys without restarting; the nonce LRU is preserved.
 
 See [Authentication](/authentication) for the full setup guide, header format, key rotation, and migration path from token auth.
 
@@ -156,13 +165,16 @@ printf '%s' "$TOKEN" | portwing hash-token
 # $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 ```
 
-At runtime Portwing compares the incoming token against the stored hash using Argon2id verification, still wrapped with `crypto/subtle` for the final byte comparison to prevent timing leakage. A compromised environment variable dump or configuration file reveals only the hash.
+At runtime Portwing compares the incoming token against the stored hash using Argon2id verification, still wrapped with `crypto/subtle` for the final byte comparison to prevent timing leakage. Cold verification is capped at two concurrent derivations across the agent; excess cold requests receive HTTP 429 before allocating Argon2 memory. A successful verification caches only a fixed-size SHA-256 digest. A compromised environment variable dump or configuration file reveals only the hash.
 
 ---
 
 ## Control 6 — Timing-safe token comparison
 
-All credential comparisons use `crypto/subtle.ConstantTimeCompare` from the Go standard library. The comparison runs in constant time regardless of whether and where the provided token diverges from the configured secret, eliminating timing-oracle attacks that can leak token bytes one at a time.
+Raw token verifiers retain a fixed-size SHA-256 digest rather than the raw
+configured token. Each presented value is hashed and compared to that digest
+with `crypto/subtle.ConstantTimeCompare`, so comparison length is independent
+of the submitted token length.
 
 This applies to all accepted credential headers: `Authorization: Bearer`, `X-Portwing-Token`, and `X-Dd-Agent-Secret`.
 
@@ -170,7 +182,8 @@ This applies to all accepted credential headers: `Authorization: Bearer`, `X-Por
 
 ## Control 7 — TLS 1.2+ AEAD-only
 
-When `TLS_CERT` and `TLS_KEY` are configured, Portwing presents TLS with:
+`TLS_CERT` and `TLS_KEY` must be configured together; setting only one is a
+startup error. When configured, Portwing presents TLS with:
 
 | Setting | Value |
 |---------|-------|
@@ -190,7 +203,10 @@ In production, run Portwing in standard mode behind a TLS reverse proxy. This ke
 
 Three independent validation steps protect the Compose code path:
 
-**Path-traversal guard.** All file paths in `ComposeRequest` are resolved to their absolute forms and verified to remain within `STACKS_DIR` before any disk operation:
+**Root-confined file writes.** Compose upload paths are checked lexically, then
+opened through Go's directory-scoped `os.Root` API. Each directory component
+and destination is inspected without following symlinks; the rooted open keeps
+the write beneath `STACKS_DIR` even if a path is swapped concurrently.
 
 ```go
 if !strings.HasPrefix(resolved, absBase+string(filepath.Separator)) && resolved != absBase {
@@ -198,7 +214,9 @@ if !strings.HasPrefix(resolved, absBase+string(filepath.Separator)) && resolved 
 }
 ```
 
-A caller supplying `../../etc/passwd` or a symlink pointing outside the stacks directory receives a validation error; no file is read or written.
+A caller supplying `../../etc/passwd`, a symlinked directory, or a symlinked
+destination receives a validation error; no uploaded data is written outside
+the stacks directory.
 
 **Env-var denylist.** Environment variables passed in `ComposeRequest.EnvVars` must match `^[a-zA-Z_][a-zA-Z0-9_]*$` and must not be in the denylist:
 
@@ -222,6 +240,11 @@ Failed authentication attempts are tracked per remote IP in a sliding one-minute
 | Response | HTTP 429 until the window expires |
 | IP table cap | 10,000 entries (new entries beyond the cap are dropped to prevent map exhaustion — fail-open for tracking, not for auth) |
 | Cleanup interval | Every 5 minutes (background goroutine) |
+| Per-IP in-flight auth cap | 2 credential verifications |
+| Agent-wide cold Argon2 cap | 2 derivations; excess requests return HTTP 429 before allocation |
+
+Malformed and oversized enrollment bodies use a separate per-IP abuse window,
+while bad enrollment credentials use the authentication-failure window.
 
 ---
 
@@ -234,6 +257,9 @@ Failed authentication attempts are tracked per remote IP in a sliding one-minute
 | Edge log-request payload | 100 MB | Bound a buffered `dd:container_log_response` |
 | Edge follow-log window | ~7s | Bound a `follow=true` `dd:container_log_request` so it can't hold a message-handler slot indefinitely |
 | Exec request body | 10 MB | Limit exec payload size |
+| Ed25519 signed-request body | 1 MB | Bound body buffering before signature verification |
+| Enrollment request body | 64 KiB | Bound unauthenticated JSON parsing |
+| Cold Argon2id derivations | 2 | Bound memory-hard verification across the agent |
 | Concurrent exec sessions | 100 | Prevent unbounded goroutine growth |
 | Concurrent stream sessions | 100 | Prevent unbounded goroutine growth |
 | Rate-limiter IP table | 10,000 entries | Prevent rate-limiter map exhaustion |
@@ -246,7 +272,7 @@ The outermost HTTP handler is wrapped with `RecoveryMiddleware`, which uses `def
 
 ---
 
-## Control 12 — Tamper-evident audit log
+## Control 12 — Structured audit log and external tamper evidence
 
 Set `AUDIT_LOG` to `stdout`, `stderr`, or a file path to enable structured JSON audit logging. Every security-relevant event produces a JSON line:
 
@@ -268,6 +294,8 @@ Example lines:
 
 Audit logging is disabled by default (`AUDIT_LOG` unset). When disabled, the overhead is a single nil pointer check per request. Log files are opened in append-only mode at `0600`.
 
+The local file is not cryptographically tamper-evident: a principal that can rewrite the host filesystem can truncate, replace, or delete it. For tamper evidence, ship records immediately to append-only or WORM storage under separate credentials and monitor delivery gaps.
+
 See [Audit Logging](/audit-logging) for the full schema and aggregator integration notes.
 
 ---
@@ -283,7 +311,7 @@ Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0
 Verify a release before running it:
 
 ```bash
-TAG=v0.6.0
+TAG=v0.7.0
 
 # Verify the checksums file
 cosign verify-blob \
@@ -300,6 +328,23 @@ cosign verify \
 ```
 
 See [Verification](/verification) for SBOM inspection and SLSA provenance verification.
+
+---
+
+## Control 14 — Static-site browser policy
+
+The marketing and documentation exports ship a checked-in Vercel header
+policy generated from the final HTML. Every route receives
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, a strict referrer
+policy, and a restrictive permissions policy. Each HTML route also receives a
+Content Security Policy whose `script-src` contains only `self` plus SHA-256
+hashes of that route's generated inline scripts; arbitrary inline JavaScript
+is not allowed. `frame-ancestors 'none'`, `object-src 'none'`, and
+`base-uri 'self'` further reduce browser-side injection and framing exposure.
+
+The site build fails if the generated route policy differs from
+`website/vercel.json`, preventing content changes from silently deploying with
+stale script hashes.
 
 ---
 

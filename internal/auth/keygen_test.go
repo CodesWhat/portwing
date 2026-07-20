@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -95,6 +96,28 @@ func TestLoadPrivateKey_NotFound(t *testing.T) {
 	_, err := LoadPrivateKey("/nonexistent/path/private.pem")
 	if err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+func TestLoadPrivateKey_GroupOrWorldWritableRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission check not applicable on Windows")
+	}
+	privPEM, _, err := GenerateKeyPair("unsafe-mode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []os.FileMode{0o620, 0o602} {
+		path := filepath.Join(t.TempDir(), "private.pem")
+		if err := os.WriteFile(path, privPEM, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadPrivateKey(path); err == nil {
+			t.Fatalf("mode %04o: expected writable private key rejection", mode)
+		}
 	}
 }
 

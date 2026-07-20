@@ -50,11 +50,12 @@ func (s *stubServerAdapter) OnContainerRefresh(_ context.Context, _ adapter.Mess
 // minimalConfig returns a Config that is safe for NewServer.
 func minimalConfig() *config.Config {
 	return &config.Config{
-		Port:            "3000",
-		BindAddress:     "127.0.0.1",
-		AuditBufferSize: 16,
-		NonceLRUSize:    100,
-		DDPollInterval:  30,
+		Port:                 "3000",
+		BindAddress:          "127.0.0.1",
+		AllowUnauthenticated: true,
+		AuditBufferSize:      16,
+		NonceLRUSize:         100,
+		DDPollInterval:       30,
 	}
 }
 
@@ -493,7 +494,24 @@ func TestHandleComposeValidJSON(t *testing.T) {
 // http.go — NewServer construction paths
 // ---------------------------------------------------------------------------
 
-func TestNewServerNoAuth(t *testing.T) {
+func TestNewServerRejectsImplicitUnauthenticatedMode(t *testing.T) {
+	t.Parallel()
+
+	client, stop := newStubDockerClient(t)
+	defer stop()
+
+	cfg := minimalConfig()
+	cfg.AllowUnauthenticated = false
+	_, err := NewServer(cfg, client, &stubServerAdapter{})
+	if err == nil {
+		t.Fatal("expected NewServer to reject missing authentication without an explicit opt-in")
+	}
+	if !strings.Contains(err.Error(), "ALLOW_UNAUTHENTICATED") {
+		t.Fatalf("expected opt-in guidance, got: %v", err)
+	}
+}
+
+func TestNewServerAllowsExplicitLoopbackUnauthenticatedMode(t *testing.T) {
 	t.Parallel()
 
 	client, stop := newStubDockerClient(t)
@@ -501,7 +519,42 @@ func TestNewServerNoAuth(t *testing.T) {
 
 	s, err := NewServer(minimalConfig(), client, &stubServerAdapter{})
 	if err != nil {
-		t.Fatalf("NewServer: %v", err)
+		t.Fatalf("NewServer with explicit local opt-in: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = s.Shutdown(ctx)
+}
+
+func TestNewServerRejectsUnauthenticatedNonLoopbackBind(t *testing.T) {
+	t.Parallel()
+
+	client, stop := newStubDockerClient(t)
+	defer stop()
+
+	cfg := minimalConfig()
+	cfg.BindAddress = "0.0.0.0"
+	_, err := NewServer(cfg, client, &stubServerAdapter{})
+	if err == nil {
+		t.Fatal("expected unauthenticated non-loopback bind to require a second explicit opt-in")
+	}
+	if !strings.Contains(err.Error(), "ALLOW_UNAUTHENTICATED_REMOTE") {
+		t.Fatalf("expected remote opt-in guidance, got: %v", err)
+	}
+}
+
+func TestNewServerAllowsExplicitRemoteUnauthenticatedMode(t *testing.T) {
+	t.Parallel()
+
+	client, stop := newStubDockerClient(t)
+	defer stop()
+
+	cfg := minimalConfig()
+	cfg.BindAddress = "0.0.0.0"
+	cfg.AllowUnauthenticatedRemote = true
+	s, err := NewServer(cfg, client, &stubServerAdapter{})
+	if err != nil {
+		t.Fatalf("NewServer with both unauthenticated opt-ins: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

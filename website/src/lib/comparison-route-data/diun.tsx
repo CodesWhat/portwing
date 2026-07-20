@@ -7,7 +7,7 @@ export const diunComparisonRouteData = {
 Image update notifications|Yes (multi-registry polling + 20+ notifiers)|No (Drydock notifies; Portwing is the access agent)|competitor
 Remote Docker API proxy|No (monitoring only, no remote control)|Yes (full Docker API proxy with auth)|self
 Auth for remote access|No (local only)|Yes (Ed25519 per-request signing)|self
-Structured audit log|No|Yes (tamper-evident, built-in)|self
+Structured audit log|No|Yes (JSON, built-in)|self
 Image signature verification|No|Yes (cosign + SBOM + SLSA)|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Yes|Yes|tie
@@ -19,7 +19,7 @@ License|MIT|AGPL-3.0|tie
   highlightsTable: `
 key|Remote Auth (Ed25519)|Diun has no remote access model — it runs locally and pushes notifications outward. Portwing exposes the Docker API over authenticated HTTP with Ed25519 per-request signing so each client gets a revocable key pair.
 shield|Default-Deny Socket Filter|Portwing pairs with sockguard to constrain Docker API calls at the socket level. Diun mounts the raw socket and has no filtering layer.
-filetext|Structured Audit Log|Portwing logs every Docker API call it proxies in a tamper-evident JSON format. Diun has no audit trail beyond its own notification records.
+filetext|Structured Audit Log|Portwing logs every Docker API call it proxies as structured JSON for export to immutable storage. Diun has no audit trail beyond its own notification records.
 packagecheck|Image Signature Verification|Portwing verifies image signatures via cosign and ships CycloneDX SBOMs and SLSA build provenance on its own releases. Diun detects new tags but does not verify image signatures.
 bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server so AI tools can inspect containers, images, and events. Diun has no MCP support.
 activity|Complementary, Not Competing|Diun and Portwing solve different problems and run happily side-by-side. Diun monitors registries and notifies; Portwing gives Drydock secure remote control. You likely want both.

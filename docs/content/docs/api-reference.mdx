@@ -21,7 +21,11 @@ Protected endpoints require the agent token in one of these headers (checked in 
 | `X-Portwing-Token` | Alternative header |
 | `X-Dd-Agent-Secret` | Drydock agent secret header |
 
-Alternatively, per-request Ed25519 signatures are accepted when the `X-Portwing-Signature` header is present. See [Authentication](/authentication) for the full signing protocol.
+Alternatively, per-request Ed25519 signatures are accepted when the
+`X-Portwing-Signature` header is present. Current clients send
+`X-Portwing-Signature-Version: 2` and sign the escaped path plus exact raw
+query string. See [Authentication](/authentication) for the full signing
+protocol.
 
 **Rate limiting:** 10 failed auth attempts per IP per rolling minute. Exceeding the limit returns HTTP `429` until the window resets.
 
@@ -57,7 +61,7 @@ Returns HTTP `503` with `"status":"unhealthy","docker":"disconnected"` when Dock
 
 ```json
 {
-  "version": "0.6.0",
+  "version": "0.7.0",
   "dockerVersion": "27.0.3",
   "mode": "standard",
   "uptime": "2h34m56.789s",
@@ -191,7 +195,7 @@ Available when `ADAPTER=generic`. These endpoints expose container management wi
 
 ```json
 {
-  "agentVersion": "0.6.0",
+  "agentVersion": "0.7.0",
   "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"
@@ -363,7 +367,7 @@ One-shot bootstrap endpoint for registering an Ed25519 public key (Model C authe
 | `POST` | `/api/portwing/enroll` | Enrollment token | Register an Ed25519 public key. Token is burned after first successful use. |
 
 <Callout type="info">
-This endpoint is only available when `ENROLLMENT_TOKEN` (and `AUTHORIZED_KEYS`) are configured. The endpoint is reachable without a prior agent token — the enrollment token is the credential. It is subject to the same IP-based rate limiter as auth failures.
+This endpoint is only available when `ENROLLMENT_TOKEN` (and `AUTHORIZED_KEYS`) are configured. The endpoint is reachable without a prior agent token — the enrollment token is the credential. Its JSON body is limited to 64 KiB; oversized bodies return HTTP `413`. Malformed and oversized requests feed a separate per-IP abuse limiter, while bad credentials feed the authentication-failure limiter.
 </Callout>
 
 ### Request body

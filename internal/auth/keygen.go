@@ -9,17 +9,18 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"os"
+	"io"
 )
 
 // LoadPrivateKey reads an Ed25519 private key from a PEM-encoded PKCS#8 file.
-// It rejects the key file if it is world-readable (permissions should be 0600).
+// It requires a regular file and rejects unsafe Unix read/write permissions.
 func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
-	if err := checkFilePermissions(path); err != nil {
+	f, err := openCredentialFile(path, "private key")
+	if err != nil {
 		return nil, fmt.Errorf("private key %q has unsafe permissions: %w", path, err)
 	}
-	// #nosec G304 -- private key path is explicit operator configuration and permissions are checked above.
-	data, err := os.ReadFile(path)
+	defer f.Close()
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("reading private key %q: %w", path, err)
 	}
