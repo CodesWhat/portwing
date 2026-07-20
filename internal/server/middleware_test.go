@@ -44,6 +44,16 @@ type blockingTokenVerifier struct {
 	maximum atomic.Int64
 }
 
+type saturatedTokenVerifier struct{}
+
+func (saturatedTokenVerifier) Verify(string) bool {
+	panic("Verify must not run when VerifyWithCapacity is available")
+}
+
+func (saturatedTokenVerifier) VerifyWithCapacity(string) (bool, bool) {
+	return false, false
+}
+
 func (v *blockingTokenVerifier) Verify(string) bool {
 	active := v.active.Add(1)
 	for {
@@ -97,6 +107,139 @@ func TestAuthMiddlewareBoundsConcurrentVerificationsPerIP(t *testing.T) {
 
 	if got := verifier.maximum.Load(); got > 2 {
 		t.Fatalf("maximum concurrent verifications = %d, want at most 2", got)
+	}
+}
+
+func TestAuthMiddlewareReturns429WhenVerifierCapacityIsExhausted(t *testing.T) {
+	rl := NewRateLimiter()
+	defer rl.Stop()
+
+	h := rl.AuthMiddleware(saturatedTokenVerifier{}, noAudit(t), nil, http.HandlerFunc(okHandler))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.12:12345"
+	req.Header.Set(headerPortwingToken, "presented")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 when verifier capacity is exhausted, got %d", rec.Code)
+	}
+	if _, ok := rl.attempts["192.0.2.12"]; ok {
+		t.Fatal("capacity rejection must release the per-IP verification reservation")
+	}
+}
+
+func TestRateLimiterAbuseWindowStateTransitions(t *testing.T) {
+	rl := &RateLimiter{
+		attempts: make(map[string]*ipAttempts),
+		maxFails: 2,
+		window:   time.Minute,
+		maxIPs:   1,
+	}
+
+	if rl.isAbuseRateLimited("missing") {
+		t.Fatal("missing abuse record must not be rate limited")
+	}
+
+	rl.recordAbuse("client")
+	if rl.isAbuseRateLimited("client") {
+		t.Fatal("one malformed request must remain below the abuse limit")
+	}
+	rl.recordAbuse("client")
+	if !rl.isAbuseRateLimited("client") {
+		t.Fatal("client must be rate limited at the abuse threshold")
+	}
+
+	rl.abuse["client"].firstFail = time.Now().Add(-2 * rl.window)
+	if rl.isAbuseRateLimited("client") {
+		t.Fatal("expired abuse window must not remain rate limited")
+	}
+	if _, ok := rl.abuse["client"]; ok {
+		t.Fatal("expired abuse record must be removed during lookup")
+	}
+
+	rl.recordAbuse("existing")
+	rl.recordAbuse("overflow")
+	if _, ok := rl.abuse["overflow"]; ok {
+		t.Fatal("abuse table must not grow beyond maxIPs")
+	}
+	rl.abuse["existing"].count = rl.maxFails
+	rl.abuse["existing"].firstFail = time.Now().Add(-2 * rl.window)
+	rl.recordAbuse("existing")
+	if got := rl.abuse["existing"].count; got != 1 {
+		t.Fatalf("expired abuse record count = %d, want 1", got)
+	}
+}
+
+func TestRateLimiterAuthReservationStateTransitions(t *testing.T) {
+	rl := &RateLimiter{
+		attempts: make(map[string]*ipAttempts),
+		maxFails: 2,
+		window:   time.Minute,
+		maxIPs:   10,
+	}
+
+	if !rl.tryBeginAuth("client") {
+		t.Fatal("default per-IP capacity must allow the first in-flight verification")
+	}
+	if !rl.tryBeginAuth("client") {
+		t.Fatal("default per-IP capacity must allow the second in-flight verification")
+	}
+	if rl.tryBeginAuth("client") {
+		t.Fatal("third in-flight verification must be rejected")
+	}
+	rl.finishAuth("client", true)
+	if got := rl.attempts["client"].inFlight; got != 1 {
+		t.Fatalf("in-flight reservations after first success = %d, want 1", got)
+	}
+	rl.finishAuth("client", true)
+	if _, ok := rl.attempts["client"]; ok {
+		t.Fatal("successful final reservation must remove an empty tracking record")
+	}
+	rl.finishAuth("missing", false)
+
+	for i := 0; i < rl.maxFails; i++ {
+		if !rl.tryBeginAuth("failing") {
+			t.Fatalf("failure reservation %d was unexpectedly rejected", i+1)
+		}
+		rl.finishAuth("failing", false)
+	}
+	if !rl.IsRateLimited("failing") {
+		t.Fatal("completed failures at the threshold must rate limit the client")
+	}
+	if rl.tryBeginAuth("failing") {
+		t.Fatal("rate-limited client must not reserve another verification")
+	}
+
+	rl.attempts["failing"].firstFail = time.Now().Add(-2 * rl.window)
+	if rl.IsRateLimited("failing") {
+		t.Fatal("expired failure window must not remain rate limited")
+	}
+	if _, ok := rl.attempts["failing"]; ok {
+		t.Fatal("expired idle failure record must be removed")
+	}
+
+	rl.attempts["busy"] = &ipAttempts{
+		count:     rl.maxFails,
+		firstFail: time.Now().Add(-2 * rl.window),
+		inFlight:  1,
+	}
+	if rl.IsRateLimited("busy") {
+		t.Fatal("expired busy record must reset instead of remaining rate limited")
+	}
+	if got := rl.attempts["busy"]; got.count != 0 || !got.firstFail.IsZero() || got.inFlight != 1 {
+		t.Fatalf("expired busy record was not reset safely: %+v", got)
+	}
+
+	rl.attempts["expired"] = &ipAttempts{
+		count:     rl.maxFails,
+		firstFail: time.Now().Add(-2 * rl.window),
+	}
+	if !rl.tryBeginAuth("expired") {
+		t.Fatal("expired failure record must allow a fresh reservation")
+	}
+	if got := rl.attempts["expired"]; got.count != 0 || !got.firstFail.IsZero() || got.inFlight != 1 {
+		t.Fatalf("fresh reservation did not reset expired state: %+v", got)
 	}
 }
 
