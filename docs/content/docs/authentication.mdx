@@ -9,6 +9,14 @@ Requests authenticate via `Authorization: Bearer`, `X-Portwing-Token`, or `X-Dd-
 
 See [Configuration](/configuration) for a complete environment variable reference, and [Connection Modes](/connection-modes) for how auth applies in edge (WebSocket) mode.
 
+<Callout type="warn">
+Standard mode refuses to start without at least one configured credential.
+Unauthenticated local development must be explicitly enabled with
+`ALLOW_UNAUTHENTICATED=true` on a loopback bind; exposing that mode on a
+non-loopback address requires the separate
+`ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
+</Callout>
+
 ---
 
 ## 1. Plaintext token
@@ -55,7 +63,7 @@ This is appropriate for Docker secrets, Kubernetes secret volumes, or any orches
 
 ## 3. Argon2id hash-at-rest
 
-`TOKEN_HASH` stores an Argon2id hash of the token so the plaintext never appears in environment variable dumps or config files. At runtime the agent performs a constant-time Argon2id comparison against the presented token.
+`TOKEN_HASH` stores an Argon2id hash of the token so the plaintext never appears in environment variable dumps or config files. At runtime the agent performs a constant-time Argon2id comparison against the presented token. Cold verification is capped at two concurrent derivations across the agent; excess cold requests receive HTTP 429 before allocating Argon2 memory. After the first successful verification, a fixed-size SHA-256 success digest keeps normal request cost flat.
 
 **Generate the hash with `portwing hash-token`.** The token is read from stdin — it is never passed as a command-line argument to avoid exposure in shell history and process listings.
 
@@ -94,7 +102,12 @@ docker run -d --name portwing \
 
 ## 4. Ed25519 per-client keys
 
-Ed25519 keypairs give each client a distinct cryptographic identity. Every request carries a detached signature over the HTTP method, path, a SHA-256 body hash, a Unix timestamp, and a 128-bit random nonce. The agent verifies the signature, rejects requests with a timestamp skew greater than 60 seconds, and tracks nonces in an in-memory LRU to prevent replay within the timestamp window.
+Ed25519 keypairs give each client a distinct cryptographic identity. Every
+version 2 request carries a detached signature over the HTTP method, complete
+origin-form request target, a SHA-256 body hash, a Unix timestamp, and a
+128-bit random nonce. The agent verifies the signature, rejects requests with
+a timestamp skew greater than 60 seconds, and tracks nonces in an in-memory
+LRU to prevent replay within the timestamp window.
 
 No shared secret is involved. Compromising one client's private key does not affect other enrolled clients.
 
@@ -119,7 +132,11 @@ The file format mirrors OpenSSH `authorized_keys`. Each non-blank, non-comment l
 ed25519 <base64-public-key> [comment]
 ```
 
-Comment out or remove a line to revoke that key. The agent refuses to start if the file is world-readable.
+Comment out or remove a line to revoke that key. Credential files must resolve
+to regular files. On Unix, the agent refuses files that are world-readable or
+group/world-writable; mode `0640` remains valid for secret mounts that need a
+container-readable group. Permissions are checked on the opened file
+descriptor so a path swap cannot race the validation.
 
 ### Start the agent with Ed25519 auth
 
@@ -135,7 +152,7 @@ docker run -d --name portwing \
 
 ### Request signing headers
 
-Clients must send four headers on every request:
+Signature version 2 clients must send five headers on every request:
 
 | Header | Format |
 |--------|--------|
@@ -143,18 +160,27 @@ Clients must send four headers on every request:
 | `X-Portwing-Timestamp` | Unix epoch, seconds, decimal string |
 | `X-Portwing-Nonce` | 32 random hex characters (128-bit) |
 | `X-Portwing-Signature` | Base64url (no padding) Ed25519 signature over the canonical message |
+| `X-Portwing-Signature-Version` | Must be `2` for the full request-target format |
 
 The canonical message is a newline-separated UTF-8 string:
 
 ```text
 METHOD
-/path/to/resource
+/path/to/resource?exact=raw&query=order
 <sha256-hex-of-body>
 <unix-timestamp>
 <nonce-hex>
 ```
 
-For an empty body, use the SHA-256 of the empty string: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+The second line is the complete origin-form request target: escaped path plus
+the exact, unmodified raw query string. Adding, removing, changing, or
+reordering query parameters therefore invalidates the signature. For an empty
+body, use the SHA-256 of the empty string:
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+Unversioned legacy signatures remain accepted only for query-free requests.
+Any request with a query string must use signature version 2. This permits a
+bounded migration without retaining query-tampering exposure.
 
 ### Key rotation (zero-downtime)
 

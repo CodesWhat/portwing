@@ -48,8 +48,8 @@ func BenchmarkAuthMiddleware(b *testing.B) {
 		verifier tokenVerifier
 		token    string
 	}{
-		{"authorized_raw", &rawTokenVerifier{token: "secret"}, "secret"},
-		{"rejected_raw", &rawTokenVerifier{token: "secret"}, "wrong"},
+		{"authorized_raw", newRawTokenVerifier("secret"), "secret"},
+		{"rejected_raw", newRawTokenVerifier("secret"), "wrong"},
 		{"passthrough_no_auth", nil, ""},
 	}
 

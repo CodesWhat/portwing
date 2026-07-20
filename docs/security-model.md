@@ -9,7 +9,7 @@ The controls below are numbered to serve as a stable citation surface
 documentation site's security model page presents an expanded, independently
 numbered set that additionally covers the Sockguard socket filter, the hardened
 container runtime (read-only rootfs, dropped capabilities, `no-new-privileges`),
-tamper-evident audit logging, and signed/verifiable releases — the two numbering
+structured audit logging with external immutable export, and signed/verifiable releases — the two numbering
 schemes are kept independent so these code-level control numbers don't shift.
 
 ## Controls
@@ -29,12 +29,19 @@ mux.Handle("/", auth(s.handleDockerProxy))
 This means a missing or misconfigured auth middleware would cause a build-time
 or startup-time failure rather than a silent security gap.
 
+Standard mode also fails closed at construction time when no raw token,
+Argon2id token hash, or authorized-keys registry is configured. Local
+unauthenticated development requires `ALLOW_UNAUTHENTICATED=true`; a
+non-loopback bind additionally requires the independent
+`ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
+
 ### 2. Timing-Safe Token Comparison
 
-Token validation uses `crypto/subtle.ConstantTimeCompare` from the Go standard
-library. The comparison runs in constant time regardless of whether and where
-the provided token diverges from the configured secret, eliminating
-timing-oracle attacks that can leak token bytes one at a time.
+Raw token validation stores only a fixed-size SHA-256 digest in the verifier.
+Each presented value is hashed and compared with
+`crypto/subtle.ConstantTimeCompare` from the Go standard library. The
+comparison therefore has fixed length regardless of the submitted token
+length and the long-lived verifier does not retain the raw configured token.
 
 Applies to all accepted credential headers: `Authorization: Bearer`,
 `X-Portwing-Token`, and `X-Dd-Agent-Secret`.
@@ -66,11 +73,18 @@ the stored hash using Argon2id verification, still wrapped with
 
 This means the plaintext token is never stored on disk; a compromised
 environment variable dump or configuration file reveals only the hash.
+Cold Argon2id work is bounded to two concurrent derivations across the agent.
+Additional cold requests receive HTTP 429 before allocating Argon2 memory.
+After the first successful verification, the verifier caches only a fixed-size
+SHA-256 digest and uses the timing-safe fast path.
 
 ### 4. Compose Path-Traversal Guard
 
-All file paths in `ComposeRequest` are resolved to their absolute forms and
-verified to remain within `STACKS_DIR` before any disk operation:
+All file paths in `ComposeRequest` are first checked lexically to remain within
+`STACKS_DIR`. Uploaded Compose files and `.env.drydock` are then written
+through Go's directory-scoped `os.Root` API. Every directory component and the
+destination are checked without following symlinks, and the rooted open keeps
+the operation confined even if a path is swapped concurrently.
 
 ```go
 if !strings.HasPrefix(resolved, absBase+string(filepath.Separator)) && resolved != absBase {
@@ -78,8 +92,9 @@ if !strings.HasPrefix(resolved, absBase+string(filepath.Separator)) && resolved 
 }
 ```
 
-A caller supplying `../../etc/passwd` or a symlink pointing outside the stacks
-directory will receive a validation error; no file is read or written.
+A caller supplying `../../etc/passwd`, a symlinked directory, or a symlinked
+destination receives a validation error; uploaded data is never written
+outside the stacks directory.
 
 ### 5. Compose Env Denylist
 
@@ -120,10 +135,18 @@ one-minute window:
   new entries beyond the cap are silently dropped to prevent memory
   exhaustion (fail-open for tracking, not for auth).
 - **Cleanup:** A background goroutine prunes expired entries every 5 minutes.
+- **Expensive-verification capacity:** no more than two authentication
+  attempts per IP and two cold Argon2id derivations agent-wide may be in
+  flight; excess work receives HTTP 429 before credential verification.
+- **Enrollment abuse accounting:** malformed and oversized enrollment bodies
+  use a separate per-IP failure window, so they cannot evade throttling while
+  remaining independent of credential-failure accounting.
 
 ### 8. TLS 1.2+ AEAD-Only
 
-When `TLS_CERT` and `TLS_KEY` are configured, Portwing presents TLS with:
+`TLS_CERT` and `TLS_KEY` must either both be configured or both be empty;
+partial TLS configuration is a startup error. When configured, Portwing
+presents TLS with:
 
 - **Minimum version:** TLS 1.2 (`tls.VersionTLS12`)
 - **Cipher suites (TLS 1.2):** ECDHE-ECDSA-AES256-GCM-SHA384,
@@ -146,6 +169,8 @@ AEAD suites by design.
 | Edge follow-log window | ~7s | Bound a `follow=true` `dd:container_log_request` so it can't hold a message-handler slot indefinitely |
 | Exec request body | 10 MB | Limit exec payload size |
 | Ed25519 signed-request body | 1 MB | Bound the request body buffered for signature verification |
+| Enrollment request body | 64 KiB | Bound unauthenticated JSON parsing before enrollment authentication |
+| Cold Argon2id derivations | 2 | Bound memory-hard authentication work across the agent |
 | Concurrent exec sessions | 100 | Prevent unbounded goroutine growth |
 | Concurrent stream sessions | 100 | Prevent unbounded goroutine growth |
 | Rate-limiter IP table | 10,000 entries | Prevent rate-limiter map exhaustion |
@@ -169,11 +194,13 @@ trusted 32-byte Ed25519 public keys (one per line, `ed25519 <base64> [comment]`
 format). The agent loads this file at startup and on `SIGHUP`. Hot reload adds
 or removes keys from the in-memory map without restarting.
 
-**Per-request signature:** Every authenticated HTTP request carries four
+**Per-request signature:** Signature version 2 requests carry five
 headers (`X-Portwing-Key-ID`, `X-Portwing-Timestamp`, `X-Portwing-Nonce`,
-`X-Portwing-Signature`). The agent verifies the Ed25519 signature over a
-canonical string of `METHOD\nPATH\nbody-sha256-hex\ntimestamp\nnonce` using
-`crypto/ed25519.Verify` from the Go standard library. No new dependencies.
+`X-Portwing-Signature`, and `X-Portwing-Signature-Version: 2`). The agent
+verifies the Ed25519 signature over
+`METHOD\nREQUEST-TARGET\nbody-sha256-hex\ntimestamp\nnonce`, where the request
+target is the escaped path plus the exact raw query string. Unversioned legacy
+signatures are accepted only for query-free requests. No new dependencies.
 
 **Replay protection:** Two complementary mechanisms:
 
@@ -187,9 +214,11 @@ canonical string of `METHOD\nPATH\nbody-sha256-hex\ntimestamp\nnonce` using
 verification runs; if absent, the request falls through to the existing token
 verifier. Both auth methods can coexist during migration.
 
-**File security:** The agent refuses to load an authorized_keys file with world-
-read permission (`mode & 0004 != 0`), ensuring key material is never readable
-by untrusted system users.
+**File security:** Authorized-keys and private-key paths must resolve to regular
+files. On Unix, the agent rejects world-readable or group/world-writable
+credential files while permitting group-readable mode `0640`. Validation uses
+the already-open file descriptor, eliminating the stat-then-open race while
+remaining compatible with symlinked secret mounts.
 
 **Edge-mode signed hello:** Edge (WebSocket) mode requires `PRIVATE_KEY_FILE` —
 configuration load fails fast when `DRYDOCK_URL` is set without it, because the
@@ -202,9 +231,11 @@ for a running edge agent.
 
 **Model C enrollment (optional):** When `ENROLLMENT_TOKEN` is set alongside
 `AUTHORIZED_KEYS`, the agent exposes `POST /api/portwing/enroll` (outside the
-auth middleware, rate-limited). A caller presents the enrollment token and a
-public key; the agent appends the key to the authorized_keys file, reloads the
-registry, and burns the token (refusing further enrollment until restart).
+auth middleware, rate-limited). The configured enrollment token is retained
+and compared only as a fixed-size SHA-256 digest. Bodies are capped at 64 KiB
+and must contain a single JSON value. A caller presents the token and a public key;
+the agent appends the key to the authorized_keys file, reloads the registry,
+and burns the token (refusing further enrollment until restart).
 
 See `docs/design/ed25519-auth.md` for full threat analysis, key rotation
 procedures, and migration path from token auth.

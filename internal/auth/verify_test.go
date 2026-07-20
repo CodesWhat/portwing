@@ -50,7 +50,7 @@ func testSetup(t *testing.T) (
 func signRequest(t *testing.T, r *http.Request, body []byte, priv ed25519.PrivateKey, pub ed25519.PublicKey, tsUnix int64, nonce string) {
 	t.Helper()
 	bodyHash := BodyHashHex(body)
-	msg := CanonicalMessage(r.Method, r.URL.Path, bodyHash, tsUnix, nonce)
+	msg := CanonicalMessage(r.Method, CanonicalRequestTarget(r.URL), bodyHash, tsUnix, nonce)
 	sig := ed25519.Sign(priv, msg)
 
 	keyIDBytes := sha256.Sum256(pub)
@@ -60,6 +60,7 @@ func signRequest(t *testing.T, r *http.Request, body []byte, priv ed25519.Privat
 	r.Header.Set(HeaderTimestamp, strconv.FormatInt(tsUnix, 10))
 	r.Header.Set(HeaderNonce, nonce)
 	r.Header.Set(HeaderSignature, base64.RawURLEncoding.EncodeToString(sig))
+	r.Header.Set(HeaderSignatureVersion, SignatureVersion2)
 }
 
 // randomNonce generates a fresh 32-hex-char nonce.
@@ -80,6 +81,14 @@ func TestCanonicalMessage_EmptyBody(t *testing.T) {
 	want := "GET\n/api/test\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n1749600000\na1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 	if string(msg) != want {
 		t.Errorf("canonical message mismatch\ngot:  %q\nwant: %q", string(msg), want)
+	}
+}
+
+func TestCanonicalRequestTarget_PreservesEscapingAndRawQuery(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodGet, "/v1.44/containers/a%2Fb/logs?tail=10&stdout=1", nil)
+	if got, want := CanonicalRequestTarget(req.URL), "/v1.44/containers/a%2Fb/logs?tail=10&stdout=1"; got != want {
+		t.Fatalf("canonical request target = %q, want %q", got, want)
 	}
 }
 
@@ -125,6 +134,66 @@ func TestVerifyRequest_HappyPath(t *testing.T) {
 	if keyID == "" {
 		t.Error("expected non-empty key ID")
 	}
+}
+
+func TestVerifyRequest_QueryMutationInvalidatesSignature(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		signed  string
+		mutated string
+	}{
+		{name: "add", signed: "/v1.44/containers/example", mutated: "force=1"},
+		{name: "remove", signed: "/v1.44/containers/example?force=1", mutated: ""},
+		{name: "change", signed: "/v1.44/containers/example?force=0", mutated: "force=1"},
+		{name: "reorder", signed: "/v1.44/containers/example?a=1&b=2", mutated: "b=2&a=1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reg, lru, pub, priv := testSetup(t)
+			req := httptest.NewRequest(http.MethodDelete, tc.signed, nil)
+			signRequest(t, req, nil, priv, pub, time.Now().Unix(), randomNonce(t))
+			req.URL.RawQuery = tc.mutated
+
+			_, err := VerifyRequest(req, nil, reg, lru, 60)
+			if !errors.Is(err, ErrBadSignature) {
+				t.Fatalf("expected query mutation to invalidate signature, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestVerifyRequest_Version2AcceptsExactQuery(t *testing.T) {
+	t.Parallel()
+	reg, lru, pub, priv := testSetup(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1.44/images/json?all=1&filters=%7B%7D", nil)
+	signRequest(t, req, nil, priv, pub, time.Now().Unix(), randomNonce(t))
+
+	if _, err := VerifyRequest(req, nil, reg, lru, 60); err != nil {
+		t.Fatalf("expected exact version 2 query to verify: %v", err)
+	}
+}
+
+func TestVerifyRequest_LegacyCompatibilityIsQueryFreeOnly(t *testing.T) {
+	t.Parallel()
+	t.Run("query-free request remains accepted", func(t *testing.T) {
+		reg, lru, pub, priv := testSetup(t)
+		req := httptest.NewRequest(http.MethodGet, "/v1.44/info", nil)
+		signRequest(t, req, nil, priv, pub, time.Now().Unix(), randomNonce(t))
+		req.Header.Del(HeaderSignatureVersion)
+		if _, err := VerifyRequest(req, nil, reg, lru, 60); err != nil {
+			t.Fatalf("expected legacy query-free signature to verify: %v", err)
+		}
+	})
+	t.Run("query request requires version 2", func(t *testing.T) {
+		reg, lru, pub, priv := testSetup(t)
+		req := httptest.NewRequest(http.MethodGet, "/v1.44/images/json?all=1", nil)
+		signRequest(t, req, nil, priv, pub, time.Now().Unix(), randomNonce(t))
+		req.Header.Del(HeaderSignatureVersion)
+		if _, err := VerifyRequest(req, nil, reg, lru, 60); !errors.Is(err, ErrBadSignature) {
+			t.Fatalf("expected legacy query signature rejection, got: %v", err)
+		}
+	})
 }
 
 func TestVerifyRequest_BadSignature(t *testing.T) {

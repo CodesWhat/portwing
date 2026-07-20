@@ -220,16 +220,19 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 	if stackDir == "" {
 		stackDir = req.StackName
 	}
+	if err := os.MkdirAll(cm.stacksDir, 0o750); err != nil {
+		return fmt.Errorf("creating stacks directory: %w", err)
+	}
+	root, err := os.OpenRoot(cm.stacksDir)
+	if err != nil {
+		return fmt.Errorf("opening stacks directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
 
 	for relPath, content := range req.Files {
-		absPath, err := cm.resolvePath(stackDir, relPath)
+		rootedPath, err := cm.rootedPath(stackDir, relPath)
 		if err != nil {
 			return fmt.Errorf("resolving path %q: %w", relPath, err)
-		}
-
-		dir := filepath.Dir(absPath)
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return fmt.Errorf("creating directory %q: %w", dir, err)
 		}
 
 		var data []byte
@@ -243,14 +246,14 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 			data = []byte(content)
 		}
 
-		if err := os.WriteFile(absPath, data, 0o600); err != nil {
-			return fmt.Errorf("writing %q: %w", absPath, err)
+		if err := writeRootedFile(root, rootedPath, data); err != nil {
+			return fmt.Errorf("writing %q: %w", relPath, err)
 		}
 	}
 
 	// Write .env.drydock if env vars are provided.
 	if len(req.EnvVars) > 0 {
-		envPath, err := cm.resolvePath(stackDir, ".env.drydock")
+		envPath, err := cm.rootedPath(stackDir, ".env.drydock")
 		if err != nil {
 			return fmt.Errorf("resolving .env.drydock path: %w", err)
 		}
@@ -260,11 +263,91 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 			fmt.Fprintf(&buf, "%s=%s\n", key, val)
 		}
 
-		if err := os.WriteFile(envPath, buf.Bytes(), 0o600); err != nil {
+		if err := writeRootedFile(root, envPath, buf.Bytes()); err != nil {
 			return fmt.Errorf("writing .env.drydock: %w", err)
 		}
 	}
 
+	return nil
+}
+
+func (cm *ComposeManager) rootedPath(stackDir, path string) (string, error) {
+	absPath, err := cm.resolvePath(stackDir, path)
+	if err != nil {
+		return "", err
+	}
+	absRoot, err := filepath.Abs(cm.stacksDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving stacks directory: %w", err)
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return "", fmt.Errorf("resolving rooted path: %w", err)
+	}
+	if rel == "." || !pathWithin(".", rel) {
+		return "", fmt.Errorf("path %q is not a file below stacks directory", path)
+	}
+	return rel, nil
+}
+
+// writeRootedFile creates each directory component without following symlinks
+// and writes through os.Root, which keeps the operation beneath STACKS_DIR even
+// if a path is swapped concurrently.
+func writeRootedFile(root *os.Root, name string, data []byte) error {
+	if err := mkdirRootedNoSymlinks(root, filepath.Dir(name)); err != nil {
+		return err
+	}
+	if info, err := root.Lstat(name); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing symlink file %q", name)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing non-regular file %q", name)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking file %q: %w", name, err)
+	}
+
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("setting permissions on %q: %w", name, err)
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func mkdirRootedNoSymlinks(root *os.Root, dir string) error {
+	if dir == "." || dir == "" {
+		return nil
+	}
+	current := ""
+	for _, component := range strings.Split(filepath.Clean(dir), string(filepath.Separator)) {
+		if component == "" || component == "." {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, err := root.Lstat(current)
+		switch {
+		case err == nil && info.Mode()&os.ModeSymlink != 0:
+			return fmt.Errorf("refusing symlink directory %q", current)
+		case err == nil && !info.IsDir():
+			return fmt.Errorf("path component %q is not a directory", current)
+		case err == nil:
+			continue
+		case os.IsNotExist(err):
+			if err := root.Mkdir(current, 0o750); err != nil {
+				return fmt.Errorf("creating directory %q: %w", current, err)
+			}
+		default:
+			return fmt.Errorf("checking directory %q: %w", current, err)
+		}
+	}
 	return nil
 }
 

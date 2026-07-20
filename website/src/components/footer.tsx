@@ -8,7 +8,7 @@ import { GITHUB_ORG_URL, GITHUB_RELEASES_URL, GITHUB_URL, SITE_CONFIG } from "@/
 const CODESWHAT = GITHUB_ORG_URL;
 const YEAR = new Date().getFullYear();
 const BLURB =
-  "Security-first remote Docker agent. Lightweight Go binary, Ed25519 auth, sockguard-ready socket filter, tamper-evident audit log.";
+  "Security-first remote Docker agent. Lightweight Go binary, Ed25519 auth, sockguard-ready socket filter, structured audit log.";
 
 type FooterLink = { label: string; href: string; external?: boolean };
 

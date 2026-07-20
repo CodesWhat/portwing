@@ -94,16 +94,11 @@ func (r *KeyRegistry) Len() int {
 }
 
 // parseAuthorizedKeys reads an authorized_keys file and returns the parsed
-// key map. It refuses to load a world-readable file on Unix systems.
+// key map. It requires a regular file and rejects unsafe Unix permissions.
 func parseAuthorizedKeys(path string) (map[string]*AuthorizedKey, error) {
-	if err := checkFilePermissions(path); err != nil {
-		return nil, err
-	}
-
-	// #nosec G304 -- authorized_keys path is explicit operator configuration and permissions are checked above.
-	f, err := os.Open(path)
+	f, err := openCredentialFile(path, "authorized_keys")
 	if err != nil {
-		return nil, fmt.Errorf("opening authorized_keys %q: %w", path, err)
+		return nil, err
 	}
 	defer f.Close()
 
@@ -185,24 +180,56 @@ func deriveKeyID(pubKey []byte) string {
 	return hex.EncodeToString(h[:8])
 }
 
-// checkFilePermissions refuses to load a world-readable authorized_keys file
-// on Unix systems (mode & 0044 != 0). On non-Unix platforms it is a no-op.
+// checkFilePermissions validates the opened file rather than a prior path stat,
+// so callers never validate one inode and then read another.
 func checkFilePermissions(path string) error {
+	f, err := openCredentialFile(path, "authorized_keys")
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func openCredentialFile(path, kind string) (*os.File, error) {
+	// #nosec G304 -- credential paths are explicit operator configuration.
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening %s %q: %w", kind, path, err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("stat opened %s %q: %w", kind, path, err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("%s %q is not a regular file (mode %s)", kind, path, info.Mode())
+	}
+	if err := validateCredentialPermissions(path, kind, info.Mode()); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func validateCredentialPermissions(path, kind string, mode os.FileMode) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("stat authorized_keys %q: %w", path, err)
-	}
-	mode := info.Mode()
 	// Refuse if any other (world) read bit is set: mode & 0004.
 	// Group read (0040) is allowed so 0640 is fine; world read (0004) is not.
 	if mode&0o004 != 0 {
 		return fmt.Errorf(
-			"authorized_keys file %q is world-readable (mode %04o): "+
+			"%s %q is world-readable (mode %04o): "+
 				"restrict permissions to 0600 or 0640 before loading",
-			path, mode.Perm(),
+			kind, path, mode.Perm(),
+		)
+	}
+	if mode.Perm()&0o022 != 0 {
+		return fmt.Errorf(
+			"%s %q is group/world-writable (mode %04o): "+
+				"remove group and other write permissions before loading",
+			kind, path, mode.Perm(),
 		)
 	}
 	return nil

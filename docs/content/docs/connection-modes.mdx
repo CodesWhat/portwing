@@ -37,7 +37,7 @@ The agent host must accept inbound TCP connections on `PORT`. Run Portwing behin
 | `BIND_ADDRESS` | `0.0.0.0` | Listening address |
 | `TOKEN` | — | Shared secret; controller sends it as `X-Dd-Agent-Secret` |
 | `TOKEN_HASH` | — | Argon2id hash of the token (preferred over `TOKEN`) |
-| `TLS_CERT` / `TLS_KEY` | — | PEM files to enable built-in TLS (optional) |
+| `TLS_CERT` / `TLS_KEY` | — | PEM files to enable built-in TLS; both must be set together or startup fails |
 | `TRUSTED_PROXIES` | — | Comma-separated CIDRs for real-IP extraction |
 
 For Ed25519 key authentication (no shared secret on the wire), see [Authentication](/authentication).

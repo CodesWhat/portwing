@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,12 +37,75 @@ func okHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+type blockingTokenVerifier struct {
+	entered chan struct{}
+	release <-chan struct{}
+	active  atomic.Int64
+	maximum atomic.Int64
+}
+
+func (v *blockingTokenVerifier) Verify(string) bool {
+	active := v.active.Add(1)
+	for {
+		maximum := v.maximum.Load()
+		if active <= maximum || v.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	v.entered <- struct{}{}
+	<-v.release
+	v.active.Add(-1)
+	return false
+}
+
+func TestAuthMiddlewareBoundsConcurrentVerificationsPerIP(t *testing.T) {
+	rl := NewRateLimiter()
+	defer rl.Stop()
+
+	const requests = 12
+	release := make(chan struct{})
+	verifier := &blockingTokenVerifier{
+		entered: make(chan struct{}, requests),
+		release: release,
+	}
+	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < requests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = "192.0.2.10:12345"
+			req.Header.Set(headerPortwingToken, "wrong")
+			h.ServeHTTP(httptest.NewRecorder(), req)
+		}()
+	}
+	close(start)
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-verifier.entered:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for bounded verification slots")
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := verifier.maximum.Load(); got > 2 {
+		t.Fatalf("maximum concurrent verifications = %d, want at most 2", got)
+	}
+}
+
 // TestAuthMiddlewareRawTokenAccept verifies the raw-token path accepts a correct token.
 func TestAuthMiddlewareRawTokenAccept(t *testing.T) {
 	t.Parallel()
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -53,12 +118,43 @@ func TestAuthMiddlewareRawTokenAccept(t *testing.T) {
 	}
 }
 
+func TestRawTokenVerifierUsesFixedLengthDigest(t *testing.T) {
+	t.Parallel()
+	verifier := newRawTokenVerifier("correct horse battery staple")
+	if !verifier.Verify("correct horse battery staple") {
+		t.Fatal("correct token did not verify")
+	}
+	for _, token := range []string{"", "x", strings.Repeat("x", 4096)} {
+		if verifier.Verify(token) {
+			t.Fatalf("incorrect token of length %d verified", len(token))
+		}
+	}
+}
+
+func TestTryBeginAuthPreservesFailOpenTrackingAtIPCapacity(t *testing.T) {
+	rl := &RateLimiter{
+		attempts:    map[string]*ipAttempts{"existing": {count: 1, firstFail: time.Now()}},
+		maxFails:    10,
+		window:      time.Minute,
+		maxIPs:      1,
+		maxInFlight: 2,
+	}
+
+	if !rl.tryBeginAuth("untracked") {
+		t.Fatal("IP table capacity must not turn tracking exhaustion into an auth denial")
+	}
+	rl.finishAuth("untracked", false)
+	if _, ok := rl.attempts["untracked"]; ok {
+		t.Fatal("capacity-overflow IP should remain untracked")
+	}
+}
+
 // TestAuthMiddlewareRawTokenReject verifies the raw-token path rejects a wrong token.
 func TestAuthMiddlewareRawTokenReject(t *testing.T) {
 	t.Parallel()
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -153,7 +249,7 @@ func TestAuthMiddlewareBearerHeader(t *testing.T) {
 	t.Parallel()
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "bearer-secret"}
+	verifier := newRawTokenVerifier("bearer-secret")
 	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -212,7 +308,7 @@ func TestRateLimiterNotBypassedBySpoofedXFF(t *testing.T) {
 	t.Parallel()
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	for i := 0; i < 10; i++ {
@@ -245,7 +341,7 @@ func TestAuthMiddlewareFallbackHeader(t *testing.T) {
 	t.Parallel()
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "legacytoken"}
+	verifier := newRawTokenVerifier("legacytoken")
 	h := rl.AuthMiddleware(verifier, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -271,7 +367,7 @@ func TestAuditMiddlewareEmitsAuthFailure(t *testing.T) {
 	t.Cleanup(close)
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, l, nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
@@ -302,7 +398,7 @@ func TestAuditMiddlewareEmitsRateLimited(t *testing.T) {
 	t.Cleanup(close)
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, l, nil, http.HandlerFunc(okHandler))
 
 	// Exhaust the 10-failure limit.
@@ -344,7 +440,7 @@ func TestAuditMiddlewareEmitsAPIRequest(t *testing.T) {
 	t.Cleanup(close)
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, l, nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
@@ -377,7 +473,7 @@ func TestAuthMiddlewarePreservesStreamingInterfaces(t *testing.T) {
 	})
 
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "correct"}
+	verifier := newRawTokenVerifier("correct")
 	h := rl.AuthMiddleware(verifier, noAudit(t), nil, inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
@@ -439,7 +535,7 @@ func signEd25519Request(t *testing.T, req *http.Request, body []byte, priv ed255
 	t.Helper()
 	pub := priv.Public().(ed25519.PublicKey)
 	bodyHash := auth.BodyHashHex(body)
-	msg := auth.CanonicalMessage(req.Method, req.URL.Path, bodyHash, tsUnix, nonce)
+	msg := auth.CanonicalMessage(req.Method, auth.CanonicalRequestTarget(req.URL), bodyHash, tsUnix, nonce)
 	sig := ed25519.Sign(priv, msg)
 
 	h := sha256.Sum256(pub)
@@ -449,6 +545,7 @@ func signEd25519Request(t *testing.T, req *http.Request, body []byte, priv ed255
 	req.Header.Set(auth.HeaderTimestamp, strconv.FormatInt(tsUnix, 10))
 	req.Header.Set(auth.HeaderNonce, nonce)
 	req.Header.Set(auth.HeaderSignature, base64.RawURLEncoding.EncodeToString(sig))
+	req.Header.Set(auth.HeaderSignatureVersion, auth.SignatureVersion2)
 }
 
 func freshNonce(t *testing.T) string {
@@ -482,7 +579,7 @@ func TestEd25519MiddlewareAccept(t *testing.T) {
 func TestEd25519MiddlewareTokenFallback(t *testing.T) {
 	t.Parallel()
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "mysecret"}
+	verifier := newRawTokenVerifier("mysecret")
 	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/path", nil)
@@ -501,7 +598,7 @@ func TestEd25519MiddlewareBothConfigured(t *testing.T) {
 	t.Parallel()
 	ed, priv := setupEd25519(t)
 	rl := NewRateLimiter()
-	verifier := &rawTokenVerifier{token: "mysecret"}
+	verifier := newRawTokenVerifier("mysecret")
 	h := rl.AuthMiddlewareWithEd25519(verifier, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/path", nil)
@@ -621,6 +718,35 @@ func TestRateLimitOnlyRecordsFailures(t *testing.T) {
 
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 after 10 enrollment failures, got %d", rec.Code)
+	}
+}
+
+func TestRateLimitOnlyRecordsMalformedEnrollmentAbuse(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	defer rl.Stop()
+	malformed := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+	})
+	h := rl.rateLimitOnly(malformed, nil)
+
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", nil)
+		req.RemoteAddr = "192.0.2.11:40000"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("attempt %d: expected 400, got %d", i, rec.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", nil)
+	req.RemoteAddr = "192.0.2.11:40000"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after malformed enrollment abuse, got %d", rec.Code)
 	}
 }
 

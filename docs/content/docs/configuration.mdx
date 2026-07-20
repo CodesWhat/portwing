@@ -16,8 +16,8 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 | `PORT` | `3000` | TCP port the HTTP server listens on. |
 | `BIND_ADDRESS` | `0.0.0.0` | IP address the server binds to. |
 | `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Portwing operates in Edge mode and connects outbound to Drydock. |
-| `TLS_CERT` | — | Path to server TLS certificate (Standard mode). |
-| `TLS_KEY` | — | Path to server TLS private key (Standard mode). |
+| `TLS_CERT` | — | Path to server TLS certificate (Standard mode). Must be set together with `TLS_KEY`; partial configuration is a startup error. |
+| `TLS_KEY` | — | Path to server TLS private key (Standard mode). Must be set together with `TLS_CERT`; partial configuration is a startup error. |
 | `CA_CERT` | — | Path to a custom CA certificate used when verifying the Drydock server in Edge mode. |
 | `TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification on the outbound Edge connection. **Testing only.** |
 | `TRUSTED_PROXIES` | — | Comma-separated list of CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`) for reverse proxies whose `X-Forwarded-For` header Portwing will trust for real-IP resolution. When unset, forwarding headers are ignored entirely. |
@@ -43,9 +43,19 @@ The following variables govern how Portwing authenticates incoming requests. `TO
 | `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on first use. |
 | `ENROLLMENT_TOKEN_FILE` | — | Path to a file containing the enrollment token. |
 | `PRIVATE_KEY_FILE` | — | Path to an Ed25519 private key (PEM PKCS#8) used to sign the agent's Edge-mode hello message. |
+| `ALLOW_UNAUTHENTICATED` | `false` | Explicit development-only opt-in to start Standard mode without a credential. Safe by default only on a loopback `BIND_ADDRESS`. |
+| `ALLOW_UNAUTHENTICATED_REMOTE` | `false` | Additional dangerous opt-in required when an unauthenticated listener binds a non-loopback address. |
 
 <Callout type="warn">
 `TOKEN` stores the secret in plaintext in the process environment. Use `TOKEN_HASH` (Argon2id) for any environment accessible to more than one person, or where secret scanning tools may read process state.
+</Callout>
+
+<Callout type="warn">
+Standard mode fails closed when none of `TOKEN`, `TOKEN_HASH`, or
+`AUTHORIZED_KEYS` is configured. `ALLOW_UNAUTHENTICATED=true` is intended for
+local development only. Portwing requires the additional
+`ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement before it will expose an
+unauthenticated listener on a non-loopback address.
 </Callout>
 
 ---

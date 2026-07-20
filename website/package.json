@@ -6,8 +6,11 @@
     "dev": "next dev --port 3001",
     "prebuild": "npm run build:docs-content",
     "build": "next build",
+    "postbuild": "node scripts/security-headers.mjs --check",
     "build:docs-content": "(cd ../docs && npm run build) && rm -rf public/docs && mkdir -p public/docs && cp -R ../docs/out/. public/docs/",
-    "start": "next start --port 3001"
+    "lint": "tsc --noEmit",
+    "start": "next start --port 3001",
+    "test:headers": "node --test scripts/security-headers.test.mjs"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",

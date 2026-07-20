@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
 	"io"
@@ -25,13 +26,29 @@ type tokenVerifier interface {
 	Verify(token string) bool
 }
 
+type capacityTokenVerifier interface {
+	VerifyWithCapacity(token string) (valid bool, attempted bool)
+}
+
+func verifyTokenWithCapacity(verifier tokenVerifier, token string) (bool, bool) {
+	if bounded, ok := verifier.(capacityTokenVerifier); ok {
+		return bounded.VerifyWithCapacity(token)
+	}
+	return verifier.Verify(token), true
+}
+
 // rawTokenVerifier performs timing-safe comparison against a plain-text token.
 type rawTokenVerifier struct {
-	token string
+	digest [sha256.Size]byte
+}
+
+func newRawTokenVerifier(token string) *rawTokenVerifier {
+	return &rawTokenVerifier{digest: sha256.Sum256([]byte(token))}
 }
 
 func (v *rawTokenVerifier) Verify(token string) bool {
-	return subtle.ConstantTimeCompare([]byte(token), []byte(v.token)) == 1
+	presented := sha256.Sum256([]byte(token))
+	return subtle.ConstantTimeCompare(presented[:], v.digest[:]) == 1
 }
 
 const (
@@ -47,9 +64,13 @@ const (
 type RateLimiter struct {
 	mu       sync.Mutex
 	attempts map[string]*ipAttempts
+	abuse    map[string]*ipAttempts
 	maxFails int
 	window   time.Duration
 	maxIPs   int
+	// maxInFlight bounds concurrent credential checks from one source before
+	// any expensive verifier work begins.
+	maxInFlight int
 
 	trustedProxies []*net.IPNet
 
@@ -59,6 +80,7 @@ type RateLimiter struct {
 type ipAttempts struct {
 	count     int
 	firstFail time.Time
+	inFlight  int
 }
 
 // NewRateLimiter returns a RateLimiter that allows 10 failures per IP within
@@ -66,11 +88,13 @@ type ipAttempts struct {
 // five minutes.
 func NewRateLimiter() *RateLimiter {
 	rl := &RateLimiter{
-		attempts: make(map[string]*ipAttempts),
-		maxFails: 10,
-		window:   time.Minute,
-		maxIPs:   10000,
-		done:     make(chan struct{}),
+		attempts:    make(map[string]*ipAttempts),
+		abuse:       make(map[string]*ipAttempts),
+		maxFails:    10,
+		window:      time.Minute,
+		maxIPs:      10000,
+		maxInFlight: 2,
+		done:        make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
@@ -98,13 +122,54 @@ func (rl *RateLimiter) cleanup() {
 			rl.mu.Lock()
 			now := time.Now()
 			for ip, a := range rl.attempts {
-				if now.Sub(a.firstFail) > rl.window {
+				if a.inFlight == 0 && !a.firstFail.IsZero() && now.Sub(a.firstFail) > rl.window {
 					delete(rl.attempts, ip)
+				}
+			}
+			for ip, a := range rl.abuse {
+				if now.Sub(a.firstFail) > rl.window {
+					delete(rl.abuse, ip)
 				}
 			}
 			rl.mu.Unlock()
 		}
 	}
+}
+
+func (rl *RateLimiter) isAbuseRateLimited(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	a, ok := rl.abuse[ip]
+	if !ok {
+		return false
+	}
+	if time.Since(a.firstFail) > rl.window {
+		delete(rl.abuse, ip)
+		return false
+	}
+	return a.count >= rl.maxFails
+}
+
+func (rl *RateLimiter) recordAbuse(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	if rl.abuse == nil {
+		rl.abuse = make(map[string]*ipAttempts)
+	}
+	a, ok := rl.abuse[ip]
+	if !ok {
+		if len(rl.abuse) >= rl.maxIPs {
+			return
+		}
+		rl.abuse[ip] = &ipAttempts{count: 1, firstFail: time.Now()}
+		return
+	}
+	if time.Since(a.firstFail) > rl.window {
+		a.count = 1
+		a.firstFail = time.Now()
+		return
+	}
+	a.count++
 }
 
 // IsRateLimited returns true if the given IP has exceeded the failure threshold
@@ -118,13 +183,86 @@ func (rl *RateLimiter) IsRateLimited(ip string) bool {
 		return false
 	}
 
-	// If the window has expired, remove the entry and allow through.
+	if a.firstFail.IsZero() {
+		return false
+	}
+
+	// If the window has expired, remove the entry and allow through when no
+	// verification currently holds a reservation.
 	if time.Since(a.firstFail) > rl.window {
-		delete(rl.attempts, ip)
+		if a.inFlight == 0 {
+			delete(rl.attempts, ip)
+		} else {
+			a.count = 0
+			a.firstFail = time.Time{}
+		}
 		return false
 	}
 
 	return a.count >= rl.maxFails
+}
+
+// tryBeginAuth atomically reserves one per-IP verification slot. It combines
+// the failure-limit check with in-flight accounting so a concurrent cold-start
+// burst cannot race every request past a completed-failure counter.
+func (rl *RateLimiter) tryBeginAuth(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	a, ok := rl.attempts[ip]
+	if ok && !a.firstFail.IsZero() && time.Since(a.firstFail) > rl.window {
+		a.count = 0
+		a.firstFail = time.Time{}
+	}
+	if !ok {
+		if len(rl.attempts) >= rl.maxIPs {
+			// Preserve the existing fail-open-for-tracking policy at the table
+			// capacity. Expensive Argon2 verification remains protected by its
+			// agent-wide semaphore even when this IP cannot be reserved.
+			return true
+		}
+		a = &ipAttempts{}
+		rl.attempts[ip] = a
+	}
+
+	maxInFlight := rl.maxInFlight
+	if maxInFlight <= 0 {
+		maxInFlight = 2
+	}
+	if a.count >= rl.maxFails || a.inFlight >= maxInFlight {
+		return false
+	}
+	a.inFlight++
+	return true
+}
+
+// finishAuth releases a verification reservation and records a failed check.
+// Successful checks do not consume the rolling failure budget.
+func (rl *RateLimiter) finishAuth(ip string, success bool) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	a, ok := rl.attempts[ip]
+	if !ok {
+		return
+	}
+	if a.inFlight > 0 {
+		a.inFlight--
+	}
+	if success {
+		if a.count == 0 && a.inFlight == 0 {
+			delete(rl.attempts, ip)
+		}
+		return
+	}
+
+	now := time.Now()
+	if a.firstFail.IsZero() || now.Sub(a.firstFail) > rl.window {
+		a.count = 1
+		a.firstFail = now
+		return
+	}
+	a.count++
 }
 
 // RecordFailure records a failed authentication attempt for the given IP.
@@ -193,7 +331,7 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 		// Rate-limit check happens BEFORE verification. This ensures that failed
 		// attempts accumulate in the limiter even for expensive Argon2id paths,
 		// and that blocked IPs never reach the verifier.
-		if rl.IsRateLimited(clientIP) {
+		if !rl.tryBeginAuth(clientIP) {
 			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
 			if reg != nil {
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
@@ -204,9 +342,20 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 		}
 
 		provided := agentToken(r)
+		valid, attempted := verifyTokenWithCapacity(verifier, provided)
+		if !attempted {
+			rl.finishAuth(clientIP, true)
+			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusTooManyRequests)
+				reg.IncRateLimited()
+			}
+			http.Error(w, "authentication verification capacity exceeded", http.StatusTooManyRequests)
+			return
+		}
+		rl.finishAuth(clientIP, valid)
 
-		if !verifier.Verify(provided) {
-			rl.RecordFailure(clientIP)
+		if !valid {
 			slog.Warn("authentication failed", "ip", clientIP)
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			if reg != nil {
@@ -233,14 +382,14 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 
 // rateLimitOnly wraps a handler with rate limiting (by IP) but no auth check.
 // This is used for the enrollment endpoint which does its own credential
-// check. Downstream 401 responses are recorded as failures so the endpoint
-// cannot be brute-forced past the limiter.
+// check. Authentication failures and malformed-body abuse are tracked in
+// distinct rolling windows.
 // reg receives request counters and duration histograms; it may be nil.
 func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		clientIP := rl.clientIP(r)
-		if rl.IsRateLimited(clientIP) {
+		if rl.IsRateLimited(clientIP) || rl.isAbuseRateLimited(clientIP) {
 			if reg != nil {
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
 				reg.IncRateLimited()
@@ -254,8 +403,11 @@ func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) h
 			defer reg.DecInFlight()
 		}
 		next.ServeHTTP(rw, r)
-		if rw.code == http.StatusUnauthorized {
+		switch rw.code {
+		case http.StatusUnauthorized:
 			rl.RecordFailure(clientIP)
+		case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
+			rl.recordAbuse(clientIP)
 		}
 		if reg != nil {
 			reg.IncRequest(r.Method, rw.code)
@@ -393,9 +545,29 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		}
 
 		provided := agentToken(r)
+		if !rl.tryBeginAuth(clientIP) {
+			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusTooManyRequests)
+				reg.IncRateLimited()
+			}
+			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+			return
+		}
+		valid, attempted := verifyTokenWithCapacity(verifier, provided)
+		if !attempted {
+			rl.finishAuth(clientIP, true)
+			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+			if reg != nil {
+				reg.IncRequest(r.Method, http.StatusTooManyRequests)
+				reg.IncRateLimited()
+			}
+			http.Error(w, "authentication verification capacity exceeded", http.StatusTooManyRequests)
+			return
+		}
+		rl.finishAuth(clientIP, valid)
 
-		if !verifier.Verify(provided) {
-			rl.RecordFailure(clientIP)
+		if !valid {
 			slog.Warn("authentication failed", "ip", clientIP)
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			if reg != nil {

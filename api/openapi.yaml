@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Portwing Agent API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
@@ -16,9 +16,11 @@ info:
     - `X-Portwing-Token` header
     - `X-Dd-Agent-Secret` header (Drydock agent secret header)
 
-    Token comparison uses `crypto/subtle.ConstantTimeCompare` (timing-safe).
-    If no token is configured, authentication is disabled and all requests pass
-    through unauthenticated.
+    Raw-token verification hashes each presented value and compares a
+    fixed-size SHA-256 digest with `crypto/subtle.ConstantTimeCompare`.
+    Standard mode fails closed when no token, token hash, or authorized-keys
+    registry is configured. Unauthenticated development requires explicit
+    opt-in and an additional acknowledgement for non-loopback binds.
 
     **Rate limiting:** 10 failed attempts per IP per rolling minute. Exceeding
     the threshold returns HTTP 429 until the window expires.
@@ -79,7 +81,7 @@ components:
         is present the agent verifies the request via Ed25519 instead of the
         shared token.
 
-        Four headers are required together:
+        Signature version 2 requires five headers together:
 
         | Header | Format | Example |
         |--------|--------|---------|
@@ -87,11 +89,14 @@ components:
         | `X-Portwing-Timestamp` | Unix epoch, seconds, decimal | `1749600000` |
         | `X-Portwing-Nonce` | 32 random hex chars (128-bit) | `a1b2c3d4e5f6...` |
         | `X-Portwing-Signature` | base64url (no padding) Ed25519 signature | `d2hh...` |
+        | `X-Portwing-Signature-Version` | canonical format version | `2` |
 
         The signed canonical string is:
         ```
-        METHOD\nPATH\nbody-sha256-hex\nunix-timestamp\nnonce
+        METHOD\nREQUEST-TARGET\nbody-sha256-hex\nunix-timestamp\nnonce
         ```
+        `REQUEST-TARGET` is the escaped path plus the exact raw query string.
+        Unversioned legacy signatures are accepted only on query-free requests.
         For an empty body, `body-sha256-hex` is the full SHA-256 of the empty
         string: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
 
@@ -128,7 +133,7 @@ components:
         version:
           type: string
           description: Portwing agent version
-          example: "0.6.0"
+          example: "0.7.0"
         dockerVersion:
           type: string
           description: Docker Engine version string
@@ -392,7 +397,7 @@ components:
       properties:
         agentVersion:
           type: string
-          example: "0.6.0"
+          example: "0.7.0"
         protocolName:
           type: string
           example: "portwing"
@@ -843,7 +848,7 @@ paths:
 
         **Example stream:**
         ```
-        data: {"type":"dd:ack","data":{"version":"0.6.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+        data: {"type":"dd:ack","data":{"version":"0.7.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
 
         data: {"type":"dd:watcher-snapshot","data":{"watcher":{...WatcherComponent...},"containers":[{...Container...}]}}
 
@@ -1463,7 +1468,9 @@ paths:
         This endpoint is **only available** when `ENROLLMENT_TOKEN` (and
         `AUTHORIZED_KEYS`) are configured. It is reachable without prior
         authentication — the enrollment token IS the credential — but it is
-        rate-limited via the same IP-based rate limiter as auth failures.
+        rate-limited. Bad enrollment credentials feed the authentication
+        failure limiter; malformed or oversized bodies feed a separate per-IP
+        abuse limiter. Request bodies are capped at 64 KiB.
 
         On success the public key is appended to the authorized-keys file and
         the key registry is hot-reloaded. The new key is immediately active.
@@ -1507,6 +1514,8 @@ paths:
           description: Invalid request body, bad base64, or wrong key length.
         "401":
           description: Wrong enrollment token, or token already burned.
+        "413":
+          description: Request body exceeds the 64 KiB enrollment limit.
         "405":
           description: Method not allowed (POST required).
         "429":

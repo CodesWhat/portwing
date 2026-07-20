@@ -72,7 +72,7 @@ The operator writes an `authorized_keys`-style file listing trusted public keys 
 
 | Threat | Severity | Mitigation |
 |--------|----------|------------|
-| File permissions too broad | Medium | Agent should refuse to start if file is world-readable |
+| File permissions too broad or path swapped | Medium | Agent requires a regular file, rejects world-readable and group/world-writable Unix modes, and validates the opened descriptor |
 | Operator adds wrong/attacker key | Medium | Operational; no software mitigation beyond clear documentation |
 | No enrollment API = no attack surface | — | Positive: there is nothing to race against |
 | Key rotation requires file edit + SIGHUP | Low | Acceptable for operations-managed agents |
@@ -86,7 +86,7 @@ The agent is pre-configured with a short-lived `ENROLLMENT_TOKEN` (a random secr
 **Flow:**
 
 1. Operator generates a random enrollment token and sets `ENROLLMENT_TOKEN=<hex>` on the agent.
-2. Platform calls `POST /api/portwing/enroll` with `{"enrollment_token": "<hex>", "public_key": "<base64url>"}`.
+2. Platform calls `POST /api/portwing/enroll` with a single JSON value no larger than 64 KiB: `{"enrollment_token": "<hex>", "public_key": "<standard-base64>"}`.
 3. Agent verifies the token (constant-time), appends the public key to the authorized-keys file, clears the token from memory, and acknowledges.
 4. The agent refuses further enrollment calls until restarted with a new token.
 
@@ -113,7 +113,8 @@ Model A (bare TOFU) is explicitly *not recommended* for production use and is **
 
 ### 3.1 Standard Mode (HTTP API)
 
-Every request from an authenticated client carries three headers that together constitute a detached Ed25519 signature.
+Every version 2 request from an authenticated client carries five headers
+that together constitute a detached Ed25519 signature.
 
 #### Signed content
 
@@ -121,7 +122,7 @@ The client signs the following canonical byte string (UTF-8, no trailing newline
 
 ```text
 <METHOD>\n
-<PATH>\n
+<REQUEST-TARGET>\n
 <SHA-256 of request body, hex-encoded, or the full 64-char SHA-256 of the empty string "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" for empty body>\n
 <Unix timestamp, seconds, decimal>\n
 <Nonce, 32 hex bytes>
@@ -137,7 +138,10 @@ POST
 a1b2c3d4e5f6...
 ```
 
-The signed content deliberately does not include the `Host` header — the agent is typically behind a reverse proxy and the Host value seen by the agent may differ from the value the client intended.
+`REQUEST-TARGET` is the escaped path plus the exact raw query string in
+origin-form. The signed content deliberately does not include the `Host`
+header — the agent is typically behind a reverse proxy and the Host value seen
+by the agent may differ from the value the client intended.
 
 #### Headers
 
@@ -147,6 +151,7 @@ The signed content deliberately does not include the `Host` header — the agent
 | `X-Portwing-Timestamp` | Unix epoch, seconds, decimal string | `1749600000` |
 | `X-Portwing-Nonce` | 32 random hex bytes (128-bit) | `a1b2c3d4e5f6...` |
 | `X-Portwing-Signature` | base64url (no padding) Ed25519 signature over canonical string | `MEQCIBe...` |
+| `X-Portwing-Signature-Version` | canonical format version | `2` |
 
 The existing `Authorization: Bearer` and `X-Portwing-Token` headers continue to work as the legacy path.
 
@@ -156,7 +161,7 @@ The existing `Authorization: Bearer` and `X-Portwing-Token` headers continue to 
 2. Look up the key by `X-Portwing-Key-ID`. If not found, return 401.
 3. Parse `X-Portwing-Timestamp`. If `|now - timestamp| > 60s`, return 401 with `X-Portwing-Reason: timestamp-skew`.
 4. Check the nonce LRU (see §3.3). If seen, return 401 with `X-Portwing-Reason: replay`.
-5. Reconstruct the canonical byte string from the request (method, path, SHA-256 of body, timestamp, nonce).
+5. Reconstruct the canonical byte string from the request (method, escaped path plus exact raw query, SHA-256 of body, timestamp, nonce).
 6. Verify the Ed25519 signature against the registered public key. `crypto/ed25519.Verify` returns a bool — no constant-time concern here since the signature algorithm itself is not timing-sensitive to verify.
 7. Record the nonce in the LRU. Advance the rate limiter success counter.
 
@@ -171,6 +176,7 @@ X-Portwing-Key-ID: 4a3f2b1c9d8e7f6a
 X-Portwing-Timestamp: 1749600000
 X-Portwing-Nonce: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
 X-Portwing-Signature: d2hhdCBhIGRheSB0byBiZSBhbGl2ZQ
+X-Portwing-Signature-Version: 2
 
 {}
 ```
@@ -404,7 +410,7 @@ This means the authorized-keys file remains the single source of truth regardles
 | Key storage (server side) | `authorized_keys` file, SIGHUP reload | Core DB / `./keys/` directory | Manager-side CA + SPIFFE URI |
 | Key storage (client side) | Operator-held private key | Periphery generates; private key stays on server | Agent generates; `agent.crt`/`agent.key` on disk |
 | Multi-key / multi-client | Yes (multiple lines in file) | One key per Periphery server | One cert per environment |
-| Per-request proof | Detached header signature over (method, path, body-hash, timestamp, nonce) | Long-term key exchange; request-level detail not public | TLS handshake per connection; no per-request overhead |
+| Per-request proof | Detached versioned header signature over (method, full request-target, body-hash, timestamp, nonce) | Long-term key exchange; request-level detail not public | TLS handshake per connection; no per-request overhead |
 | Replay protection | Timestamp window + nonce LRU | Not specified publicly | TLS session binding |
 | Revocation | Remove line from file + SIGHUP (seconds) | Key rotation via Komodo UI | Delete/regenerate API key in Manager UI |
 | Zero new deps | Yes (stdlib only) | Rust crate ecosystem | Requires CA infrastructure |
@@ -444,7 +450,7 @@ No changes to existing files. Zero deps beyond stdlib.
 
 **Files:**
 
-- `internal/auth/verify.go` — `Ed25519Verifier` implementing the `tokenVerifier` interface from `internal/server/middleware.go`; `CanonicalMessage(method, path, bodyHash, timestamp, nonce string) []byte`; `VerifyRequest(r *http.Request, registry *KeyRegistry, lru *NonceLRU) (keyID string, err error)`
+- `internal/auth/verify.go` — request verifier plus `CanonicalMessage(method, target, bodyHash, timestamp, nonce)`; signature version 2 passes the complete origin-form request target and rejects unversioned queries.
 - `internal/auth/verify_test.go` — happy path, bad signature, expired timestamp, replayed nonce, missing headers
 
 **Conflict flag:** `internal/server/middleware.go` — the `tokenVerifier` interface is defined here. This PR reads but does not modify that file. If another team adds fields to `tokenVerifier`, coordinate.
@@ -524,7 +530,7 @@ PRs 1 and 2 can be built and reviewed independently with no codebase conflicts. 
 ## Appendix A — Canonical Message Construction (pseudocode)
 
 ```go
-func CanonicalMessage(method, path string, body []byte, timestampUnix int64, nonce string) []byte {
+func CanonicalMessage(method, target string, body []byte, timestampUnix int64, nonce string) []byte {
     var bodyHash string
     if len(body) == 0 {
         bodyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -533,7 +539,7 @@ func CanonicalMessage(method, path string, body []byte, timestampUnix int64, non
         bodyHash = hex.EncodeToString(h[:])
     }
     return []byte(fmt.Sprintf("%s\n%s\n%s\n%d\n%s",
-        method, path, bodyHash, timestampUnix, nonce))
+        method, target, bodyHash, timestampUnix, nonce))
 }
 ```
 

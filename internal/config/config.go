@@ -21,6 +21,10 @@ type Config struct {
 	TLSCert        string
 	TLSKey         string
 	TrustedProxies []string
+	// AllowUnauthenticated is an explicit development-only opt-in for standard
+	// mode. Non-loopback binds additionally require AllowUnauthenticatedRemote.
+	AllowUnauthenticated       bool
+	AllowUnauthenticatedRemote bool
 
 	// Docker
 	DockerSocket string
@@ -151,17 +155,25 @@ func Load() (*Config, error) {
 		dockerSocket = detectDockerSocket()
 	}
 
+	tlsCert := getEnv("TLS_CERT", "")
+	tlsKey := getEnv("TLS_KEY", "")
+	if (tlsCert == "") != (tlsKey == "") {
+		return nil, fmt.Errorf("TLS_CERT and TLS_KEY must either both be set or both be empty")
+	}
+
 	cfg := &Config{
-		DrydockURL:     drydockURL,
-		Token:          token,
-		TokenHash:      tokenHash,
-		CACert:         getEnv("CA_CERT", ""),
-		TLSSkipVerify:  getEnvBool("TLS_SKIP_VERIFY", false),
-		Port:           getEnv("PORT", "3000"),
-		BindAddress:    getEnv("BIND_ADDRESS", "0.0.0.0"),
-		TLSCert:        getEnv("TLS_CERT", ""),
-		TLSKey:         getEnv("TLS_KEY", ""),
-		TrustedProxies: splitCSV(getEnv("TRUSTED_PROXIES", "")),
+		DrydockURL:                 drydockURL,
+		Token:                      token,
+		TokenHash:                  tokenHash,
+		CACert:                     getEnv("CA_CERT", ""),
+		TLSSkipVerify:              getEnvBool("TLS_SKIP_VERIFY", false),
+		Port:                       getEnv("PORT", "3000"),
+		BindAddress:                getEnv("BIND_ADDRESS", "0.0.0.0"),
+		TLSCert:                    tlsCert,
+		TLSKey:                     tlsKey,
+		TrustedProxies:             splitCSV(getEnv("TRUSTED_PROXIES", "")),
+		AllowUnauthenticated:       getEnvBool("ALLOW_UNAUTHENTICATED", false),
+		AllowUnauthenticatedRemote: getEnvBool("ALLOW_UNAUTHENTICATED_REMOTE", false),
 
 		DockerSocket: dockerSocket,
 		StacksDir:    getEnv("STACKS_DIR", "/data/stacks"),

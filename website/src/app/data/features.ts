@@ -70,7 +70,7 @@ export const features: Feature[] = [
     color: "text-rose-500 dark:text-rose-400",
     bg: "bg-rose-100 dark:bg-rose-900/50",
     description:
-      "We ship hardened by default: `read_only`, `cap_drop: ALL`, `no-new-privileges`, and tokens mounted as secrets instead of env vars. The image runs as non-root (UID 65532) out of the box; running as root (`user: \"0:0\"`) is an explicit opt-in for socket-group compatibility. No security theater.",
+      'We ship hardened by default: `read_only`, `cap_drop: ALL`, `no-new-privileges`, and tokens mounted as secrets instead of env vars. The image runs as non-root (UID 65532) out of the box; running as root (`user: "0:0"`) is an explicit opt-in for socket-group compatibility. No security theater.',
     category: "security",
   },
   {
@@ -124,7 +124,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "Every action we take is recorded as structured, tamper-evident JSON: who asked, what ran, and what the daemon answered. Authentication and key-enrollment events are first-class.",
+      "Every action we take is recorded as structured JSON: who asked, what ran, and what the daemon answered. Export it to immutable storage for tamper evidence; authentication and key-enrollment events are first-class.",
     category: "operations",
   },
   {

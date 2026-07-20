@@ -202,6 +202,26 @@ func TestParseAuthorizedKeys_WorldReadableRefused(t *testing.T) {
 	}
 }
 
+func TestParseAuthorizedKeys_GroupOrWorldWritableRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission check not applicable on Windows")
+	}
+	_, b64 := genPubKeyB64(t)
+	for _, mode := range []os.FileMode{0o620, 0o602} {
+		path := writeKeyFile(t, "ed25519 "+b64+" k\n", mode)
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatalf("chmod %04o: %v", mode, err)
+		}
+		_, err := parseAuthorizedKeys(path)
+		if err == nil {
+			t.Fatalf("mode %04o: expected writable credential file rejection", mode)
+		}
+		if !strings.Contains(err.Error(), "writable") {
+			t.Fatalf("mode %04o: expected writable-permission error, got %v", mode, err)
+		}
+	}
+}
+
 func TestParseAuthorizedKeys_GroupReadableAccepted(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -213,6 +233,16 @@ func TestParseAuthorizedKeys_GroupReadableAccepted(t *testing.T) {
 	_, err := parseAuthorizedKeys(path)
 	if err != nil {
 		t.Fatalf("unexpected error for 0640 file: %v", err)
+	}
+}
+
+func TestParseAuthorizedKeys_NonRegularFileRefused(t *testing.T) {
+	_, err := parseAuthorizedKeys(t.TempDir())
+	if err == nil {
+		t.Fatal("expected directory credential path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("expected regular-file error, got %v", err)
 	}
 }
 

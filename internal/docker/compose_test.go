@@ -67,6 +67,61 @@ func TestResolvePathRejectsStackFileTraversal(t *testing.T) {
 	}
 }
 
+func TestWriteStackFilesRejectsSymlinkedStackRootEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink setup requires Windows privileges")
+	}
+	stacksDir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(stacksDir, "app")); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: stacksDir}
+	err := cm.writeStackFiles(ComposeRequest{
+		StackName: "app",
+		Files:     map[string]string{"compose.yml": "attacker-controlled"},
+	})
+	if err == nil {
+		t.Fatal("expected symlinked stack root to be rejected")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "compose.yml")); !os.IsNotExist(statErr) {
+		t.Fatalf("write escaped STACKS_DIR through symlink: %v", statErr)
+	}
+}
+
+func TestWriteStackFilesRejectsSymlinkedNestedFileEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink setup requires Windows privileges")
+	}
+	stacksDir := t.TempDir()
+	stackDir := filepath.Join(stacksDir, "app")
+	if err := os.Mkdir(stackDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "protected")
+	if err := os.WriteFile(outside, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(stackDir, "compose.yml")); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: stacksDir}
+	err := cm.writeStackFiles(ComposeRequest{
+		StackName: "app",
+		Files:     map[string]string{"compose.yml": "overwritten"},
+	})
+	if err == nil {
+		t.Fatal("expected symlinked nested file to be rejected")
+	}
+	got, readErr := os.ReadFile(outside)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != "original" {
+		t.Fatalf("outside file was modified: %q", got)
+	}
+}
+
 func assertMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 

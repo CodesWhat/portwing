@@ -272,7 +272,10 @@ docker run -d \
   ghcr.io/codeswhat/portwing:latest
 ```
 
-Without `TOKEN` (or `TOKEN_HASH` / `AUTHORIZED_KEYS`) the API is **unauthenticated** — anyone who can reach the port controls your Docker daemon.
+Without `TOKEN`, `TOKEN_HASH`, or `AUTHORIZED_KEYS`, Standard mode refuses to
+start. Local unauthenticated evaluation requires `ALLOW_UNAUTHENTICATED=true`
+on a loopback bind; non-loopback exposure additionally requires the separate
+`ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
 
 The image runs as the non-root `portwing` user (UID 65532); `--group-add` grants it the Docker socket's group so it can reach the daemon.
 

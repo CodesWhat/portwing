@@ -7,7 +7,7 @@ export const watchtowerComparisonRouteData = {
 Auto-update containers|Yes (pull + restart on schedule)|No (Drydock handles updates; Portwing is the access agent)|competitor
 Remote Docker API proxy|No (local/scheduled, no remote protocol)|Yes (full Docker API proxy with auth)|self
 Auth for remote access|No (local only)|Yes (Ed25519 per-request signing)|self
-Structured audit log|No|Yes (tamper-evident, built-in)|self
+Structured audit log|No|Yes (JSON, built-in)|self
 Image signature verification|Basic cosign support (newer builds)|Yes (cosign + SBOM + SLSA)|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|No|Yes|self
@@ -19,7 +19,7 @@ License|Apache-2.0|AGPL-3.0|tie
   highlightsTable: `
 key|Remote Auth (Ed25519)|Watchtower runs locally and has no remote access model. Portwing exposes the Docker API over authenticated HTTP, using Ed25519 per-request signing so each client has its own revocable key pair.
 shield|Default-Deny Socket Filter|Portwing pairs with sockguard to filter Docker API calls at the socket level. Even if Portwing is compromised, the sockguard allowlist constrains what can be called. Watchtower mounts the socket unfiltered.
-filetext|Structured Audit Log|Portwing logs every Docker API call it proxies in a tamper-evident JSON format. Watchtower has no audit trail.
+filetext|Structured Audit Log|Portwing logs every Docker API call it proxies as structured JSON for export to immutable storage. Watchtower has no audit trail.
 packagecheck|Supply-Chain Artifacts|Every Portwing release ships a CycloneDX SBOM, cosign image signatures, and SLSA build provenance. Watchtower publishes no supply-chain artifacts.
 activity|Prometheus Metrics|Portwing exposes agent health, request counts, and latency histograms. Watchtower has no metrics endpoint.
 bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server so AI tools can inspect containers and events. Watchtower has no MCP support.

@@ -1,6 +1,6 @@
 # Portwing
 
-> Lightweight, security-first remote Docker agent. Gives Drydock a secure foothold on every Docker host — HTTP/SSE standard mode or an outbound WebSocket edge tunnel for NAT/firewalled hosts — with Ed25519 per-client auth and a tamper-evident audit log. Part of the CodesWhat stack: Drydock orchestrates, Portwing is the agent, Sockguard filters the socket.
+> Lightweight, security-first remote Docker agent. Gives Drydock a secure foothold on every Docker host — HTTP/SSE standard mode or an outbound WebSocket edge tunnel for NAT/firewalled hosts — with Ed25519 per-client auth and a structured audit log ready for immutable export. Part of the CodesWhat stack: Drydock orchestrates, Portwing is the agent, Sockguard filters the socket.
 
 Portwing sits between the Drydock controller and the Docker Engine on each remote host. The controller connects inbound to Portwing over HTTP/SSE (standard mode), or Portwing dials outbound over a WebSocket tunnel when the host is behind NAT or a firewall (edge mode). All authentication is Ed25519 per-client signed requests (no shared secret on the wire) or Argon2id-hashed tokens. The audit log records every security-relevant action as structured JSON.
 
@@ -12,7 +12,7 @@ Portwing is currently in active alpha (v0.5.x). APIs, environment variables, and
 - Edge mode: outbound WebSocket tunnel to the Drydock controller (DRYDOCK_URL + PRIVATE_KEY_FILE); no inbound port required on the agent host; exponential backoff reconnect with jitter; requires Drydock 1.5+ and Portwing 0.3.0+
 - Ed25519 per-client auth: signed requests with replay protection; generate keypairs with `portwing keygen`; enroll public keys via /api/portwing/enroll; token fallback (TOKEN / TOKEN_HASH / TOKEN_FILE) for initial setup
 - Argon2id hash-at-rest: generate hash with `portwing hash-token`; plaintext never stored in env vars or config files; constant-time comparison
-- Tamper-evident audit log: structured JSON (one record per line, RFC 3339 nanosecond timestamps, UTC); events include api_request, auth_failure, rate_limited, compose_op, exec_start, enrollment; in-memory ring buffer at GET /_portwing/audit
+- Structured audit log: JSON lines with RFC 3339 nanosecond UTC timestamps; events include api_request, auth_failure, rate_limited, compose_op, exec_start, enrollment; export immediately to append-only/WORM storage for tamper evidence; in-memory ring buffer at GET /_portwing/audit
 - Hardened runtime: ships to run read_only, cap_drop ALL, no-new-privileges, tokens as Docker secrets
 - Sockguard integration: optionally layer Sockguard as a sibling container filtering the raw Docker socket — even a fully compromised Portwing agent is then constrained to an explicit API allowlist
 - Docker Compose lifecycle management via /_portwing/compose (up, down, pull, etc.) with per-operation audit records

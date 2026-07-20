@@ -465,7 +465,7 @@ func TestRun_ListenAndServeFailure(t *testing.T) {
 	// An invalid bind address causes ListenAndServe to return a real error (not ErrServerClosed).
 	setenv(t, "BIND_ADDRESS", "invalid-host-that-cannot-bind")
 	setenv(t, "PORT", "99999") // also invalid port for good measure
-	unsetenv(t, "TOKEN")
+	setenv(t, "TOKEN", "test-token")
 	unsetenv(t, "TOKEN_HASH")
 	unsetenv(t, "DRYDOCK_URL")
 	unsetenv(t, "TOKEN_FILE")
@@ -641,7 +641,7 @@ func TestRun_StandardMode_MockDocker(t *testing.T) {
 
 	setenv(t, "DOCKER_SOCKET", sockPath)
 	setenv(t, "PORT", "0") // bind to a random port so no real port is consumed
-	unsetenv(t, "TOKEN")
+	setenv(t, "TOKEN", "test-token")
 	unsetenv(t, "TOKEN_HASH")
 	unsetenv(t, "DRYDOCK_URL")
 	unsetenv(t, "TOKEN_FILE")

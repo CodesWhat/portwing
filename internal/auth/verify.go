@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -19,7 +20,11 @@ const (
 	HeaderTimestamp = "X-Portwing-Timestamp"
 	HeaderNonce     = "X-Portwing-Nonce"
 	HeaderSignature = "X-Portwing-Signature"
-	HeaderReason    = "X-Portwing-Reason"
+	// HeaderSignatureVersion selects the canonical request format. Version 2
+	// signs the complete origin-form request target, including the raw query.
+	HeaderSignatureVersion = "X-Portwing-Signature-Version"
+	HeaderReason           = "X-Portwing-Reason"
+	SignatureVersion2      = "2"
 )
 
 // Sentinel errors returned by VerifyRequest. Callers can use errors.Is.
@@ -55,16 +60,31 @@ func HasSignature(h http.Header) bool {
 }
 
 // CanonicalMessage constructs the canonical byte string that is signed and
-// verified for every authenticated request. The format (Appendix A) is:
+// verified for every authenticated request. In signature version 2, target is
+// the complete origin-form request target returned by CanonicalRequestTarget.
+// The format is:
 //
-//	METHOD\nPATH\nbody-sha256-hex\nunix-timestamp\nnonce
+//	METHOD\nREQUEST-TARGET\nbody-sha256-hex\nunix-timestamp\nnonce
 //
 // For an empty body, bodyHashHex must be the full SHA-256 of the empty string:
 //
 //	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-func CanonicalMessage(method, path, bodyHashHex string, timestampUnix int64, nonce string) []byte {
+func CanonicalMessage(method, target, bodyHashHex string, timestampUnix int64, nonce string) []byte {
 	return []byte(fmt.Sprintf("%s\n%s\n%s\n%d\n%s",
-		method, path, bodyHashHex, timestampUnix, nonce))
+		method, target, bodyHashHex, timestampUnix, nonce))
+}
+
+// CanonicalRequestTarget returns the exact origin-form target covered by a
+// version 2 HTTP signature: escaped path plus the unmodified raw query.
+func CanonicalRequestTarget(u *url.URL) string {
+	target := u.EscapedPath()
+	if target == "" {
+		target = "/"
+	}
+	if u.ForceQuery || u.RawQuery != "" {
+		target += "?" + u.RawQuery
+	}
+	return target
 }
 
 // emptyBodyHash is the SHA-256 hex digest of the empty string, used when the
@@ -161,9 +181,23 @@ func VerifyRequest(
 		return "", ErrInvalidSig
 	}
 
-	// Build canonical message.
+	// Build the canonical message. Legacy signatures without a version header
+	// remain valid only for query-free requests; accepting them with a query
+	// would preserve the query-tampering vulnerability fixed by version 2.
 	bodyHash := BodyHashHex(body)
-	msg := CanonicalMessage(r.Method, r.URL.Path, bodyHash, tsUnix, nonceHeader)
+	var target string
+	switch r.Header.Get(HeaderSignatureVersion) {
+	case SignatureVersion2:
+		target = CanonicalRequestTarget(r.URL)
+	case "":
+		if r.URL.RawQuery != "" || r.URL.ForceQuery {
+			return "", ErrBadSignature
+		}
+		target = r.URL.Path
+	default:
+		return "", ErrBadSignature
+	}
+	msg := CanonicalMessage(r.Method, target, bodyHash, tsUnix, nonceHeader)
 
 	// Verify signature.
 	if !ed25519.Verify(ed25519.PublicKey(key.PubKey), msg, sig) {

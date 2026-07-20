@@ -9,6 +9,9 @@ const withMDX = createMDX();
 // keeps working once the website serves the export at getportwing.com/docs/...
 export default withMDX({
   output: "export",
+  // Keep the exported inline bootstrap deterministic for the website's
+  // route-specific CSP hash generation. Static assets remain content-hashed.
+  generateBuildId: async () => "portwing-docs-static",
   basePath: "/docs",
   images: {
     unoptimized: true,
