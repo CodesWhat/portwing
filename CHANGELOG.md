@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Continuous Drydock edge logs.** `dd:container_log_request` now supports a `stream:true` mode with correlated stdout/stderr chunks, explicit end/error frames, and controller-initiated cancellation. Portwing admits at most 128 live log readers, skips Docker frames larger than 256 KiB, and relies on the existing bounded edge send queue so a stalled controller is evicted rather than consuming memory without limit.
 - **Cross-repo fleet-soak target.** The mock Docker daemon now supports real exec hijacks and sustained multiplexed log output so Drydock can run Portwing processes through reconnect storms, concurrent exec, continuous logs, and controller backpressure.
+- **Native package channels.** GoReleaser now builds individually keyless-signed and checksummed `deb`/`rpm` packages for every supported Linux architecture, publishes stable macOS archives through `CodesWhat/homebrew-tap`, and gates releases on clean-container package installs plus a macOS Homebrew smoke test. Prereleases do not update the stable cask.
 
 ### Changed
 

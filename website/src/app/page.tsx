@@ -30,10 +30,10 @@ export default function Home() {
     url: BASE_URL,
     description: SITE_CONFIG.description,
     applicationCategory: "DeveloperApplication",
-    operatingSystem: "Docker",
+    operatingSystem: "Linux, macOS, Docker",
     license: SITE_CONFIG.licenseUrl,
     downloadUrl: GITHUB_RELEASES_URL,
-    installUrl: GITHUB_RELEASES_URL,
+    installUrl: `${BASE_URL}/docs/installation`,
     offers: {
       "@type": "Offer",
       price: "0",

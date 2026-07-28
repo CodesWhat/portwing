@@ -1,17 +1,18 @@
 "use client";
 
-import { ShieldCheck, Terminal, TriangleAlert, Zap } from "lucide-react";
+import { PackageOpen, ShieldCheck, Terminal, TriangleAlert, Zap } from "lucide-react";
 import { useState } from "react";
 import { DockerRunSnippet } from "@/components/docker-run-snippet";
 import { SectionHeading } from "@/components/section-heading";
 import { YamlBlock } from "@/components/yaml-block";
 import { SITE_CONFIG } from "@/lib/site-config";
 
-type Tab = "quick" | "secure";
+type Tab = "quick" | "secure" | "native";
 
 const TABS: { id: Tab; label: string; icon: typeof Zap }[] = [
   { id: "quick", label: "Quick", icon: Zap },
   { id: "secure", label: "Secure", icon: ShieldCheck },
+  { id: "native", label: "Native", icon: PackageOpen },
 ];
 
 // Hardened standard-mode compose from docs/getting-started.mdx.
@@ -115,7 +116,7 @@ export function GetStarted() {
         <div role="tabpanel" id="get-started-panel" aria-labelledby={`tab-${tab}`}>
           {tab === "quick" ? (
             <DockerRunSnippet />
-          ) : (
+          ) : tab === "secure" ? (
             <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl">
               <div className="flex items-center gap-2 border-b border-neutral-800 px-4 py-3">
                 <Terminal className="h-4 w-4 text-neutral-500" />
@@ -128,6 +129,23 @@ export function GetStarted() {
                 className="overflow-x-auto p-6 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-neutral-300"
               />
             </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl">
+              <div className="flex items-center gap-2 border-b border-neutral-800 px-4 py-3">
+                <PackageOpen className="h-4 w-4 text-neutral-500" />
+                <span className="text-xs font-medium text-neutral-500">Native packages</span>
+              </div>
+              <pre className="overflow-x-auto p-6 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-neutral-300">
+                <code>{`# macOS
+brew install --cask codeswhat/tap/portwing
+
+# Debian / Ubuntu
+sudo apt install ./portwing_0.8.0_linux_amd64.deb
+
+# Fedora / RHEL
+sudo rpm --install ./portwing_0.8.0_linux_amd64.rpm`}</code>
+              </pre>
+            </div>
           )}
 
           <div className="mt-4 flex items-center justify-center gap-2 text-center text-sm">
@@ -136,7 +154,7 @@ export function GetStarted() {
                 <TriangleAlert className="h-4 w-4 shrink-0 text-amber-500" />
                 TOKEN is visible in docker inspect — fine for a local try, not for production.
               </p>
-            ) : (
+            ) : tab === "secure" ? (
               <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
                 <ShieldCheck className="h-4 w-4 shrink-0 text-violet-500" />
                 Token delivered as a Docker secret — never in env vars or inspect output.{" "}
@@ -145,6 +163,17 @@ export function GetStarted() {
                   className="font-medium text-neutral-900 underline-offset-4 hover:underline dark:text-neutral-100"
                 >
                   Full getting-started docs →
+                </a>
+              </p>
+            ) : (
+              <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
+                <ShieldCheck className="h-4 w-4 shrink-0 text-violet-500" />
+                Stable packages are checksummed, keyless-signed, and install-tested.{" "}
+                <a
+                  href="/docs/installation"
+                  className="font-medium text-neutral-900 underline-offset-4 hover:underline dark:text-neutral-100"
+                >
+                  Install and verify →
                 </a>
               </p>
             )}

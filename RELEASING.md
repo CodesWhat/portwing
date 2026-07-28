@@ -32,7 +32,8 @@
    goreleaser release --snapshot --clean --skip=sign,docker,publish,sbom
    ```
 
-   The snapshot must produce all platform archives and `checksums.txt` under `dist/`.
+   The snapshot must produce all platform archives, Linux `deb`/`rpm`
+   packages, the generated Homebrew cask, and `checksums.txt` under `dist/`.
 
 5. **Update CHANGELOG.md**
 
@@ -57,7 +58,15 @@ Go to **Actions → 🏷️ Release: Cut** → **Run workflow** on `main`. The w
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
-This requires the **`RELEASE_PAT`** secret (fine-grained PAT, Contents: read/write on this repo). Tags pushed with the default `GITHUB_TOKEN` do not trigger downstream workflows, so without the PAT the tag would never fire `release.yml`.
+This requires the **`RELEASE_PAT`** secret (fine-grained PAT, Contents:
+read/write on this repo). Tags pushed with the default `GITHUB_TOKEN` do not
+trigger downstream workflows, so without the PAT the tag would never fire
+`release.yml`.
+
+The release job also requires **`HOMEBREW_TAP_TOKEN`**, a fine-grained token
+with Contents read/write access to `CodesWhat/homebrew-tap`. The default
+`GITHUB_TOKEN` cannot publish to a different repository. Prerelease tags render
+the cask for validation but do not upload it (`skip_upload: auto`).
 
 **Manual path** (if you need to override the computed version):
 
@@ -74,15 +83,18 @@ git push origin v<version>
 
 `release.yml` runs on the tag push:
 
-1. **GoReleaser** — builds all platform binaries, archives, and checksums; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
+1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; publishes the stable Homebrew cask; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
 2. **Attestations** — SLSA build provenance for every archive in `checksums.txt` and for the container manifest (`gh attestation verify <archive> --repo CodesWhat/portwing`)
 3. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.
+4. **verify-native-packages** — verifies every package's Sigstore bundle, installs the `amd64` deb and rpm in digest-pinned clean distribution containers, checks the systemd unit, and runs `portwing version`.
+5. **verify-homebrew** — on stable tags, installs the published cask on macOS, runs `portwing version`, and uninstalls it.
 
 **Verify the release:**
 
 - GitHub Actions: the `release.yml` run is green
 - GHCR image exists: `docker pull ghcr.io/codeswhat/portwing:<version>`
-- The release page has archives for every platform plus `checksums.txt`
+- The release page has archives and native packages for every supported platform, each package has a `.bundle`, and `checksums.txt` lists them
+- `brew install --cask codeswhat/tap/portwing` installs the tagged stable release
 - `portwing version` (or `GET /api/v1/version`) on the new image reports the tagged version, not `0.1.0` — this catches ldflags injection regressions
 
 ---

@@ -293,6 +293,9 @@ jobs:
           version: "~> v2"
           args: check
 
+      - name: Verify package release contract
+        run: bash scripts/package-release-config-test.sh
+
   codeql:
     name: "🔍 CodeQL Analysis"
     # CodeQL SARIF upload requires GitHub Advanced Security (GHAS), which is not

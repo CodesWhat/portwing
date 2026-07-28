@@ -42,6 +42,33 @@ archives:
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
 
+nfpms:
+  - id: packages
+    package_name: portwing
+    ids:
+      - portwing
+    formats: [deb, rpm]
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}.{{ .Format }}"
+    vendor: CodesWhat
+    homepage: https://portwing.codeswhat.com/
+    maintainer: CodesWhat <security@codeswhat.com>
+    description: Security-first remote Docker agent for Drydock and standalone API clients.
+    license: AGPL-3.0-only
+    bindir: /usr/bin
+    contents:
+      - src: scripts/portwing.service
+        dst: /usr/lib/systemd/system/portwing.service
+        file_info:
+          mode: 0644
+      - dst: /etc/portwing
+        type: dir
+        file_info:
+          mode: 0750
+      - dst: /data/stacks
+        type: dir
+        file_info:
+          mode: 0750
+
 checksum:
   name_template: "checksums.txt"
 
@@ -54,7 +81,8 @@ sboms:
     artifacts: archive
 
 signs:
-  - cmd: cosign
+  - id: checksums
+    cmd: cosign
     signature: "${artifact}.bundle"
     args:
       - "sign-blob"
@@ -62,6 +90,18 @@ signs:
       - "${artifact}"
       - "--yes"
     artifacts: checksum
+    output: true
+  - id: packages
+    cmd: cosign
+    signature: "${artifact}.bundle"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: package
+    ids:
+      - packages
     output: true
 
 docker_signs:
@@ -109,3 +149,24 @@ dockers_v2:
     # is additive to the archive-level `sboms:` block above, which covers the
     # binaries but not the image's OS packages.
     sbom: "true"
+
+homebrew_casks:
+  - name: portwing
+    ids:
+      - default
+    binaries:
+      - portwing
+    homepage: https://portwing.codeswhat.com/
+    description: Security-first remote Docker agent for Drydock and standalone API clients
+    caveats: |
+      Portwing needs access to a Docker socket and authentication configuration.
+      See https://portwing.codeswhat.com/docs/installation before starting it.
+    skip_upload: auto
+    repository:
+      owner: CodesWhat
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: security@codeswhat.com
