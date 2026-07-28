@@ -1,0 +1,181 @@
+---
+title: Native Installation
+description: Install, verify, configure, upgrade, and remove Portwing with Homebrew, deb, or rpm packages.
+---
+
+Portwing releases ship native packages in addition to the multi-architecture
+container image and tar archives:
+
+- a Homebrew cask for macOS on Intel and Apple Silicon;
+- `deb` packages for Linux `amd64`, `arm64`, and `armv7`;
+- `rpm` packages for Linux `amd64`, `arm64`, and `armv7`.
+
+Stable releases update the Homebrew tap. Release candidates and other
+prereleases remain available from the GitHub release page but do not move the
+stable Homebrew channel.
+
+<Callout type="warn">
+Installing Portwing does not make Docker access safe by itself. A process that
+can use the Docker socket effectively has root-equivalent control of the host.
+Use strong authentication, TLS in standard mode, and the
+[sockguard deployment](/getting-started) when you need an API allowlist.
+</Callout>
+
+## Homebrew
+
+Install the latest stable release:
+
+```bash
+brew install --cask codeswhat/tap/portwing
+portwing version
+```
+
+The cask installs the `portwing` command but does not create a launch daemon or
+configuration. Run it from your own service manager after configuring the
+required authentication and Docker socket access.
+
+## Debian and Ubuntu
+
+Download the package for your architecture from the
+[GitHub release](https://github.com/CodesWhat/portwing/releases). For example:
+
+```bash
+VERSION=0.8.0
+gh release download "v${VERSION}" \
+  --repo CodesWhat/portwing \
+  --pattern "portwing_${VERSION}_linux_amd64.deb" \
+  --pattern "portwing_${VERSION}_linux_amd64.deb.bundle" \
+  --pattern checksums.txt \
+  --pattern checksums.txt.bundle
+
+sudo apt install ./portwing_${VERSION}_linux_amd64.deb
+portwing version
+```
+
+Use `linux_arm64.deb` on 64-bit Arm or `linux_armv7.deb` on 32-bit Arm.
+
+## Fedora, RHEL, and compatible distributions
+
+Download the matching package and its signature bundle:
+
+```bash
+VERSION=0.8.0
+gh release download "v${VERSION}" \
+  --repo CodesWhat/portwing \
+  --pattern "portwing_${VERSION}_linux_amd64.rpm" \
+  --pattern "portwing_${VERSION}_linux_amd64.rpm.bundle" \
+  --pattern checksums.txt \
+  --pattern checksums.txt.bundle
+
+sudo rpm --install ./portwing_${VERSION}_linux_amd64.rpm
+portwing version
+```
+
+Use `linux_arm64.rpm` on 64-bit Arm or `linux_armv7.rpm` on 32-bit Arm.
+
+## Verify before installing
+
+Every native package is listed in `checksums.txt`. The release pipeline signs
+both that checksum manifest and each `deb`/`rpm` artifact with keyless Sigstore
+bundles. Verify the checksum manifest as described in
+[Release Verification](/verification), then check the downloaded package:
+
+```bash
+sha256sum --check checksums.txt --ignore-missing
+
+cosign verify-blob \
+  --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  --bundle="portwing_${VERSION}_linux_amd64.deb.bundle" \
+  "portwing_${VERSION}_linux_amd64.deb"
+```
+
+Replace `.deb` with `.rpm` for an rpm package. The release workflow also
+installs the published `amd64` deb and rpm in clean distribution containers and
+smoke-tests the Homebrew cask on macOS.
+
+## Configure the systemd service
+
+Native Linux packages install:
+
+- `/usr/bin/portwing`;
+- `/usr/lib/systemd/system/portwing.service`;
+- `/etc/portwing/` for operator-owned configuration;
+- `/data/stacks/` for Compose stack state.
+
+The package deliberately does **not** enable or start `portwing.service`.
+Portwing fails closed without authentication, so create the configuration first:
+
+```bash
+sudo install -d -m 0750 /etc/portwing
+sudo sh -c 'umask 077; cat > /etc/portwing/config' <<'EOF'
+TOKEN_FILE=/etc/portwing/token
+PORT=3000
+BIND_ADDRESS=127.0.0.1
+LOG_LEVEL=info
+EOF
+openssl rand -hex 32 | sudo tee /etc/portwing/token >/dev/null
+sudo chmod 0600 /etc/portwing/config /etc/portwing/token
+sudo systemctl enable --now portwing.service
+```
+
+The packaged unit runs as root by default because Docker socket access is
+privileged on typical Linux hosts. It applies `NoNewPrivileges`,
+`ProtectSystem=strict`, `ProtectHome`, and a narrow writable stacks directory.
+If your host provides a dedicated socket-owning group or a filtered sockguard
+socket, add a systemd drop-in with `User=`, `Group=`, and `DOCKER_SOCKET`
+appropriate for that host. Do not assume that membership in the `docker` group
+is a meaningful privilege boundary.
+
+## Upgrade
+
+Homebrew:
+
+```bash
+brew update
+brew upgrade --cask portwing
+```
+
+Debian or Ubuntu:
+
+```bash
+sudo apt install ./portwing_NEW_VERSION_linux_amd64.deb
+sudo systemctl restart portwing.service
+```
+
+Fedora, RHEL, or compatible distributions:
+
+```bash
+sudo rpm --upgrade ./portwing_NEW_VERSION_linux_amd64.rpm
+sudo systemctl restart portwing.service
+```
+
+Review the [changelog](https://github.com/CodesWhat/portwing/blob/main/CHANGELOG.md)
+and [stability policy](/stability-policy) before upgrading between pre-1.0
+minor versions.
+
+## Uninstall
+
+Homebrew:
+
+```bash
+brew uninstall --cask portwing
+```
+
+Debian or Ubuntu:
+
+```bash
+sudo systemctl disable --now portwing.service
+sudo apt remove portwing
+```
+
+Fedora, RHEL, or compatible distributions:
+
+```bash
+sudo systemctl disable --now portwing.service
+sudo rpm --erase portwing
+```
+
+Package removal does not delete operator-created secrets in `/etc/portwing` or
+Compose data in `/data/stacks`. Remove those directories separately only after
+confirming you no longer need their contents.

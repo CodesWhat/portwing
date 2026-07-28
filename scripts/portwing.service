@@ -8,7 +8,7 @@ Requires=docker.service
 [Service]
 Type=simple
 EnvironmentFile=-/etc/portwing/config
-ExecStart=/usr/local/bin/portwing
+ExecStart=/usr/bin/portwing
 Restart=always
 RestartSec=5
 LimitNOFILE=65536

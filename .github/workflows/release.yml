@@ -94,6 +94,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Resolve container manifest digest
         id: manifest-digest
@@ -187,3 +188,108 @@ jobs:
             --repo CodesWhat/portwing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  verify-native-packages:
+    name: "✅ Verify Native Packages"
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            registry-1.docker.io:443
+            release-assets.githubusercontent.com:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+
+      - name: Download native packages and signatures
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p packages
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "*.deb" \
+            --pattern "*.deb.bundle" \
+            --pattern "*.rpm" \
+            --pattern "*.rpm.bundle" \
+            --dir packages
+
+      - name: Verify native package signatures
+        run: |
+          set -euo pipefail
+          for package in packages/*.deb packages/*.rpm; do
+            cosign verify-blob \
+              --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+              --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+              --bundle="${package}.bundle" \
+              "${package}"
+          done
+
+      - name: Verify deb package install
+        run: |
+          docker run --rm \
+            --volume "${PWD}/packages:/packages:ro" \
+            ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90 \
+            bash -euxo pipefail -c '
+              dpkg --install /packages/portwing_*_linux_amd64.deb
+              /usr/bin/portwing version
+              test -f /usr/lib/systemd/system/portwing.service
+              grep -Fq "ExecStart=/usr/bin/portwing" /usr/lib/systemd/system/portwing.service
+            '
+
+      - name: Verify rpm package install
+        run: |
+          docker run --rm \
+            --volume "${PWD}/packages:/packages:ro" \
+            fedora:42@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814 \
+            bash -euxo pipefail -c '
+              rpm --install /packages/portwing_*_linux_amd64.rpm
+              /usr/bin/portwing version
+              test -f /usr/lib/systemd/system/portwing.service
+              grep -Fq "ExecStart=/usr/bin/portwing" /usr/lib/systemd/system/portwing.service
+            '
+
+  verify-homebrew:
+    name: "✅ Verify Homebrew"
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            formulae.brew.sh:443
+            github.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+
+      - name: Verify Homebrew cask install
+        run: |
+          brew tap CodesWhat/tap https://github.com/CodesWhat/homebrew-tap.git
+          brew install --cask codeswhat/tap/portwing
+          portwing version
+          brew uninstall --cask portwing

@@ -56,6 +56,7 @@
 <h2 align="center">📑 Contents</h2>
 
 - [🚀 Quick Start](#quick-start)
+- [📦 Native Packages](#native-packages)
 - [🆕 Recent Updates](#recent-updates)
 - [✨ Features](#features)
 - [🔐 Authentication](#authentication)
@@ -127,6 +128,28 @@ curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/s
 ```bash
 docker compose -f docker-compose.with-sockguard.yml up -d
 ```
+
+<h2 align="center" id="native-packages">📦 Native Packages</h2>
+
+Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
+`rpm` packages for `amd64`, `arm64`, and `armv7`.
+
+```bash
+# macOS
+brew install --cask codeswhat/tap/portwing
+
+# Debian/Ubuntu (after downloading the matching release asset)
+sudo apt install ./portwing_0.8.0_linux_amd64.deb
+
+# Fedora/RHEL (after downloading the matching release asset)
+sudo rpm --install ./portwing_0.8.0_linux_amd64.rpm
+```
+
+Packages install the command and, on Linux, a hardened `portwing.service`; they
+do not start it before authentication is configured. See the
+[native installation guide](https://portwing.codeswhat.com/docs/installation)
+for artifact verification, configuration, upgrade, uninstall, and service-user
+expectations.
 
 This runs sockguard and Portwing as separate containers sharing a filtered socket volume. Neither container has the raw Docker socket mounted directly; sockguard enforces an allowlist of Docker API operations at the socket level. The full compose file (`examples/docker-compose.with-sockguard.yml`):
 
