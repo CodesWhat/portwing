@@ -96,7 +96,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			cancel()
 		}()
 		if err := edgeClient.Run(ctx); err != nil && ctx.Err() == nil {
-			slog.Error("edge client error", "error", err)
+			slog.Error("edge client error", "error", applog.Sanitize(err.Error()))
 			return 1
 		}
 	} else {

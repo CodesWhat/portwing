@@ -17,7 +17,9 @@
     "turbo": "^2.9.17"
   },
   "overrides": {
-    "postcss": "^8.5.10"
+    "js-yaml": "^4.3.0",
+    "postcss": "^8.5.24",
+    "sharp": "^0.35.3"
   },
   "packageManager": "npm@11.13.0",
   "engines": {

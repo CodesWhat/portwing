@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	applog "github.com/codeswhat/portwing/internal/log"
 )
 
 // Header names used in Ed25519 request authentication.
@@ -167,7 +169,7 @@ func VerifyRequest(
 	if skew > 30*time.Second {
 		slog.Warn("clock skew warning",
 			"skew_seconds", int(skew.Seconds()),
-			"key_id", kidHeader)
+			"key_id", applog.Sanitize(kidHeader))
 	}
 
 	// Replay check.

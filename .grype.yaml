@@ -1,7 +1,36 @@
-# Grype reports Go module vulnerabilities embedded in the third-party
-# docker-compose executable packaged from Wolfi. Keep these ignores scoped to
-# that binary and review them by 2026-07-15 when Wolfi ships updated packages.
+# Grype reports module-level findings for stripped Go binaries even when the
+# affected package is not linked. Keep those exceptions version- and
+# location-scoped so dependency updates automatically force a new review.
 ignore:
+  # GO-2026-5932 affects only golang.org/x/crypto/openpgp. Portwing imports
+  # x/crypto/argon2 only (confirmed by source-mode govulncheck), and Docker
+  # Compose v5.3.1's build dependency graph does not contain openpgp. There is
+  # no fixed x/crypto version because the advisory deprecates that package.
+  - vulnerability: GO-2026-5932
+    reason: "Portwing uses x/crypto/argon2 only; openpgp is not linked. Review if x/crypto changes from v0.54.0."
+    package:
+      name: golang.org/x/crypto
+      version: v0.54.0
+      type: go-module
+      location: "**/go.mod"
+  - vulnerability: GO-2026-5932
+    reason: "Portwing uses x/crypto/argon2 only; openpgp is not linked. Review if x/crypto changes from v0.54.0."
+    package:
+      name: golang.org/x/crypto
+      version: v0.54.0
+      type: go-module
+      location: "**/usr/bin/portwing"
+  - vulnerability: GO-2026-5932
+    reason: "Docker Compose v5.3.1 does not import openpgp; stripped-binary module match only. Review when Wolfi changes x/crypto from v0.53.0."
+    package:
+      name: golang.org/x/crypto
+      version: v0.53.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+
+  # Grype reports Go module vulnerabilities embedded in the third-party
+  # docker-compose executable packaged from Wolfi. Keep these ignores scoped
+  # to that binary and review them when Wolfi ships updated packages.
   - vulnerability: GO-2026-5026
     reason: "Embedded in Wolfi docker-compose binary; review by 2026-07-15."
     package:

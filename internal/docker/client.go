@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"regexp"
 	"time"
+
+	applog "github.com/codeswhat/portwing/internal/log"
 )
 
 // Types for Docker API responses.
@@ -322,7 +324,7 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerIns
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "InspectContainer", "path", "/containers/"+id+"/json", "status", resp.StatusCode, "body", string(body))
+		slog.Warn("docker error", "method", "InspectContainer", "path", applog.Sanitize("/containers/"+id+"/json"), "status", resp.StatusCode, "body", applog.Sanitize(string(body)))
 		return nil, fmt.Errorf("inspect container: docker error (status %d)", resp.StatusCode)
 	}
 
@@ -352,7 +354,7 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force bool) err
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "RemoveContainer", "path", path, "status", resp.StatusCode, "body", string(body))
+		slog.Warn("docker error", "method", "RemoveContainer", "path", applog.Sanitize(path), "status", resp.StatusCode, "body", applog.Sanitize(string(body)))
 		return fmt.Errorf("remove container: docker error (status %d)", resp.StatusCode)
 	}
 	return nil
@@ -399,7 +401,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 
 	if resp.StatusCode != http.StatusOK {
 		body := readAndCloseBody(resp.Body)
-		slog.Warn("docker error", "method", "GetContainerLogs", "path", "/containers/"+id+"/logs", "status", resp.StatusCode, "body", body)
+		slog.Warn("docker error", "method", "GetContainerLogs", "path", applog.Sanitize("/containers/"+id+"/logs"), "status", resp.StatusCode, "body", applog.Sanitize(body))
 		return nil, fmt.Errorf("container logs: docker error (status %d)", resp.StatusCode)
 	}
 
@@ -444,7 +446,7 @@ func (c *Client) CreateExec(ctx context.Context, containerID string, cmd []strin
 
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "CreateExec", "path", "/containers/"+containerID+"/exec", "status", resp.StatusCode, "body", string(body))
+		slog.Warn("docker error", "method", "CreateExec", "path", applog.Sanitize("/containers/"+containerID+"/exec"), "status", resp.StatusCode, "body", applog.Sanitize(string(body)))
 		return "", fmt.Errorf("create exec: docker error (status %d)", resp.StatusCode)
 	}
 
@@ -628,7 +630,7 @@ func (c *Client) ContainerStats(ctx context.Context, id string) (*ContainerStats
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "ContainerStats", "path", "/containers/"+id+"/stats", "status", resp.StatusCode, "body", string(body))
+		slog.Warn("docker error", "method", "ContainerStats", "path", applog.Sanitize("/containers/"+id+"/stats"), "status", resp.StatusCode, "body", applog.Sanitize(string(body)))
 		return nil, fmt.Errorf("container stats: docker error (status %d)", resp.StatusCode)
 	}
 
