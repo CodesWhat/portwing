@@ -91,13 +91,14 @@ func TestSendContainerSync_DoesNotPreMarshalContainers(t *testing.T) {
 	}
 
 	var got struct {
-		Containers []adapter.Container `json:"containers"`
+		Containers []drydockContainer `json:"containers"`
 	}
 	if err := json.Unmarshal(payload, &got); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	if !reflect.DeepEqual(containers, got.Containers) {
-		t.Fatalf("unexpected containers payload: got %#v want %#v", got.Containers, containers)
+	want := toDrydockContainers(containers)
+	if !reflect.DeepEqual(want, got.Containers) {
+		t.Fatalf("unexpected containers payload: got %#v want %#v", got.Containers, want)
 	}
 }
 

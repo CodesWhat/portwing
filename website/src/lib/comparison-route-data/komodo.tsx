@@ -12,7 +12,7 @@ Signed images + SBOM + provenance|No|Yes (cosign + SBOM + SLSA)|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Partial (some system metrics)|Yes (agent request + health metrics)|self
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|No|Yes (Drydock 1.5+, early access)|self
+Edge / NAT outbound tunnel|No|Yes (Drydock 1.5+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|GPL-3.0|AGPL-3.0|tie
 `,

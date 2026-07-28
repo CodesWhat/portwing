@@ -18,7 +18,7 @@
 >
 > ### 🚧 Pre-1.0 software — APIs may still change
 >
-> Portwing is pre-`v1.0.0` (currently `v0.7.0`). APIs, environment variables, and on-disk/wire formats may change between minor releases **without notice**. Pin to an exact version, review the [CHANGELOG](CHANGELOG.md) before upgrading, and expect breaking changes before `v1.0.0`.
+> Portwing is pre-`v1.0.0` (currently `v0.7.1`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
@@ -75,7 +75,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.7.0 is the current release.** Standard mode now fails closed without credentials, Ed25519 HTTP signatures bind the full request target, and unauthenticated development requires explicit opt-in. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.7.1 is the current release.** It includes the v0.7 security fixes plus the dependency and CodeQL remediation release. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
@@ -203,13 +203,13 @@ volumes:
 **Upgrade to Ed25519 key auth (zero shared secrets):** generate a keypair with `portwing keygen`, mount the `authorized_keys` file, and set `AUTHORIZED_KEYS=/etc/portwing/authorized_keys` — see [Authentication](#authentication). Use `PRIVATE_KEY_FILE` for signed edge-mode hellos.
 
 <details>
-<summary>Edge mode variant (outbound WebSocket — early access)</summary>
+<summary>Edge mode variant (outbound WebSocket — stable portwing/1.0)</summary>
 
-> **Early access.** Edge mode is usable end-to-end as of the current release: Drydock 1.5 ships the `/api/portwing/ws` controller endpoint (Ed25519-only) and Portwing signs its hello with an Ed25519 key. Drydock 1.5 is released (GA); Portwing is still pre-`v1.0.0`. Full exec robustness under load is still being hardened.
+> **Production supported.** Edge mode uses the stable `portwing/1.0` protocol and is covered by a real multi-agent reconnect, exec, backpressure, and continuous-log soak. Drydock 1.6 enables the endpoint by default; Drydock 1.5 requires `DD_EXPERIMENTAL_PORTWING=true`.
 
 For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml) has Portwing dial out to your Drydock controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`); no port is published on the remote host.
 
-Edge mode against Drydock 1.5 is Ed25519-only — generate a keypair first and register the public key with Drydock (`POST /api/v1/portwing/keys`):
+Edge mode is Ed25519-only — generate a keypair first and register the public key with Drydock (`POST /api/v1/portwing/keys`):
 
 ```bash
 portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
@@ -290,7 +290,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-For v0.4.0 and later — including v0.7.0, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+For v0.4.0 and later — including v0.7.1, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 - **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
 - **v0.2.0** — the security & observability release. Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`. Also shipped in v0.2.0:
@@ -421,9 +421,9 @@ Portwing runs an HTTP(S) server; the **Drydock controller connects inbound** and
 - Transparent Docker API proxy on all paths; agent endpoints under `/_portwing/*`
 - Optional TLS with modern cipher suites (TLS 1.2+)
 
-### Edge Mode — early access
+### Edge Mode — production supported
 
-Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound port. Both sides are implemented — Drydock 1.5 ships the controller endpoint and Portwing signs an Ed25519 hello — so edge mode is **usable end-to-end** as of the current release. Drydock 1.5 is released (GA); Portwing is still pre-`v1.0.0`, and full exec robustness under load is still being hardened. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
+Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound port. The stable `portwing/1.0` path is covered by a real multi-agent reconnect/load soak, including concurrent exec and continuous logs under controller backpressure. Drydock 1.6 enables the endpoint by default; Drydock 1.5 requires `DD_EXPERIMENTAL_PORTWING=true`. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
 
 - Set when `DRYDOCK_URL` is configured along with `PRIVATE_KEY_FILE` — mandatory, not optional; Drydock rejects token-only agents, so `TOKEN` or `AUTHORIZED_KEYS` alone are not sufficient
 - Targets hosts behind NAT, firewalls, and dynamic IPs

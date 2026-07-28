@@ -122,6 +122,18 @@ func FuzzEnvelope(f *testing.F) {
 		case TypeDDContainerLogResponse:
 			var m DDContainerLogResponseMessage
 			_ = json.Unmarshal(env.Data, &m)
+		case TypeDDContainerLogChunk:
+			var m DDContainerLogChunkMessage
+			_ = json.Unmarshal(env.Data, &m)
+		case TypeDDContainerLogEnd:
+			var m DDContainerLogEndMessage
+			_ = json.Unmarshal(env.Data, &m)
+		case TypeDDContainerLogError:
+			var m DDContainerLogErrorMessage
+			_ = json.Unmarshal(env.Data, &m)
+		case TypeDDContainerLogCancel:
+			var m DDContainerLogCancelMessage
+			_ = json.Unmarshal(env.Data, &m)
 		case TypeDDContainerDeleteRequest:
 			var m DDContainerDeleteRequestMessage
 			_ = json.Unmarshal(env.Data, &m)

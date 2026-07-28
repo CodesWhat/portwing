@@ -7,7 +7,7 @@ export const faqItems: Array<{ question: string; answer: string }> = [
   {
     question: "What are standard mode and edge mode, and which should I use?",
     answer:
-      "Standard mode runs an HTTP/SSE server on port 3000. The Drydock controller connects inbound, calls the agent's inventory endpoints, and holds a long-lived SSE stream for real-time events. This is the production-ready path — use it when the host is reachable from your Drydock instance. Edge mode flips the direction: the agent dials out to Drydock over a WebSocket tunnel, so no inbound port is required. That makes it the right choice for hosts behind NAT, dynamic IPs, or restrictive firewalls. Edge mode requires Drydock 1.5+ and Portwing 0.3.0+; it works end-to-end but is still early access — prefer standard mode for production until you have validated edge mode for your specific workload.",
+      "Standard mode runs an HTTP/SSE server on port 3000. The Drydock controller connects inbound, calls the agent's inventory endpoints, and holds a long-lived SSE stream for real-time events. Use it when the host is reachable from your Drydock instance. Edge mode flips the direction: the agent dials out to Drydock over a WebSocket tunnel, so no inbound port is required. Use it for hosts behind NAT, dynamic IPs, or restrictive firewalls. Both are production-supported paths; edge mode requires Drydock 1.5+, uses the stable portwing/1.0 protocol, and is gated by real multi-agent load/soak tests.",
   },
   {
     question: "How does Ed25519 authentication work and why use it over a shared token?",
@@ -32,7 +32,7 @@ export const faqItems: Array<{ question: string; answer: string }> = [
   {
     question: "Is Portwing production-ready?",
     answer:
-      "Honestly: it's alpha (v0.7.x). Standard mode is functionally complete and has been running in test environments. v0.7.0 makes the security posture explicit: startup fails closed without credentials, unauthenticated development requires deliberate opt-ins, Ed25519 signatures bind the full request target, expensive token verification is concurrency-capped, and credential and Compose file handling reject unsafe filesystem shapes. Edge mode works end-to-end on Drydock 1.5 but exec-session robustness under sustained load is not yet battle-tested. The public roadmap targets v1.0 for a stable, semantically-versioned API. If you want to run Portwing today, standard mode with sockguard is the strongest posture and the one we test against most heavily. Report issues or security concerns at https://github.com/CodesWhat/portwing/issues or security@codeswhat.com.",
+      "Honestly: the project is still pre-v1 (v0.7.x), so operators should pin versions and review the changelog. Both standard and edge modes are production supported: edge is gated by a real multi-agent reconnect/load soak with concurrent exec, continuous logs, and controller backpressure. The HTTP, environment-variable, MCP, and portwing/1.0 compatibility promises are published now, while the public roadmap still targets v1.0 for the first fully stable release. For the strongest deployment posture, pair either mode with sockguard. Report issues or security concerns at https://github.com/CodesWhat/portwing/issues or security@codeswhat.com.",
   },
   {
     question: "Do I need sockguard? What does adding it actually change?",

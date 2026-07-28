@@ -1,6 +1,6 @@
 # Drydock Integration Reference
 
-> Verified against Drydock 1.5.x (`app/agent/AgentClient.ts`, `app/agent/api/`).
+> Verified against Drydock `dev/v1.6` (`app/agent/AgentClient.ts`, `app/agent/api/`, and `app/agent/EdgeAgentAdapter.ts`).
 
 ## Architecture
 
@@ -87,9 +87,9 @@ sequenceDiagram
 
 The edge-mode hello is Ed25519-signed (`pubKeyId`/`timestamp`/`nonce`/`signature`); the controller endpoint is Ed25519-only and rejects token-hash hellos. The full `hello` payload (exact field set) is in [SPEC.md §3.2](../SPEC.md#32-hello-message).
 
-> **Drydock version:** the `/api/portwing/ws` controller endpoint and the `portwing/1.0` protocol string require a Drydock build that ships them. Drydock 1.5 is the first controller release with this endpoint, so edge mode needs Drydock 1.5+; older controllers do not expose it.
+> **Drydock version:** the `/api/portwing/ws` controller endpoint and the `portwing/1.0` protocol string require a Drydock build that ships them. Drydock 1.5 is the first controller release with this endpoint; Drydock 1.6 enables it by default. Drydock 1.5 deployments must set `DD_EXPERIMENTAL_PORTWING=true`.
 >
-> **Requires `DD_EXPERIMENTAL_PORTWING=true`:** the Drydock controller must be started with this flag set — otherwise `/api/portwing/ws` returns 404, which the agent treats as fatal and exits immediately (it does not retry).
+> **Emergency disable:** on Drydock 1.6+, `DD_EXPERIMENTAL_PORTWING=false` disables new edge connections. No enable flag is normally required.
 
 ---
 
@@ -183,13 +183,16 @@ Drydock expects these fields:
 | `watcher` | string | Watcher name (Portwing: `"docker"` or from `dd.watch` label) |
 | `agent` | string? | Agent name (set by Drydock controller, stripped in agent responses) |
 | `image.id` | string | Image SHA |
-| `image.registry` | string | e.g. `"docker.io"` |
+| `image.registry` | object | `{name:"unknown", url:"docker.io"}`; Portwing knows the registry URL, while the controller assigns its configured registry component |
 | `image.name` | string | Image name |
-| `image.tag` | string | Image tag |
+| `image.tag` | object | `{value:"latest", semver:false}` |
+| `image.digest` | object | `{watch:false, value:"sha256:…"}` |
+| `image.architecture` | string | Docker image architecture, with the agent architecture as fallback |
+| `image.os` | string | Docker image OS, with the agent OS as fallback |
 | `updateAvailable` | bool | Always `false` (Drydock controller performs registry checks) |
-| `updateKind` | string | Always `"unknown"` |
+| `updateKind` | object | Always `{"kind":"unknown"}` |
 | `labels` | object? | All Docker labels |
-| `details` | object? | Runtime details (ports, networks, volumes, env, health) |
+| `details` | object? | Runtime details; ports and volumes use Drydock's string-array wire representation |
 
 ---
 
@@ -291,7 +294,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `dd:update-operation-changed` SSE | N-A | Same |
 | `dd:batch-update-completed` SSE | N-A | Same |
 | `dd:security-alert` / `dd:security-scan-cycle-complete` SSE | N-A | Portwing does not perform security scanning |
-| Edge Mode WebSocket (`/api/portwing/ws`) | IMPLEMENTED (Drydock 1.5) | Portwing: `edge/client.go` + Ed25519 hello; Drydock: `app/api/portwing-ws.ts` (Ed25519-only). Requires Drydock 1.5+ and Portwing 0.3.0+ (early access) |
+| Edge Mode WebSocket (`/api/portwing/ws`) | STABLE (`portwing/1.0`) | Ed25519-only; Drydock 1.6 enables the endpoint by default. Portwing 0.8 adds continuous log streaming and the fleet-soak release gate. |
 
 ---
 

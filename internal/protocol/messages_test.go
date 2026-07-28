@@ -98,3 +98,70 @@ func requestIDFromDDContainerMessage(t *testing.T, value any) string {
 		return ""
 	}
 }
+
+func TestDDContainerLogStreamMessageJSONRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value any
+		new   func() any
+	}{
+		{
+			name: "chunk",
+			value: DDContainerLogChunkMessage{
+				RequestID: "stream-1", ContainerID: "container-1", Stream: "stderr", Logs: "failed\n",
+			},
+			new: func() any { return &DDContainerLogChunkMessage{} },
+		},
+		{
+			name: "end",
+			value: DDContainerLogEndMessage{
+				RequestID: "stream-1", ContainerID: "container-1", Reason: "eof",
+			},
+			new: func() any { return &DDContainerLogEndMessage{} },
+		},
+		{
+			name: "error",
+			value: DDContainerLogErrorMessage{
+				RequestID: "stream-1", ContainerID: "container-1", Error: "unavailable",
+			},
+			new: func() any { return &DDContainerLogErrorMessage{} },
+		},
+		{
+			name: "cancel",
+			value: DDContainerLogCancelMessage{
+				RequestID: "stream-1", ContainerID: "container-1",
+			},
+			new: func() any { return &DDContainerLogCancelMessage{} },
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			encoded, err := json.Marshal(tc.value)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if !strings.Contains(string(encoded), `"requestId":"stream-1"`) ||
+				!strings.Contains(string(encoded), `"containerId":"container-1"`) {
+				t.Fatalf("json = %s, want request and container IDs", encoded)
+			}
+
+			decoded := tc.new()
+			if err := json.Unmarshal(encoded, decoded); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			roundTrip, err := json.Marshal(decoded)
+			if err != nil {
+				t.Fatalf("marshal round trip: %v", err)
+			}
+			if string(roundTrip) != string(encoded) {
+				t.Fatalf("round trip = %s, want %s", roundTrip, encoded)
+			}
+		})
+	}
+}

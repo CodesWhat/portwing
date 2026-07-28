@@ -42,6 +42,10 @@ const (
 	TypeDDTriggerResponse         = "dd:trigger_response"
 	TypeDDContainerLogRequest     = "dd:container_log_request"
 	TypeDDContainerLogResponse    = "dd:container_log_response"
+	TypeDDContainerLogChunk       = "dd:container_log_chunk"
+	TypeDDContainerLogEnd         = "dd:container_log_end"
+	TypeDDContainerLogError       = "dd:container_log_error"
+	TypeDDContainerLogCancel      = "dd:container_log_cancel"
 	TypeDDContainerDeleteRequest  = "dd:container_delete_request"
 	TypeDDContainerDeleteResponse = "dd:container_delete_response"
 )
@@ -295,12 +299,37 @@ type DDContainerLogRequestMessage struct {
 	Until       string `json:"until,omitempty"`
 	Follow      bool   `json:"follow,omitempty"`
 	Timestamps  bool   `json:"timestamps,omitempty"`
+	Stream      bool   `json:"stream,omitempty"`
 }
 
 type DDContainerLogResponseMessage struct {
 	RequestID   string `json:"requestId,omitempty"`
 	ContainerID string `json:"containerId"`
 	Logs        string `json:"logs"`
+}
+
+type DDContainerLogChunkMessage struct {
+	RequestID   string `json:"requestId"`
+	ContainerID string `json:"containerId"`
+	Stream      string `json:"stream"`
+	Logs        string `json:"logs"`
+}
+
+type DDContainerLogEndMessage struct {
+	RequestID   string `json:"requestId"`
+	ContainerID string `json:"containerId"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+type DDContainerLogErrorMessage struct {
+	RequestID   string `json:"requestId"`
+	ContainerID string `json:"containerId"`
+	Error       string `json:"error"`
+}
+
+type DDContainerLogCancelMessage struct {
+	RequestID   string `json:"requestId"`
+	ContainerID string `json:"containerId"`
 }
 
 type DDContainerDeleteRequestMessage struct {

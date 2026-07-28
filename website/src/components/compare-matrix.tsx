@@ -42,8 +42,7 @@ const TOOLS: Tool[] = [
       auditLog: "yes",
       metrics: "yes",
       mcpServer: "yes",
-      // Edge mode is early access in Drydock 1.5+; mark partial to be honest.
-      edgeMode: "partial",
+      edgeMode: "yes",
     },
   },
   {

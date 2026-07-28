@@ -211,8 +211,8 @@ The hello carries `pubKeyId`, `timestamp`, `nonce`, and `signature` fields. The 
 
 See [Connection Modes](/connection-modes) for a full description of edge mode.
 
-<Callout type="warn">
-Edge mode requires the Drydock controller to be started with `DD_EXPERIMENTAL_PORTWING=true` — otherwise `/api/portwing/ws` returns 404, which the agent treats as fatal and exits immediately (it does not retry).
+<Callout type="info">
+Drydock 1.6 enables the Portwing endpoint by default. `DD_EXPERIMENTAL_PORTWING=false` is retained as an emergency disable; Drydock 1.5 deployments must set `DD_EXPERIMENTAL_PORTWING=true`. A missing or disabled endpoint returns 404, which the agent treats as fatal rather than retrying forever.
 </Callout>
 
 <Callout type="warn">

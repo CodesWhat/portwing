@@ -31,7 +31,7 @@ func (a *Adapter) RegisterRoutes(mux *http.ServeMux, auth func(http.HandlerFunc)
 func (a *Adapter) handleContainers(w http.ResponseWriter, r *http.Request) {
 	containers := a.containers.GetContainers()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(containers)
+	_ = json.NewEncoder(w).Encode(toDrydockContainers(containers))
 }
 
 func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {

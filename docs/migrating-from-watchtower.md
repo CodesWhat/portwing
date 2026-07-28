@@ -106,7 +106,7 @@ Environment variables reference:
 ## Edge Mode (outbound WebSocket)
 
 Use this when your host is behind NAT, a firewall, or has a dynamic IP.
-Portwing initiates the outbound connection to the Drydock controller; no inbound port is needed. The controller-side endpoint (`/api/portwing/ws`) shipped in Drydock 1.5 — edge mode is functional end-to-end as of Portwing 0.3.0 (Ed25519 key required; treat as early access).
+Portwing initiates the outbound connection to the Drydock controller; no inbound port is needed. The stable `portwing/1.0` controller endpoint shipped in Drydock 1.5 and is production supported with Portwing 0.8+ (Ed25519 key required). Drydock 1.6 enables it by default; Drydock 1.5 requires `DD_EXPERIMENTAL_PORTWING=true`.
 
 Drydock's edge endpoint is Ed25519-only, so generate a keypair first and register the public key with your controller:
 
