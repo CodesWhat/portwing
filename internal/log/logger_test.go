@@ -41,3 +41,27 @@ func TestParseLevel(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeEscapesLineBreaks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "unchanged", input: "safe value", want: "safe value"},
+		{name: "line feed", input: "first\nsecond", want: `first\nsecond`},
+		{name: "carriage return", input: "first\rsecond", want: `first\rsecond`},
+		{name: "windows line ending", input: "first\r\nsecond", want: `first\r\nsecond`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Sanitize(tt.input); got != tt.want {
+				t.Fatalf("Sanitize(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

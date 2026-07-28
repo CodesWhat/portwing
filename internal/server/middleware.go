@@ -17,6 +17,7 @@ import (
 
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/auth"
+	applog "github.com/codeswhat/portwing/internal/log"
 	"github.com/codeswhat/portwing/internal/metrics"
 )
 
@@ -356,7 +357,7 @@ func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Log
 		rl.finishAuth(clientIP, valid)
 
 		if !valid {
-			slog.Warn("authentication failed", "ip", clientIP)
+			slog.Warn("authentication failed", "ip", applog.Sanitize(clientIP))
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			if reg != nil {
 				reg.IncRequest(r.Method, http.StatusUnauthorized)
@@ -499,12 +500,21 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			if skew <= 0 {
 				skew = 60
 			}
+			if !rl.tryBeginAuth(clientIP) {
+				auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+				if reg != nil {
+					reg.IncRequest(r.Method, http.StatusTooManyRequests)
+					reg.IncRateLimited()
+				}
+				http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+				return
+			}
 			keyID, err := auth.VerifyRequest(r, body, ed.Registry, ed.Nonces, skew)
+			rl.finishAuth(clientIP, err == nil)
 			if err != nil {
-				rl.RecordFailure(clientIP)
 				reason := auth.ReasonFor(err)
 				slog.Warn("ed25519 authentication failed",
-					"ip", clientIP, "reason", reason)
+					"ip", applog.Sanitize(clientIP), "reason", applog.Sanitize(reason))
 				auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 				if reg != nil {
 					reg.IncRequest(r.Method, http.StatusUnauthorized)
@@ -514,7 +524,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			slog.Debug("ed25519 authentication succeeded", "key_id", keyID, "ip", clientIP)
+			slog.Debug("ed25519 authentication succeeded", "key_id", applog.Sanitize(keyID), "ip", applog.Sanitize(clientIP))
 			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
 			if reg != nil {
 				reg.IncInFlight()
@@ -534,7 +544,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			// Ed25519 was configured but request had no signature, and there
 			// is no token verifier — authentication required but none presented.
 			rl.RecordFailure(clientIP)
-			slog.Warn("authentication failed: no credentials presented", "ip", clientIP)
+			slog.Warn("authentication failed: no credentials presented", "ip", applog.Sanitize(clientIP))
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			if reg != nil {
 				reg.IncRequest(r.Method, http.StatusUnauthorized)
@@ -568,7 +578,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		rl.finishAuth(clientIP, valid)
 
 		if !valid {
-			slog.Warn("authentication failed", "ip", clientIP)
+			slog.Warn("authentication failed", "ip", applog.Sanitize(clientIP))
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			if reg != nil {
 				reg.IncRequest(r.Method, http.StatusUnauthorized)
@@ -636,10 +646,10 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 			if err := recover(); err != nil {
 				stack := debug.Stack()
 				slog.Error("panic recovered",
-					"error", fmt.Sprintf("%v", err),
+					"error", applog.Sanitize(fmt.Sprintf("%v", err)),
 					"stack", string(stack),
-					"method", r.Method,
-					"path", r.URL.Path,
+					"method", applog.Sanitize(r.Method),
+					"path", applog.Sanitize(r.URL.Path),
 				)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 			}

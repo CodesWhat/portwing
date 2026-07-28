@@ -29,6 +29,7 @@ import (
 	"github.com/codeswhat/portwing/internal/auth"
 	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/docker"
+	applog "github.com/codeswhat/portwing/internal/log"
 	"github.com/codeswhat/portwing/internal/metrics"
 	"github.com/codeswhat/portwing/internal/pool"
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -169,10 +170,10 @@ func (c *Client) Run(ctx context.Context) error {
 
 		if err != nil {
 			if errors.Is(err, errFatal) {
-				slog.Error("fatal connection error, not retrying", "error", err)
+				slog.Error("fatal connection error, not retrying", "error", applog.Sanitize(err.Error()))
 				return err
 			}
-			slog.Warn("connection lost", "error", err)
+			slog.Warn("connection lost", "error", applog.Sanitize(err.Error()))
 		}
 
 		// Reset backoff after a connection that was actually established, so a
@@ -325,7 +326,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 			agentMajor := strings.SplitN(protocol.DrydockCompat, ".", 2)[0]
 			if serverMajor != agentMajor {
 				slog.Warn("controller compat level mismatch",
-					"serverCompatLevel", compat,
+					"serverCompatLevel", applog.Sanitize(compat),
 					"agentExpects", protocol.DrydockCompat,
 				)
 			}
@@ -543,7 +544,7 @@ func (c *Client) readPump(ctx context.Context) error {
 					c.handleRequest(ctx, req)
 				}()
 			default:
-				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", req.RequestID)
+				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
 				_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 					Message:   "agent busy: too many concurrent requests",
 					RequestID: req.RequestID,
@@ -603,15 +604,15 @@ func (c *Client) readPump(ctx context.Context) error {
 				continue
 			}
 			slog.Warn("received error from controller",
-				"code", errMsg.Code,
-				"message", errMsg.Message,
-				"requestId", errMsg.RequestID,
+				"code", applog.Sanitize(errMsg.Code),
+				"message", applog.Sanitize(errMsg.Message),
+				"requestId", applog.Sanitize(errMsg.RequestID),
 			)
 
 		default:
 			// Delegate to adapter for unrecognized message types.
 			if !c.adapter.HandleMessage(ctx, sender, env.Type, env.Data) {
-				slog.Debug("unhandled message type", "type", env.Type)
+				slog.Debug("unhandled message type", "type", applog.Sanitize(env.Type))
 			}
 		}
 	}

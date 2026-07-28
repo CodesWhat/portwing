@@ -48,6 +48,8 @@ import (
 	"log/slog"
 	"os"
 	"time"
+
+	applog "github.com/codeswhat/portwing/internal/log"
 )
 
 // Event type constants — stable identifiers used in the "event" field.
@@ -150,9 +152,9 @@ func (l *Logger) APIRequest(actor, method, path, outcome string, status int, dur
 	if l.log != nil {
 		l.log.Info("",
 			slog.String("event", EventAPIRequest),
-			slog.String("actor", actor),
-			slog.String("method", method),
-			slog.String("path", path),
+			slog.String("actor", applog.Sanitize(actor)),
+			slog.String("method", applog.Sanitize(method)),
+			slog.String("path", applog.Sanitize(path)),
 			slog.String("outcome", outcome),
 			slog.Int("status", status),
 			slog.Float64("duration_ms", durationMs),
@@ -180,9 +182,9 @@ func (l *Logger) AuthFailure(actor, method, path string) {
 	if l.log != nil {
 		l.log.Info("",
 			slog.String("event", EventAuthFailure),
-			slog.String("actor", actor),
-			slog.String("method", method),
-			slog.String("path", path),
+			slog.String("actor", applog.Sanitize(actor)),
+			slog.String("method", applog.Sanitize(method)),
+			slog.String("path", applog.Sanitize(path)),
 			slog.String("outcome", OutcomeDenied),
 		)
 	}
@@ -206,9 +208,9 @@ func (l *Logger) RateLimited(actor, method, path string) {
 	if l.log != nil {
 		l.log.Info("",
 			slog.String("event", EventRateLimited),
-			slog.String("actor", actor),
-			slog.String("method", method),
-			slog.String("path", path),
+			slog.String("actor", applog.Sanitize(actor)),
+			slog.String("method", applog.Sanitize(method)),
+			slog.String("path", applog.Sanitize(path)),
 			slog.String("outcome", OutcomeDenied),
 		)
 	}
@@ -232,9 +234,9 @@ func (l *Logger) ComposeOp(actor, operation, stack, outcome string) {
 	if l.log != nil {
 		l.log.Info("",
 			slog.String("event", EventComposeOp),
-			slog.String("actor", actor),
-			slog.String("operation", operation),
-			slog.String("stack", stack),
+			slog.String("actor", applog.Sanitize(actor)),
+			slog.String("operation", applog.Sanitize(operation)),
+			slog.String("stack", applog.Sanitize(stack)),
 			slog.String("outcome", outcome),
 		)
 	}
@@ -259,8 +261,8 @@ func (l *Logger) Enrollment(actor, keyID, outcome string) {
 	if l.log != nil {
 		l.log.Info("",
 			slog.String("event", EventEnrollment),
-			slog.String("actor", actor),
-			slog.String("key_id", keyID),
+			slog.String("actor", applog.Sanitize(actor)),
+			slog.String("key_id", applog.Sanitize(keyID)),
 			slog.String("outcome", outcome),
 		)
 	}
@@ -283,9 +285,9 @@ func (l *Logger) ExecStart(actor, container, execID string) {
 	if l.log != nil {
 		l.log.Info("",
 			slog.String("event", EventExecStart),
-			slog.String("actor", actor),
-			slog.String("container", container),
-			slog.String("exec_id", execID),
+			slog.String("actor", applog.Sanitize(actor)),
+			slog.String("container", applog.Sanitize(container)),
+			slog.String("exec_id", applog.Sanitize(execID)),
 			slog.String("outcome", OutcomeAllowed),
 		)
 	}

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	applog "github.com/codeswhat/portwing/internal/log"
 	"github.com/codeswhat/portwing/internal/pool"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
@@ -119,7 +120,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	// Create exec instance.
 	execID, err := c.dockerClient.CreateExec(ctx, msg.ContainerID, msg.Cmd, msg.User, tty)
 	if err != nil {
-		slog.Error("failed to create exec", "container", msg.ContainerID, "error", err)
+		slog.Error("failed to create exec", "container", applog.Sanitize(msg.ContainerID), "error", applog.Sanitize(err.Error()))
 		session.failStart(fmt.Sprintf("create exec failed: %v", err))
 		return
 	}
@@ -133,7 +134,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	// Start exec and get hijacked connection.
 	conn, err := c.dockerClient.StartExec(ctx, execID, tty)
 	if err != nil {
-		slog.Error("failed to start exec", "execID", execID, "error", err)
+		slog.Error("failed to start exec", "execID", applog.Sanitize(execID), "error", applog.Sanitize(err.Error()))
 		session.failStart(fmt.Sprintf("start exec failed: %v", err))
 		return
 	}
@@ -166,7 +167,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 	val, ok := c.execSessions.Load(msg.ExecID)
 	if !ok {
-		slog.Debug("exec session not found for input", "execID", msg.ExecID)
+		slog.Debug("exec session not found for input", "execID", applog.Sanitize(msg.ExecID))
 		return
 	}
 
@@ -174,16 +175,16 @@ func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 
 	data, err := base64.StdEncoding.DecodeString(msg.Data)
 	if err != nil {
-		slog.Warn("failed to decode exec input", "execID", msg.ExecID, "error", err)
+		slog.Warn("failed to decode exec input", "execID", applog.Sanitize(msg.ExecID), "error", applog.Sanitize(err.Error()))
 		return
 	}
 
 	select {
 	case session.inbox <- execItem{data: data}:
 	case <-session.done:
-		slog.Debug("exec input for closed session", "execID", msg.ExecID)
+		slog.Debug("exec input for closed session", "execID", applog.Sanitize(msg.ExecID))
 	default:
-		slog.Warn("exec input queue full, dropping", "execID", msg.ExecID)
+		slog.Warn("exec input queue full, dropping", "execID", applog.Sanitize(msg.ExecID))
 	}
 }
 
@@ -221,7 +222,7 @@ func (s *ExecSession) writeInput(data []byte) {
 		if _, err := s.conn.Write(data); err == nil {
 			return
 		} else {
-			slog.Debug("exec write retry", "execID", s.execID, "attempt", attempt+1, "error", err)
+			slog.Debug("exec write retry", "execID", applog.Sanitize(s.execID), "attempt", attempt+1, "error", applog.Sanitize(err.Error()))
 		}
 		select {
 		case <-s.done:
@@ -230,7 +231,7 @@ func (s *ExecSession) writeInput(data []byte) {
 		}
 	}
 
-	slog.Warn("failed to write exec input after retries", "execID", s.execID)
+	slog.Warn("failed to write exec input after retries", "execID", applog.Sanitize(s.execID))
 	s.Close()
 }
 
@@ -242,7 +243,7 @@ func (s *ExecSession) writeInput(data []byte) {
 func (c *Client) HandleResize(_ context.Context, msg protocol.ExecResizeMessage) {
 	val, ok := c.execSessions.Load(msg.ExecID)
 	if !ok {
-		slog.Debug("exec session not found for resize", "execID", msg.ExecID)
+		slog.Debug("exec session not found for resize", "execID", applog.Sanitize(msg.ExecID))
 		return
 	}
 
@@ -251,9 +252,9 @@ func (c *Client) HandleResize(_ context.Context, msg protocol.ExecResizeMessage)
 	select {
 	case session.inbox <- execItem{resize: &resizeOp{cols: msg.Cols, rows: msg.Rows}}:
 	case <-session.done:
-		slog.Debug("exec resize for closed session", "execID", msg.ExecID)
+		slog.Debug("exec resize for closed session", "execID", applog.Sanitize(msg.ExecID))
 	default:
-		slog.Warn("exec resize queue full, dropping", "execID", msg.ExecID)
+		slog.Warn("exec resize queue full, dropping", "execID", applog.Sanitize(msg.ExecID))
 	}
 }
 
@@ -266,7 +267,7 @@ func (s *ExecSession) doResize(ctx context.Context, op resizeOp) {
 		if err := s.client.dockerClient.ResizeExec(ctx, s.dockerExecID, op.cols, op.rows); err == nil {
 			return
 		} else {
-			slog.Debug("exec resize retry", "execID", s.execID, "attempt", attempt+1, "error", err)
+			slog.Debug("exec resize retry", "execID", applog.Sanitize(s.execID), "attempt", attempt+1, "error", applog.Sanitize(err.Error()))
 		}
 		select {
 		case <-s.done:
@@ -276,14 +277,14 @@ func (s *ExecSession) doResize(ctx context.Context, op resizeOp) {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-	slog.Warn("failed to resize exec after retries", "execID", s.execID)
+	slog.Warn("failed to resize exec after retries", "execID", applog.Sanitize(s.execID))
 }
 
 // EndExec closes an active exec session.
 func (c *Client) EndExec(msg protocol.ExecEndMessage) {
 	val, ok := c.execSessions.Load(msg.ExecID)
 	if !ok {
-		slog.Debug("exec session not found for end", "execID", msg.ExecID)
+		slog.Debug("exec session not found for end", "execID", applog.Sanitize(msg.ExecID))
 		return
 	}
 
@@ -299,7 +300,7 @@ func (s *ExecSession) activate(conn net.Conn) bool {
 	if s.closed {
 		s.mu.Unlock()
 		if err := conn.Close(); err != nil {
-			slog.Debug("closing orphaned exec conn", "exec_id", s.execID, "error", err)
+			slog.Debug("closing orphaned exec conn", "exec_id", applog.Sanitize(s.execID), "error", applog.Sanitize(err.Error()))
 		}
 		return false
 	}
@@ -349,7 +350,7 @@ func (s *ExecSession) readLoop() {
 		pool.PutBuffer(buf)
 
 		if err != nil {
-			slog.Debug("exec read ended", "execID", s.execID, "error", err)
+			slog.Debug("exec read ended", "execID", applog.Sanitize(s.execID), "error", applog.Sanitize(err.Error()))
 
 			// Send exec_end.
 			reason := "exited"
@@ -385,7 +386,7 @@ func (s *ExecSession) Close() {
 
 		if conn != nil {
 			if err := conn.Close(); err != nil {
-				slog.Debug("closing exec session", "exec_id", s.execID, "error", err)
+				slog.Debug("closing exec session", "exec_id", applog.Sanitize(s.execID), "error", applog.Sanitize(err.Error()))
 			}
 		}
 		close(s.done)
@@ -399,6 +400,6 @@ func (s *ExecSession) Close() {
 func recoverSession(where, execID string) {
 	if r := recover(); r != nil {
 		slog.Error("recovered from panic in exec session goroutine",
-			"where", where, "execID", execID, "panic", r)
+			"where", where, "execID", applog.Sanitize(execID), "panic", applog.Sanitize(fmt.Sprint(r)))
 	}
 }

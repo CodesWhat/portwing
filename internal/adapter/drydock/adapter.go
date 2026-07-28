@@ -12,6 +12,7 @@ import (
 
 	"github.com/codeswhat/portwing/internal/adapter"
 	"github.com/codeswhat/portwing/internal/docker"
+	applog "github.com/codeswhat/portwing/internal/log"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -302,7 +303,7 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 
 	body, err := a.dockerClient.GetContainerLogs(ctx, msg.ContainerID, tail, msg.Since, until, msg.Follow, msg.Timestamps)
 	if err != nil {
-		slog.Warn("failed to get container logs", "container", msg.ContainerID, "error", err)
+		slog.Warn("failed to get container logs", "container", applog.Sanitize(msg.ContainerID), "error", applog.Sanitize(err.Error()))
 		a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
 			RequestID:   msg.RequestID,
 			ContainerID: msg.ContainerID,
@@ -333,7 +334,7 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 func (a *Adapter) handleContainerDeleteRequest(ctx context.Context, sender adapter.MessageSender, msg protocol.DDContainerDeleteRequestMessage) {
 	err := a.dockerClient.RemoveContainer(ctx, msg.ContainerID, true)
 	if err != nil {
-		slog.Warn("failed to delete container", "container", msg.ContainerID, "error", err)
+		slog.Warn("failed to delete container", "container", applog.Sanitize(msg.ContainerID), "error", applog.Sanitize(err.Error()))
 		a.sendTypedMessage(sender, protocol.TypeDDContainerDeleteResponse, protocol.DDContainerDeleteResponseMessage{
 			RequestID:   msg.RequestID,
 			ContainerID: msg.ContainerID,
@@ -421,7 +422,7 @@ func (a *Adapter) spawnMessageHandler(ctx context.Context, msgType string, fn fu
 	select {
 	case sem <- struct{}{}:
 	case <-ctx.Done():
-		slog.Debug("skipping message handler due to canceled context", "type", msgType, "error", ctx.Err())
+		slog.Debug("skipping message handler due to canceled context", "type", applog.Sanitize(msgType), "error", applog.Sanitize(ctx.Err().Error()))
 		return
 	}
 
