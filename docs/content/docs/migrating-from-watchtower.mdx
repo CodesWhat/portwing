@@ -155,7 +155,7 @@ Additional Edge mode variables:
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff (seconds) |
 | `WELCOME_TIMEOUT` | `30` | Seconds to wait for the Drydock welcome message |
 
-Edge mode requires `DRYDOCK_URL` and, for the Drydock 1.5 controller, an Ed25519 key via `PRIVATE_KEY_FILE` — the endpoint rejects token-only connections. If `DRYDOCK_URL` is missing, Portwing falls back to Standard mode.
+Edge mode requires `DRYDOCK_URL` and an Ed25519 key via `PRIVATE_KEY_FILE` — the Drydock controller rejects token-only connections. If `DRYDOCK_URL` is missing, Portwing falls back to Standard mode.
 
 ---
 

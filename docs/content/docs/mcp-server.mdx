@@ -5,8 +5,8 @@ description: Portwing's built-in read-only Model Context Protocol endpoint lets 
 
 Portwing ships a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_portwing/mcp`. AI assistants — Claude Desktop, Cursor, Windsurf, or any MCP-compatible client — can call its tools to inspect containers and host metrics using their standard tool-call flow. No extra process or sidecar is needed; the endpoint is part of the main Portwing HTTP server.
 
-<Callout type="warn">
-The MCP server is available in Portwing v0.7.x (currently alpha). The tool surface is stable, but the endpoint should be treated as experimental until v1.0.
+<Callout type="info">
+The MCP server is supported in Portwing v0.8.x. Its tool names, input schemas, and result shapes follow the repository's published pre-v1 stability policy.
 </Callout>
 
 ---

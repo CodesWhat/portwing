@@ -9,12 +9,11 @@ description: How to verify the authenticity and integrity of Portwing container 
   Portwing release pipeline — not a tampered build.
 </Callout>
 
-<Callout type="warn">
-  Portwing is in alpha (v0.7.x). The signing identity regexp targets
-  `release.yml` specifically, but the workflow path may change between
-  pre-release milestones. If a verify command fails with a certificate mismatch,
-  check the [release notes](https://github.com/CodesWhat/portwing/releases) for
-  any signing-identity changes before assuming tampering.
+<Callout type="info">
+  These examples target Portwing v0.8.x and the `release.yml` signing identity.
+  If a verify command fails with a certificate mismatch, check the
+  [release notes](https://github.com/CodesWhat/portwing/releases) for a documented
+  signing-identity change before trusting the artifact.
 </Callout>
 
 All Portwing releases are signed via [Sigstore cosign](https://github.com/sigstore/cosign)
@@ -54,10 +53,10 @@ brew install gh            # macOS
 Every image pushed to `ghcr.io/codeswhat/portwing` is cosign keyless-signed by
 the release workflow. Replace `TAG` with the version tag you are deploying
 (the tag is the semver without the leading `v`, matching GoReleaser's output —
-e.g. `0.7.0`, not `v0.7.0`):
+e.g. `0.8.0`, not `v0.8.0`):
 
 ```bash
-TAG=0.7.0
+TAG=0.8.0
 
 cosign verify \
   --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
@@ -76,7 +75,7 @@ to the container manifest. This uses the Sigstore Rekor ledger and is
 independently verifiable without cosign:
 
 ```bash
-TAG=0.7.0
+TAG=0.8.0
 
 gh attestation verify "oci://ghcr.io/codeswhat/portwing:${TAG}" \
   --repo CodesWhat/portwing
@@ -99,7 +98,7 @@ The `checksums.txt.bundle` file (also a release asset) contains the cosign
 keyless signature over `checksums.txt`:
 
 ```bash
-TAG=v0.7.0
+TAG=v0.8.0
 
 cosign verify-blob \
   --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
@@ -136,7 +135,7 @@ asset named `portwing-${TAG}-sbom.cdx.json`. It enumerates every Go module
 dependency included in the binary.
 
 ```bash
-TAG=v0.7.0
+TAG=v0.8.0
 
 # Download the SBOM asset
 gh release download "${TAG}" \

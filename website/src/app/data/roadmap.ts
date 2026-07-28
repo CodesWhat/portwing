@@ -88,7 +88,7 @@ export const roadmap: Milestone[] = [
     version: "v0.8.0",
     title: "Toward v1.0",
     emoji: "🧭",
-    status: "next",
+    status: "released",
     items: [
       "Edge mode graduated to production support — enabled by default in Drydock 1.6 and gated by a real cross-repo multi-agent load/soak",
       "Published stability policy — semver guarantees for the HTTP API, env-var surface, MCP tools, and DrydockCompat wire contract",

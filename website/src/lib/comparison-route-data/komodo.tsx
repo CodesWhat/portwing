@@ -12,7 +12,7 @@ Signed images + SBOM + provenance|No|Yes (cosign + SBOM + SLSA)|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Partial (some system metrics)|Yes (agent request + health metrics)|self
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|No|Yes (Drydock 1.5+)|self
+Edge / NAT outbound tunnel|No|Yes (Drydock 1.6+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|GPL-3.0|AGPL-3.0|tie
 `,
@@ -58,7 +58,7 @@ bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool int
       <strong className="text-neutral-900 dark:text-neutral-200">
         auth (Ed25519), audit logging, supply-chain artifacts, and sockguard socket filtering
       </strong>
-      . Komodo is production-mature; Portwing is alpha (v0.7.x).
+      . Komodo is production-mature; Portwing v0.8.x is a supported pre-v1 release.
     </p>
   ),
   migrationTitle: "Coming from Komodo Periphery?",

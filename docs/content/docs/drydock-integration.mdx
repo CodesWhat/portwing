@@ -13,7 +13,7 @@ Drydock supports two agent connectivity patterns. Portwing implements both.
 
 **Standard Mode** (fully implemented): The Drydock controller opens an inbound HTTP connection to each remote host's Portwing agent. Portwing runs an HTTP server; the controller polls `/api/*` and holds a long-lived SSE stream.
 
-**Edge Mode** (stable `portwing/1.0`; requires Drydock 1.5+): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
+**Edge Mode** (stable `portwing/1.0`; enabled by default in Drydock 1.6): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
 
 <Callout type="info">
 Edge Mode is implemented on both sides and is covered by a real multi-agent reconnect/load soak. Drydock 1.6 enables its Ed25519-only endpoint by default; `DD_EXPERIMENTAL_PORTWING=false` is retained as an emergency disable. Drydock 1.5 deployments must explicitly set `DD_EXPERIMENTAL_PORTWING=true`.
@@ -23,7 +23,7 @@ Edge Mode is implemented on both sides and is covered by a real multi-agent reco
 
 ## Standard Mode: Handshake Sequence
 
-Verified against Drydock 1.5.x (`app/agent/AgentClient.ts`).
+Verified against Drydock 1.6.x (`app/agent/AgentClient.ts`).
 
 When a Drydock controller connects to a Portwing agent in Standard Mode, the following sequence occurs:
 
@@ -207,7 +207,7 @@ Portwing reports container inventory. The Drydock controller performs registry c
 When `DRYDOCK_URL` is set, Portwing dials outbound to `DRYDOCK_URL/api/portwing/ws` and sends `portwing/1.0` as the protocol identifier inside its `hello` message — an application-level field, not a negotiated `Sec-WebSocket-Protocol` sub-protocol header.
 
 <Callout type="info">
-The sequence below is the production handshake, implemented on the agent side in `internal/edge/client.go` and `internal/protocol/messages.go` and on the controller side in Drydock 1.5's `/api/portwing/ws` endpoint. The controller requires an Ed25519-signed hello.
+The sequence below is the production handshake, implemented on the agent side in `internal/edge/client.go` and `internal/protocol/messages.go` and on the controller side in Drydock 1.6's `/api/portwing/ws` endpoint. The controller requires an Ed25519-signed hello.
 </Callout>
 
 <Callout type="info">
@@ -407,7 +407,7 @@ The `TOKEN` value on the Portwing side must match the `secret` value on the Dryd
 For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages are implemented and verified against a specific Drydock build.
 </Callout>
 
-Verified against Drydock 1.5.x (`app/agent/AgentClient.ts`, `app/agent/api/`).
+Verified against Drydock 1.6.x (`app/agent/AgentClient.ts`, `app/agent/api/`).
 
 | Feature | Status | Notes |
 |---|---|---|

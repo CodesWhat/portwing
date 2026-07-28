@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is pre-`v1.0.0` software (currently `v0.7.1`). This roadmap describes
+> Portwing is pre-`v1.0.0` software (currently `v0.8.0`). This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
@@ -9,13 +9,13 @@
 
 The security-hardening, release/supply-chain, test-coverage, and edge-tunnel
 work previously tracked here as "in progress" landed across v0.5.0 through
-v0.7.1 — see [CHANGELOG.md](CHANGELOG.md) for the itemized history. In
+v0.8.0 — see [CHANGELOG.md](CHANGELOG.md) for the itemized history. In
 particular:
 
-- **End-to-end edge mode.** Drydock 1.5 (GA, 2026-06-22) added the matching
-  `/api/portwing/ws` controller endpoint (Ed25519-only), so the agent can dial
-  out and manage NAT'd / firewalled hosts with no inbound port. Drydock 1.5 is
-  released; Portwing itself remains pre-`v1.0.0`.
+- **End-to-end edge mode.** Drydock 1.5 first shipped the matching
+  `/api/portwing/ws` controller endpoint (Ed25519-only); Drydock 1.6 enables
+  the stable `portwing/1.0` endpoint by default. Portwing can dial out and
+  manage NAT'd / firewalled hosts with no inbound port.
 - **Edge tunnel robustness.** Ordered exec I/O, a single-writer outbound
   backpressure path with per-frame write deadlines and slow-consumer eviction,
   and a dedicated wire-contract test harness (`internal/edge/wire_contract_test.go`).
@@ -41,15 +41,17 @@ calendar date:
   the HTTP API surface, the environment-variable surface, and the
   MCP tool surface and `DrydockCompat` wire contract are defined in
   [STABILITY.md](STABILITY.md).
-- **Package-manager distribution.** A Homebrew tap and `apt`/`rpm` packages
+- **Completed for v0.8 — Package-manager distribution.** A Homebrew tap and
+  signed/checksummed `deb`/`rpm` packages
   built through the existing GoReleaser pipeline, so installation doesn't
   require a container image or pulling the raw binary off GitHub Releases.
 - **Completed for v0.8 — Continuous edge logs.** The `dd:container_log_*`
   namespace now supports correlated stdout/stderr chunks, explicit end/error
   frames, viewer cancellation, bounded agent/controller queues, and a legacy
   one-shot fallback for mixed-version fleets.
-- **Operational ergonomics.** Richer health/metrics, structured audit export,
-  and ready-to-run deployment examples for common topologies.
+- **Completed for v0.8 — Operational ergonomics.** Mode-aware liveness and
+  readiness, shared standard/edge metrics, cursor-based NDJSON audit export,
+  and ready-to-run Compose/Kubernetes observability examples.
 
 ## Non-goals
 

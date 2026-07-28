@@ -3,7 +3,7 @@
 # out, so it works behind NAT and firewalls. The built-in health endpoint
 # still works (it listens container-locally in edge mode too).
 #
-# Edge mode against Drydock 1.5 is Ed25519-only: the controller's
+# Edge mode against Drydock 1.6 is Ed25519-only: the controller's
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a keypair
 # and register its public key with Drydock before applying this manifest:
 #

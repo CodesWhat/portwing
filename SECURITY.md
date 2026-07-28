@@ -6,8 +6,8 @@ Security fixes are shipped on the **latest release line only**.
 
 | Version        | Supported          |
 | -------------- | ------------------ |
-| 0.7.x (latest) | :white_check_mark: |
-| < 0.7          | :x:                |
+| 0.8.x (latest) | :white_check_mark: |
+| < 0.8          | :x:                |
 
 ## Reporting a Vulnerability
 
