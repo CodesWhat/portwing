@@ -8,6 +8,7 @@ import (
 // Record holds a single structured audit event captured in the ring buffer.
 // Field names match the stable on-wire JSON schema documented in the package comment.
 type Record struct {
+	Cursor     uint64    `json:"cursor"`
 	Time       time.Time `json:"ts"`
 	Event      string    `json:"event"`
 	Actor      string    `json:"actor,omitempty"`
@@ -31,6 +32,7 @@ type ring struct {
 	head     int // index of the next write slot
 	size     int // number of valid entries currently stored
 	capacity int
+	next     uint64 // cursor assigned to the next record
 }
 
 // newRing creates a ring buffer with the given capacity.
@@ -44,12 +46,53 @@ func newRing(capacity int) *ring {
 // push appends r to the buffer, overwriting the oldest entry when full.
 func (rb *ring) push(r Record) {
 	rb.mu.Lock()
+	rb.next++
+	r.Cursor = rb.next
 	rb.buf[rb.head] = r
 	rb.head = (rb.head + 1) % rb.capacity
 	if rb.size < rb.capacity {
 		rb.size++
 	}
 	rb.mu.Unlock()
+}
+
+// recordsAfter returns records with a cursor greater than after, oldest-first,
+// capped at limit. It also returns the retained cursor window so callers can
+// detect when a requested cursor has already been overwritten.
+func (rb *ring) recordsAfter(after uint64, limit int) ([]Record, uint64, uint64) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	if rb.size == 0 {
+		return []Record{}, 0, rb.next
+	}
+
+	oldestIndex := (rb.head - rb.size + rb.capacity) % rb.capacity
+	oldestCursor := rb.buf[oldestIndex].Cursor
+	latestCursor := rb.next
+	out := make([]Record, 0, rb.size)
+	for i := 0; i < rb.size; i++ {
+		record := rb.buf[(oldestIndex+i)%rb.capacity]
+		if record.Cursor <= after {
+			continue
+		}
+		out = append(out, record)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, oldestCursor, latestCursor
+}
+
+func (rb *ring) stats() (records, capacity int, oldestCursor, latestCursor uint64) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	if rb.size > 0 {
+		oldestIndex := (rb.head - rb.size + rb.capacity) % rb.capacity
+		oldestCursor = rb.buf[oldestIndex].Cursor
+	}
+	return rb.size, rb.capacity, oldestCursor, rb.next
 }
 
 // records returns a copy of the buffered records, newest-first, capped at

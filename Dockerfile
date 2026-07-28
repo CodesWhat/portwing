@@ -44,6 +44,6 @@ VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD ["wget", "-q", "--spider", "http://localhost:3000/_portwing/health"]
+    CMD if [ -n "$TLS_CERT" ]; then wget -q --no-check-certificate --spider "https://localhost:${PORT:-3000}/health"; else wget -q --spider "http://localhost:${PORT:-3000}/health"; fi
 
 ENTRYPOINT ["/usr/bin/portwing"]

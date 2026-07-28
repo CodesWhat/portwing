@@ -87,7 +87,9 @@ type Client struct {
 	adapter      adapter.EdgeAdapter
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
+	metrics      *metrics.Registry
 	auditor      *audit.Logger
+	startTime    time.Time
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
@@ -119,13 +121,17 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 	if cfg.TLSSkipVerify {
 		slog.Warn("TLS certificate verification disabled (TLS_SKIP_VERIFY=true): the outbound controller connection is vulnerable to man-in-the-middle interception; use only for testing")
 	}
+	registry := metrics.NewRegistry()
+	registry.SetEdgeMode(true)
 	return &Client{
 		cfg:          cfg,
 		dockerClient: dockerClient,
 		adapter:      a,
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
 		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
+		metrics:      registry,
 		auditor:      auditor,
+		startTime:    time.Now(),
 		streamSem:    make(chan struct{}, maxStreams),
 	}
 }
@@ -133,6 +139,7 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 // Run is the main loop. It starts a minimal health server and then enters a
 // connect-retry loop with exponential backoff and jitter.
 func (c *Client) Run(ctx context.Context) error {
+	c.ensureOperationalState()
 	// Start minimal health HTTP server for Docker HEALTHCHECK.
 	c.startHealthServer()
 	defer func() {
@@ -185,6 +192,7 @@ func (c *Client) Run(ctx context.Context) error {
 
 		waitDuration := jitteredDuration(delay)
 
+		c.metrics.IncReconnect()
 		slog.Info("reconnecting", "delay", waitDuration.Round(time.Millisecond))
 
 		select {
@@ -204,6 +212,7 @@ func (c *Client) Run(ctx context.Context) error {
 // connect dials the WebSocket, performs the hello/welcome handshake, syncs
 // state, and runs the read and write pumps.
 func (c *Client) connect(ctx context.Context) (bool, error) {
+	c.ensureOperationalState()
 	// Build TLS config. Pin a TLS 1.2 floor to match the server's inbound
 	// posture; the controller dial relies on Go defaults otherwise.
 	tlsConfig := &tls.Config{
@@ -342,6 +351,8 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	}
 
 	slog.Info("connected to controller")
+	c.metrics.SetControllerConnected(true)
+	defer c.metrics.SetControllerConnected(false)
 
 	pumpCtx, pumpCancel := context.WithCancel(ctx)
 	defer pumpCancel()
@@ -810,6 +821,9 @@ func (c *Client) sendMessage(env protocol.Envelope) {
 	select {
 	case ch <- env:
 	default:
+		if c.metrics != nil {
+			c.metrics.IncBackpressure()
+		}
 		c.failConn("send queue full")
 	}
 }
@@ -901,14 +915,78 @@ func closeWebSocket(conn *websocket.Conn, context string) {
 	}
 }
 
-// startHealthServer starts a minimal HTTP server for Docker HEALTHCHECK.
+type edgeHealthResponse struct {
+	Status        string  `json:"status"`
+	Live          bool    `json:"live"`
+	Ready         bool    `json:"ready"`
+	Mode          string  `json:"mode"`
+	Version       string  `json:"version"`
+	UptimeSeconds float64 `json:"uptimeSeconds"`
+	Docker        string  `json:"docker"`
+	Controller    string  `json:"controller"`
+}
+
+// startHealthServer starts the local liveness, readiness, and operational
+// metrics server used by Docker, Kubernetes, and Prometheus.
 func (c *Client) startHealthServer() {
+	c.ensureOperationalState()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /_portwing/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status": "healthy",
+		_ = json.NewEncoder(w).Encode(edgeHealthResponse{
+			Status:        "ok",
+			Live:          true,
+			Ready:         false,
+			Mode:          "edge",
+			Version:       protocol.AgentVersion,
+			UptimeSeconds: time.Since(c.startTime).Seconds(),
+			Docker:        "unknown",
+			Controller:    currentControllerState(c.metrics.ControllerConnected()),
 		})
+	})
+	readiness := func(w http.ResponseWriter, r *http.Request) {
+		dockerConnected := c.dockerReady(r.Context())
+		controllerConnected := c.metrics.ControllerConnected()
+		status := "healthy"
+		httpStatus := http.StatusOK
+		if !dockerConnected || !controllerConnected {
+			status = "unhealthy"
+			httpStatus = http.StatusServiceUnavailable
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(httpStatus)
+		_ = json.NewEncoder(w).Encode(edgeHealthResponse{
+			Status:        status,
+			Live:          true,
+			Ready:         dockerConnected && controllerConnected,
+			Mode:          "edge",
+			Version:       protocol.AgentVersion,
+			UptimeSeconds: time.Since(c.startTime).Seconds(),
+			Docker:        currentDockerState(dockerConnected),
+			Controller:    currentControllerState(controllerConnected),
+		})
+	}
+	mux.HandleFunc("GET /ready", readiness)
+	mux.HandleFunc("GET /_portwing/health", readiness)
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		if c.auditor != nil {
+			stats := c.auditor.Stats()
+			c.metrics.SetAuditState(stats.Records, stats.Capacity, stats.SinkEnabled)
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "# HELP portwing_build_info Portwing agent build metadata.\n")
+		fmt.Fprintf(&b, "# TYPE portwing_build_info gauge\n")
+		fmt.Fprintf(&b, "portwing_build_info{version=\"%s\"} 1\n", escapePrometheusLabel(protocol.AgentVersion))
+		fmt.Fprintf(&b, "# HELP portwing_uptime_seconds Seconds since the agent started.\n")
+		fmt.Fprintf(&b, "# TYPE portwing_uptime_seconds gauge\n")
+		fmt.Fprintf(&b, "portwing_uptime_seconds %g\n", time.Since(c.startTime).Seconds())
+		metrics.WriteHostPrometheus(&b, c.collector)
+		if dockerMetrics, ok := c.dockerClient.(metrics.DockerMetricsClient); ok {
+			metrics.WriteContainerPrometheus(r.Context(), &b, dockerMetrics, escapePrometheusLabel)
+		}
+		c.metrics.WritePrometheus(&b, escapePrometheusLabel)
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = io.WriteString(w, b.String())
 	})
 	c.healthServer = &http.Server{
 		Addr:              c.cfg.BindAddress + ":" + c.cfg.Port,
@@ -921,4 +999,53 @@ func (c *Client) startHealthServer() {
 			slog.Warn("health server error", "error", err)
 		}
 	}()
+}
+
+func (c *Client) ensureOperationalState() {
+	if c.metrics == nil {
+		c.metrics = metrics.NewRegistry()
+		c.metrics.SetEdgeMode(true)
+	}
+	if c.startTime.IsZero() {
+		c.startTime = time.Now()
+	}
+	if c.streamSem == nil {
+		c.streamSem = make(chan struct{}, maxStreams)
+	}
+}
+
+func (c *Client) dockerReady(ctx context.Context) bool {
+	if c.dockerClient == nil {
+		return false
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	response, err := c.dockerClient.Do(pingCtx, http.MethodGet, "/_ping", nil)
+	if err != nil || response == nil {
+		return false
+	}
+	if response.Body != nil {
+		_ = response.Body.Close()
+	}
+	return response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices
+}
+
+func currentDockerState(connected bool) string {
+	if connected {
+		return "connected"
+	}
+	return "disconnected"
+}
+
+func currentControllerState(connected bool) string {
+	if connected {
+		return "connected"
+	}
+	return "disconnected"
+}
+
+func escapePrometheusLabel(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	return strings.ReplaceAll(value, "\n", `\n`)
 }

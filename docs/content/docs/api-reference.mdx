@@ -37,8 +37,9 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/health` | None | Returns `{"status":"ok"}`. Always HTTP 200 while the agent is running. |
-| `GET` | `/_portwing/health` | None | Returns agent status and Docker daemon connectivity. Returns HTTP 503 when Docker is unreachable. |
+| `GET` | `/health` | None | Process liveness. Always HTTP 200 while the agent is running; does not probe dependencies. |
+| `GET` | `/ready` | None | Readiness. Requires Docker in standard mode and Docker plus the controller in edge mode. |
+| `GET` | `/_portwing/health` | None | Compatibility alias for `/ready`. |
 | `GET` | `/_portwing/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. |
 
 ### Response shapes
@@ -46,16 +47,35 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
 **`GET /health`**
 
 ```json
-{ "status": "ok" }
+{
+  "status": "ok",
+  "live": true,
+  "ready": false,
+  "mode": "standard",
+  "version": "0.8.0",
+  "uptimeSeconds": 3842.7,
+  "docker": "unknown",
+  "controller": "not_applicable"
+}
 ```
 
-**`GET /_portwing/health`**
+**`GET /ready` and `GET /_portwing/health`**
 
 ```json
-{ "status": "healthy", "docker": "connected" }
+{
+  "status": "healthy",
+  "live": true,
+  "ready": true,
+  "mode": "standard",
+  "version": "0.8.0",
+  "uptimeSeconds": 3842.7,
+  "docker": "connected",
+  "controller": "not_applicable"
+}
 ```
 
-Returns HTTP `503` with `"status":"unhealthy","docker":"disconnected"` when Docker is unreachable.
+Returns HTTP `503` with `"ready":false` when Docker is unreachable or, in
+edge mode, when the controller WebSocket is disconnected.
 
 **`GET /_portwing/info`**
 
@@ -79,7 +99,7 @@ Returns HTTP `503` with `"status":"unhealthy","docker":"disconnected"` when Dock
 curl -s http://localhost:3000/health
 
 # Docker connectivity check
-curl -s http://localhost:3000/_portwing/health | jq .
+curl -s http://localhost:3000/ready | jq .
 
 # Agent metadata
 curl -s -H "Authorization: Bearer $TOKEN" \
@@ -98,6 +118,8 @@ Prometheus-format host and agent metrics. See [Observability](/observability) fo
 | `GET` | `/metrics` | Required | Alias for `/_portwing/metrics`. Provided for compatibility with default Prometheus scrape configs. |
 
 Both endpoints return `text/plain` in Prometheus exposition format 0.0.4.
+Standard mode requires auth. Edge mode exposes `/metrics` on its limited local
+operations listener without auth, so keep that listener on a private network.
 
 ### curl example
 
@@ -116,6 +138,35 @@ portwing_host_cpu_usage_percent 23.5
 # TYPE portwing_host_memory_used_bytes gauge
 portwing_host_memory_used_bytes 4294967296
 ```
+
+---
+
+## Audit export
+
+Standard mode exposes both a human/operator JSON view and a polling-friendly
+NDJSON export. Both require authentication.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/_portwing/audit` | Required | Recent ring-buffer records, newest first, wrapped in `{records,count}`. |
+| `GET` | `/_portwing/audit/export` | Required | Cursor-based NDJSON records, oldest first. |
+
+For initial export, omit `cursor`. After consuming the response, persist
+`X-Portwing-Next-Cursor` and pass it on the next poll:
+
+```bash
+curl -sS -D headers.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  "https://localhost:3000/_portwing/audit/export?cursor=42&limit=500"
+```
+
+The response also includes `X-Portwing-Oldest-Cursor`,
+`X-Portwing-Latest-Cursor`, and `X-Portwing-Record-Count`. HTTP `409` means the
+cursor was overwritten or belongs to a previous agent process; surface the gap
+and resume from the reset cursor in `X-Portwing-Next-Cursor`.
+
+See [Audit Logging](/audit-logging) for the stable sink/export schemas and
+shipping guidance.
 
 ---
 

@@ -94,7 +94,7 @@ export const roadmap: Milestone[] = [
       "Published stability policy — semver guarantees for the HTTP API, env-var surface, MCP tools, and DrydockCompat wire contract",
       "Package-manager distribution — a Homebrew tap and apt/rpm packages via the existing GoReleaser pipeline",
       "Continuous edge live-tail under the dd: namespace, with cancellation, stdout/stderr framing, and bounded backpressure",
-      "Richer health/metrics and structured audit export",
+      "Mode-aware liveness/readiness, edge/backpressure metrics, stable cursor-based NDJSON audit export, and runnable observability examples",
     ],
   },
   {

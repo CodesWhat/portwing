@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bufio"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/codeswhat/portwing/internal/audit"
+	"github.com/codeswhat/portwing/internal/metrics"
 )
 
 // makeAuditTestServer builds a minimal Server with a real audit Logger that
@@ -167,5 +170,161 @@ func TestHandleAuditInvalidLimitFallsBackToAll(t *testing.T) {
 	}
 	if resp.Count != 2 {
 		t.Errorf("expected count=2 for invalid limit, got %d", resp.Count)
+	}
+}
+
+func TestHandleAuditExportNDJSONCursor(t *testing.T) {
+	t.Parallel()
+
+	s := makeAuditTestServer(t, 8)
+	s.metrics = metrics.NewRegistry()
+	s.auditor.AuthFailure("a", "GET", "/1")
+	s.auditor.AuthFailure("b", "GET", "/2")
+	s.auditor.APIRequest("c", "GET", "/3", audit.OutcomeAllowed, 200, 0.5)
+
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor=1&limit=1", nil)
+	rr := httptest.NewRecorder()
+	s.handleAuditExport(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/x-ndjson" {
+		t.Fatalf("content type = %q, want application/x-ndjson", got)
+	}
+	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != "2" {
+		t.Fatalf("next cursor = %q, want 2", got)
+	}
+	if got := rr.Header().Get("X-Portwing-Record-Count"); got != "1" {
+		t.Fatalf("record count = %q, want 1", got)
+	}
+
+	scanner := bufio.NewScanner(rr.Body)
+	if !scanner.Scan() {
+		t.Fatal("expected one NDJSON record")
+	}
+	var record audit.Record
+	if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+		t.Fatalf("decode NDJSON record: %v", err)
+	}
+	if record.Cursor != 2 || record.Path != "/2" {
+		t.Fatalf("record = %+v, want cursor 2 and path /2", record)
+	}
+	if scanner.Scan() {
+		t.Fatalf("unexpected second NDJSON record: %s", scanner.Text())
+	}
+
+	metricsBody := new(strings.Builder)
+	s.metrics.WritePrometheus(metricsBody, func(value string) string { return value })
+	if !strings.Contains(metricsBody.String(), `portwing_audit_exports_total{outcome="success"} 1`) {
+		t.Fatalf("missing successful audit export metric:\n%s", metricsBody.String())
+	}
+}
+
+func TestHandleAuditExportRejectsInvalidCursor(t *testing.T) {
+	t.Parallel()
+
+	s := makeAuditTestServer(t, 8)
+	s.metrics = metrics.NewRegistry()
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor=invalid", nil)
+	rr := httptest.NewRecorder()
+	s.handleAuditExport(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+
+	var b strings.Builder
+	s.metrics.WritePrometheus(&b, func(value string) string { return value })
+	if !strings.Contains(b.String(), `portwing_audit_exports_total{outcome="error"} 1`) {
+		t.Fatalf("missing failed audit export metric:\n%s", b.String())
+	}
+}
+
+func TestHandleAuditExportReportsCursorGap(t *testing.T) {
+	t.Parallel()
+
+	s := makeAuditTestServer(t, 2)
+	s.metrics = metrics.NewRegistry()
+	s.auditor.AuthFailure("a", "GET", "/1")
+	s.auditor.AuthFailure("b", "GET", "/2")
+	s.auditor.AuthFailure("c", "GET", "/3")
+
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor=0", nil)
+	rr := httptest.NewRecorder()
+	s.handleAuditExport(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 for overwritten cursor: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Portwing-Oldest-Cursor"); got != "2" {
+		t.Fatalf("oldest cursor = %q, want 2", got)
+	}
+}
+
+func TestHandleAuditExportWithoutCursorBootstrapsAtOldestRetainedRecord(t *testing.T) {
+	t.Parallel()
+
+	s := makeAuditTestServer(t, 2)
+	s.auditor.AuthFailure("a", "GET", "/1")
+	s.auditor.AuthFailure("b", "GET", "/2")
+	s.auditor.AuthFailure("c", "GET", "/3")
+
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export", nil)
+	rr := httptest.NewRecorder()
+	s.handleAuditExport(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 bootstrap response, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != "3" {
+		t.Fatalf("next cursor = %q, want 3", got)
+	}
+
+	scanner := bufio.NewScanner(rr.Body)
+	var cursors []uint64
+	for scanner.Scan() {
+		var record audit.Record
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			t.Fatalf("decode record: %v", err)
+		}
+		cursors = append(cursors, record.Cursor)
+	}
+	if len(cursors) != 2 || cursors[0] != 2 || cursors[1] != 3 {
+		t.Fatalf("bootstrap cursors = %v, want [2 3]", cursors)
+	}
+}
+
+func TestHandleAuditExportDetectsCursorAheadOfCurrentGeneration(t *testing.T) {
+	t.Parallel()
+
+	s := makeAuditTestServer(t, 2)
+	s.auditor.AuthFailure("a", "GET", "/1")
+
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor=99", nil)
+	rr := httptest.NewRecorder()
+	s.handleAuditExport(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for future cursor, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != "0" {
+		t.Fatalf("reset cursor = %q, want 0", got)
+	}
+}
+
+func TestAuditRecordsCarryMonotonicCursors(t *testing.T) {
+	t.Parallel()
+
+	s := makeAuditTestServer(t, 8)
+	s.auditor.AuthFailure("a", "GET", "/1")
+	s.auditor.AuthFailure("b", "GET", "/2")
+
+	records := s.auditor.Records(0)
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2", len(records))
+	}
+	if records[0].Cursor != 2 || records[1].Cursor != 1 {
+		t.Fatalf("cursors = %d,%d, want 2,1", records[0].Cursor, records[1].Cursor)
 	}
 }

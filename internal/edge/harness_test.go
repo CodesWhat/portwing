@@ -18,6 +18,7 @@ import (
 
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/config"
+	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -290,6 +291,9 @@ type fakeDocker struct {
 	streamResp *http.Response
 	streamErr  error
 	doCalls    []doCall
+
+	metricContainers []docker.ContainerJSON
+	metricStats      map[string]*docker.ContainerStatsResponse
 }
 
 type createExecCall struct {
@@ -364,6 +368,18 @@ func (f *fakeDocker) DoStream(_ context.Context, method, path string, _ io.Reade
 	f.doCalls = append(f.doCalls, doCall{method, path, true})
 	f.mu.Unlock()
 	return f.streamResp, f.streamErr
+}
+
+func (f *fakeDocker) ListContainers(context.Context, bool) ([]docker.ContainerJSON, error) {
+	return f.metricContainers, nil
+}
+
+func (f *fakeDocker) ContainerStats(_ context.Context, id string) (*docker.ContainerStatsResponse, error) {
+	stats, ok := f.metricStats[id]
+	if !ok {
+		return nil, errors.New("stats unavailable")
+	}
+	return stats, nil
 }
 
 func (f *fakeDocker) resizeCallList() []resizeCall {

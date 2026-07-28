@@ -77,6 +77,15 @@ type Logger struct {
 	closer func()       // flushes/closes the underlying file; no-op for non-file sinks
 }
 
+// Stats describes the current audit sink and in-memory export buffer.
+type Stats struct {
+	Records      int
+	Capacity     int
+	SinkEnabled  bool
+	OldestCursor uint64
+	LatestCursor uint64
+}
+
 // New creates a Logger that writes to the sink indicated by dest and keeps an
 // in-memory ring buffer of the most recent bufferSize events.
 // dest == "" disables slog output. bufferSize <= 0 disables the buffer.
@@ -142,6 +151,29 @@ func (l *Logger) Records(limit int) []Record {
 		return []Record{}
 	}
 	return l.ring.records(limit)
+}
+
+// RecordsAfter returns retained records with a cursor greater than after in
+// oldest-first export order, along with the current buffer window.
+func (l *Logger) RecordsAfter(after uint64, limit int) ([]Record, Stats) {
+	stats := l.Stats()
+	if l.ring == nil {
+		return []Record{}, stats
+	}
+	records, oldest, latest := l.ring.recordsAfter(after, limit)
+	stats.OldestCursor = oldest
+	stats.LatestCursor = latest
+	return records, stats
+}
+
+// Stats returns current audit sink and buffer state.
+func (l *Logger) Stats() Stats {
+	stats := Stats{SinkEnabled: l.log != nil}
+	if l.ring == nil {
+		return stats
+	}
+	stats.Records, stats.Capacity, stats.OldestCursor, stats.LatestCursor = l.ring.stats()
+	return stats
 }
 
 // APIRequest records an authenticated (or rejected) HTTP API call.

@@ -40,6 +40,20 @@ type Registry struct {
 	histBuckets [numHistBuckets]uint64 // cumulative counts per bucket (one per bucket bound)
 	histSum     float64
 	histCount   uint64
+
+	// Edge connection and backpressure state. edgeMode gates their exposition
+	// so standard-mode agents do not emit a misleading disconnected gauge.
+	edgeMode            atomic.Bool
+	controllerConnected atomic.Bool
+	reconnectsTotal     atomic.Uint64
+	backpressureTotal   atomic.Uint64
+
+	// Audit export health is sampled when metrics or export endpoints run.
+	auditBufferRecords  atomic.Int64
+	auditBufferCapacity atomic.Int64
+	auditSinkEnabled    atomic.Bool
+	auditExportSuccess  atomic.Uint64
+	auditExportErrors   atomic.Uint64
 }
 
 // NewRegistry creates and returns an empty Registry.
@@ -73,6 +87,48 @@ func (reg *Registry) IncAuthFailure(reason string) {
 // IncRateLimited increments the rate-limited request counter.
 func (reg *Registry) IncRateLimited() {
 	reg.rateLimitedTotal.Add(1)
+}
+
+// SetEdgeMode enables edge-only controller connection metrics.
+func (reg *Registry) SetEdgeMode(enabled bool) {
+	reg.edgeMode.Store(enabled)
+}
+
+// SetControllerConnected updates the current edge-controller connection gauge.
+func (reg *Registry) SetControllerConnected(connected bool) {
+	reg.controllerConnected.Store(connected)
+}
+
+// ControllerConnected reports the current edge-controller connection state.
+func (reg *Registry) ControllerConnected() bool {
+	return reg.controllerConnected.Load()
+}
+
+// IncReconnect records a scheduled edge-controller reconnect.
+func (reg *Registry) IncReconnect() {
+	reg.reconnectsTotal.Add(1)
+}
+
+// IncBackpressure records an edge connection eviction caused by outbound
+// backpressure.
+func (reg *Registry) IncBackpressure() {
+	reg.backpressureTotal.Add(1)
+}
+
+// SetAuditState updates the current in-memory audit buffer and sink gauges.
+func (reg *Registry) SetAuditState(records, capacity int, sinkEnabled bool) {
+	reg.auditBufferRecords.Store(int64(records))
+	reg.auditBufferCapacity.Store(int64(capacity))
+	reg.auditSinkEnabled.Store(sinkEnabled)
+}
+
+// IncAuditExport records the outcome of an audit export request.
+func (reg *Registry) IncAuditExport(success bool) {
+	if success {
+		reg.auditExportSuccess.Add(1)
+		return
+	}
+	reg.auditExportErrors.Add(1)
 }
 
 // IncInFlight increments the in-flight gauge.
@@ -177,6 +233,40 @@ func (reg *Registry) WritePrometheus(b *strings.Builder, escapeLabel func(string
 	fmt.Fprintf(b, "# HELP portwing_rate_limited_total Total requests rejected due to rate limiting.\n")
 	fmt.Fprintf(b, "# TYPE portwing_rate_limited_total counter\n")
 	fmt.Fprintf(b, "portwing_rate_limited_total %d\n", reg.rateLimitedTotal.Load())
+
+	if reg.edgeMode.Load() {
+		controllerConnected := 0
+		if reg.controllerConnected.Load() {
+			controllerConnected = 1
+		}
+		fmt.Fprintf(b, "# HELP portwing_edge_controller_connected Whether the edge controller WebSocket is connected (1) or disconnected (0).\n")
+		fmt.Fprintf(b, "# TYPE portwing_edge_controller_connected gauge\n")
+		fmt.Fprintf(b, "portwing_edge_controller_connected %d\n", controllerConnected)
+		fmt.Fprintf(b, "# HELP portwing_edge_reconnects_total Total edge-controller reconnects scheduled by the agent.\n")
+		fmt.Fprintf(b, "# TYPE portwing_edge_reconnects_total counter\n")
+		fmt.Fprintf(b, "portwing_edge_reconnects_total %d\n", reg.reconnectsTotal.Load())
+		fmt.Fprintf(b, "# HELP portwing_edge_backpressure_events_total Total edge connections evicted because the outbound queue was full.\n")
+		fmt.Fprintf(b, "# TYPE portwing_edge_backpressure_events_total counter\n")
+		fmt.Fprintf(b, "portwing_edge_backpressure_events_total %d\n", reg.backpressureTotal.Load())
+	}
+
+	auditSinkEnabled := 0
+	if reg.auditSinkEnabled.Load() {
+		auditSinkEnabled = 1
+	}
+	fmt.Fprintf(b, "# HELP portwing_audit_buffer_records Current number of records retained in the audit ring buffer.\n")
+	fmt.Fprintf(b, "# TYPE portwing_audit_buffer_records gauge\n")
+	fmt.Fprintf(b, "portwing_audit_buffer_records %d\n", reg.auditBufferRecords.Load())
+	fmt.Fprintf(b, "# HELP portwing_audit_buffer_capacity Configured capacity of the audit ring buffer.\n")
+	fmt.Fprintf(b, "# TYPE portwing_audit_buffer_capacity gauge\n")
+	fmt.Fprintf(b, "portwing_audit_buffer_capacity %d\n", reg.auditBufferCapacity.Load())
+	fmt.Fprintf(b, "# HELP portwing_audit_sink_enabled Whether an external audit log sink is enabled (1) or disabled (0).\n")
+	fmt.Fprintf(b, "# TYPE portwing_audit_sink_enabled gauge\n")
+	fmt.Fprintf(b, "portwing_audit_sink_enabled %d\n", auditSinkEnabled)
+	fmt.Fprintf(b, "# HELP portwing_audit_exports_total Total audit export requests by outcome.\n")
+	fmt.Fprintf(b, "# TYPE portwing_audit_exports_total counter\n")
+	fmt.Fprintf(b, "portwing_audit_exports_total{outcome=\"success\"} %d\n", reg.auditExportSuccess.Load())
+	fmt.Fprintf(b, "portwing_audit_exports_total{outcome=\"error\"} %d\n", reg.auditExportErrors.Load())
 }
 
 // formatBound formats a histogram bucket upper bound without trailing zeros

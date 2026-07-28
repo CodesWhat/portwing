@@ -1,0 +1,115 @@
+# Prometheus scraper for kubernetes/standard.yaml. The Portwing token and TLS
+# certificate secrets are reused from that manifest's prerequisites.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: portwing-prometheus-standard
+  namespace: portwing
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: portwing-standard
+        scheme: https
+        metrics_path: /metrics
+        static_configs:
+          - targets: [portwing.portwing.svc:3000]
+        authorization:
+          type: Bearer
+          credentials_file: /etc/portwing-auth/token
+        tls_config:
+          ca_file: /etc/portwing-tls/tls.crt
+          server_name: portwing.portwing.svc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portwing-prometheus
+  namespace: portwing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: portwing-prometheus
+  template:
+    metadata:
+      labels:
+        app: portwing-prometheus
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.10.0-distroless@sha256:4d2174874988fe0d8356fa5c799210767661a2ffce6bb03cdc64306f6579d7b9
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+          ports:
+            - name: http
+              containerPort: 9090
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            - name: token
+              mountPath: /etc/portwing-auth
+              readOnly: true
+            - name: tls
+              mountPath: /etc/portwing-tls
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: portwing-prometheus-standard
+        - name: token
+          secret:
+            secretName: portwing-token
+        - name: tls
+          secret:
+            secretName: portwing-tls
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portwing-prometheus
+  namespace: portwing
+spec:
+  type: ClusterIP
+  selector:
+    app: portwing-prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http

@@ -2,8 +2,14 @@
 # One agent per Docker-capable node; reachable in-cluster at portwing:3000.
 #
 # Prerequisite: create the token secret before applying this manifest.
+#   kubectl create namespace portwing --dry-run=client -o yaml | kubectl apply -f -
 #   openssl rand -hex 32 > portwing_token.txt
 #   kubectl -n portwing create secret generic portwing-token --from-file=token=portwing_token.txt
+#   openssl req -x509 -newkey ed25519 -nodes -days 30 \
+#     -subj /CN=portwing.portwing.svc \
+#     -addext subjectAltName=DNS:portwing.portwing.svc,DNS:portwing \
+#     -keyout portwing.key -out portwing.crt
+#   kubectl -n portwing create secret tls portwing-tls --cert=portwing.crt --key=portwing.key
 #
 # Then apply:
 #   kubectl apply -f kubernetes/standard.yaml
@@ -16,18 +22,31 @@ kind: Namespace
 metadata:
   name: portwing
 ---
-# Create this secret out-of-band; do not store real tokens in source control.
-# Command:
-#   kubectl -n portwing create secret generic portwing-token --from-file=token=portwing_token.txt
 apiVersion: v1
-kind: Secret
+kind: ConfigMap
 metadata:
-  name: portwing-token
+  name: portwing-audit-forwarder
   namespace: portwing
-type: Opaque
-stringData:
-  token: "REPLACE_WITH_openssl_rand_hex_32"
----
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush 1
+        Log_Level info
+        Parsers_File parsers.conf
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port 2020
+        Health_Check On
+    [INPUT]
+        Name tail
+        Path /var/log/portwing/audit.ndjson
+        Tag portwing.audit
+        Parser json
+        DB /var/lib/fluent-bit/audit.db
+        Read_from_Head true
+    [OUTPUT]
+        Name stdout
+        Match portwing.audit
 # DaemonSet: schedules one Portwing agent on every node labelled
 # portwing.dev/docker="true". Label only nodes that actually run Docker and
 # expose /var/run/docker.sock. Most modern clusters use containerd/CRI-O —
@@ -86,6 +105,14 @@ spec:
           env:
             - name: TOKEN_FILE
               value: /etc/portwing/token
+            - name: TLS_CERT
+              value: /etc/portwing/tls/tls.crt
+            - name: TLS_KEY
+              value: /etc/portwing/tls/tls.key
+            - name: AUDIT_LOG
+              value: /var/log/portwing/audit.ndjson
+            - name: AUDIT_BUFFER_SIZE
+              value: "4096"
           volumeMounts:
             - name: docker-sock
               mountPath: /var/run/docker.sock
@@ -93,21 +120,28 @@ spec:
             - name: portwing-token
               mountPath: /etc/portwing
               readOnly: true
+            - name: portwing-tls
+              mountPath: /etc/portwing/tls
+              readOnly: true
+            - name: audit-log
+              mountPath: /var/log/portwing
             - name: tmp
               mountPath: /tmp
             - name: stacks
               mountPath: /data/stacks
           livenessProbe:
             httpGet:
-              path: /_portwing/health
+              path: /health
               port: 3000
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /_portwing/health
+              path: /ready
               port: 3000
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
@@ -118,6 +152,43 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+        - name: audit-forwarder
+          image: cr.fluentbit.io/fluent/fluent-bit:5.0.6@sha256:1abcf78fe8c9dee0c57fc2199693370a5a1f84e0af4716beddcd153b40cbbbb1
+          args: [-c, /fluent-bit/etc/portwing.conf]
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: audit-forwarder-config
+              mountPath: /fluent-bit/etc/portwing.conf
+              subPath: fluent-bit.conf
+              readOnly: true
+            - name: audit-log
+              mountPath: /var/log/portwing
+              readOnly: true
+            - name: audit-forwarder-state
+              mountPath: /var/lib/fluent-bit
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 2020
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 2020
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
       volumes:
         - name: docker-sock
           hostPath:
@@ -129,6 +200,16 @@ spec:
             items:
               - key: token
                 path: token
+        - name: portwing-tls
+          secret:
+            secretName: portwing-tls
+        - name: audit-log
+          emptyDir: {}
+        - name: audit-forwarder-state
+          emptyDir: {}
+        - name: audit-forwarder-config
+          configMap:
+            name: portwing-audit-forwarder
         - name: tmp
           emptyDir: {}
         # Compose stacks must survive pod restarts: down/ps/stop/restart/logs
@@ -156,7 +237,7 @@ spec:
   selector:
     app: portwing
   ports:
-    - name: http
+    - name: https
       port: 3000
       targetPort: 3000
       protocol: TCP

@@ -326,12 +326,12 @@ func TestHandleSimpleHealthDirect(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		t.Errorf("unexpected Content-Type: %q", ct)
 	}
-	var body map[string]string
+	var body healthResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body["status"] != "ok" {
-		t.Errorf("status: got %q, want ok", body["status"])
+	if body.Status != "ok" {
+		t.Errorf("status: got %q, want ok", body.Status)
 	}
 }
 
@@ -353,13 +353,15 @@ func TestHandleHealthConnected(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	var body map[string]string
-	_ = json.NewDecoder(rec.Body).Decode(&body)
-	if body["status"] != "healthy" {
-		t.Errorf("status: got %q, want healthy", body["status"])
+	var body healthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
-	if body["docker"] != "connected" {
-		t.Errorf("docker: got %q, want connected", body["docker"])
+	if body.Status != "healthy" {
+		t.Errorf("status: got %q, want healthy", body.Status)
+	}
+	if body.Docker != "connected" {
+		t.Errorf("docker: got %q, want connected", body.Docker)
 	}
 }
 
@@ -377,13 +379,15 @@ func TestHandleHealthDisconnected(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", rec.Code)
 	}
-	var body map[string]string
-	_ = json.NewDecoder(rec.Body).Decode(&body)
-	if body["status"] != "unhealthy" {
-		t.Errorf("status: got %q, want unhealthy", body["status"])
+	var body healthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
-	if body["docker"] != "disconnected" {
-		t.Errorf("docker: got %q, want disconnected", body["docker"])
+	if body.Status != "unhealthy" {
+		t.Errorf("status: got %q, want unhealthy", body.Status)
+	}
+	if body.Docker != "disconnected" {
+		t.Errorf("docker: got %q, want disconnected", body.Docker)
 	}
 }
 
@@ -643,7 +647,7 @@ func TestRegisterRoutesSimpleHealth(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	for _, path := range []string{"/health", "/_portwing/health"} {
+	for _, path := range []string{"/health", "/ready", "/_portwing/health"} {
 		resp, err := ts.Client().Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
@@ -680,14 +684,15 @@ func TestRegisterRoutesAuthGated(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	// /_portwing/info is auth-gated; no credentials → 401.
-	resp, err := ts.Client().Get(ts.URL + "/_portwing/info")
-	if err != nil {
-		t.Fatalf("GET /_portwing/info: %v", err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("expected 401 for unauthenticated /_portwing/info, got %d", resp.StatusCode)
+	for _, path := range []string{"/_portwing/info", "/_portwing/audit/export"} {
+		resp, err := ts.Client().Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401 for unauthenticated %s, got %d", path, resp.StatusCode)
+		}
 	}
 }
 
