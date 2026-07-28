@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.1] - 2026-07-28
+
+### Fixed
+
+- **Security scanner findings and log injection hardening.** Untrusted values written by the HTTP server, edge tunnel, Docker client, drydock adapter, and audit logger are now sanitized before reaching structured logs, and Ed25519 verification capacity is reserved atomically. Vulnerable website/docs dependencies were upgraded, generated CSP hashes were refreshed, and narrowly scoped Grype exclusions for unreachable OpenPGP and Docker Compose code now have CI guards that fail if either package becomes imported or linked into the shipped binary.
+
 ## [v0.7.0] - 2026-07-20
 
 ### Added
