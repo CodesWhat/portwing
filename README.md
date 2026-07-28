@@ -18,7 +18,7 @@
 >
 > ### 🚧 Pre-1.0 software — APIs may still change
 >
-> Portwing is pre-`v1.0.0` (currently `v0.8.0`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> Portwing is pre-`v1.0.0` (currently `v0.8.1`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
@@ -76,7 +76,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.8.0 is the current release.** It graduates edge mode on the stable `portwing/1.0` wire, adds continuous live logs, publishes the stability policy, ships native packages, and completes the operations/observability surface. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.8.1 is the current release.** It includes the v0.8 edge, continuous-log, stability, native-package, and operations work plus the native-install verification fix. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
@@ -139,10 +139,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.8.0_linux_amd64.deb
+sudo apt install ./portwing_0.8.1_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.8.0_linux_amd64.rpm
+sudo rpm --install ./portwing_0.8.1_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -313,7 +313,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-For v0.4.0 and later — including v0.8.0, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+For v0.4.0 and later — including v0.8.1, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 - **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
 - **v0.2.0** — the security & observability release. Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`. Also shipped in v0.2.0:

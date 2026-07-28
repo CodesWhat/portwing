@@ -17,7 +17,7 @@ DrydockCompat bumps.
 
 | Portwing version | Drydock version | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|
-| v0.8.0 (latest release) / `main` | 1.6.x (1.5.x with `DD_EXPERIMENTAL_PORTWING=true`) | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v0.8.1 (latest release) / `main` | 1.6.x (1.5.x with `DD_EXPERIMENTAL_PORTWING=true`) | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 
 ## What "wire compat" means
 

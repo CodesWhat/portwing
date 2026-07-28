@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.8.1] - 2026-07-28
+
+### Fixed
+
+- **Native-install version command.** `portwing version` now prints the
+  GoReleaser-injected version and exits before loading configuration or
+  contacting Docker, so Homebrew, deb, and rpm installs can be verified on a
+  clean host.
+- **Native-package release verification.** The hardened verification runner
+  now permits the pinned cosign installer to download from `github.com`,
+  allowing package signature and clean-container install checks to run.
+
 ## [v0.8.0] - 2026-07-28
 
 ### Added

@@ -18,6 +18,7 @@ import (
 	"github.com/codeswhat/portwing/internal/auth"
 	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // ---------------------------------------------------------------------------
@@ -427,6 +428,23 @@ func TestRun_KeygenDispatch(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "BEGIN PRIVATE KEY") {
 		t.Fatalf("expected PEM on stdout, got: %s", stdout.String())
+	}
+}
+
+func TestRun_VersionDispatchBeforeConfig(t *testing.T) {
+	// Deliberately make the server configuration invalid. The version
+	// subcommand must be self-contained so package-install smoke tests work on
+	// hosts with no Docker socket or Portwing configuration.
+	setenv(t, "TOKEN", "plaintext")
+	setenv(t, "TOKEN_HASH", "cannot-be-set-with-token")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"portwing", "version"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d; stderr: %s", code, stderr.String())
+	}
+	if got, want := stdout.String(), protocol.AgentVersion+"\n"; got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
 	}
 }
 
