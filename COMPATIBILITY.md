@@ -4,6 +4,9 @@ This is the canonical, cross-repo compatibility matrix for Portwing, Drydock,
 and sockguard. It supersedes any duplicate matrix in per-repo docs — those
 should link here rather than maintain a second copy.
 
+The versioning and deprecation rules applied to these pairings are defined in
+[STABILITY.md](STABILITY.md).
+
 **DrydockCompat only bumps on a wire-protocol-breaking change, independent of
 product version numbers — check this file, not the product version, before
 assuming compatibility.** Product releases (portwing `vX.Y.Z`, Drydock
@@ -67,6 +70,9 @@ both together when either changes.
 
 ## Related pages
 
+- Portwing: [`STABILITY.md`](STABILITY.md) — semantic-versioning, deprecation,
+  and change-control guarantees for the HTTP, environment, MCP, and wire
+  surfaces.
 - Portwing: [`docs/drydock-integration.md`](docs/drydock-integration.md) / [`docs/content/docs/drydock-integration.mdx`](docs/content/docs/drydock-integration.mdx) — full wire-protocol and REST/SSE contract detail.
 - Drydock: see its README's ecosystem section.
 - sockguard: see its README's ecosystem section.

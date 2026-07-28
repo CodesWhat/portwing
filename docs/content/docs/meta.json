@@ -6,6 +6,7 @@
     "connection-modes",
     "authentication",
     "configuration",
+    "stability-policy",
     "security-model",
     "drydock-integration",
     "standalone-mode",

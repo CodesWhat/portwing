@@ -1,0 +1,59 @@
+---
+title: Stability Policy
+description: The semantic-versioning, deprecation, and cross-version compatibility guarantees Portwing will make at v1.0.
+---
+
+Portwing `v0.8.x` publishes its compatibility and stability policy for review
+before the guarantees become binding at `v1.0.0`. The canonical policy is
+maintained in [`STABILITY.md`](https://github.com/CodesWhat/portwing/blob/main/STABILITY.md),
+and the tested product pairings remain in
+[`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md).
+
+## Stable at v1
+
+At `v1.0.0`, semantic-versioning guarantees cover:
+
+- the versioned `/api/v1` REST and SSE surface;
+- documented Drydock-compatible routes and operational `/_portwing/*`
+  endpoints;
+- the names, defaults, value grammar, precedence, and security semantics of
+  documented environment variables;
+- the MCP transport, tool names, schemas, and read-only security model; and
+- the `portwing/1.0` agent/controller WebSocket contract.
+
+The raw Docker API proxy follows the connected Docker daemon's negotiated API
+version and is not frozen by Portwing's semantic version.
+
+## Compatible additions
+
+New endpoints, message types, tools, optional fields, optional arguments, and
+optional environment variables are additive. Both sides of the edge protocol
+must ignore unknown object fields and unknown message types so mixed-version
+deployments can receive additive upgrades safely.
+
+Removing or renaming a stable surface, adding a required field, changing a
+field's type or meaning, changing ordering/correlation semantics, or weakening
+a security control requires a major release after v1.
+
+## Deprecations
+
+A stable behavior remains available for at least one minor release and 90 days
+after deprecation. The changelog and reference docs identify the replacement,
+and runtime use emits an actionable warning when practical. Removal occurs only
+in the next major release.
+
+An urgent security fix may shorten that window when preserving the old behavior
+would leave operators exposed. The release notes must identify and explain the
+exception.
+
+## Mixed Portwing/Drydock versions
+
+`drydockCompat` and `serverCompatLevel` identify the wire compatibility epoch;
+their major component must match. Product versions are independent. The
+compatibility matrix lists the exact supported pairings, and every Portwing
+release runs contract tests against the oldest and newest Drydock versions it
+claims to support.
+
+See the [canonical policy](https://github.com/CodesWhat/portwing/blob/main/STABILITY.md)
+for the complete HTTP, environment-variable, MCP, wire-protocol, change-control,
+and security-exception rules.
