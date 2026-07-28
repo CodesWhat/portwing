@@ -45,6 +45,7 @@ data:
     [OUTPUT]
         Name stdout
         Match portwing.audit
+---
 # DaemonSet: one edge agent per Docker-capable node, all dialing out to Drydock.
 # The AGENT_NAME is derived from the node name via the Downward API so each
 # instance self-identifies uniquely to the controller — no manual per-node config.

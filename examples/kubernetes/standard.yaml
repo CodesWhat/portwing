@@ -47,6 +47,7 @@ data:
     [OUTPUT]
         Name stdout
         Match portwing.audit
+---
 # DaemonSet: schedules one Portwing agent on every node labelled
 # portwing.dev/docker="true". Label only nodes that actually run Docker and
 # expose /var/run/docker.sock. Most modern clusters use containerd/CRI-O —
