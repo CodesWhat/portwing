@@ -71,7 +71,7 @@ See [Getting Started](/getting-started) for the full Sockguard variant and TLS e
 
 ## Edge Mode
 
-**Status: production supported with stable `portwing/1.0` — requires Drydock 1.5+.**
+**Status: production supported with stable `portwing/1.0` — enabled by default in Drydock 1.6.**
 
 <Callout type="info">
   Edge mode is covered by a real multi-agent reconnect/load soak, including concurrent
@@ -183,7 +183,7 @@ secrets:
 | Inbound port required | Yes | No |
 | Works behind NAT / firewall | No | Yes |
 | Agent-side implementation | Complete | Complete |
-| Controller-side support | Complete | Drydock 1.5+ |
-| Recommended for production | Yes | Yes (Drydock 1.5+; Portwing 0.8+ recommended) |
+| Controller-side support | Complete | Drydock 1.6 (1.5 opt-in) |
+| Recommended for production | Yes | Yes (Drydock 1.6; Portwing 0.8+) |
 
 Use Standard mode when the controller can reach the host directly. Use Edge mode when the host cannot accept an inbound connection; both modes are production supported.

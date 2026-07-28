@@ -15,10 +15,10 @@ flowchart TB
         SC -- "HTTP / SSE · X-Dd-Agent-Secret" --> SL
     end
 
-    subgraph edge ["Edge mode — outbound WebSocket (Drydock 1.5)"]
+    subgraph edge ["Edge mode — outbound WebSocket (Drydock 1.6)"]
         direction LR
         EL["Portwing<br/>edge/client (outbound)"]
-        EC["Drydock controller<br/>WebSocket srv /api/portwing/ws<br/>(Drydock 1.5 — Ed25519)"]
+        EC["Drydock controller<br/>WebSocket srv /api/portwing/ws<br/>(Drydock 1.6 — Ed25519)"]
         EL -- "WSS · hello → welcome" --> EC
     end
 
@@ -34,7 +34,7 @@ Portwing Standard Mode replaces the Legacy SSE Agent. Edge Mode has Portwing dia
 
 ---
 
-## Standard Mode: Drydock 1.5.x Handshake Sequence
+## Standard Mode: Drydock 1.6.x Handshake Sequence
 
 Source: `app/agent/AgentClient.ts:506–579`
 

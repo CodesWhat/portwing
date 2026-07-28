@@ -216,7 +216,7 @@ Drydock 1.6 enables the Portwing endpoint by default. `DD_EXPERIMENTAL_PORTWING=
 </Callout>
 
 <Callout type="warn">
-Drydock's bundled `AgentClient` (the HTTP-polling client used in Standard Mode) does not implement Ed25519 request signing today — it authenticates only via `X-Dd-Agent-Secret` (token-hash auth, see [3. Argon2id hash-at-rest](#3-argon2id-hash-at-rest) above). Per-request Ed25519 signing is available today only for custom, non-Drydock HTTP clients calling Portwing's Standard Mode API directly. Edge Mode's Ed25519 *hello* signing described above is a separate mechanism — it is required and used by Drydock 1.5+ regardless of which client library talks to Standard Mode.
+Drydock's bundled `AgentClient` (the HTTP-polling client used in Standard Mode) does not implement Ed25519 request signing today — it authenticates only via `X-Dd-Agent-Secret` (token-hash auth, see [3. Argon2id hash-at-rest](#3-argon2id-hash-at-rest) above). Per-request Ed25519 signing is available today only for custom, non-Drydock HTTP clients calling Portwing's Standard Mode API directly. Edge Mode's Ed25519 *hello* signing described above is a separate mechanism — it is required by Drydock 1.6 and the Drydock 1.5 opt-in compatibility path regardless of which client library talks to Standard Mode.
 </Callout>
 
 ---

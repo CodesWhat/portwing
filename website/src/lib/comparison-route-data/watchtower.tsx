@@ -12,7 +12,7 @@ Image signature verification|Basic cosign support (newer builds)|Yes (cosign + S
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|No|Yes|self
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|No|Yes (Drydock 1.5+)|self
+Edge / NAT outbound tunnel|No|Yes (Drydock 1.6+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|Apache-2.0|AGPL-3.0|tie
 `,

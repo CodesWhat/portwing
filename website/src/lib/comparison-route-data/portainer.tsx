@@ -12,7 +12,7 @@ Signed images + SBOM + provenance|No|Yes (cosign + SBOM + SLSA build provenance)
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Business tier only ($)|Yes|self
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|Yes (Edge Agent, mature)|Yes (Drydock 1.5+)|competitor
+Edge / NAT outbound tunnel|Yes (Edge Agent, mature)|Yes (Drydock 1.6+)|competitor
 Single lightweight binary|No (~300 MB node image)|Yes (~10 MB Go binary)|self
 License|Zlib (core) / proprietary (Business)|AGPL-3.0|tie
 `,
@@ -58,8 +58,8 @@ lock|Narrow Scope by Design|Portainer is a full management platform. Portwing is
         secure foothold agent without the management overhead
       </strong>{" "}
       — and ships Ed25519 auth, audit logging, and Prometheus metrics in the free AGPL-3.0 build
-      without requiring a Business-tier upgrade. Portwing is alpha (v0.7.x); Portainer is
-      production-mature.
+      without requiring a Business-tier upgrade. Portwing v0.8.x is a supported pre-v1 release;
+      Portainer is production-mature.
     </p>
   ),
   migrationTitle: "Coming from Portainer Agent?",
