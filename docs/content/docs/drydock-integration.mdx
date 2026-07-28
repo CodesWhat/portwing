@@ -269,6 +269,26 @@ When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `
 | `ping` / `pong` | Either | Keepalive (30s default) |
 | `error` | Either | Error with optional `code` |
 
+**Exec (interactive `docker exec` sessions):**
+
+| Type | Direction | Purpose |
+|---|---|---|
+| `exec_start` | Controller → Agent | Start an exec session (`execId`, `containerId`, `cmd`, `user`, `cols`, `rows`, `tty`) |
+| `exec_ready` | Agent → Controller | Exec session started and attached; safe to send input |
+| `exec_input` | Controller → Agent | Base64 stdin chunk for a live session |
+| `exec_output` | Agent → Controller | Base64 stdout/stderr chunk from a live session |
+| `exec_resize` | Controller → Agent | TTY resize (`cols`, `rows`) for a live session |
+| `exec_end` | Either | Session ended, with an optional `reason` |
+
+If a session fails to start (for example, a sockguard exec-policy denial),
+the agent's failStart path sends `exec_end` immediately instead of
+`exec_ready`. Its `reason` field now carries the underlying Docker/sockguard
+error body — e.g. `not allowed by portwing preset` or `exec denied:
+privileged exec is not allowed` — rather than a bare status code. Drydock's
+edge agent adapter does not yet surface that reason to the user; today it
+receives the frame but discards `reason` before it reaches Drydock's own
+exec error display.
+
 **Drydock-specific (`dd:` namespace):**
 
 | Type | Direction | Purpose |

@@ -7,6 +7,8 @@ Ready-to-run Docker Compose and Kubernetes examples, hardened by default (`read_
 | [`docker-compose.standard.yml`](docker-compose.standard.yml) | Standard (inbound HTTP on :3000) | Drydock or any client can reach the host directly |
 | [`docker-compose.edge.yml`](docker-compose.edge.yml) | Edge (outbound WebSocket, no inbound ports) | Agent is behind NAT/firewall; it dials out to your Drydock instance |
 | [`docker-compose.with-sockguard.yml`](docker-compose.with-sockguard.yml) | Standard + [sockguard](https://github.com/CodesWhat/sockguard) socket filter | Two-layer defense: even a compromised agent is constrained to an explicit Docker API allowlist |
+| [`docker-compose.edge-with-exec.yml`](docker-compose.edge-with-exec.yml) | Edge + sockguard, exec enabled | Same two-layer defense as above, but pairs with [`sockguard-with-exec.yaml`](sockguard-with-exec.yaml) so Drydock's edge exec feature is actually allowed through the proxy |
+| [`sockguard-with-exec.yaml`](sockguard-with-exec.yaml) | Sockguard preset (with-exec) | The policy file `docker-compose.edge-with-exec.yml` mounts; pairs with it, not used standalone |
 | [`observability/docker-compose.yml`](observability/docker-compose.yml) | Standard or edge + Prometheus + Fluent Bit | Complete TLS/auth, metrics, readiness, and audit-shipping topology selected with a Compose profile |
 
 Before starting any of them, generate a token and export the Docker socket's group ID (the images run as the non-root `portwing` user, UID 65532, and need `group_add` to reach the socket):
