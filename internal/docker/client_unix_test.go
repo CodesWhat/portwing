@@ -17,7 +17,7 @@ import (
 func shortTempDir(t *testing.T) string {
 	t.Helper()
 	// Use os.MkdirTemp with /tmp as base to keep the path short.
-	dir, err := os.MkdirTemp("", "dktest*")
+	dir, err := os.MkdirTemp("", "lk")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
