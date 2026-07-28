@@ -241,6 +241,28 @@ func TestHandleAuditExportRejectsInvalidCursor(t *testing.T) {
 	}
 }
 
+func TestHandleAuditExportRejectsInvalidLimit(t *testing.T) {
+	t.Parallel()
+
+	for _, limit := range []string{"invalid", "-1"} {
+		s := makeAuditTestServer(t, 8)
+		req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?limit="+limit, nil)
+		rr := httptest.NewRecorder()
+		s.handleAuditExport(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("limit %q status = %d, want 400", limit, rr.Code)
+		}
+	}
+}
+
+func TestAuditResetCursorEmptyWindow(t *testing.T) {
+	t.Parallel()
+
+	if got := auditResetCursor(audit.Stats{}); got != 0 {
+		t.Fatalf("reset cursor = %d, want 0", got)
+	}
+}
+
 func TestHandleAuditExportReportsCursorGap(t *testing.T) {
 	t.Parallel()
 

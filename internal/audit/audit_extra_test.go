@@ -70,6 +70,50 @@ func TestAPIRequestRingOnly(t *testing.T) {
 	}
 }
 
+func TestRecordsAfterAndStats(t *testing.T) {
+	t.Parallel()
+
+	disabled, cleanup, err := New("", 0)
+	if err != nil {
+		t.Fatalf("New disabled logger: %v", err)
+	}
+	defer cleanup()
+	records, stats := disabled.RecordsAfter(0, 0)
+	if records == nil || len(records) != 0 {
+		t.Fatalf("disabled records = %+v, want non-nil empty slice", records)
+	}
+	if stats != (Stats{}) {
+		t.Fatalf("disabled stats = %+v, want zero value", stats)
+	}
+
+	logger, loggerCleanup, err := New("", 2)
+	if err != nil {
+		t.Fatalf("New buffered logger: %v", err)
+	}
+	defer loggerCleanup()
+	logger.AuthFailure("a", "GET", "/1")
+	logger.AuthFailure("b", "GET", "/2")
+	logger.AuthFailure("c", "GET", "/3")
+
+	records, stats = logger.RecordsAfter(1, 1)
+	if len(records) != 1 || records[0].Cursor != 2 {
+		t.Fatalf("records after cursor 1 = %+v, want cursor 2", records)
+	}
+	if stats.Records != 2 || stats.Capacity != 2 ||
+		stats.OldestCursor != 2 || stats.LatestCursor != 3 || stats.SinkEnabled {
+		t.Fatalf("buffered stats = %+v", stats)
+	}
+
+	sink, sinkCleanup, err := New(t.TempDir()+"/audit.log", 0)
+	if err != nil {
+		t.Fatalf("New sink logger: %v", err)
+	}
+	defer sinkCleanup()
+	if got := sink.Stats(); !got.SinkEnabled {
+		t.Fatalf("sink stats = %+v, want enabled sink", got)
+	}
+}
+
 // TestComposeOpRingOnly covers the log==nil && ring!=nil branch in ComposeOp.
 func TestComposeOpRingOnly(t *testing.T) {
 	t.Parallel()

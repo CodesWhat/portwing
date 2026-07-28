@@ -254,8 +254,14 @@ func TestRegistryOperationalMetrics(t *testing.T) {
 	t.Parallel()
 
 	reg := metrics.NewRegistry()
+	if reg.ControllerConnected() {
+		t.Fatal("new registry should report a disconnected controller")
+	}
 	reg.SetEdgeMode(true)
 	reg.SetControllerConnected(true)
+	if !reg.ControllerConnected() {
+		t.Fatal("controller connected state was not retained")
+	}
 	reg.IncReconnect()
 	reg.IncReconnect()
 	reg.IncBackpressure()

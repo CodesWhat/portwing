@@ -82,6 +82,55 @@ func TestRingEmptyBuffer(t *testing.T) {
 	}
 }
 
+func TestRingRecordsAfterRetainedWindow(t *testing.T) {
+	t.Parallel()
+
+	rb := newRing(3)
+	for i := 0; i < 5; i++ {
+		rb.push(Record{Event: string(rune('A' + i))})
+	}
+
+	got, oldest, latest := rb.recordsAfter(2, 2)
+	if oldest != 3 || latest != 5 {
+		t.Fatalf("window = %d..%d, want 3..5", oldest, latest)
+	}
+	if len(got) != 2 || got[0].Cursor != 3 || got[1].Cursor != 4 {
+		t.Fatalf("limited records = %+v, want cursors 3,4", got)
+	}
+
+	got, oldest, latest = rb.recordsAfter(4, 0)
+	if oldest != 3 || latest != 5 || len(got) != 1 || got[0].Cursor != 5 {
+		t.Fatalf("records after 4 = %+v with window %d..%d", got, oldest, latest)
+	}
+
+	got, _, _ = rb.recordsAfter(99, 0)
+	if len(got) != 0 {
+		t.Fatalf("records after future cursor = %+v, want empty", got)
+	}
+}
+
+func TestRingRecordsAfterAndStatsEmpty(t *testing.T) {
+	t.Parallel()
+
+	rb := newRing(4)
+	got, oldest, latest := rb.recordsAfter(0, 0)
+	if got == nil || len(got) != 0 || oldest != 0 || latest != 0 {
+		t.Fatalf("empty recordsAfter = %+v, %d..%d", got, oldest, latest)
+	}
+	records, capacity, oldest, latest := rb.stats()
+	if records != 0 || capacity != 4 || oldest != 0 || latest != 0 {
+		t.Fatalf("empty stats = records:%d capacity:%d window:%d..%d",
+			records, capacity, oldest, latest)
+	}
+
+	rb.push(Record{Event: "A"})
+	records, capacity, oldest, latest = rb.stats()
+	if records != 1 || capacity != 4 || oldest != 1 || latest != 1 {
+		t.Fatalf("populated stats = records:%d capacity:%d window:%d..%d",
+			records, capacity, oldest, latest)
+	}
+}
+
 // TestLoggerBufferWithoutSink verifies that events are captured in the buffer
 // even when no slog sink is configured.
 func TestLoggerBufferWithoutSink(t *testing.T) {
