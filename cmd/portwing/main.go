@@ -42,6 +42,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runKeygen(args[2:], stdout, stderr)
 	}
 
+	if len(args) >= 2 && args[1] == "version" {
+		fmt.Fprintln(stdout, protocol.AgentVersion)
+		return 0
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
