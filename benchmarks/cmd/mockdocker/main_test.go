@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -159,5 +161,24 @@ func TestMockDockerInventoryCarriesDockerImageIDs(t *testing.T) {
 	}
 	if !strings.HasPrefix(inspect.Image, "sha256:") {
 		t.Fatalf("inspect Image = %q, want sha256 ID", inspect.Image)
+	}
+}
+
+func TestEncodeLogFrameSizeRejectsUint32Overflow(t *testing.T) {
+	t.Parallel()
+
+	header := make([]byte, 8)
+	if err := encodeLogFrameSize(header, 1234); err != nil {
+		t.Fatalf("encode valid size: %v", err)
+	}
+	if got := binary.BigEndian.Uint32(header[4:8]); got != 1234 {
+		t.Fatalf("encoded size = %d, want 1234", got)
+	}
+
+	if strconv.IntSize == 64 {
+		oversized := int(uint64(math.MaxUint32) + 1)
+		if err := encodeLogFrameSize(header, oversized); err == nil {
+			t.Fatal("expected uint32 overflow to be rejected")
+		}
 	}
 }

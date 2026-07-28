@@ -23,10 +23,12 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -225,13 +227,28 @@ func writeLogs(w http.ResponseWriter, r *http.Request) {
 func writeLogFrame(w io.Writer, payload []byte) error {
 	header := make([]byte, 8)
 	header[0] = 1 // stdout
-	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
+	if err := encodeLogFrameSize(header, len(payload)); err != nil {
+		return err
+	}
 	if _, err := w.Write(header); err != nil {
 		return fmt.Errorf("writing log frame header: %w", err)
 	}
 	if _, err := w.Write(payload); err != nil {
 		return fmt.Errorf("writing log frame payload: %w", err)
 	}
+	return nil
+}
+
+func encodeLogFrameSize(header []byte, size int) error {
+	if len(header) < 8 {
+		return errors.New("docker log frame header is shorter than 8 bytes")
+	}
+	if size < 0 || uint64(size) > uint64(math.MaxUint32) {
+		return fmt.Errorf("docker log frame payload size %d exceeds uint32", size)
+	}
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], uint64(size))
+	copy(header[4:8], encoded[4:])
 	return nil
 }
 
