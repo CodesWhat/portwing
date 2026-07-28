@@ -500,9 +500,18 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			if skew <= 0 {
 				skew = 60
 			}
+			if !rl.tryBeginAuth(clientIP) {
+				auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+				if reg != nil {
+					reg.IncRequest(r.Method, http.StatusTooManyRequests)
+					reg.IncRateLimited()
+				}
+				http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+				return
+			}
 			keyID, err := auth.VerifyRequest(r, body, ed.Registry, ed.Nonces, skew)
+			rl.finishAuth(clientIP, err == nil)
 			if err != nil {
-				rl.RecordFailure(clientIP)
 				reason := auth.ReasonFor(err)
 				slog.Warn("ed25519 authentication failed",
 					"ip", applog.Sanitize(clientIP), "reason", applog.Sanitize(reason))

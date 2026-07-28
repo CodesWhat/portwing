@@ -717,6 +717,35 @@ func TestEd25519MiddlewareAccept(t *testing.T) {
 	}
 }
 
+func TestEd25519MiddlewareRejectsWhenVerificationCapacityFull(t *testing.T) {
+	t.Parallel()
+
+	ed, priv := setupEd25519(t)
+	rl := NewRateLimiter()
+	defer rl.Stop()
+
+	const clientIP = "198.51.100.10"
+	rl.maxInFlight = 1
+	rl.attempts[clientIP] = &ipAttempts{inFlight: 1}
+
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
+	req.RemoteAddr = clientIP + ":1234"
+	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 when Ed25519 verification capacity is full, got %d", rec.Code)
+	}
+	rl.mu.Lock()
+	attempt := *rl.attempts[clientIP]
+	rl.mu.Unlock()
+	if attempt.inFlight != 1 || attempt.count != 0 {
+		t.Fatalf("rejected verification changed rate-limit state: %+v", attempt)
+	}
+}
+
 // TestEd25519MiddlewareTokenFallback verifies that if no Ed25519 config is set,
 // the token verifier is still used.
 func TestEd25519MiddlewareTokenFallback(t *testing.T) {
