@@ -17,7 +17,7 @@ import (
 func shortTempDir(t *testing.T) string {
 	t.Helper()
 	// Use os.MkdirTemp with /tmp as base to keep the path short.
-	dir, err := os.MkdirTemp("", "dktest*")
+	dir, err := os.MkdirTemp("", "lk")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
@@ -195,6 +195,49 @@ func TestStartExec_Non101Response(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "101") {
 		t.Fatalf("error = %q, expected to contain '101'", err.Error())
+	}
+}
+
+func TestStartExec_Non101ResponseWithMessage(t *testing.T) {
+	t.Parallel()
+
+	dir := shortTempDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	body := `{"message":"exec denied: no commands are allowlisted"}`
+	resp := fmt.Sprintf("HTTP/1.1 403 Forbidden\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4096)
+		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)) //nolint:errcheck
+		conn.Read(buf)                                               //nolint:errcheck
+		conn.Write([]byte(resp))                                     //nolint:errcheck
+	}()
+
+	c := &Client{socketPath: sockPath, apiVersion: "v1.44"}
+	_, err = c.StartExec(t.Context(), "exec-123", false)
+	wg.Wait()
+	if err == nil {
+		t.Fatal("expected error for non-101 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "101") {
+		t.Fatalf("error = %q, expected to contain '101'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "exec denied: no commands are allowlisted") {
+		t.Fatalf("error = %q, expected to contain the docker error message", err.Error())
 	}
 }
 

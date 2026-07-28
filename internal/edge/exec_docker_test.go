@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -102,6 +103,29 @@ func TestStartExecCreateFailure(t *testing.T) {
 	}
 	if _, ok := c.execSessions.Load("e1"); ok {
 		t.Error("a session was registered despite CreateExec failing")
+	}
+}
+
+// A CreateExec failure carrying a denial reason from the Docker error body
+// (e.g. sockguard's 403 exec-policy rejection) surfaces that reason verbatim
+// in the terminal exec_end, so the controller/UI can show why exec was denied
+// instead of a bare status code.
+func TestStartExecCreateFailure_ExecDenied(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	fd := &fakeDocker{createExecErr: errors.New("create exec: docker error (status 403): exec denied: no commands are allowlisted")}
+	c.dockerClient = fd
+
+	c.StartExec(context.Background(), protocol.ExecStartMessage{ExecID: "e1", ContainerID: "c1"})
+
+	var end protocol.ExecEndMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeExecEnd), &end)
+	if !strings.Contains(end.Reason, "exec denied: no commands are allowlisted") {
+		t.Errorf("exec_end reason = %q, want it to contain the exec-denial message", end.Reason)
+	}
+	if !strings.Contains(end.Reason, "403") {
+		t.Errorf("exec_end reason = %q, want it to contain the status code", end.Reason)
 	}
 }
 

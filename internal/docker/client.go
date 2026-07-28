@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	applog "github.com/codeswhat/portwing/internal/log"
@@ -285,6 +286,47 @@ func validateContainerRef(ref string) error {
 	return nil
 }
 
+// maxDockerErrorBodyBytes bounds how much of a non-2xx Docker response body
+// is read into an error message, so a misbehaving daemon or proxy can't
+// inflate error text (and anything downstream, like a wire message) without
+// limit.
+const maxDockerErrorBodyBytes = 4 * 1024 // 4 KiB
+
+// dockerError builds an error for a non-2xx Docker API response for the
+// given action (e.g. "create exec"), including the response body's message
+// when present. Docker (and proxies such as sockguard sitting in front of
+// the daemon) return non-2xx bodies as {"message":"..."} JSON, so a denial
+// reason like "exec denied: no commands are allowlisted" is surfaced to the
+// caller instead of being discarded. body should already be bounded (e.g.
+// read via maxDockerErrorBodyBytes) by the caller.
+func dockerError(action string, status int, body []byte) error {
+	if msg := extractDockerErrorMessage(body); msg != "" {
+		return fmt.Errorf("%s: docker error (status %d): %s", action, status, msg)
+	}
+	return fmt.Errorf("%s: docker error (status %d)", action, status)
+}
+
+// extractDockerErrorMessage pulls a human-readable message out of a Docker
+// error response body. Docker's (and sockguard's) error bodies are usually
+// {"message":"..."} JSON; when the body doesn't match that shape, or the
+// message is empty, the raw trimmed body is used instead.
+func extractDockerErrorMessage(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return ""
+	}
+
+	var parsed struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+		if msg := strings.TrimSpace(parsed.Message); msg != "" {
+			return msg
+		}
+	}
+	return trimmed
+}
+
 // ListContainers returns all containers (or only running ones if all is false).
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerJSON, error) {
 	path := "/containers/json"
@@ -299,9 +341,10 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerJSON,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "ListContainers", "status", resp.StatusCode, "body", string(body))
-		return nil, fmt.Errorf("list containers: docker error (status %d)", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		err = dockerError("list containers", resp.StatusCode, body)
+		slog.Warn("docker error", "method", "ListContainers", "status", resp.StatusCode, "error", err)
+		return nil, err
 	}
 
 	var containers []ContainerJSON
@@ -323,9 +366,10 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerIns
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "InspectContainer", "path", applog.Sanitize("/containers/"+id+"/json"), "status", resp.StatusCode, "body", applog.Sanitize(string(body)))
-		return nil, fmt.Errorf("inspect container: docker error (status %d)", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		err = dockerError("inspect container", resp.StatusCode, body)
+		slog.Warn("docker error", "method", "InspectContainer", "path", applog.Sanitize("/containers/"+id+"/json"), "status", resp.StatusCode, "error", applog.Sanitize(err.Error()))
+		return nil, err
 	}
 
 	var info ContainerInspect
@@ -353,9 +397,10 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force bool) err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "RemoveContainer", "path", applog.Sanitize(path), "status", resp.StatusCode, "body", applog.Sanitize(string(body)))
-		return fmt.Errorf("remove container: docker error (status %d)", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		err = dockerError("remove container", resp.StatusCode, body)
+		slog.Warn("docker error", "method", "RemoveContainer", "path", applog.Sanitize(path), "status", resp.StatusCode, "error", applog.Sanitize(err.Error()))
+		return err
 	}
 	return nil
 }
@@ -400,9 +445,13 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body := readAndCloseBody(resp.Body)
-		slog.Warn("docker error", "method", "GetContainerLogs", "path", applog.Sanitize("/containers/"+id+"/logs"), "status", resp.StatusCode, "body", applog.Sanitize(body))
-		return nil, fmt.Errorf("container logs: docker error (status %d)", resp.StatusCode)
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			slog.Debug("closing docker response body", "method", "GetContainerLogs", "error", closeErr)
+		}
+		err = dockerError("container logs", resp.StatusCode, data)
+		slog.Warn("docker error", "method", "GetContainerLogs", "path", applog.Sanitize("/containers/"+id+"/logs"), "status", resp.StatusCode, "error", applog.Sanitize(err.Error()))
+		return nil, err
 	}
 
 	return resp.Body, nil
@@ -445,9 +494,10 @@ func (c *Client) CreateExec(ctx context.Context, containerID string, cmd []strin
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "CreateExec", "path", applog.Sanitize("/containers/"+containerID+"/exec"), "status", resp.StatusCode, "body", applog.Sanitize(string(body)))
-		return "", fmt.Errorf("create exec: docker error (status %d)", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		err = dockerError("create exec", resp.StatusCode, body)
+		slog.Warn("docker error", "method", "CreateExec", "path", applog.Sanitize("/containers/"+containerID+"/exec"), "status", resp.StatusCode, "error", applog.Sanitize(err.Error()))
+		return "", err
 	}
 
 	var result struct {
@@ -489,7 +539,11 @@ func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Co
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
 		closeConn(conn, "exec start unexpected status")
+		if msg := extractDockerErrorMessage(body); msg != "" {
+			return nil, fmt.Errorf("expected 101 Switching Protocols, got %d: %s", resp.StatusCode, msg)
+		}
 		return nil, fmt.Errorf("expected 101 Switching Protocols, got %d", resp.StatusCode)
 	}
 
@@ -523,11 +577,8 @@ func (c *Client) ResizeExec(ctx context.Context, execID string, cols, rows int) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("resize exec: status %d: reading body: %w", resp.StatusCode, err)
-		}
-		return fmt.Errorf("resize exec: status %d: %s", resp.StatusCode, string(body))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		return dockerError("resize exec", resp.StatusCode, body)
 	}
 	return nil
 }
@@ -541,26 +592,14 @@ func (c *Client) GetEvents(ctx context.Context) (io.ReadCloser, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body := readAndCloseBody(resp.Body)
-		return nil, fmt.Errorf("docker events: status %d: %s", resp.StatusCode, string(body))
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			slog.Debug("closing docker response body", "method", "GetEvents", "error", closeErr)
+		}
+		return nil, dockerError("docker events", resp.StatusCode, data)
 	}
 
 	return resp.Body, nil
-}
-
-func readAndCloseBody(body io.ReadCloser) string {
-	data, readErr := io.ReadAll(body)
-	closeErr := body.Close()
-	switch {
-	case readErr != nil && closeErr != nil:
-		return fmt.Sprintf("reading body: %v; closing body: %v", readErr, closeErr)
-	case readErr != nil:
-		return fmt.Sprintf("reading body: %v", readErr)
-	case closeErr != nil:
-		return fmt.Sprintf("%s; closing body: %v", string(data), closeErr)
-	default:
-		return string(data)
-	}
 }
 
 func closeConn(conn net.Conn, context string) {
@@ -578,9 +617,10 @@ func (c *Client) GetDockerInfo(ctx context.Context) (*DockerInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "GetDockerInfo", "path", "/info", "status", resp.StatusCode, "body", string(body))
-		return nil, fmt.Errorf("docker info: docker error (status %d)", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		err = dockerError("docker info", resp.StatusCode, body)
+		slog.Warn("docker error", "method", "GetDockerInfo", "path", "/info", "status", resp.StatusCode, "error", err)
+		return nil, err
 	}
 
 	var info DockerInfo
@@ -629,9 +669,10 @@ func (c *Client) ContainerStats(ctx context.Context, id string) (*ContainerStats
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		slog.Warn("docker error", "method", "ContainerStats", "path", applog.Sanitize("/containers/"+id+"/stats"), "status", resp.StatusCode, "body", applog.Sanitize(string(body)))
-		return nil, fmt.Errorf("container stats: docker error (status %d)", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDockerErrorBodyBytes))
+		err = dockerError("container stats", resp.StatusCode, body)
+		slog.Warn("docker error", "method", "ContainerStats", "path", applog.Sanitize("/containers/"+id+"/stats"), "status", resp.StatusCode, "error", applog.Sanitize(err.Error()))
+		return nil, err
 	}
 
 	var stats ContainerStatsResponse

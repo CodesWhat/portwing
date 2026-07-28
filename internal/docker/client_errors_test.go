@@ -232,8 +232,10 @@ func TestResizeExec_BodyReadError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on body read failure, got nil")
 	}
-	if !strings.Contains(err.Error(), "reading body") {
-		t.Fatalf("error = %q, expected 'reading body'", err.Error())
+	// The body couldn't be read, so no message is available; the error still
+	// carries the status code via the shared dockerError helper.
+	if !strings.Contains(err.Error(), "404") {
+		t.Fatalf("error = %q, expected to contain status 404", err.Error())
 	}
 }
 
