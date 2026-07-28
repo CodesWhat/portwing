@@ -8,24 +8,31 @@ ignore:
   # Compose v5.3.1's build dependency graph does not contain openpgp. There is
   # no fixed x/crypto version because the advisory deprecates that package.
   - vulnerability: GO-2026-5932
-    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-no-openpgp.sh guards source and binary linkage. Review if x/crypto changes from v0.54.0."
+    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.54.0."
     package:
       name: golang.org/x/crypto
       version: v0.54.0
       type: go-module
       location: "/go.mod"
   - vulnerability: GO-2026-5932
-    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-no-openpgp.sh guards source and binary linkage. Review if x/crypto changes from v0.54.0."
+    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.54.0."
     package:
       name: golang.org/x/crypto
       version: v0.54.0
       type: go-module
       location: "**/usr/bin/portwing"
   - vulnerability: GO-2026-5932
-    reason: "Docker Compose v5.3.1 does not link openpgp; scripts/verify-no-openpgp.sh inspects the shipped binary. Review when Wolfi changes x/crypto from v0.53.0."
+    reason: "Docker Compose v5.3.1 does not link openpgp; scripts/verify-scanner-exclusions.sh inspects the shipped binary. Review when Wolfi changes x/crypto from v0.53.0."
     package:
       name: golang.org/x/crypto
       version: v0.53.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-5841
+    reason: "Docker Compose v5.3.1 does not link the affected compress/s2 package; scripts/verify-scanner-exclusions.sh inspects the shipped binary. Review when klauspost/compress changes from v1.18.6."
+    package:
+      name: github.com/klauspost/compress
+      version: v1.18.6
       type: go-module
       location: "**/usr/bin/docker-compose"
 
