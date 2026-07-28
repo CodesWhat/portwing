@@ -207,12 +207,22 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Errorf("health status: got %d, want 200", resp.StatusCode)
 	}
 
-	var body map[string]string
+	var body struct {
+		Status     string `json:"status"`
+		Live       bool   `json:"live"`
+		Ready      bool   `json:"ready"`
+		Mode       string `json:"mode"`
+		Docker     string `json:"docker"`
+		Controller string `json:"controller"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decoding health response: %v", err)
 	}
-	if body["status"] != "healthy" {
-		t.Errorf("health status field: got %q, want \"healthy\"", body["status"])
+	if body.Status != "healthy" || !body.Live || !body.Ready {
+		t.Errorf("health state: got %+v, want healthy/live/ready", body)
+	}
+	if body.Mode != "standard" || body.Docker != "connected" || body.Controller != "not_applicable" {
+		t.Errorf("operational health fields: got %+v", body)
 	}
 }
 
