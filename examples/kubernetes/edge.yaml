@@ -7,6 +7,7 @@
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a keypair
 # and register its public key with Drydock before applying this manifest:
 #
+#   kubectl create namespace portwing --dry-run=client -o yaml | kubectl apply -f -
 #   portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
 #   kubectl -n portwing create secret generic portwing-key \
 #     --from-file=portwing_ed25519.pem=portwing_ed25519.pem
@@ -19,22 +20,31 @@ kind: Namespace
 metadata:
   name: portwing
 ---
-# Create this secret out-of-band; do not store real private keys in source control.
-# Command:
-#   portwing keygen -comment "edge-host-01" > portwing_ed25519.pem   # PKCS#8 key + authorized_keys line
-#   kubectl -n portwing create secret generic portwing-key \
-#     --from-file=portwing_ed25519.pem=portwing_ed25519.pem
-#
-# Register the authorized_keys line with Drydock (POST /api/v1/portwing/keys)
-# so the controller trusts this agent before it first connects.
 apiVersion: v1
-kind: Secret
+kind: ConfigMap
 metadata:
-  name: portwing-key
+  name: portwing-audit-forwarder
   namespace: portwing
-type: Opaque
-stringData:
-  portwing_ed25519.pem: "REPLACE_WITH_PKCS8_ED25519_PRIVATE_KEY"
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush 1
+        Log_Level info
+        Parsers_File parsers.conf
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port 2020
+        Health_Check On
+    [INPUT]
+        Name tail
+        Path /var/log/portwing/audit.ndjson
+        Tag portwing.audit
+        Parser json
+        DB /var/lib/fluent-bit/audit.db
+        Read_from_Head true
+    [OUTPUT]
+        Name stdout
+        Match portwing.audit
 ---
 # DaemonSet: one edge agent per Docker-capable node, all dialing out to Drydock.
 # The AGENT_NAME is derived from the node name via the Downward API so each
@@ -80,7 +90,11 @@ spec:
         - name: portwing
           image: ghcr.io/codeswhat/portwing:latest
           imagePullPolicy: Always
-          # No ports published — edge mode is outbound-only.
+          # Cluster-internal operations port only; no host port is published.
+          ports:
+            - name: operations
+              containerPort: 3000
+              protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -95,6 +109,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: AUDIT_LOG
+              value: /var/log/portwing/audit.ndjson
+            - name: AUDIT_BUFFER_SIZE
+              value: "4096"
           volumeMounts:
             - name: docker-sock
               mountPath: /var/run/docker.sock
@@ -102,20 +120,22 @@ spec:
             - name: portwing-key
               mountPath: /etc/portwing
               readOnly: true
+            - name: audit-log
+              mountPath: /var/log/portwing
             - name: tmp
               mountPath: /tmp
             - name: stacks
               mountPath: /data/stacks
           livenessProbe:
             httpGet:
-              path: /_portwing/health
+              path: /health
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /_portwing/health
+              path: /ready
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -127,6 +147,43 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+        - name: audit-forwarder
+          image: cr.fluentbit.io/fluent/fluent-bit:5.0.6@sha256:1abcf78fe8c9dee0c57fc2199693370a5a1f84e0af4716beddcd153b40cbbbb1
+          args: [-c, /fluent-bit/etc/portwing.conf]
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: audit-forwarder-config
+              mountPath: /fluent-bit/etc/portwing.conf
+              subPath: fluent-bit.conf
+              readOnly: true
+            - name: audit-log
+              mountPath: /var/log/portwing
+              readOnly: true
+            - name: audit-forwarder-state
+              mountPath: /var/lib/fluent-bit
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 2020
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 2020
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
       volumes:
         - name: docker-sock
           hostPath:
@@ -140,6 +197,13 @@ spec:
                 path: portwing_ed25519.pem
         - name: tmp
           emptyDir: {}
+        - name: audit-log
+          emptyDir: {}
+        - name: audit-forwarder-state
+          emptyDir: {}
+        - name: audit-forwarder-config
+          configMap:
+            name: portwing-audit-forwarder
         # Compose stacks must survive pod restarts: down/ps/stop/restart/logs
         # reuse the compose file an earlier `up` wrote here, so this must NOT be
         # an emptyDir (which is wiped on pod recreation). hostPath keeps each
@@ -150,3 +214,19 @@ spec:
           hostPath:
             path: /var/lib/portwing/stacks
             type: DirectoryOrCreate
+---
+# Cluster-internal access for Prometheus only. Edge control traffic remains
+# outbound over the Drydock WebSocket and no NodePort/LoadBalancer is created.
+apiVersion: v1
+kind: Service
+metadata:
+  name: portwing-edge-metrics
+  namespace: portwing
+spec:
+  type: ClusterIP
+  selector:
+    app: portwing-edge
+  ports:
+    - name: metrics
+      port: 3000
+      targetPort: operations

@@ -29,8 +29,8 @@ Beginning with `v1.0.0`, the following documented surfaces are stable:
 
 - the generic REST and SSE API under `/api/v1`;
 - the documented Drydock-compatible HTTP and SSE routes;
-- `/_portwing/health`, `/_portwing/info`, `/_portwing/metrics`,
-  `/_portwing/audit`, and `/_portwing/mcp`;
+- `/ready`, `/_portwing/health`, `/_portwing/info`, `/_portwing/metrics`,
+  `/_portwing/audit`, `/_portwing/audit/export`, and `/_portwing/mcp`;
 - `/health` as a minimal unauthenticated liveness response; and
 - Ed25519 HTTP signature version 2, including its exact escaped-path and raw
   query request target.
@@ -57,6 +57,20 @@ The raw Docker API proxy is intentionally outside this guarantee. Its paths,
 payloads, and behavior follow the connected Docker daemon's negotiated API
 version. Experimental endpoints are also outside the guarantee until their
 documentation explicitly marks them stable.
+
+## Audit event and export schemas
+
+The structured audit sink schema, event identifiers, and ring-buffer export
+schema documented in the audit logging reference are stable beginning with
+`v0.8.0`. This earlier guarantee exists so external collectors can safely
+persist and index security records before Portwing reaches v1.
+
+Minor releases may add a new event identifier or optional field. Removing or
+renaming an event or field, changing a field's type or meaning, reusing an
+identifier for a different event, or changing cursor ordering is breaking.
+The sink and export schemas intentionally differ: sink records use
+`time`/`level`/`msg`, while ring and NDJSON export records use `cursor`/`ts`.
+Both variants are covered by this policy.
 
 ## Environment variables
 
@@ -134,6 +148,7 @@ operators exposed. The advisory and release notes must explain the exception.
 A release that changes a stable surface must update the corresponding artifact:
 
 - `api/openapi.yaml` and API contract tests for HTTP changes;
+- the audit logging reference and cursor/export tests for audit schema changes;
 - the configuration reference and parser tests for environment changes;
 - MCP protocol/tool tests for MCP changes;
 - Portwing and Drydock wire-contract tests for edge changes; and

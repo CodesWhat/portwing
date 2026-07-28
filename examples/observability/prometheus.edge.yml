@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: portwing-edge
+    scheme: http
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["portwing-edge:3000"]

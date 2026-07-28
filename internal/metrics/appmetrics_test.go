@@ -250,6 +250,42 @@ func TestRegistryDeterministicOutput(t *testing.T) {
 	}
 }
 
+func TestRegistryOperationalMetrics(t *testing.T) {
+	t.Parallel()
+
+	reg := metrics.NewRegistry()
+	if reg.ControllerConnected() {
+		t.Fatal("new registry should report a disconnected controller")
+	}
+	reg.SetEdgeMode(true)
+	reg.SetControllerConnected(true)
+	if !reg.ControllerConnected() {
+		t.Fatal("controller connected state was not retained")
+	}
+	reg.IncReconnect()
+	reg.IncReconnect()
+	reg.IncBackpressure()
+	reg.SetAuditState(3, 8, true)
+	reg.IncAuditExport(true)
+	reg.IncAuditExport(false)
+
+	body := output(reg)
+	for _, want := range []string{
+		"portwing_edge_controller_connected 1",
+		"portwing_edge_reconnects_total 2",
+		"portwing_edge_backpressure_events_total 1",
+		"portwing_audit_buffer_records 3",
+		"portwing_audit_buffer_capacity 8",
+		"portwing_audit_sink_enabled 1",
+		`portwing_audit_exports_total{outcome="success"} 1`,
+		`portwing_audit_exports_total{outcome="error"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q; output:\n%s", want, body)
+		}
+	}
+}
+
 // TestRegistryConcurrency exercises all mutation methods concurrently and then
 // asserts exact totals. Run with -race to catch data races.
 func TestRegistryConcurrency(t *testing.T) {

@@ -115,7 +115,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "Our zero-dependency `/metrics` endpoint exports container and agent telemetry in cAdvisor-compatible form, so it drops straight into the dashboards and alerts you already run.",
+      "Our zero-dependency `/metrics` endpoint exports host/container telemetry plus edge connection, reconnect, backpressure, and audit health. Explicit `/health` and `/ready` probes keep dependency outages from becoming restart loops.",
     category: "operations",
   },
   {
@@ -124,7 +124,7 @@ export const features: Feature[] = [
     color: "text-amber-500 dark:text-amber-400",
     bg: "bg-amber-100 dark:bg-amber-900/50",
     description:
-      "Every action we take is recorded as structured JSON: who asked, what ran, and what the daemon answered. Export it to immutable storage for tamper evidence; authentication and key-enrollment events are first-class.",
+      "Every action is recorded with a stable structured schema: who asked, what ran, and what the daemon answered. A cursor-based NDJSON path detects overwritten history and restarts before exporters ship records to immutable storage.",
     category: "operations",
   },
   {

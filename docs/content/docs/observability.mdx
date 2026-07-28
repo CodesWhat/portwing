@@ -3,7 +3,10 @@ title: Observability
 description: Prometheus metrics, health checks, and the info endpoint exposed by the Portwing agent.
 ---
 
-Portwing ships a zero-dependency Prometheus metrics endpoint and two health-check routes. No sidecar, no instrumentation library — the agent writes the exposition format directly.
+Portwing ships a zero-dependency Prometheus metrics endpoint plus explicit
+liveness and readiness routes in both standard and edge modes. No
+instrumentation library is embedded — the agent writes the exposition format
+directly.
 
 ## Metrics endpoint
 
@@ -14,7 +17,12 @@ Metrics are available at two paths; both serve identical output:
 | `/_portwing/metrics` | Canonical path. Prefixed `portwing_` and `container_` metrics only. |
 | `/metrics` | Alias for compatibility with default Prometheus scrape configs. |
 
-Both paths require a valid Bearer token. The response content-type is `text/plain; version=0.0.4; charset=utf-8` (Prometheus text exposition format 0.0.4).
+In standard mode both paths require a valid Bearer token. In edge mode the
+local operations listener exposes only `/health`, `/ready`,
+`/_portwing/health`, and `/metrics`; keep that listener on a private container
+or cluster network because the metrics route has no inbound credential surface.
+The response content-type is `text/plain; version=0.0.4; charset=utf-8`
+(Prometheus text exposition format 0.0.4).
 
 ## Prometheus scrape config
 
@@ -35,6 +43,16 @@ scrape_configs:
 <Callout type="info">
 If you scrape multiple agents, give each a distinct `job_name` or add a `relabel_configs` block to attach a `host` label so time series from different agents stay identifiable in your dashboards.
 </Callout>
+
+Edge-mode scrape config on the same private container or pod network:
+
+```yaml
+scrape_configs:
+  - job_name: portwing-edge
+    scheme: http
+    static_configs:
+      - targets: ["portwing-edge:3000"]
+```
 
 ## Exported metrics
 
@@ -91,6 +109,26 @@ portwing_http_requests_total{method="POST",code="200"} 42
 portwing_auth_failures_total{reason="bad_token"} 3
 ```
 
+### Edge connection and audit metrics
+
+These series make controller connectivity, reconnect churn, slow-consumer
+backpressure, and audit exporter health directly alertable.
+
+| Metric | Type | Mode | Description |
+|--------|------|------|-------------|
+| `portwing_edge_controller_connected` | gauge | edge | `1` while the controller WebSocket is connected, otherwise `0`. |
+| `portwing_edge_reconnects_total` | counter | edge | Reconnect attempts scheduled after a controller disconnect or dial failure. |
+| `portwing_edge_backpressure_events_total` | counter | edge | Connections evicted because the bounded outbound frame queue filled. |
+| `portwing_audit_buffer_records` | gauge | both | Records currently retained by the in-memory audit ring. |
+| `portwing_audit_buffer_capacity` | gauge | both | Configured audit ring capacity. |
+| `portwing_audit_sink_enabled` | gauge | both | `1` when a file/stdout/stderr audit sink is configured. |
+| `portwing_audit_exports_total{outcome}` | counter | standard | JSON/NDJSON export requests split into `success` and `error`. |
+
+Recommended alerts include sustained
+`portwing_edge_controller_connected == 0`, a reconnect rate above the expected
+maintenance baseline, any increase in backpressure events, and an audit buffer
+that remains at capacity while the exporter error counter rises.
+
 ### Sample output
 
 ```text
@@ -129,41 +167,51 @@ container_cpu_usage_seconds_total{id="a1b2c3d4e5f6",name="myapp",image="myapp:la
 container_memory_usage_bytes{id="a1b2c3d4e5f6",name="myapp",image="myapp:latest"} 134217728
 ```
 
-## Health and info endpoints
+## Liveness, readiness, and info endpoints
 
 ### GET /health
 
-No authentication required. Intended for Docker `HEALTHCHECK` directives and load-balancer probes.
+No authentication required. Intended for Docker/Kubernetes liveness probes.
+It does not contact Docker or the edge controller, so a dependency outage
+cannot put the process into a restart loop.
 
 ```bash
 curl http://your-host:3000/health
 ```
 
-Returns HTTP 200 with:
+Returns HTTP 200 with the full operational shape:
 
-```text
-{"status":"ok"}
+```json
+{"status":"ok","live":true,"ready":false,"mode":"standard","version":"0.8.0","uptimeSeconds":3842.7,"docker":"unknown","controller":"not_applicable"}
 ```
 
-### GET /_portwing/health
+### GET /ready
 
-No authentication required. Returns agent status and Docker daemon connectivity. Returns HTTP 503 when Docker is unreachable.
+No authentication required. In standard mode, readiness requires Docker. In
+edge mode, readiness requires both Docker and the Drydock controller
+WebSocket. It returns HTTP 503 until every required dependency is connected.
 
 ```bash
-curl http://your-host:3000/_portwing/health
+curl http://your-host:3000/ready
 ```
 
-Returns HTTP 200 when healthy:
+Standard-mode ready response:
 
-```text
-{"status":"healthy","docker":"connected"}
+```json
+{"status":"healthy","live":true,"ready":true,"mode":"standard","version":"0.8.0","uptimeSeconds":3842.7,"docker":"connected","controller":"not_applicable"}
 ```
 
-Returns HTTP 503 when Docker is unreachable:
+Edge-mode not-ready response:
 
-```text
-{"status":"unhealthy","docker":"disconnected"}
+```json
+{"status":"unhealthy","live":true,"ready":false,"mode":"edge","version":"0.8.0","uptimeSeconds":42.1,"docker":"connected","controller":"disconnected"}
 ```
+
+`GET /_portwing/health` remains as a compatibility alias for `/ready`.
+
+The container image's built-in healthcheck uses `/health` and automatically
+selects HTTP or HTTPS from `TLS_CERT`, while the Kubernetes examples use
+`/health` for liveness and `/ready` for readiness.
 
 ### GET /_portwing/info
 
@@ -183,3 +231,4 @@ curl -H "Authorization: Bearer YOUR_PORTWING_TOKEN" \
 - [Audit Logging](/audit-logging) — structured audit events complement these time-series metrics for the security side of observability.
 - [API Reference](/api-reference) — full OpenAPI spec for all endpoints including metrics and health.
 - [Configuration](/configuration) — token configuration options referenced in the scrape config above.
+- [Deployment examples](https://github.com/CodesWhat/portwing/tree/main/examples) — pinned Prometheus and Fluent Bit topologies for Compose and Kubernetes.

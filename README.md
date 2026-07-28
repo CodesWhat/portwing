@@ -626,12 +626,14 @@ Portwing talks to the Docker daemon over the Unix socket only — there is no `D
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/health` | GET | No | Simple health check — `{"status":"ok"}` |
-| `/_portwing/health` | GET | No | Health check + Docker connectivity |
+| `/health` | GET | No | Process liveness; never probes dependencies |
+| `/ready` | GET | No | Docker readiness, plus controller readiness in edge mode |
+| `/_portwing/health` | GET | No | Compatibility alias for `/ready` |
 
-`/_portwing/health` returns HTTP 503 when the Docker daemon is unreachable.
-Both endpoints are unauthenticated and safe to use for load-balancer probes
-and Docker HEALTHCHECK instructions.
+Every response includes status, live/ready booleans, mode, version, uptime,
+Docker state, and edge-controller state. `/ready` returns HTTP 503 when a
+required dependency is unreachable. The image healthcheck uses `/health`;
+Kubernetes examples use `/health` for liveness and `/ready` for readiness.
 
 ### Agent Endpoints
 
@@ -642,6 +644,7 @@ and Docker HEALTHCHECK instructions.
 | `/_portwing/metrics` | GET | Yes | Prometheus metrics (agent-scoped) |
 | `/metrics` | GET | Yes | Prometheus metrics (Drydock agent secret) |
 | `/_portwing/audit` | GET | Yes | Recent audit records (JSON, newest-first; `?limit=N`) |
+| `/_portwing/audit/export` | GET | Yes | Cursor-based NDJSON export (oldest-first) |
 | `/_portwing/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol 2025-11-25) |
 
 ### MCP — AI Assistant Integration
@@ -733,7 +736,11 @@ All other paths (`/*`) are transparently proxied to the Docker Engine API, inclu
 ### Metrics
 
 Portwing exposes Prometheus metrics at `/_portwing/metrics` (and the alias
-`/metrics`). Both require bearer auth. In addition to build/host/per-container series, both endpoints also expose agent request metrics: `portwing_http_requests_total{method,code}`, `portwing_http_request_duration_seconds` (histogram), `portwing_http_requests_in_flight` (gauge), `portwing_auth_failures_total{reason}`, and `portwing_rate_limited_total`.
+`/metrics`). Standard mode requires bearer auth; edge mode exposes `/metrics`
+on its limited private operations listener. In addition to
+build/host/per-container and HTTP series, the endpoint reports edge-controller
+connection/reconnect/backpressure state plus audit ring, sink, and export
+health.
 
 Prometheus scrape config:
 
@@ -899,7 +906,13 @@ docker run -e AUDIT_LOG=/var/log/portwing-audit.log ...
 docker run -e AUDIT_LOG=stdout ...
 ```
 
-Auditing is disabled by default (`AUDIT_LOG` unset). When disabled the overhead is a single nil pointer check per request. Separately, setting `AUDIT_BUFFER_SIZE` (default 256) keeps the most recent audit records in an in-memory ring buffer for pull-based retrieval at `GET /_portwing/audit` (auth required), so a controller can read the audit trail without host file access. The buffer is independent of `AUDIT_LOG` and works even when the slog sink is off.
+Auditing is disabled by default (`AUDIT_LOG` unset). When disabled the overhead
+is a single nil pointer check per request. Separately, setting
+`AUDIT_BUFFER_SIZE` (default 256) keeps recent records in an in-memory ring for
+`GET /_portwing/audit` and cursor-based NDJSON export at
+`GET /_portwing/audit/export` (both auth required). A 409 response detects
+overwritten history or a restarted cursor generation instead of silently
+dropping records. The sink and export schemas are stable from v0.8.0.
 
 ### Events
 

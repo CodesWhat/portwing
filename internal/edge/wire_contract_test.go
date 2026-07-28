@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -30,6 +31,7 @@ import (
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/auth"
 	"github.com/codeswhat/portwing/internal/config"
+	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/metrics"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
@@ -746,18 +748,44 @@ func TestCloseWebSocketCallsClose(t *testing.T) {
 // startHealthServer — endpoint responds correctly
 // ---------------------------------------------------------------------------
 
-// TestStartHealthServerEndpointResponds confirms that the /_portwing/health
-// endpoint returns HTTP 200 and {"status":"healthy"} after startHealthServer
-// is called.
+// TestStartHealthServerEndpointResponds confirms that edge readiness includes
+// Docker and controller state and that the local metrics endpoint exposes
+// connection/reconnect/backpressure state.
 func TestStartHealthServerEndpointResponds(t *testing.T) {
 	t.Parallel()
 
 	addr := freeAddr(t)
+	reg := metrics.NewRegistry()
+	reg.SetEdgeMode(true)
+	reg.SetControllerConnected(true)
+	reg.IncReconnect()
+	reg.IncBackpressure()
+	containerStats := &docker.ContainerStatsResponse{}
+	containerStats.CPUStats.CPUUsage.TotalUsage = 2_000_000_000
+	containerStats.MemoryStats.Usage = 1024
+	containerStats.MemoryStats.Limit = 4096
 	c := &Client{
 		cfg: &config.Config{
 			BindAddress: "127.0.0.1",
 			Port:        portFrom(addr),
 		},
+		dockerClient: &fakeDocker{
+			doResp: &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("OK")),
+			},
+			metricContainers: []docker.ContainerJSON{{
+				ID:    "edge-container",
+				Names: []string{"/edge-workload"},
+				Image: "example/workload:v1",
+			}},
+			metricStats: map[string]*docker.ContainerStatsResponse{
+				"edge-container": containerStats,
+			},
+		},
+		collector: metrics.NewCollector("", true),
+		metrics:   reg,
+		startTime: time.Now().Add(-time.Second),
 	}
 	c.startHealthServer()
 	t.Cleanup(func() {
@@ -784,12 +812,45 @@ func TestStartHealthServerEndpointResponds(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("health status = %d, want 200", resp.StatusCode)
 	}
-	var body map[string]string
+	var body struct {
+		Status     string `json:"status"`
+		Live       bool   `json:"live"`
+		Ready      bool   `json:"ready"`
+		Mode       string `json:"mode"`
+		Docker     string `json:"docker"`
+		Controller string `json:"controller"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode health response: %v", err)
 	}
-	if body["status"] != "healthy" {
-		t.Errorf("health body status = %q, want healthy", body["status"])
+	if body.Status != "healthy" || !body.Live || !body.Ready {
+		t.Fatalf("health response = %+v, want healthy/live/ready", body)
+	}
+	if body.Mode != "edge" || body.Docker != "connected" || body.Controller != "connected" {
+		t.Fatalf("operational health fields = %+v", body)
+	}
+
+	metricsResp, err := http.Get("http://" + c.healthServer.Addr + "/metrics") //nolint:noctx,gosec
+	if err != nil {
+		t.Fatalf("GET edge metrics: %v", err)
+	}
+	defer metricsResp.Body.Close()
+	metricsBody, err := io.ReadAll(metricsResp.Body)
+	if err != nil {
+		t.Fatalf("read edge metrics: %v", err)
+	}
+	for _, want := range []string{
+		`portwing_build_info{version="` + protocol.AgentVersion + `"} 1`,
+		"portwing_uptime_seconds ",
+		"portwing_host_memory_total_bytes ",
+		`container_cpu_usage_seconds_total{id="edge-container",name="edge-workload",image="example/workload:v1"} 2`,
+		"portwing_edge_controller_connected 1",
+		"portwing_edge_reconnects_total 1",
+		"portwing_edge_backpressure_events_total 1",
+	} {
+		if !strings.Contains(string(metricsBody), want) {
+			t.Errorf("missing %q in edge metrics:\n%s", want, metricsBody)
+		}
 	}
 }
 

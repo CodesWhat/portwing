@@ -257,6 +257,7 @@ func isLoopbackBind(address string) bool {
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// No auth required.
 	mux.HandleFunc("GET /_portwing/health", s.handleHealth)
+	mux.HandleFunc("GET /ready", s.handleHealth)
 	mux.HandleFunc("GET /health", s.handleSimpleHealth)
 
 	// Enrollment endpoint: reachable WITHOUT auth (it IS the bootstrap), but
@@ -276,6 +277,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /_portwing/metrics", authWrap(s.handleMetrics))
 	mux.Handle("GET /metrics", authWrap(s.handleMetrics))
 	mux.Handle("GET /_portwing/audit", authWrap(s.handleAudit))
+	mux.Handle("GET /_portwing/audit/export", authWrap(s.handleAuditExport))
 	mcpHandler := authWrap(func(w http.ResponseWriter, r *http.Request) {
 		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
 	})
@@ -288,7 +290,19 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("/", authWrap(s.handleDockerProxy))
 }
 
-// handleHealth returns the agent health status including Docker connectivity.
+type healthResponse struct {
+	Status        string  `json:"status"`
+	Live          bool    `json:"live"`
+	Ready         bool    `json:"ready"`
+	Mode          string  `json:"mode"`
+	Version       string  `json:"version"`
+	UptimeSeconds float64 `json:"uptimeSeconds"`
+	Docker        string  `json:"docker"`
+	Controller    string  `json:"controller"`
+}
+
+// handleHealth returns readiness including Docker connectivity. It is exposed
+// at both the compatibility path /_portwing/health and the explicit /ready.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	err := s.dockerClient.Ping(ctx)
@@ -304,19 +318,39 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status": status,
-		"docker": dockerStatus,
+	_ = json.NewEncoder(w).Encode(healthResponse{
+		Status:        status,
+		Live:          true,
+		Ready:         err == nil,
+		Mode:          "standard",
+		Version:       protocol.AgentVersion,
+		UptimeSeconds: elapsedSeconds(s.startTime),
+		Docker:        dockerStatus,
+		Controller:    "not_applicable",
 	})
 }
 
-// handleSimpleHealth returns a minimal 200 OK response.
+// handleSimpleHealth reports process liveness without probing dependencies.
 func (s *Server) handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status": "ok",
+	_ = json.NewEncoder(w).Encode(healthResponse{
+		Status:        "ok",
+		Live:          true,
+		Ready:         false,
+		Mode:          "standard",
+		Version:       protocol.AgentVersion,
+		UptimeSeconds: elapsedSeconds(s.startTime),
+		Docker:        "unknown",
+		Controller:    "not_applicable",
 	})
+}
+
+func elapsedSeconds(start time.Time) float64 {
+	if start.IsZero() {
+		return 0
+	}
+	return time.Since(start).Seconds()
 }
 
 // handleInfo returns agent metadata.

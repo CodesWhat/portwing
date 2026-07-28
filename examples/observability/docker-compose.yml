@@ -1,0 +1,140 @@
+# Full v0.8 operations topology. Start one mode at a time:
+#
+#   docker compose --profile standard up -d
+#   DRYDOCK_URL=https://drydock.example.com docker compose --profile edge up -d
+#
+# Preparation and certificate/key generation are documented in ../README.md.
+name: portwing-observability
+
+x-portwing-runtime: &portwing-runtime
+  image: ghcr.io/codeswhat/portwing:v0.8.0
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: [/tmp]
+  user: "65532:65532"
+  group_add:
+    - "${DOCKER_SOCK_GID:?set this to the GID of /var/run/docker.sock}"
+
+x-prometheus-runtime: &prometheus-runtime
+  image: prom/prometheus:v3.10.0-distroless@sha256:4d2174874988fe0d8356fa5c799210767661a2ffce6bb03cdc64306f6579d7b9
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs:
+    - /prometheus:uid=65532,gid=65532,mode=0750
+
+x-audit-forwarder-runtime: &audit-forwarder-runtime
+  image: cr.fluentbit.io/fluent/fluent-bit:5.0.6@sha256:1abcf78fe8c9dee0c57fc2199693370a5a1f84e0af4716beddcd153b40cbbbb1
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  user: "65532:65532"
+  tmpfs:
+    - /var/lib/fluent-bit:uid=65532,gid=65532,mode=0750
+
+services:
+  portwing-standard:
+    <<: *portwing-runtime
+    profiles: [standard]
+    ports:
+      - "3000:3000"
+    environment:
+      TOKEN_FILE: /run/secrets/portwing_token
+      TLS_CERT: /run/secrets/portwing_tls_cert
+      TLS_KEY: /run/secrets/portwing_tls_key
+      AUDIT_LOG: /var/log/portwing/audit.ndjson
+      AUDIT_BUFFER_SIZE: "4096"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../runtime/standard-audit:/var/log/portwing
+      - standard-stacks:/data/stacks
+    secrets:
+      - portwing_token
+      - portwing_tls_cert
+      - portwing_tls_key
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --no-check-certificate --spider https://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  prometheus-standard:
+    <<: *prometheus-runtime
+    profiles: [standard]
+    depends_on: [portwing-standard]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.standard.yml:/etc/prometheus/prometheus.yml:ro
+    secrets:
+      - portwing_token
+      - portwing_tls_cert
+
+  audit-forwarder-standard:
+    <<: *audit-forwarder-runtime
+    profiles: [standard]
+    depends_on: [portwing-standard]
+    command: [/fluent-bit/bin/fluent-bit, -c, /fluent-bit/etc/portwing.conf]
+    volumes:
+      - ./fluent-bit.conf:/fluent-bit/etc/portwing.conf:ro
+      - ../runtime/standard-audit:/var/log/portwing:ro
+
+  portwing-edge:
+    <<: *portwing-runtime
+    profiles: [edge]
+    # No host port is published. Prometheus reaches the operations endpoint
+    # only across this private Compose network.
+    environment:
+      DRYDOCK_URL: "${DRYDOCK_URL:-https://drydock.example.com}"
+      PRIVATE_KEY_FILE: /run/secrets/portwing_key
+      AGENT_NAME: "${AGENT_NAME:-edge-host-01}"
+      AUDIT_LOG: /var/log/portwing/audit.ndjson
+      AUDIT_BUFFER_SIZE: "4096"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../runtime/edge-audit:/var/log/portwing
+      - edge-stacks:/data/stacks
+    secrets:
+      - portwing_key
+
+  prometheus-edge:
+    <<: *prometheus-runtime
+    profiles: [edge]
+    depends_on: [portwing-edge]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.edge.yml:/etc/prometheus/prometheus.yml:ro
+
+  audit-forwarder-edge:
+    <<: *audit-forwarder-runtime
+    profiles: [edge]
+    depends_on: [portwing-edge]
+    command: [/fluent-bit/bin/fluent-bit, -c, /fluent-bit/etc/portwing.conf]
+    volumes:
+      - ./fluent-bit.conf:/fluent-bit/etc/portwing.conf:ro
+      - ../runtime/edge-audit:/var/log/portwing:ro
+
+secrets:
+  portwing_token:
+    file: ../portwing_token.txt
+  portwing_key:
+    file: ../portwing_ed25519.pem
+  portwing_tls_cert:
+    file: ../tls/portwing.crt
+  portwing_tls_key:
+    file: ../tls/portwing.key
+
+volumes:
+  standard-stacks:
+  edge-stacks:

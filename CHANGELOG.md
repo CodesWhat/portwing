@@ -9,12 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mode-aware operations endpoints.** `/health` is now process-only liveness,
+  while `/ready` and its `/_portwing/health` compatibility alias report mode,
+  version, uptime, Docker state, and edge-controller state. Edge mode exposes a
+  private operations listener with the same build/host/container metrics as
+  standard mode plus controller connection, reconnect, and backpressure
+  series.
+- **Cursor-based audit export.** `GET /_portwing/audit/export` streams the
+  stable ring-buffer schema as oldest-first NDJSON, with cursor/window headers
+  and explicit 409 responses for overwritten history or a restarted agent
+  generation. Prometheus now reports audit ring, sink, and export health.
+- **Runnable observability topologies.** The Compose and Kubernetes examples
+  cover standard and edge modes, TLS/bearer or Ed25519 authentication,
+  liveness/readiness probes, authenticated/private Prometheus scraping, and a
+  digest-pinned Fluent Bit audit-forwarding sidecar.
 - **Continuous Drydock edge logs.** `dd:container_log_request` now supports a `stream:true` mode with correlated stdout/stderr chunks, explicit end/error frames, and controller-initiated cancellation. Portwing admits at most 128 live log readers, skips Docker frames larger than 256 KiB, and relies on the existing bounded edge send queue so a stalled controller is evicted rather than consuming memory without limit.
 - **Cross-repo fleet-soak target.** The mock Docker daemon now supports real exec hijacks and sustained multiplexed log output so Drydock can run Portwing processes through reconnect storms, concurrent exec, continuous logs, and controller backpressure.
 - **Native package channels.** GoReleaser now builds individually keyless-signed and checksummed `deb`/`rpm` packages for every supported Linux architecture, publishes stable macOS archives through `CodesWhat/homebrew-tap`, and gates releases on clean-container package installs plus a macOS Homebrew smoke test. Prereleases do not update the stable cask.
 
 ### Changed
 
+- **Container healthchecks now mean liveness.** All image variants probe
+  `/health` instead of dependency readiness and automatically select HTTP or
+  HTTPS from `TLS_CERT`, preventing Docker/controller outages from causing
+  container restart loops.
 - **Drydock wire objects track the current controller schema.** Drydock adapter responses and events now serialize nested registry, tag, digest, update-kind, and runtime-detail objects without changing the generic REST adapter's simpler public model.
 - **Edge mode is production supported.** Project docs, the documentation site, and getportwing.com now describe the stable `portwing/1.0` contract and Drydock 1.6's default-on endpoint; Drydock 1.5 still requires `DD_EXPERIMENTAL_PORTWING=true`.
 

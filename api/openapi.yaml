@@ -106,25 +106,37 @@ components:
   schemas:
     HealthResponse:
       type: object
-      required: [status, docker]
+      required: [status, live, ready, mode, version, uptimeSeconds, docker, controller]
       properties:
         status:
           type: string
-          enum: [healthy, unhealthy]
+          enum: [ok, healthy, unhealthy]
           example: healthy
+        live:
+          type: boolean
+          description: Whether the Portwing process is running.
+        ready:
+          type: boolean
+          description: Whether the dependencies required by the current mode are connected.
+        mode:
+          type: string
+          enum: [standard, edge]
+        version:
+          type: string
+          description: Portwing agent version.
+          example: "0.8.0"
+        uptimeSeconds:
+          type: number
+          minimum: 0
+          description: Seconds since the agent process started.
         docker:
           type: string
-          enum: [connected, disconnected]
+          enum: [connected, disconnected, unknown]
           example: connected
-
-    SimpleHealthResponse:
-      type: object
-      required: [status]
-      properties:
-        status:
+        controller:
           type: string
-          enum: [ok]
-          example: ok
+          enum: [connected, disconnected, not_applicable]
+          description: Edge controller state, or `not_applicable` in standard mode.
 
     InfoResponse:
       type: object
@@ -448,13 +460,18 @@ components:
 
     AuditRecord:
       type: object
-      required: [ts, event]
+      required: [cursor, ts, event]
       description: >
         A single structured audit event from the in-memory ring buffer. Field
         names match the stable on-wire JSON schema; optional fields are omitted
         when empty. This ring-buffer schema differs from the streamed slog log
         line, which uses `time`/`level`/`msg` keys.
       properties:
+        cursor:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonic cursor scoped to the current agent process.
         ts:
           type: string
           format: date-time
@@ -546,10 +563,11 @@ paths:
   /health:
     get:
       operationId: getHealth
-      summary: Simple health check
+      summary: Process liveness
       description: >
-        Returns HTTP 200 with `{"status":"ok"}`. No auth required. Intended
-        for Docker HEALTHCHECK and load-balancer probes.
+        Returns HTTP 200 while the Portwing process is running. No auth
+        required. This route does not probe Docker or the edge controller;
+        use `/ready` for dependency readiness.
       tags: [Health]
       responses:
         "200":
@@ -557,15 +575,38 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SimpleHealthResponse'
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      operationId: getReadiness
+      summary: Agent readiness
+      description: >
+        Probes Docker connectivity and, in edge mode, the controller
+        WebSocket. No auth required. Returns HTTP 503 until all dependencies
+        required by the active mode are connected.
+      tags: [Health]
+      responses:
+        "200":
+          description: Agent dependencies are ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        "503":
+          description: Docker or the edge controller is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
 
   /_portwing/health:
     get:
       operationId: getPortwingHealth
       summary: Agent health check with Docker connectivity
       description: >
-        Returns agent status and Docker daemon connectivity. No auth required.
-        Returns HTTP 503 when Docker is unreachable.
+        Compatibility alias for `/ready`. Returns mode, version, uptime,
+        Docker state, and edge-controller state. No auth required.
       tags: [Health]
       responses:
         "200":
@@ -616,8 +657,9 @@ paths:
       summary: Prometheus metrics (namespaced)
       description: >
         Exposes Portwing agent metrics in Prometheus text exposition format
-        (version 0.0.4). Metrics are prefixed with `portwing_`. Bearer auth
-        required.
+        (version 0.0.4), including HTTP, host, container, audit, and edge
+        connection/backpressure series. Metrics are prefixed with `portwing_`
+        or `container_`. Bearer auth is required in standard mode.
 
         Scrape this endpoint rather than `/metrics` when you want only
         agent-specific metrics without Docker daemon metrics.
@@ -774,6 +816,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditResponse'
+        "401":
+          description: Missing or invalid token.
+        "429":
+          description: Rate limit exceeded.
+
+  /_portwing/audit/export:
+    get:
+      operationId: exportPortwingAudit
+      summary: Cursor-based NDJSON audit export
+      description: >
+        Streams retained audit records oldest-first as newline-delimited JSON.
+        On the first request, omit `cursor` to bootstrap from the oldest
+        retained record. Persist `X-Portwing-Next-Cursor` and provide it on the
+        next request. A 409 response detects overwritten history or an agent
+        restart instead of silently skipping records. Bearer auth required.
+      tags: [Agent]
+      security:
+        - bearerToken: []
+        - portwingToken: []
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+          description: Last successfully consumed cursor. Omit for initial bootstrap.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+          description: Maximum records to return; zero or omitted returns all retained matches.
+      responses:
+        "200":
+          description: Retained records after the supplied cursor.
+          headers:
+            X-Portwing-Oldest-Cursor:
+              schema:
+                type: integer
+            X-Portwing-Latest-Cursor:
+              schema:
+                type: integer
+            X-Portwing-Next-Cursor:
+              schema:
+                type: integer
+              description: Cursor to persist after consuming the response.
+            X-Portwing-Record-Count:
+              schema:
+                type: integer
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+              example: |
+                {"cursor":41,"ts":"2026-07-28T19:00:00Z","event":"auth_failure","actor":"203.0.113.9","method":"GET","path":"/_portwing/info","outcome":"denied"}
+                {"cursor":42,"ts":"2026-07-28T19:00:01Z","event":"api_request","actor":"203.0.113.42","method":"GET","path":"/metrics","outcome":"allowed","status":200}
+        "400":
+          description: Invalid cursor or limit.
+        "409":
+          description: >
+            Cursor is outside the current retained window. Reset to the
+            `X-Portwing-Next-Cursor` response header and surface the gap.
         "401":
           description: Missing or invalid token.
         "429":
