@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Continuous Drydock edge logs.** `dd:container_log_request` now supports a `stream:true` mode with correlated stdout/stderr chunks, explicit end/error frames, and controller-initiated cancellation. Portwing admits at most 128 live log readers, skips Docker frames larger than 256 KiB, and relies on the existing bounded edge send queue so a stalled controller is evicted rather than consuming memory without limit.
+- **Cross-repo fleet-soak target.** The mock Docker daemon now supports real exec hijacks and sustained multiplexed log output so Drydock can run Portwing processes through reconnect storms, concurrent exec, continuous logs, and controller backpressure.
+
+### Changed
+
+- **Drydock wire objects track the current controller schema.** Drydock adapter responses and events now serialize nested registry, tag, digest, update-kind, and runtime-detail objects without changing the generic REST adapter's simpler public model.
+- **Edge mode is production supported.** Project docs, the documentation site, and getportwing.com now describe the stable `portwing/1.0` contract and Drydock 1.6's default-on endpoint; Drydock 1.5 still requires `DD_EXPERIMENTAL_PORTWING=true`.
+
+### Tests
+
+- **Real fleet evidence.** An eight-agent, 45-second local gate completed 48 concurrent exec sessions, recovered from two reconnect storms and a forced slow-consumer reconnect, and stayed within its 128 MiB aggregate agent-RSS and 64 MiB controller-heap growth budgets.
+
 ## [v0.7.1] - 2026-07-28
 
 ### Fixed

@@ -71,15 +71,14 @@ See [Getting Started](/getting-started) for the full Sockguard variant and TLS e
 
 ## Edge Mode
 
-**Status: implemented end-to-end — requires Drydock 1.5+ and Portwing 0.3.0+. Treat as early access.**
+**Status: production supported with stable `portwing/1.0` — requires Drydock 1.5+.**
 
-<Callout type="warn">
-  Edge mode works end-to-end as of **Drydock 1.5** (which ships the `/api/portwing/ws`
-  endpoint) and **Portwing 0.3.0**. It's still new — exec-session robustness under sustained
-  load is not yet battle-tested — so prefer standard mode for production until you've
-  validated edge mode for your workload. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and
-  register the public key with Drydock — token-only (`TOKEN` / `TOKEN_HASH`) connections
-  are rejected.
+<Callout type="info">
+  Edge mode is covered by a real multi-agent reconnect/load soak, including concurrent
+  exec, continuous logs, and controller backpressure. Drydock 1.6 enables the endpoint
+  by default; Drydock 1.5 requires `DD_EXPERIMENTAL_PORTWING=true`. The endpoint is
+  **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock —
+  token-only (`TOKEN` / `TOKEN_HASH`) connections are rejected.
 </Callout>
 
 In Edge mode the agent initiates an outbound WebSocket connection to the Drydock controller at `DRYDOCK_URL + /api/portwing/ws`. No inbound port is required on the agent host, making it suitable for hosts behind NAT, firewalls, and dynamic IP addresses.
@@ -185,6 +184,6 @@ secrets:
 | Works behind NAT / firewall | No | Yes |
 | Agent-side implementation | Complete | Complete |
 | Controller-side support | Complete | Drydock 1.5+ |
-| Recommended for production | Yes | Early access (Drydock 1.5+ and Portwing 0.3.0+) |
+| Recommended for production | Yes | Yes (Drydock 1.5+; Portwing 0.8+ recommended) |
 
-If your host is reachable from the internet or your Drydock server, use Standard mode today. Edge mode is the right answer for hosts with no inbound port and is functional now on Drydock 1.5 and Portwing 0.3.0 — treat it as early access and validate it for your workload before relying on it in production.
+Use Standard mode when the controller can reach the host directly. Use Edge mode when the host cannot accept an inbound connection; both modes are production supported.

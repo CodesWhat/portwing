@@ -242,7 +242,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	}
 	if err != nil {
 		if errors.Is(err, websocket.ErrBadHandshake) && resp != nil && resp.StatusCode == http.StatusNotFound {
-			return false, fmt.Errorf("%w: controller returned 404 on WebSocket upgrade — DD_EXPERIMENTAL_PORTWING is likely not enabled or the /api/portwing/ws route is absent", errFatal)
+			return false, fmt.Errorf("%w: controller returned 404 on WebSocket upgrade — the /api/portwing/ws route is absent or has been disabled", errFatal)
 		}
 		return false, fmt.Errorf("websocket dial: %w", err)
 	}

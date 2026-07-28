@@ -133,7 +133,7 @@ func TestBuildWatcherSnapshotPayload(t *testing.T) {
 				Type string `json:"type"`
 				Name string `json:"name"`
 			} `json:"watcher"`
-			Containers []adapter.Container `json:"containers"`
+			Containers []drydockContainer `json:"containers"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {

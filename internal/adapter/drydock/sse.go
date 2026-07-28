@@ -209,7 +209,7 @@ func (b *SSEBroadcaster) buildWatcherSnapshotPayload() ([]byte, error) {
 		"type": "dd:watcher-snapshot",
 		"data": map[string]any{
 			"watcher":    GetWatcherComponents()[0],
-			"containers": containers,
+			"containers": toDrydockContainers(containers),
 		},
 	}
 	return json.Marshal(event)
@@ -230,7 +230,7 @@ func (b *SSEBroadcaster) BroadcastWatcherSnapshot() {
 func (b *SSEBroadcaster) BroadcastContainerAdded(c adapter.Container) {
 	event := map[string]any{
 		"type": "dd:container-added",
-		"data": c,
+		"data": toDrydockContainer(c),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -244,7 +244,7 @@ func (b *SSEBroadcaster) BroadcastContainerAdded(c adapter.Container) {
 func (b *SSEBroadcaster) BroadcastContainerUpdated(c adapter.Container) {
 	event := map[string]any{
 		"type": "dd:container-updated",
-		"data": c,
+		"data": toDrydockContainer(c),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {

@@ -90,10 +90,10 @@ export const roadmap: Milestone[] = [
     emoji: "🧭",
     status: "next",
     items: [
-      "Edge-mode graduation out of early access — DD_EXPERIMENTAL_PORTWING on by default, pending cross-repo load/soak evidence",
-      "A drafted wire/API stability policy — semver guarantees for the HTTP API, env-var surface, and the DrydockCompat wire contract",
+      "Edge mode graduated to production support — enabled by default in Drydock 1.6 and gated by a real cross-repo multi-agent load/soak",
+      "Published stability policy — semver guarantees for the HTTP API, env-var surface, MCP tools, and DrydockCompat wire contract",
       "Package-manager distribution — a Homebrew tap and apt/rpm packages via the existing GoReleaser pipeline",
-      "The last edge wire-protocol gap — a true continuous live-tail variant under the dd: namespace",
+      "Continuous edge live-tail under the dd: namespace, with cancellation, stdout/stderr framing, and bounded backpressure",
       "Richer health/metrics and structured audit export",
     ],
   },

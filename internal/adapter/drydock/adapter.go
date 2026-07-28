@@ -1,8 +1,11 @@
 package drydock
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,6 +31,8 @@ const (
 	LabelLinkTemplate = "dd.link.template"
 
 	defaultMessageHandlerConcurrency = 32
+	maxContainerLogStreams           = 128
+	maxContainerLogStreamFrameBytes  = 256 << 10
 
 	// maxContainerLogBytes caps a single dd:container_log_response payload.
 	maxContainerLogBytes = 100 * 1024 * 1024 // 100 MiB
@@ -55,6 +60,14 @@ type Adapter struct {
 
 	messageSem chan struct{}
 	semInit    sync.Once
+
+	logStreamsMu sync.Mutex
+	logStreams   map[string]activeContainerLogStream
+}
+
+type activeContainerLogStream struct {
+	containerID string
+	cancel      context.CancelFunc
 }
 
 // NewAdapter creates a Drydock adapter. info carries the static agent
@@ -66,6 +79,7 @@ func NewAdapter(dockerClient *docker.Client, agentName string, info AgentInfo) *
 		sse:          NewSSEBroadcaster(cm, protocol.AgentVersion, info),
 		dockerClient: dockerClient,
 		messageSem:   make(chan struct{}, defaultMessageHandlerConcurrency),
+		logStreams:   make(map[string]activeContainerLogStream),
 	}
 }
 
@@ -187,9 +201,22 @@ func (a *Adapter) HandleMessage(ctx context.Context, sender adapter.MessageSende
 			slog.Warn("invalid container_log_request message", "error", err)
 			return true
 		}
+		if msg.Stream {
+			a.startContainerLogStream(ctx, sender, msg)
+			return true
+		}
 		a.spawnMessageHandler(ctx, msgType, func() {
 			a.handleContainerLogRequest(ctx, sender, msg)
 		})
+		return true
+
+	case protocol.TypeDDContainerLogCancel:
+		var msg protocol.DDContainerLogCancelMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			slog.Warn("invalid container_log_cancel message", "error", err)
+			return true
+		}
+		a.cancelContainerLogStream(msg)
 		return true
 
 	case protocol.TypeDDContainerDeleteRequest:
@@ -292,9 +319,9 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 		// Docker daemon parses for `until` (RFC3339 is rejected). A
 		// caller-supplied `until` is intentionally ignored on a follow request
 		// so the daemon's EOF and the context deadline below always agree;
-		// continuous tailing belongs on the streaming request/stream/stream_end
-		// path (docker.IsStreamingPath), not on this message pair. The context
-		// deadline is a backstop in case an old daemon ignores `until`.
+		// continuous tailing belongs on the stream=true dd:container_log_chunk
+		// path, not on this legacy response pair. The context deadline is a
+		// backstop in case an old daemon ignores `until`.
 		until = strconv.FormatInt(time.Now().Add(followLogWindow).Unix(), 10)
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, followLogWindow+followLogGrace)
@@ -331,6 +358,214 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 	})
 }
 
+func (a *Adapter) startContainerLogStream(ctx context.Context, sender adapter.MessageSender, msg protocol.DDContainerLogRequestMessage) {
+	if msg.RequestID == "" || msg.ContainerID == "" {
+		a.sendContainerLogStreamError(sender, msg, "requestId and containerId are required")
+		return
+	}
+
+	streamCtx, cancel := context.WithCancel(ctx)
+	active := activeContainerLogStream{
+		containerID: msg.ContainerID,
+		cancel:      cancel,
+	}
+
+	a.logStreamsMu.Lock()
+	if a.logStreams == nil {
+		a.logStreams = make(map[string]activeContainerLogStream)
+	}
+	switch {
+	case len(a.logStreams) >= maxContainerLogStreams:
+		a.logStreamsMu.Unlock()
+		cancel()
+		a.sendContainerLogStreamError(sender, msg, "too many active container log streams")
+		return
+	case a.logStreams[msg.RequestID].cancel != nil:
+		a.logStreamsMu.Unlock()
+		cancel()
+		a.sendContainerLogStreamError(sender, msg, "duplicate requestId")
+		return
+	default:
+		a.logStreams[msg.RequestID] = active
+		a.logStreamsMu.Unlock()
+	}
+
+	go a.runContainerLogStream(streamCtx, sender, msg)
+}
+
+func (a *Adapter) cancelContainerLogStream(msg protocol.DDContainerLogCancelMessage) {
+	a.logStreamsMu.Lock()
+	active, ok := a.logStreams[msg.RequestID]
+	a.logStreamsMu.Unlock()
+	if !ok || (msg.ContainerID != "" && active.containerID != msg.ContainerID) {
+		return
+	}
+	active.cancel()
+}
+
+func (a *Adapter) runContainerLogStream(ctx context.Context, sender adapter.MessageSender, msg protocol.DDContainerLogRequestMessage) {
+	defer func() {
+		a.logStreamsMu.Lock()
+		delete(a.logStreams, msg.RequestID)
+		a.logStreamsMu.Unlock()
+	}()
+
+	tail := ""
+	if msg.Tail > 0 {
+		tail = strconv.Itoa(msg.Tail)
+	}
+	body, err := a.dockerClient.GetContainerLogs(
+		ctx,
+		msg.ContainerID,
+		tail,
+		msg.Since,
+		msg.Until,
+		msg.Follow,
+		msg.Timestamps,
+	)
+	if err != nil {
+		if ctx.Err() != nil {
+			a.sendContainerLogStreamEnd(sender, msg, "canceled")
+			return
+		}
+		slog.Warn(
+			"failed to open container log stream",
+			"container", applog.Sanitize(msg.ContainerID),
+			"error", applog.Sanitize(err.Error()),
+		)
+		a.sendContainerLogStreamError(sender, msg, err.Error())
+		return
+	}
+	defer body.Close()
+
+	if err := a.forwardContainerLogStream(ctx, sender, msg, body); err != nil {
+		if ctx.Err() != nil {
+			a.sendContainerLogStreamEnd(sender, msg, "canceled")
+			return
+		}
+		a.sendContainerLogStreamError(sender, msg, err.Error())
+		return
+	}
+	a.sendContainerLogStreamEnd(sender, msg, "eof")
+}
+
+func (a *Adapter) forwardContainerLogStream(
+	ctx context.Context,
+	sender adapter.MessageSender,
+	msg protocol.DDContainerLogRequestMessage,
+	body io.Reader,
+) error {
+	reader := bufio.NewReaderSize(body, 32<<10)
+	header, _ := reader.Peek(8)
+	if !looksLikeDockerLogFrame(header) {
+		return a.forwardRawContainerLogStream(ctx, sender, msg, reader)
+	}
+
+	frameHeader := make([]byte, 8)
+	for {
+		if _, err := io.ReadFull(reader, frameHeader); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil
+			}
+			return fmt.Errorf("reading container log frame header: %w", err)
+		}
+
+		size := binary.BigEndian.Uint32(frameHeader[4:8])
+		if size == 0 {
+			continue
+		}
+		if size > maxContainerLogStreamFrameBytes {
+			if _, err := io.CopyN(io.Discard, reader, int64(size)); err != nil {
+				return fmt.Errorf("skipping oversized container log frame (%d bytes): %w", size, err)
+			}
+			continue
+		}
+
+		payload := make([]byte, size)
+		if _, err := io.ReadFull(reader, payload); err != nil {
+			return fmt.Errorf("reading container log frame payload: %w", err)
+		}
+		stream := "stdout"
+		if frameHeader[0] == 2 {
+			stream = "stderr"
+		}
+		if err := a.sendContainerLogStreamChunk(ctx, sender, msg, stream, payload); err != nil {
+			return err
+		}
+	}
+}
+
+func (a *Adapter) forwardRawContainerLogStream(
+	ctx context.Context,
+	sender adapter.MessageSender,
+	msg protocol.DDContainerLogRequestMessage,
+	reader io.Reader,
+) error {
+	buffer := make([]byte, 32<<10)
+	for {
+		n, err := reader.Read(buffer)
+		if n > 0 {
+			if sendErr := a.sendContainerLogStreamChunk(ctx, sender, msg, "stdout", buffer[:n]); sendErr != nil {
+				return sendErr
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("reading raw container log stream: %w", err)
+		}
+	}
+}
+
+func looksLikeDockerLogFrame(header []byte) bool {
+	return len(header) >= 8 &&
+		header[0] <= 2 &&
+		header[1] == 0 &&
+		header[2] == 0 &&
+		header[3] == 0
+}
+
+func (a *Adapter) sendContainerLogStreamChunk(
+	ctx context.Context,
+	sender adapter.MessageSender,
+	msg protocol.DDContainerLogRequestMessage,
+	stream string,
+	logs []byte,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sender == nil {
+		return errors.New("container log stream sender is nil")
+	}
+	if err := sender.SendTypedMessage(protocol.TypeDDContainerLogChunk, protocol.DDContainerLogChunkMessage{
+		RequestID:   msg.RequestID,
+		ContainerID: msg.ContainerID,
+		Stream:      stream,
+		Logs:        string(logs),
+	}); err != nil {
+		return fmt.Errorf("sending container log chunk: %w", err)
+	}
+	return nil
+}
+
+func (a *Adapter) sendContainerLogStreamEnd(sender adapter.MessageSender, msg protocol.DDContainerLogRequestMessage, reason string) {
+	a.sendTypedMessage(sender, protocol.TypeDDContainerLogEnd, protocol.DDContainerLogEndMessage{
+		RequestID:   msg.RequestID,
+		ContainerID: msg.ContainerID,
+		Reason:      reason,
+	})
+}
+
+func (a *Adapter) sendContainerLogStreamError(sender adapter.MessageSender, msg protocol.DDContainerLogRequestMessage, streamError string) {
+	a.sendTypedMessage(sender, protocol.TypeDDContainerLogError, protocol.DDContainerLogErrorMessage{
+		RequestID:   msg.RequestID,
+		ContainerID: msg.ContainerID,
+		Error:       streamError,
+	})
+}
+
 func (a *Adapter) handleContainerDeleteRequest(ctx context.Context, sender adapter.MessageSender, msg protocol.DDContainerDeleteRequestMessage) {
 	err := a.dockerClient.RemoveContainer(ctx, msg.ContainerID, true)
 	if err != nil {
@@ -353,9 +588,9 @@ func (a *Adapter) handleContainerDeleteRequest(ctx context.Context, sender adapt
 
 func (a *Adapter) sendContainerSync(sender adapter.MessageSender, containers []adapter.Container) {
 	a.sendTypedMessage(sender, protocol.TypeDDContainerSync, struct {
-		Containers []adapter.Container `json:"containers"`
+		Containers []drydockContainer `json:"containers"`
 	}{
-		Containers: containers,
+		Containers: toDrydockContainers(containers),
 	})
 }
 
@@ -387,7 +622,7 @@ func (a *Adapter) sendComponentSync(sender adapter.MessageSender) {
 }
 
 func (a *Adapter) sendContainerEvent(sender adapter.MessageSender, msgType string, container adapter.Container) {
-	data, err := json.Marshal(container)
+	data, err := json.Marshal(toDrydockContainer(container))
 	if err != nil {
 		slog.Warn("failed to marshal container event", "id", container.ID, "error", err)
 		return

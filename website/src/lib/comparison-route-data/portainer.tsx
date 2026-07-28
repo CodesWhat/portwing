@@ -12,7 +12,7 @@ Signed images + SBOM + provenance|No|Yes (cosign + SBOM + SLSA build provenance)
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Business tier only ($)|Yes|self
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|Yes (Edge Agent, mature)|Yes (Drydock 1.5+, early access)|competitor
+Edge / NAT outbound tunnel|Yes (Edge Agent, mature)|Yes (Drydock 1.5+)|competitor
 Single lightweight binary|No (~300 MB node image)|Yes (~10 MB Go binary)|self
 License|Zlib (core) / proprietary (Business)|AGPL-3.0|tie
 `,

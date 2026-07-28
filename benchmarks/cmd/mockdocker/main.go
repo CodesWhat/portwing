@@ -33,31 +33,34 @@ import (
 	"os/signal"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
 
 type mockContainer struct {
-	ID     string            `json:"Id"`
-	Names  []string          `json:"Names"`
-	Image  string            `json:"Image"`
-	State  string            `json:"State"`
-	Status string            `json:"Status"`
-	Labels map[string]string `json:"Labels"`
+	ID      string            `json:"Id"`
+	Names   []string          `json:"Names"`
+	Image   string            `json:"Image"`
+	ImageID string            `json:"ImageID"`
+	State   string            `json:"State"`
+	Status  string            `json:"Status"`
+	Labels  map[string]string `json:"Labels"`
 }
 
 var fakeContainers = []mockContainer{
-	{ID: "c0000000001", Names: []string{"/traefik"}, Image: "traefik:v3", State: "running", Status: "Up 3 days", Labels: map[string]string{"com.docker.compose.project": "infra"}},
-	{ID: "c0000000002", Names: []string{"/grafana"}, Image: "grafana/grafana:10", State: "running", Status: "Up 3 days", Labels: map[string]string{"com.docker.compose.project": "infra"}},
-	{ID: "c0000000003", Names: []string{"/prometheus"}, Image: "prom/prometheus:v2", State: "running", Status: "Up 2 days", Labels: map[string]string{"com.docker.compose.project": "infra"}},
-	{ID: "c0000000004", Names: []string{"/postgres"}, Image: "postgres:17", State: "running", Status: "Up 5 hours", Labels: map[string]string{"com.docker.compose.project": "db"}},
-	{ID: "c0000000005", Names: []string{"/redis"}, Image: "redis:8", State: "running", Status: "Up 5 hours", Labels: map[string]string{"com.docker.compose.project": "db"}},
+	{ID: "c0000000001", Names: []string{"/traefik"}, Image: "traefik:v3", ImageID: "sha256:1111111111111111111111111111111111111111111111111111111111111111", State: "running", Status: "Up 3 days", Labels: map[string]string{"com.docker.compose.project": "infra"}},
+	{ID: "c0000000002", Names: []string{"/grafana"}, Image: "grafana/grafana:10", ImageID: "sha256:2222222222222222222222222222222222222222222222222222222222222222", State: "running", Status: "Up 3 days", Labels: map[string]string{"com.docker.compose.project": "infra"}},
+	{ID: "c0000000003", Names: []string{"/prometheus"}, Image: "prom/prometheus:v2", ImageID: "sha256:3333333333333333333333333333333333333333333333333333333333333333", State: "running", Status: "Up 2 days", Labels: map[string]string{"com.docker.compose.project": "infra"}},
+	{ID: "c0000000004", Names: []string{"/postgres"}, Image: "postgres:17", ImageID: "sha256:4444444444444444444444444444444444444444444444444444444444444444", State: "running", Status: "Up 5 hours", Labels: map[string]string{"com.docker.compose.project": "db"}},
+	{ID: "c0000000005", Names: []string{"/redis"}, Image: "redis:8", ImageID: "sha256:5555555555555555555555555555555555555555555555555555555555555555", State: "running", Status: "Up 5 hours", Labels: map[string]string{"com.docker.compose.project": "db"}},
 }
 
 // versionPrefix matches a leading Docker API version segment like "/v1.44".
 var versionPrefix = regexp.MustCompile(`^/v[0-9]+\.[0-9]+`)
 
 var verbose bool
+var mockExecSequence atomic.Uint64
 
 func main() {
 	socket := flag.String("socket", "/tmp/portwing-soak-mock.sock", "unix socket path")
@@ -75,11 +78,32 @@ func main() {
 		log.Fatalf("chmod %s: %v", *socket, err)
 	}
 
+	handler := newMockDockerHandler()
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("serve: %v", err)
+		}
+	}()
+
+	log.Printf("mockdocker listening on %s", *socket)
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+
+	_ = srv.Close()
+	<-done
+	_ = os.Remove(*socket)
+}
+
+func newMockDockerHandler() http.Handler {
 	containersPayload, err := json.Marshal(fakeContainers)
 	if err != nil {
-		log.Fatalf("marshal containers: %v", err)
+		panic(fmt.Sprintf("marshal mock containers: %v", err))
 	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := versionPrefix.ReplaceAllString(r.URL.Path, "")
@@ -103,35 +127,29 @@ func main() {
 			_, _ = w.Write(containersPayload)
 		case path == "/events":
 			streamEvents(w, r)
+		case r.Method == http.MethodPost &&
+			strings.HasPrefix(path, "/containers/") &&
+			strings.HasSuffix(path, "/exec"):
+			createExec(w)
+		case r.Method == http.MethodPost &&
+			strings.HasPrefix(path, "/exec/") &&
+			strings.HasSuffix(path, "/start"):
+			startExec(w, r)
+		case r.Method == http.MethodPost &&
+			strings.HasPrefix(path, "/exec/") &&
+			strings.HasSuffix(path, "/resize"):
+			w.WriteHeader(http.StatusOK)
 		case strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/json"):
 			writeInspect(w, containerID(path, "/json"))
 		case strings.HasPrefix(path, "/containers/") && strings.Contains(path, "/logs"):
-			writeLogs(w)
+			writeLogs(w, r)
 		case strings.HasPrefix(path, "/containers/") && strings.Contains(path, "/stats"):
 			writeStats(w)
 		default:
 			http.NotFound(w, r)
 		}
 	})
-
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("serve: %v", err)
-		}
-	}()
-
-	log.Printf("mockdocker listening on %s", *socket)
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
-
-	_ = srv.Close()
-	<-done
-	_ = os.Remove(*socket)
+	return mux
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -147,10 +165,17 @@ func containerID(path, suffix string) string {
 }
 
 func writeInspect(w http.ResponseWriter, id string) {
+	imageID := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	for _, container := range fakeContainers {
+		if container.ID == id {
+			imageID = container.ImageID
+			break
+		}
+	}
 	writeJSON(w, map[string]any{
 		"Id":      id,
 		"Name":    "/" + id,
-		"Image":   "nginx:latest",
+		"Image":   imageID,
 		"Created": "2026-01-01T00:00:00Z",
 		"State":   map[string]any{"Status": "running", "Running": true, "Pid": 4242},
 		"Config":  map[string]any{"Image": "nginx:latest", "Env": []string{"A=1", "B=2"}, "Labels": map[string]string{"app": "web"}},
@@ -160,16 +185,102 @@ func writeInspect(w http.ResponseWriter, id string) {
 
 // writeLogs writes a single Docker-multiplexed stdout frame: an 8-byte header
 // (stream byte + 3 pad + big-endian payload length) followed by the payload.
-func writeLogs(w http.ResponseWriter) {
+func writeLogs(w http.ResponseWriter, r *http.Request) {
 	const logPayload = "soak log line\n"
-	const logPayloadLen = uint32(len(logPayload))
-	payload := []byte(logPayload)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	if r.URL.Query().Get("follow") != "1" {
+		_ = writeLogFrame(w, []byte(logPayload))
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	payload := []byte(strings.Repeat("x", 32*1024-1) + "\n")
+	if err := writeLogFrame(w, payload); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if err := writeLogFrame(w, payload); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func writeLogFrame(w io.Writer, payload []byte) error {
 	header := make([]byte, 8)
 	header[0] = 1 // stdout
-	binary.BigEndian.PutUint32(header[4:8], logPayloadLen)
-	w.Header().Set("Content-Type", "application/octet-stream")
-	_, _ = w.Write(header)
-	_, _ = w.Write(payload)
+	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
+	if _, err := w.Write(header); err != nil {
+		return fmt.Errorf("writing log frame header: %w", err)
+	}
+	if _, err := w.Write(payload); err != nil {
+		return fmt.Errorf("writing log frame payload: %w", err)
+	}
+	return nil
+}
+
+func createExec(w http.ResponseWriter) {
+	id := fmt.Sprintf("mock-exec-%d", mockExecSequence.Add(1))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{"Id": id})
+}
+
+func startExec(w http.ResponseWriter, r *http.Request) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "hijacking unsupported", http.StatusInternalServerError)
+		return
+	}
+	conn, rw, err := hijacker.Hijack()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	if _, err := io.Copy(io.Discard, r.Body); err != nil {
+		return
+	}
+	if _, err := rw.WriteString(
+		"HTTP/1.1 101 Switching Protocols\r\n" +
+			"Connection: Upgrade\r\n" +
+			"Upgrade: tcp\r\n\r\n" +
+			"mock exec ready\n",
+	); err != nil {
+		return
+	}
+	if err := rw.Flush(); err != nil {
+		return
+	}
+
+	buffer := make([]byte, 32*1024)
+	for {
+		n, err := conn.Read(buffer)
+		if n > 0 {
+			if _, writeErr := conn.Write(buffer[:n]); writeErr != nil {
+				return
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func writeStats(w http.ResponseWriter) {

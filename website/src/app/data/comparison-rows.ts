@@ -94,7 +94,7 @@ export const comparisonRows: ComparisonRow[] = [
     hawser: "Yes",
     watchtower: "—",
     diun: "—",
-    portwing: "Yes (Drydock 1.5+, early access)",
+    portwing: "Yes (Drydock 1.5+)",
   },
   {
     feature: "Single static Go binary",

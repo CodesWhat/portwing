@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	adapterpkg "github.com/codeswhat/portwing/internal/adapter"
 	"github.com/codeswhat/portwing/internal/docker"
 )
 
@@ -61,7 +60,7 @@ func TestHandleContainersUsesCachedInventory(t *testing.T) {
 			t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusOK)
 		}
 
-		var containers []adapterpkg.Container
+		var containers []drydockContainer
 		if err := json.NewDecoder(rec.Body).Decode(&containers); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}

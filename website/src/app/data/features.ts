@@ -88,7 +88,7 @@ export const features: Feature[] = [
     color: "text-indigo-500 dark:text-indigo-400",
     bg: "bg-indigo-100 dark:bg-indigo-900/50",
     description:
-      "Run in standard mode behind a TLS reverse proxy (the controller dials in), or, for hosts with no inbound port, outbound edge mode where the agent dials the controller. Both modes are implemented end-to-end as of v0.5.0 (Drydock 1.5+, early access); full exec robustness under load is still being hardened.",
+      "Run in standard mode behind a TLS reverse proxy (the controller dials in), or use production-supported outbound edge mode for hosts with no inbound port. The stable portwing/1.0 path is gated by real multi-agent reconnect, exec, log-stream, and backpressure soak tests.",
     category: "control",
   },
   {
