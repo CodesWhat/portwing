@@ -1,0 +1,83 @@
+# Portwing edge mode + sockguard, with exec enabled — the bundle for
+# drydock's edge exec feature.
+#
+# This is docker-compose.edge.yml (outbound WebSocket tunnel to Drydock, no
+# inbound ports) layered on docker-compose.with-sockguard.yml's two-layer
+# defense (sockguard proxies the real Docker socket; Portwing only ever talks
+# to sockguard's filtered socket). The one piece that differs from both: this
+# stack uses sockguard-with-exec.yaml, not sockguard.yaml.
+#
+# sockguard.yaml (the plain preset used by docker-compose.with-sockguard.yml)
+# denies all exec paths by design — POST /containers/*/exec comes back 403
+# "exec denied: no commands are allowlisted". If drydock is going to drive
+# interactive exec through this agent's edge tunnel, sockguard has to be
+# running the portwing-with-exec.yaml preset (sockguard-with-exec.yaml here)
+# instead, or every exec attempt is denied at the proxy before it ever
+# reaches Portwing.
+#
+# Edge mode against Drydock 1.6 is Ed25519-only: the controller's
+# /api/portwing/ws endpoint rejects token-based hellos. Generate a keypair
+# and register its public key with Drydock before starting:
+#
+#   portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+#   sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+#
+# keygen prints the PKCS#8 private key (used below as PRIVATE_KEY_FILE) plus
+# an authorized_keys line. Register that public key with your Drydock
+# controller (POST /api/v1/portwing/keys) so it trusts this agent.
+#
+# Both images run as UID 65532. Sockguard needs the numeric group ID of the
+# host Docker socket to open it:
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+# Portwing itself needs no group_add here — it talks only to sockguard's
+# filtered socket, which sockguard creates 0600 under the same UID.
+
+services:
+  sockguard:
+    image: ghcr.io/codeswhat/sockguard:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./sockguard-with-exec.yaml:/etc/sockguard/sockguard.yaml:ro
+      - sockguard-socket:/var/run/sockguard
+    environment:
+      - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
+
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
+    restart: unless-stopped
+    depends_on:
+      - sockguard
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    volumes:
+      - sockguard-socket:/var/run/sockguard:ro
+      - portwing-stacks:/data/stacks
+    environment:
+      - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
+      - DRYDOCK_URL=https://drydock.example.com
+      - PRIVATE_KEY_FILE=/run/secrets/portwing_key
+      - AGENT_NAME=edge-host-01
+    secrets:
+      - portwing_key
+
+secrets:
+  portwing_key:
+    file: ./portwing_ed25519.pem
+
+volumes:
+  sockguard-socket:
+  portwing-stacks:

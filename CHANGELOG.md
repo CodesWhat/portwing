@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Edge exec + sockguard example.** `examples/docker-compose.edge-with-exec.yml`
+  pairs Portwing's edge mode with sockguard's `portwing-with-exec.yaml` preset
+  (`examples/sockguard-with-exec.yaml`), for deployments where Drydock's edge
+  exec feature needs to reach through the sockguard proxy. The plain
+  `docker-compose.with-sockguard.yml` / `sockguard.yaml` pairing still denies
+  all exec by design.
+
+### Fixed
+
+- **Exec/Docker API errors now include the daemon or proxy response body.**
+  Non-2xx responses from the Docker daemon (or a filtering proxy like
+  sockguard) previously surfaced as a bare `docker error (status N)`,
+  discarding the response body. `CreateExec`, `StartExec`, `ResizeExec`,
+  `InspectContainer`, and the other Docker API calls in
+  `internal/docker/client.go` now read a bounded slice of the body and
+  include its message, so a sockguard denial like `exec denied: no commands
+  are allowlisted` reaches the caller instead of a bare status code. The
+  edge exec `failStart` path already forwards `err` into the `exec_end`
+  reason sent to the controller, so the enriched message now reaches Drydock
+  too.
+
 ## [v0.8.1] - 2026-07-28
 
 ### Fixed

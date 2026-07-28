@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1013,76 +1012,5 @@ func TestBufferedConn_Read(t *testing.T) {
 	}
 	if string(buf[:n]) != "hello" {
 		t.Fatalf("bufferedConn.Read: got %q, want %q", string(buf[:n]), "hello")
-	}
-}
-
-// ---- readAndCloseBody ----
-
-func TestReadAndCloseBody(t *testing.T) {
-	t.Parallel()
-
-	rc := io.NopCloser(strings.NewReader("hello"))
-	got := readAndCloseBody(rc)
-	if got != "hello" {
-		t.Fatalf("readAndCloseBody = %q, want %q", got, "hello")
-	}
-}
-
-// errCloser is a ReadCloser whose Close method always returns an error.
-type errCloser struct {
-	r        io.Reader
-	closeErr error
-}
-
-func (e *errCloser) Read(p []byte) (int, error) { return e.r.Read(p) }
-func (e *errCloser) Close() error               { return e.closeErr }
-
-// errReaderCloser combines a read error with a Close error.
-type errReaderCloser struct {
-	readErr  error
-	closeErr error
-}
-
-func (e *errReaderCloser) Read(_ []byte) (int, error) { return 0, e.readErr }
-func (e *errReaderCloser) Close() error               { return e.closeErr }
-
-func TestReadAndCloseBody_CloseError(t *testing.T) {
-	t.Parallel()
-
-	closeErr := fmt.Errorf("close failed")
-	rc := &errCloser{r: strings.NewReader("data"), closeErr: closeErr}
-	got := readAndCloseBody(rc)
-	// Should contain the data and the close error.
-	if !strings.Contains(got, "data") {
-		t.Errorf("readAndCloseBody: expected data in result, got %q", got)
-	}
-	if !strings.Contains(got, "close failed") {
-		t.Errorf("readAndCloseBody: expected close error in result, got %q", got)
-	}
-}
-
-func TestReadAndCloseBody_ReadError(t *testing.T) {
-	t.Parallel()
-
-	readErr := fmt.Errorf("read failed")
-	rc := &errReaderCloser{readErr: readErr, closeErr: nil}
-	got := readAndCloseBody(rc)
-	if !strings.Contains(got, "read failed") {
-		t.Errorf("readAndCloseBody: expected read error in result, got %q", got)
-	}
-}
-
-func TestReadAndCloseBody_BothErrors(t *testing.T) {
-	t.Parallel()
-
-	readErr := fmt.Errorf("read failed")
-	closeErr := fmt.Errorf("close failed")
-	rc := &errReaderCloser{readErr: readErr, closeErr: closeErr}
-	got := readAndCloseBody(rc)
-	if !strings.Contains(got, "read failed") {
-		t.Errorf("readAndCloseBody: expected read error in result, got %q", got)
-	}
-	if !strings.Contains(got, "close failed") {
-		t.Errorf("readAndCloseBody: expected close error in result, got %q", got)
 	}
 }
