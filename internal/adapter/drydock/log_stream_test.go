@@ -1,10 +1,13 @@
 package drydock
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -339,5 +342,125 @@ func TestContainerLogRequestStreamFieldRoundTrips(t *testing.T) {
 	}
 	if got["stream"] != true {
 		t.Fatalf("stream field = %v, want true; encoded request: %s", got["stream"], encoded)
+	}
+}
+
+func TestContainerLogStreamRejectsMissingIdentityAndMismatchedCancel(t *testing.T) {
+	t.Parallel()
+
+	a := &Adapter{}
+	sender := newLogStreamTestSender()
+	a.startContainerLogStream(
+		context.Background(),
+		sender,
+		protocol.DDContainerLogRequestMessage{RequestID: "missing-container"},
+	)
+	event := waitForLogStreamEvent(t, sender)
+	if event.msgType != protocol.TypeDDContainerLogError {
+		t.Fatalf("message type = %q, want %q", event.msgType, protocol.TypeDDContainerLogError)
+	}
+
+	streamCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.logStreams = map[string]activeContainerLogStream{
+		"stream-1": {
+			containerID: "container-1",
+			cancel:      cancel,
+		},
+	}
+	a.cancelContainerLogStream(protocol.DDContainerLogCancelMessage{
+		RequestID:   "stream-1",
+		ContainerID: "different-container",
+	})
+	select {
+	case <-streamCtx.Done():
+		t.Fatal("mismatched container ID canceled the active stream")
+	default:
+	}
+}
+
+func TestForwardContainerLogStreamFrameFailures(t *testing.T) {
+	t.Parallel()
+
+	a := &Adapter{}
+	msg := protocol.DDContainerLogRequestMessage{
+		RequestID:   "stream-1",
+		ContainerID: "container-1",
+	}
+
+	zeroLengthFrame := make([]byte, 8)
+	zeroLengthFrame[0] = 1
+	if err := a.forwardContainerLogStream(
+		context.Background(),
+		nil,
+		msg,
+		bytes.NewReader(zeroLengthFrame),
+	); err != nil {
+		t.Fatalf("zero-length frame: %v", err)
+	}
+
+	oversizedFrame := make([]byte, 8)
+	oversizedFrame[0] = 1
+	binary.BigEndian.PutUint32(oversizedFrame[4:8], maxContainerLogStreamFrameBytes+1)
+	if err := a.forwardContainerLogStream(
+		context.Background(),
+		nil,
+		msg,
+		bytes.NewReader(oversizedFrame),
+	); err == nil {
+		t.Fatal("expected truncated oversized frame to fail")
+	}
+
+	truncatedFrame := make([]byte, 9)
+	truncatedFrame[0] = 1
+	binary.BigEndian.PutUint32(truncatedFrame[4:8], 4)
+	if err := a.forwardContainerLogStream(
+		context.Background(),
+		nil,
+		msg,
+		bytes.NewReader(truncatedFrame),
+	); err == nil {
+		t.Fatal("expected truncated frame payload to fail")
+	}
+}
+
+func TestForwardRawContainerLogStreamReaderAndSenderFailures(t *testing.T) {
+	t.Parallel()
+
+	a := &Adapter{}
+	msg := protocol.DDContainerLogRequestMessage{
+		RequestID:   "stream-1",
+		ContainerID: "container-1",
+	}
+	readErr := errors.New("read failed")
+	if err := a.forwardRawContainerLogStream(
+		context.Background(),
+		newLogStreamTestSender(),
+		msg,
+		iotest.ErrReader(readErr),
+	); !errors.Is(err, readErr) {
+		t.Fatalf("raw reader error = %v, want wrapped %v", err, readErr)
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := a.sendContainerLogStreamChunk(
+		canceledCtx,
+		newLogStreamTestSender(),
+		msg,
+		"stdout",
+		[]byte("ignored"),
+	); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled send error = %v, want context canceled", err)
+	}
+
+	if err := a.sendContainerLogStreamChunk(
+		context.Background(),
+		nil,
+		msg,
+		"stdout",
+		[]byte("ignored"),
+	); err == nil {
+		t.Fatal("nil sender should fail")
 	}
 }
