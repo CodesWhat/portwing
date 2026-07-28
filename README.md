@@ -63,6 +63,7 @@
 - [🖥️ Standalone Mode](#standalone-generic-mode)
 - [⚙️ Configuration](#configuration)
 - [📡 API Reference](#api-reference)
+- [📐 Stability Policy](#stability-policy)
 - [🔑 Token Security](#token-security)
 - [✅ Verify a Release](#verify-a-release)
 - [🛡️ Security](#security)
@@ -728,6 +729,20 @@ scrape_configs:
 ```
 
 </details>
+
+<hr>
+
+<h2 align="center" id="stability-policy">📐 Stability Policy</h2>
+
+Portwing `v0.8.x` publishes the compatibility contract that becomes binding at
+`v1.0.0`. It defines semantic-versioning guarantees for the HTTP/OpenAPI
+surface, environment variables, MCP tools and schemas, and the
+`portwing/1.0`/`DrydockCompat` wire protocol, together with the deprecation and
+security-exception process.
+
+Read [STABILITY.md](STABILITY.md) for the policy and
+[COMPATIBILITY.md](COMPATIBILITY.md) for the exact Portwing, Drydock, and
+sockguard versions tested together.
 
 <hr>
 
