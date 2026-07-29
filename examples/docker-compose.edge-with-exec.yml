@@ -8,12 +8,16 @@
 # stack uses sockguard-with-exec.yaml, not sockguard.yaml.
 #
 # sockguard.yaml (the plain preset used by docker-compose.with-sockguard.yml)
-# denies all exec paths by design — POST /containers/*/exec comes back 403
-# "exec denied: no commands are allowlisted". If drydock is going to drive
-# interactive exec through this agent's edge tunnel, sockguard has to be
-# running the portwing-with-exec.yaml preset (sockguard-with-exec.yaml here)
-# instead, or every exec attempt is denied at the proxy before it ever
-# reaches Portwing.
+# denies all exec paths by design — POST /containers/*/exec matches no allow
+# rule and hits the catch-all deny, coming back 403 "not allowed by portwing
+# preset". If drydock is going to drive interactive exec through this
+# agent's edge tunnel, sockguard has to be running the portwing-with-exec.yaml
+# preset (sockguard-with-exec.yaml here) instead, or every exec attempt is
+# denied at the proxy before it ever reaches Portwing.
+#
+# For an audited, version-pinned variant of this same stack, see sockguard's
+# examples/compose/tri-tool/ bundle (pins SOCKGUARD_VERSION/PORTWING_VERSION/
+# DRYDOCK_VERSION with override env vars).
 #
 # Edge mode against Drydock 1.6 is Ed25519-only: the controller's
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a keypair
