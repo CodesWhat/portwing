@@ -307,9 +307,13 @@ func dockerError(action string, status int, body []byte) error {
 }
 
 // extractDockerErrorMessage pulls a human-readable message out of a Docker
-// error response body. Docker's (and sockguard's) error bodies are usually
-// {"message":"..."} JSON; when the body doesn't match that shape, or the
-// message is empty, the raw trimmed body is used instead.
+// error response body. Docker's error bodies are usually {"message":"..."}
+// JSON. sockguard's denial bodies additionally carry a "reason" field with
+// the detailed denial cause (populated only when sockguard's deny_verbosity
+// is "verbose"; "message" is otherwise a generic constant). When both fields
+// are present and differ, they're combined as "<message>: <reason>"; when
+// only one is present, it's used alone. When the body doesn't match that
+// shape, or both fields are empty, the raw trimmed body is used instead.
 func extractDockerErrorMessage(body []byte) string {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
@@ -318,10 +322,18 @@ func extractDockerErrorMessage(body []byte) string {
 
 	var parsed struct {
 		Message string `json:"message"`
+		Reason  string `json:"reason"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
-		if msg := strings.TrimSpace(parsed.Message); msg != "" {
+		msg := strings.TrimSpace(parsed.Message)
+		reason := strings.TrimSpace(parsed.Reason)
+		switch {
+		case msg != "" && reason != "" && msg != reason:
+			return msg + ": " + reason
+		case msg != "":
 			return msg
+		case reason != "":
+			return reason
 		}
 	}
 	return trimmed

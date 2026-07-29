@@ -43,6 +43,21 @@ func TestExtractDockerErrorMessage(t *testing.T) {
 			body: []byte(`  {"message":""}  `),
 			want: `{"message":""}`,
 		},
+		{
+			name: "sockguard verbose denial: message and reason are combined",
+			body: []byte(`{"message":"request denied by sockguard policy","method":"POST","path":"/containers/create","reason":"not allowed by portwing preset"}`),
+			want: "request denied by sockguard policy: not allowed by portwing preset",
+		},
+		{
+			name: "reason-only body yields the reason",
+			body: []byte(`{"reason":"exec denied: privileged exec is not allowed"}`),
+			want: "exec denied: privileged exec is not allowed",
+		},
+		{
+			name: "identical message and reason are not duplicated",
+			body: []byte(`{"message":"same text","reason":"same text"}`),
+			want: "same text",
+		},
 	}
 
 	for _, tt := range tests {
@@ -163,6 +178,28 @@ func TestGetContainerLogs_DockerError_MessageBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exec denied: no commands are allowlisted") {
 		t.Errorf("error = %q, expected to contain the docker error message", err.Error())
+	}
+}
+
+func TestCreateExec_DockerError_MessageAndReasonBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"request denied by sockguard policy","method":"POST","path":"/containers/abc123/exec","reason":"exec denied: privileged exec is not allowed"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.CreateExec(context.Background(), "abc123", []string{"sh"}, "", false)
+	if err == nil {
+		t.Fatal("expected error on 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error = %q, expected to contain status 403", err.Error())
+	}
+	if !strings.Contains(err.Error(), "request denied by sockguard policy: exec denied: privileged exec is not allowed") {
+		t.Errorf("error = %q, expected to contain the combined message and reason", err.Error())
 	}
 }
 

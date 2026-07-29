@@ -28,7 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are allowlisted` reaches the caller instead of a bare status code. The
   edge exec `failStart` path already forwards `err` into the `exec_end`
   reason sent to the controller, so the enriched message now reaches Drydock
-  too.
+  too. `extractDockerErrorMessage` now also reads sockguard's `reason`
+  field — sockguard's detailed denial cause (populated only when
+  `deny_verbosity` is `verbose`) lives there, not in `message`, which is
+  always the generic `request denied by sockguard policy` sentence.
 
 ## [v0.8.1] - 2026-07-28
 
