@@ -27,7 +27,7 @@ export const faqItems: Array<{ question: string; answer: string }> = [
   {
     question: "What platforms does Portwing run on, and how do I install it?",
     answer:
-      "Portwing ships as a multi-arch container image for linux/amd64, linux/arm64, and linux/arm/v7; as signed deb and rpm packages for those architectures; and as a Homebrew cask for Intel and Apple Silicon Macs. Docker Compose with sockguard remains the recommended hardened deployment, while native packages are convenient for host-managed services and local CLI use. Stable releases update codeswhat/tap/portwing; prereleases do not move that channel. See https://getportwing-codeswhat.vercel.app/docs/installation for verification, configuration, upgrade, and uninstall instructions.",
+      "Portwing ships as a multi-arch container image for linux/amd64, linux/arm64, and linux/arm/v7; as signed deb and rpm packages for those architectures; and as a Homebrew cask for Intel and Apple Silicon Macs. Docker Compose with sockguard remains the recommended hardened deployment, while native packages are convenient for host-managed services and local CLI use. Stable releases update codeswhat/tap/portwing; prereleases do not move that channel. See https://portwing.codeswhat.com/docs/installation for verification, configuration, upgrade, and uninstall instructions.",
   },
   {
     question: "Is Portwing production-ready?",

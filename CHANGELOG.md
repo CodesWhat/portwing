@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.1] - 2026-08-01
+
+### Fixed
+
+- **Public website and package metadata no longer point to a protected Vercel
+  team alias.** Canonical URLs, documentation links, agent discovery metadata,
+  native package metadata, and the Homebrew cask now use the public
+  `portwing.codeswhat.com` domain. The release contract rejects the protected
+  fallback alias on active publication surfaces.
+
 ## [v0.9.0] - 2026-08-01
 
 ### Added
