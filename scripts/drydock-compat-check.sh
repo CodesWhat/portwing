@@ -68,13 +68,38 @@ assert() {
 	fi
 }
 
+assert_equal() {
+	local actual="$1"
+	local expected="$2"
+	local name="$3"
+	local detail="${4:-}"
+
+	if [[ $actual == "$expected" ]]; then
+		assert "$name" "pass"
+	else
+		assert "$name" "fail" "$detail"
+	fi
+}
+
+assert_present() {
+	local value="$1"
+	local name="$2"
+	local detail="${3:-}"
+
+	if [[ -n $value ]]; then
+		assert "$name" "pass"
+	else
+		assert "$name" "fail" "$detail"
+	fi
+}
+
 # ── /health ───────────────────────────────────────────────────────────────────
 
 bold "1. Health endpoint (unauthenticated)"
 
 HEALTH=$(curl -sf --max-time 10 "${HOST}/health" 2>/dev/null) && HEALTH_OK=true || HEALTH_OK=false
 if [[ $HEALTH_OK == "true" ]]; then
-	STATUS=$(printf '%s' "$HEALTH" | jq -r '.status // empty' 2>/dev/null)
+	STATUS=$(printf '%s' "$HEALTH" | jq -r '.status // empty' 2>/dev/null || true)
 	assert "/health returns 200" "pass"
 	if [[ -n $STATUS ]]; then
 		assert "/health has status field" "pass"
@@ -94,7 +119,7 @@ CONTAINERS=$(curl_api /api/containers 2>/dev/null) && CONTAINERS_OK=true || CONT
 if [[ $CONTAINERS_OK == "true" ]]; then
 	assert "/api/containers returns 200" "pass"
 
-	IS_ARRAY=$(printf '%s' "$CONTAINERS" | jq 'type == "array"' 2>/dev/null)
+	IS_ARRAY=$(printf '%s' "$CONTAINERS" | jq 'type == "array"' 2>/dev/null || true)
 	if [[ $IS_ARRAY == "true" ]]; then
 		assert "/api/containers body is JSON array" "pass"
 	else
@@ -102,7 +127,7 @@ if [[ $CONTAINERS_OK == "true" ]]; then
 	fi
 
 	# Validate first container shape if any exist
-	COUNT=$(printf '%s' "$CONTAINERS" | jq 'length' 2>/dev/null)
+	COUNT=$(printf '%s' "$CONTAINERS" | jq 'length' 2>/dev/null || true)
 	if [[ $COUNT -gt 0 ]]; then
 		CONTAINER_ID=$(printf '%s' "$CONTAINERS" | jq -r '.[0].id // empty')
 		CONTAINER_STATUS=$(printf '%s' "$CONTAINERS" | jq -r '.[0].status // empty')
@@ -110,11 +135,11 @@ if [[ $CONTAINERS_OK == "true" ]]; then
 		CONTAINER_IMAGE_ID=$(printf '%s' "$CONTAINERS" | jq -r '.[0].image.id // empty')
 		CONTAINER_IMAGE_REG=$(printf '%s' "$CONTAINERS" | jq -r '.[0].image.registry // empty')
 
-		[[ -n $CONTAINER_ID ]] && assert "containers[0].id present" "pass" || assert "containers[0].id present" "fail"
-		[[ -n $CONTAINER_STATUS ]] && assert "containers[0].status present" "pass" || assert "containers[0].status present" "fail"
-		[[ -n $CONTAINER_WATCHER ]] && assert "containers[0].watcher present" "pass" || assert "containers[0].watcher present" "fail"
-		[[ -n $CONTAINER_IMAGE_ID ]] && assert "containers[0].image.id present" "pass" || assert "containers[0].image.id present" "fail"
-		[[ -n $CONTAINER_IMAGE_REG ]] && assert "containers[0].image.registry present" "pass" || assert "containers[0].image.registry present" "fail"
+		assert_present "$CONTAINER_ID" "containers[0].id present"
+		assert_present "$CONTAINER_STATUS" "containers[0].status present"
+		assert_present "$CONTAINER_WATCHER" "containers[0].watcher present"
+		assert_present "$CONTAINER_IMAGE_ID" "containers[0].image.id present"
+		assert_present "$CONTAINER_IMAGE_REG" "containers[0].image.registry present"
 	else
 		printf '    (no containers running — shape assertions skipped)\n'
 	fi
@@ -131,13 +156,19 @@ WATCHERS=$(curl_api /api/watchers 2>/dev/null) && WATCHERS_OK=true || WATCHERS_O
 if [[ $WATCHERS_OK == "true" ]]; then
 	assert "/api/watchers returns 200" "pass"
 
-	IS_ARRAY=$(printf '%s' "$WATCHERS" | jq 'type == "array"' 2>/dev/null)
-	[[ $IS_ARRAY == "true" ]] && assert "/api/watchers body is JSON array" "pass" || assert "/api/watchers body is JSON array" "fail" "got: $(printf '%s' "$WATCHERS" | head -c 200)"
+	IS_ARRAY=$(printf '%s' "$WATCHERS" | jq 'type == "array"' 2>/dev/null || true)
+	assert_equal "$IS_ARRAY" "true" "/api/watchers body is JSON array" "got: $(printf '%s' "$WATCHERS" | head -c 200)"
 
-	W_TYPE=$(printf '%s' "$WATCHERS" | jq -r '.[0].type // empty' 2>/dev/null)
-	W_NAME=$(printf '%s' "$WATCHERS" | jq -r '.[0].name // empty' 2>/dev/null)
-	[[ -n $W_TYPE ]] && assert "watchers[0].type present" "pass" || assert "watchers[0].type present" "fail"
-	[[ -n $W_NAME ]] && assert "watchers[0].name present" "pass" || assert "watchers[0].name present" "fail"
+	W_TYPE=$(printf '%s' "$WATCHERS" | jq -r '.[0].type // empty' 2>/dev/null || true)
+	W_NAME=$(printf '%s' "$WATCHERS" | jq -r '.[0].name // empty' 2>/dev/null || true)
+	assert_present "$W_TYPE" "watchers[0].type present"
+	assert_present "$W_NAME" "watchers[0].name present"
+	W_TRANSPORT=$(printf '%s' "$WATCHERS" | jq -r '.[0].configuration.transport // empty' 2>/dev/null || true)
+	W_EXECUTION=$(printf '%s' "$WATCHERS" | jq -r '.[0].configuration.execution // empty' 2>/dev/null || true)
+	W_EVENTS=$(printf '%s' "$WATCHERS" | jq -r '.[0].configuration.events // empty' 2>/dev/null || true)
+	assert_equal "$W_TRANSPORT" "docker-api" "watcher transport == docker-api" "got: $W_TRANSPORT"
+	assert_equal "$W_EXECUTION" "controller" "watcher execution == controller" "got: $W_EXECUTION"
+	assert_equal "$W_EVENTS" "portwing" "watcher events == portwing" "got: $W_EVENTS"
 else
 	assert "/api/watchers returns 200" "fail" "curl failed"
 	assert "/api/watchers body is JSON array" "fail" "skipped"
@@ -151,13 +182,13 @@ WATCHER1=$(curl_api /api/watchers/docker/docker 2>/dev/null) && WATCHER1_OK=true
 if [[ $WATCHER1_OK == "true" ]]; then
 	assert "/api/watchers/docker/docker returns 200" "pass"
 
-	IS_OBJ=$(printf '%s' "$WATCHER1" | jq 'type == "object"' 2>/dev/null)
-	[[ $IS_OBJ == "true" ]] && assert "/api/watchers/docker/docker body is JSON object" "pass" || assert "/api/watchers/docker/docker body is JSON object" "fail" "got: $(printf '%s' "$WATCHER1" | head -c 200)"
+	IS_OBJ=$(printf '%s' "$WATCHER1" | jq 'type == "object"' 2>/dev/null || true)
+	assert_equal "$IS_OBJ" "true" "/api/watchers/docker/docker body is JSON object" "got: $(printf '%s' "$WATCHER1" | head -c 200)"
 
-	W1_TYPE=$(printf '%s' "$WATCHER1" | jq -r '.type // empty' 2>/dev/null)
-	W1_NAME=$(printf '%s' "$WATCHER1" | jq -r '.name // empty' 2>/dev/null)
-	[[ $W1_TYPE == "docker" ]] && assert "watcher type == docker" "pass" || assert "watcher type == docker" "fail" "got: $W1_TYPE"
-	[[ $W1_NAME == "docker" ]] && assert "watcher name == docker" "pass" || assert "watcher name == docker" "fail" "got: $W1_NAME"
+	W1_TYPE=$(printf '%s' "$WATCHER1" | jq -r '.type // empty' 2>/dev/null || true)
+	W1_NAME=$(printf '%s' "$WATCHER1" | jq -r '.name // empty' 2>/dev/null || true)
+	assert_equal "$W1_TYPE" "docker" "watcher type == docker" "got: $W1_TYPE"
+	assert_equal "$W1_NAME" "docker" "watcher name == docker" "got: $W1_NAME"
 else
 	assert "/api/watchers/docker/docker returns 200" "fail" "curl failed (endpoint may be missing)"
 	assert "/api/watchers/docker/docker body is JSON object" "fail" "skipped"
@@ -169,14 +200,14 @@ bold "5. GET /api/watchers/unknown/missing (should 404)"
 
 if [[ -n $TOKEN ]]; then
 	HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-		-H "X-Portwing-Token: " \
+		-H "X-Portwing-Token: ${TOKEN}" \
 		"${HOST}/api/watchers/unknown/missing" 2>/dev/null || echo "000")
 else
 	HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
 		"${HOST}/api/watchers/unknown/missing" 2>/dev/null || echo "000")
 fi
 
-[[ $HTTP_CODE == "404" ]] && assert "/api/watchers/unknown/missing returns 404" "pass" || assert "/api/watchers/unknown/missing returns 404" "fail" "got HTTP $HTTP_CODE"
+assert_equal "$HTTP_CODE" "404" "/api/watchers/unknown/missing returns 404" "got HTTP $HTTP_CODE"
 
 # ── /api/triggers ─────────────────────────────────────────────────────────────
 
@@ -185,11 +216,14 @@ bold "6. GET /api/triggers"
 TRIGGERS=$(curl_api /api/triggers 2>/dev/null) && TRIGGERS_OK=true || TRIGGERS_OK=false
 if [[ $TRIGGERS_OK == "true" ]]; then
 	assert "/api/triggers returns 200" "pass"
-	IS_ARRAY=$(printf '%s' "$TRIGGERS" | jq 'type == "array"' 2>/dev/null)
-	[[ $IS_ARRAY == "true" ]] && assert "/api/triggers body is JSON array" "pass" || assert "/api/triggers body is JSON array" "fail" "got: $(printf '%s' "$TRIGGERS" | head -c 200)"
+	IS_ARRAY=$(printf '%s' "$TRIGGERS" | jq 'type == "array"' 2>/dev/null || true)
+	assert_equal "$IS_ARRAY" "true" "/api/triggers body is JSON array" "got: $(printf '%s' "$TRIGGERS" | head -c 200)"
+	TRIGGER_COUNT=$(printf '%s' "$TRIGGERS" | jq 'length' 2>/dev/null || true)
+	assert_equal "$TRIGGER_COUNT" "0" "/api/triggers advertises no remote trigger" "got: $TRIGGERS"
 else
 	assert "/api/triggers returns 200" "fail" "curl failed"
 	assert "/api/triggers body is JSON array" "fail" "skipped"
+	assert "/api/triggers advertises no remote trigger" "fail" "skipped"
 fi
 
 # ── /api/log/entries ──────────────────────────────────────────────────────────
@@ -199,8 +233,8 @@ bold "7. GET /api/log/entries"
 LOG_ENTRIES=$(curl_api /api/log/entries 2>/dev/null) && LOG_OK=true || LOG_OK=false
 if [[ $LOG_OK == "true" ]]; then
 	assert "/api/log/entries returns 200" "pass"
-	IS_ARRAY=$(printf '%s' "$LOG_ENTRIES" | jq 'type == "array"' 2>/dev/null)
-	[[ $IS_ARRAY == "true" ]] && assert "/api/log/entries body is JSON array" "pass" || assert "/api/log/entries body is JSON array" "fail" "got: $(printf '%s' "$LOG_ENTRIES" | head -c 200)"
+	IS_ARRAY=$(printf '%s' "$LOG_ENTRIES" | jq 'type == "array"' 2>/dev/null || true)
+	assert_equal "$IS_ARRAY" "true" "/api/log/entries body is JSON array" "got: $(printf '%s' "$LOG_ENTRIES" | head -c 200)"
 else
 	assert "/api/log/entries returns 200" "fail" "curl failed (endpoint may be missing)"
 	assert "/api/log/entries body is JSON array" "fail" "skipped"
@@ -211,7 +245,7 @@ fi
 bold "8. GET /api/events SSE headers"
 
 AUTH_ARGS=()
-[[ -n $TOKEN ]] && AUTH_ARGS+=(-H "X-Portwing-Token: ")
+[[ -n $TOKEN ]] && AUTH_ARGS+=(-H "X-Portwing-Token: ${TOKEN}")
 
 SSE_HEADERS=$(curl -sf --max-time 5 -D - -o /dev/null \
 	${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
@@ -243,21 +277,21 @@ SSE_BODY=$(curl -sf --max-time 5 \
 ACK_LINE=$(printf '%s' "$SSE_BODY" | grep '^data:' | head -1 | sed 's/^data: //') || true
 
 if [[ -n $ACK_LINE ]]; then
-	ACK_TYPE=$(printf '%s' "$ACK_LINE" | jq -r '.type // empty' 2>/dev/null)
-	ACK_VERSION=$(printf '%s' "$ACK_LINE" | jq -r '.data.version // empty' 2>/dev/null)
-	ACK_OS=$(printf '%s' "$ACK_LINE" | jq -r '.data.os // empty' 2>/dev/null)
-	ACK_ARCH=$(printf '%s' "$ACK_LINE" | jq -r '.data.arch // empty' 2>/dev/null)
-	ACK_CPUS=$(printf '%s' "$ACK_LINE" | jq -r '.data.cpus // empty' 2>/dev/null)
-	ACK_UPTIME=$(printf '%s' "$ACK_LINE" | jq -r '.data.uptimeSeconds // empty' 2>/dev/null)
-	ACK_LAST=$(printf '%s' "$ACK_LINE" | jq -r '.data.lastSeen // empty' 2>/dev/null)
+	ACK_TYPE=$(printf '%s' "$ACK_LINE" | jq -r '.type // empty' 2>/dev/null || true)
+	ACK_VERSION=$(printf '%s' "$ACK_LINE" | jq -r '.data.version // empty' 2>/dev/null || true)
+	ACK_OS=$(printf '%s' "$ACK_LINE" | jq -r '.data.os // empty' 2>/dev/null || true)
+	ACK_ARCH=$(printf '%s' "$ACK_LINE" | jq -r '.data.arch // empty' 2>/dev/null || true)
+	ACK_CPUS=$(printf '%s' "$ACK_LINE" | jq -r '.data.cpus // empty' 2>/dev/null || true)
+	ACK_UPTIME=$(printf '%s' "$ACK_LINE" | jq -r '.data.uptimeSeconds // empty' 2>/dev/null || true)
+	ACK_LAST=$(printf '%s' "$ACK_LINE" | jq -r '.data.lastSeen // empty' 2>/dev/null || true)
 
-	[[ $ACK_TYPE == "dd:ack" ]] && assert "dd:ack event type is dd:ack" "pass" || assert "dd:ack event type is dd:ack" "fail" "got: $ACK_TYPE"
-	[[ -n $ACK_VERSION ]] && assert "dd:ack data.version present" "pass" || assert "dd:ack data.version present" "fail"
-	[[ -n $ACK_OS ]] && assert "dd:ack data.os present" "pass" || assert "dd:ack data.os present" "fail"
-	[[ -n $ACK_ARCH ]] && assert "dd:ack data.arch present" "pass" || assert "dd:ack data.arch present" "fail"
-	[[ -n $ACK_CPUS ]] && assert "dd:ack data.cpus present" "pass" || assert "dd:ack data.cpus present" "fail"
-	[[ -n $ACK_UPTIME ]] && assert "dd:ack data.uptimeSeconds present" "pass" || assert "dd:ack data.uptimeSeconds present" "fail"
-	[[ -n $ACK_LAST ]] && assert "dd:ack data.lastSeen present" "pass" || assert "dd:ack data.lastSeen present" "fail"
+	assert_equal "$ACK_TYPE" "dd:ack" "dd:ack event type is dd:ack" "got: $ACK_TYPE"
+	assert_present "$ACK_VERSION" "dd:ack data.version present"
+	assert_present "$ACK_OS" "dd:ack data.os present"
+	assert_present "$ACK_ARCH" "dd:ack data.arch present"
+	assert_present "$ACK_CPUS" "dd:ack data.cpus present"
+	assert_present "$ACK_UPTIME" "dd:ack data.uptimeSeconds present"
+	assert_present "$ACK_LAST" "dd:ack data.lastSeen present"
 else
 	assert "dd:ack event type is dd:ack" "fail" "no data: line received from /api/events"
 	for f in "data.version" "data.os" "data.arch" "data.cpus" "data.uptimeSeconds" "data.lastSeen"; do

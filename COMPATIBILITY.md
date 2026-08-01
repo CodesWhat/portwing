@@ -15,9 +15,24 @@ DrydockCompat bumps.
 
 ## Version matrix
 
-| Portwing version | Drydock version | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
-|---|---|---|---|
-| v0.8.1 (latest release) / `main` | 1.6.x (1.5.x with `DD_EXPERIMENTAL_PORTWING=true`) | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| Portwing version | Drydock wire connection | Full feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
+|---|---|---|---|---|
+| v0.9.0 (latest release) / `main` | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+
+## Wire compatibility versus feature compatibility
+
+`DrydockCompat` answers whether the two sides can parse and maintain the stable
+`portwing/1.0` connection. It does **not** promise that an older controller
+implements every additive Portwing feature.
+
+Portwing v0.9.0 keeps `DrydockCompat` at `1.4.0`: the watcher configuration
+keys (`transport=docker-api`, `execution=controller`, `events=portwing`), empty
+remote-trigger advertisement, and component-before-inventory ordering are
+additive. A wire-compatible older Drydock can still connect, but it does not
+provide the complete controller-owned watcher/update path. Use Drydock
+`v1.6.0-rc.11` or later for full v0.9.0 behavior in both Standard Mode (Docker
+calls through authenticated HTTP) and Edge Mode (correlated WebSocket
+`request`/`response`).
 
 ## What "wire compat" means
 

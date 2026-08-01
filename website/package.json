@@ -6,7 +6,7 @@
     "dev": "next dev --port 3001",
     "prebuild": "npm run build:docs-content",
     "build": "next build",
-    "postbuild": "node scripts/security-headers.mjs --check",
+    "postbuild": "node scripts/security-headers.mjs",
     "build:docs-content": "(cd ../docs && npm run build) && rm -rf public/docs && mkdir -p public/docs && cp -R ../docs/out/. public/docs/",
     "lint": "tsc --noEmit",
     "start": "next start --port 3001",

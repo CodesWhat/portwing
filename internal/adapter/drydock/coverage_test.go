@@ -45,8 +45,6 @@ func TestCapabilities(t *testing.T) {
 		t.Fatal("Capabilities() returned empty slice")
 	}
 	want := map[string]bool{
-		"dd:watch":          true,
-		"dd:trigger":        true,
 		"dd:container-sync": true,
 		"dd:logs":           true,
 	}
@@ -58,6 +56,13 @@ func TestCapabilities(t *testing.T) {
 	}
 	for missing := range want {
 		t.Errorf("missing capability %q", missing)
+	}
+	for _, unsupported := range []string{"dd:watch", "dd:trigger"} {
+		for _, capability := range caps {
+			if capability == unsupported {
+				t.Errorf("unsupported capability %q must not be advertised", unsupported)
+			}
+		}
 	}
 }
 
@@ -152,7 +157,7 @@ func (s *collectingSender) SendTypedMessage(msgType string, _ any) error {
 	return nil
 }
 
-func TestOnConnect_SendsContainerSyncThenComponentSync(t *testing.T) {
+func TestOnConnect_SendsComponentSyncBeforeContainerSync(t *testing.T) {
 	t.Parallel()
 
 	client, _, shutdown := newRouteTestDockerClient(t)
@@ -171,11 +176,11 @@ func TestOnConnect_SendsContainerSyncThenComponentSync(t *testing.T) {
 	if len(coll.sent) < 2 {
 		t.Fatalf("expected ≥2 messages, got %d: %v", len(coll.sent), coll.sent)
 	}
-	if coll.sent[0] != protocol.TypeDDContainerSync {
-		t.Errorf("msg[0] = %q, want %q", coll.sent[0], protocol.TypeDDContainerSync)
+	if coll.sent[0] != protocol.TypeDDComponentSync {
+		t.Errorf("msg[0] = %q, want %q", coll.sent[0], protocol.TypeDDComponentSync)
 	}
-	if coll.sent[1] != protocol.TypeDDComponentSync {
-		t.Errorf("msg[1] = %q, want %q", coll.sent[1], protocol.TypeDDComponentSync)
+	if coll.sent[1] != protocol.TypeDDContainerSync {
+		t.Errorf("msg[1] = %q, want %q", coll.sent[1], protocol.TypeDDContainerSync)
 	}
 }
 

@@ -40,7 +40,7 @@ Download the package for your architecture from the
 [GitHub release](https://github.com/CodesWhat/portwing/releases). For example:
 
 ```bash
-VERSION=0.8.1
+VERSION=0.9.0
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.deb" \
@@ -59,7 +59,7 @@ Use `linux_arm64.deb` on 64-bit Arm or `linux_armv7.deb` on 32-bit Arm.
 Download the matching package and its signature bundle:
 
 ```bash
-VERSION=0.8.1
+VERSION=0.9.0
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.rpm" \
@@ -84,7 +84,7 @@ bundles. Verify the checksum manifest as described in
 sha256sum --check checksums.txt --ignore-missing
 
 cosign verify-blob \
-  --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+  --certificate-identity="https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
   --bundle="portwing_${VERSION}_linux_amd64.deb.bundle" \
   "portwing_${VERSION}_linux_amd64.deb"

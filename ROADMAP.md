@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is pre-`v1.0.0` software (currently `v0.8.1`). This roadmap describes
+> Portwing is pre-`v1.0.0` software (currently `v0.9.0`). This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
@@ -9,13 +9,13 @@
 
 The security-hardening, release/supply-chain, test-coverage, and edge-tunnel
 work previously tracked here as "in progress" landed across v0.5.0 through
-v0.8.0 — see [CHANGELOG.md](CHANGELOG.md) for the itemized history. In
+v0.9.0 — see [CHANGELOG.md](CHANGELOG.md) for the itemized history. In
 particular:
 
 - **End-to-end edge mode.** Drydock 1.5 first shipped the matching
   `/api/portwing/ws` controller endpoint (Ed25519-only); Drydock 1.6 enables
   the stable `portwing/1.0` endpoint by default. Portwing can dial out and
-  manage NAT'd / firewalled hosts with no inbound port.
+  manage NAT'd / firewalled hosts with no inbound control port published.
 - **Edge tunnel robustness.** Ordered exec I/O, a single-writer outbound
   backpressure path with per-frame write deadlines and slow-consumer eviction,
   and a dedicated wire-contract test harness (`internal/edge/wire_contract_test.go`).
@@ -26,6 +26,15 @@ particular:
   `quality-bench-monthly.yml`.
 - **Reproducible base images.** `Dockerfile` and `Dockerfile.release` pin
   every base image by digest, with Dependabot tracking the `docker` ecosystem.
+- **Controller-owned watcher/update execution.** Portwing marks the Docker
+  watcher as `transport=docker-api`, `execution=controller`, and
+  `events=portwing`; Drydock runs its native watcher and update trigger through
+  Portwing over Standard HTTP or Edge correlated requests. The complete v0.9
+  feature path requires Drydock `v1.6.0-rc.11+` while the stable wire contract
+  remains `DrydockCompat` 1.4.0.
+- **Shared Edge audit export.** The cursor-based NDJSON exporter is available
+  on Edge Mode's private operations listener, with deployment examples that
+  isolate its intentionally unauthenticated trust boundary.
 
 ## Toward `v1.0`
 
@@ -52,6 +61,13 @@ calendar date:
 - **Completed for v0.8 — Operational ergonomics.** Mode-aware liveness and
   readiness, shared standard/edge metrics, cursor-based NDJSON audit export,
   and ready-to-run Compose/Kubernetes observability examples.
+- **Completed for v0.9 — Controller-owned update integration.** Additive
+  watcher transport/ownership/event markers, component-before-inventory Edge
+  ordering, no remote-trigger advertisement, and documented Standard/Edge
+  proxy paths are coordinated with Drydock `v1.6.0-rc.11+`.
+- **Completed for v0.9 — Edge audit export hardening.** Standard and Edge
+  modes share one exporter implementation; public docs and Kubernetes examples
+  explicitly isolate Edge Mode's unauthenticated operations listener.
 
 ## Non-goals
 

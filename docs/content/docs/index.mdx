@@ -22,8 +22,9 @@ standalone too.
   compromised agent is constrained to an explicit Docker API allowlist.
 - **Ed25519 per-client auth** — signed requests with replay protection and no shared
   secrets on the wire. Prefer a token? Store only its Argon2id hash.
-- **Signed & verifiable** — every release ships cosign signatures, an SBOM, and SLSA
-  provenance. Verify the image before you trust it.
+- **Signed & verifiable** — every release ships cosign signatures, per-archive
+  SBOMs, an image SBOM attestation, and SLSA provenance. Verify the image before
+  you trust it.
 - **Hardened runtime** — ships to run `read_only`, `cap_drop: ALL`, and
   `no-new-privileges`, with tokens delivered as mounted secrets.
 - **Structured audit log** — every action recorded as JSON; auth and key-enrollment
@@ -35,7 +36,7 @@ standalone too.
 - **Tiny & multi-arch** — a single static Go binary, ~10 MB, for amd64 · arm64 · arm/v7.
 
 <Callout type="info">
-  Portwing `v0.8.x` is a supported pre-v1 release. Pin to an exact version and review
+  Portwing `v0.9.x` is a supported pre-v1 release. Pin to an exact version and review
   the changelog before upgrading; the HTTP API, environment variables, MCP tool
   surface, and stable `portwing/1.0` protocol follow the published
   [stability policy](https://github.com/CodesWhat/portwing/blob/main/STABILITY.md).

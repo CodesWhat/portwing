@@ -84,7 +84,7 @@ git push origin v<version>
 `release.yml` runs on the tag push:
 
 1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; publishes the stable Homebrew cask; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
-2. **Attestations** — SLSA build provenance for every archive in `checksums.txt` and for the container manifest (`gh attestation verify <archive> --repo CodesWhat/portwing`)
+2. **Attestations** — SLSA build provenance for every checksummed release asset (archives, native packages, and per-archive SBOMs) and for the container manifest (`gh attestation verify <asset> --repo CodesWhat/portwing`)
 3. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.
 4. **verify-native-packages** — verifies every package's Sigstore bundle, installs the `amd64` deb and rpm in digest-pinned clean distribution containers, checks the systemd unit, and runs `portwing version`.
 5. **verify-homebrew** — on stable tags, installs the published cask on macOS, runs `portwing version`, and uninstalls it.

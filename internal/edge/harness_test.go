@@ -309,9 +309,10 @@ type resizeCall struct {
 }
 
 type doCall struct {
-	method string
-	path   string
-	stream bool
+	method  string
+	path    string
+	stream  bool
+	headers http.Header
 }
 
 func (f *fakeDocker) GetVersion(context.Context) (string, error) {
@@ -358,14 +359,28 @@ func (f *fakeDocker) ResizeExec(_ context.Context, execID string, cols, rows int
 
 func (f *fakeDocker) Do(_ context.Context, method, path string, _ io.Reader) (*http.Response, error) {
 	f.mu.Lock()
-	f.doCalls = append(f.doCalls, doCall{method, path, false})
+	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: false})
+	f.mu.Unlock()
+	return f.doResp, f.doErr
+}
+
+func (f *fakeDocker) DoWithHeaders(_ context.Context, method, path string, headers http.Header, _ io.Reader) (*http.Response, error) {
+	f.mu.Lock()
+	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: false, headers: headers.Clone()})
 	f.mu.Unlock()
 	return f.doResp, f.doErr
 }
 
 func (f *fakeDocker) DoStream(_ context.Context, method, path string, _ io.Reader) (*http.Response, error) {
 	f.mu.Lock()
-	f.doCalls = append(f.doCalls, doCall{method, path, true})
+	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: true})
+	f.mu.Unlock()
+	return f.streamResp, f.streamErr
+}
+
+func (f *fakeDocker) DoStreamWithHeaders(_ context.Context, method, path string, headers http.Header, _ io.Reader) (*http.Response, error) {
+	f.mu.Lock()
+	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: true, headers: headers.Clone()})
 	f.mu.Unlock()
 	return f.streamResp, f.streamErr
 }

@@ -854,6 +854,74 @@ func TestStartHealthServerEndpointResponds(t *testing.T) {
 	}
 }
 
+// TestStartHealthServerExportsAuditRecords confirms that edge mode exposes the
+// same cursor-based NDJSON audit buffer available in standard mode. The edge
+// operations listener is intentionally private and follows its existing
+// unauthenticated metrics posture.
+func TestStartHealthServerExportsAuditRecords(t *testing.T) {
+	t.Parallel()
+
+	addr := freeAddr(t)
+	auditor, closeAudit, err := audit.New("", 8)
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	t.Cleanup(closeAudit)
+	auditor.AuthFailure("controller", http.MethodGet, "/denied")
+
+	c := &Client{
+		cfg: &config.Config{
+			BindAddress: "127.0.0.1",
+			Port:        portFrom(addr),
+		},
+		dockerClient: &fakeDocker{},
+		collector:    metrics.NewCollector("", true),
+		auditor:      auditor,
+		startTime:    time.Now(),
+	}
+	c.startHealthServer()
+	t.Cleanup(func() {
+		if c.healthServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = c.healthServer.Shutdown(ctx)
+		}
+	})
+
+	exportURL := "http://" + c.healthServer.Addr + "/_portwing/audit/export?cursor=0"
+	var resp *http.Response
+	waitFor(t, "edge audit export ready", func() bool {
+		//nolint:noctx,bodyclose
+		r, e := http.Get(exportURL) //nolint:noctx,gosec
+		if e == nil {
+			resp = r
+			return true
+		}
+		return false
+	})
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read edge audit export: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("audit export status = %d, want 200: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/x-ndjson" {
+		t.Fatalf("content type = %q, want application/x-ndjson", got)
+	}
+	if got := resp.Header.Get("X-Portwing-Next-Cursor"); got != "1" {
+		t.Fatalf("next cursor = %q, want 1", got)
+	}
+	if got := resp.Header.Get("X-Portwing-Record-Count"); got != "1" {
+		t.Fatalf("record count = %q, want 1", got)
+	}
+	if !strings.Contains(string(body), `"path":"/denied"`) {
+		t.Fatalf("audit export missing retained record: %s", body)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // SendTypedMessage (edgeMessageSender)
 // ---------------------------------------------------------------------------

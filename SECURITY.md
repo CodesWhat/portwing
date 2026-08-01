@@ -6,8 +6,8 @@ Security fixes are shipped on the **latest release line only**.
 
 | Version        | Supported          |
 | -------------- | ------------------ |
-| 0.8.x (latest) | :white_check_mark: |
-| < 0.8          | :x:                |
+| 0.9.x (latest) | :white_check_mark: |
+| < 0.9          | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -30,7 +30,7 @@ We appreciate responsible disclosure and will credit reporters in the release no
 ### In scope
 
 - The Go agent — authentication (token, Argon2id `TOKEN_HASH`, Ed25519 per-request signatures), rate limiting, the Docker API proxy, the drydock and generic adapters, the edge-mode WebSocket tunnel, the enrollment endpoint, compose stack handling, the audit log, the MCP server, the health/metrics endpoints, and config parsing.
-- The published container image at `ghcr.io/codeswhat/portwing:<tag>`, including its SBOM, build provenance, and cosign signatures.
+- The published container image at `ghcr.io/codeswhat/portwing:<tag>`, including its OCI SBOM attestation, build provenance, and cosign signatures.
 - Any compiled binary distributed via a GitHub release tagged `v0.x.x` or later.
 
 ### Out of scope
@@ -52,7 +52,7 @@ The controls that materially harden a deployment:
 - **Strong credentials** — set `TOKEN_HASH` (Argon2id PHC string from `portwing hash-token`) so a leaked config doesn't expose the credential, or use Ed25519 per-request signing (`AUTHORIZED_KEYS`) so no shared secret exists at all.
 - **Read-only root filesystem, dropped capabilities, no new privileges** — `read_only: true`, `cap_drop: [ALL]`, `security_opt: ["no-new-privileges:true"]`. See `examples/` for ready-to-run compose files.
 - **Socket filtering with sockguard** — put [sockguard](https://github.com/CodesWhat/sockguard) between Portwing and the Docker socket so even a fully compromised agent is constrained to an explicit API allowlist (`examples/docker-compose.with-sockguard.yml`).
-- **Edge mode** — `DRYDOCK_URL` makes the agent dial out over WebSocket instead of listening; no inbound port exists to attack.
+- **Edge mode** — `DRYDOCK_URL` makes control traffic dial out over WebSocket; no inbound control port needs publishing. The unauthenticated operations listener still serves health, metrics, and audit export, so Edge mode binds it to loopback by default. Explicitly choose a broader `BIND_ADDRESS` only on an isolated monitoring network.
 - **Rootless Docker on the host** — reduces the daemon's authority at the actual trust boundary.
 
 **sockguard idle-session timeout:** when sockguard fronts the Docker socket, its `HijackHandler` force-closes any hijacked bidirectional stream — interactive `exec`/`attach` sessions — after 10 minutes with zero bytes of traffic in either direction (`hijackInactivityTimeout` in sockguard's `internal/proxy/hijack.go`). This limit doesn't exist when Portwing talks directly to `/var/run/docker.sock`. Operators pairing Portwing with sockguard should expect an idle terminal session (e.g. one left open with no keystrokes or output) to be dropped after 10 minutes of inactivity; send periodic traffic or reconnect if you need longer-lived idle sessions.
@@ -74,7 +74,7 @@ Portwing implements the following:
 The nonce LRU cache (capacity controlled by `NONCE_LRU_SIZE`, default 10,000) tracks nonces within the ±60 s timestamp window to block replayed Ed25519-signed requests. When the cache is full, new nonces are silently accepted without being recorded — the cache fails open for *tracking* while the timestamp window remains enforced. This is safe because nonces are only recorded *after* a valid Ed25519 signature has been verified: filling the cache to trigger fail-open requires a large volume of legitimately signed requests, which is not possible for an unauthenticated attacker. The default capacity of 10,000 entries exceeds expected request volume for a single-host agent and ensures the fail-open path is not reachable under normal conditions.
 
 - **Minimal attack surface**: static binary, three direct dependencies, stdlib crypto only, Wolfi OS base image with no package manager.
-- **Supply chain**: SHA-pinned GitHub Actions with harden-runner on every job, weekly govulncheck/grype/gosec scans, OpenSSF Scorecard, cosign-signed images, SLSA build provenance, and SBOMs on every release.
+- **Supply chain**: SHA-pinned GitHub Actions with harden-runner on every job, weekly govulncheck/grype/gosec scans, OpenSSF Scorecard, cosign-signed images, SLSA build provenance, per-archive CycloneDX SBOMs, and a container-image SBOM attestation on every release.
 
 ## What to include in a report
 

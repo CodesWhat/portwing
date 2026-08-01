@@ -4,7 +4,7 @@ description: Portwing's layered defenses — from socket-level filtering and cry
 ---
 
 <Callout type="info">
-Portwing v0.8.x is a supported pre-v1 release. The controls documented here are implemented and tested, and public interfaces follow the published [stability policy](https://github.com/CodesWhat/portwing/blob/main/STABILITY.md). This page describes the product's security model; it is not a compliance certification or substitute for your own threat model.
+Portwing v0.9.x is a supported pre-v1 release. The controls documented here are implemented and tested, and public interfaces follow the published [stability policy](https://github.com/CodesWhat/portwing/blob/main/STABILITY.md). This page describes the product's security model; it is not a compliance certification or substitute for your own threat model.
 </Callout>
 
 The Docker socket is root-equivalent on the host that runs it. Anything that can write to `/var/run/docker.sock` can create a privileged container, mount the host filesystem, and escape to the underlying machine. Portwing is a privileged agent: an **authenticated** caller has full Docker API access. The controls described here prevent *unauthenticated or improperly authorized* access and certain classes of injection attacks; they do not limit what an authenticated caller can do with the Docker API. Treat the Portwing token as a root-equivalent credential.
@@ -24,7 +24,7 @@ Portwing's security design layers independent controls so that a failure in any 
 | **Input validation** | Root-confined symlink-resistant writes, path-traversal guard, env-var denylist, and service-name flag-injection filter on Compose requests |
 | **Resource limits** | Bounded WebSocket frames, response bodies, exec sessions, enrollment bodies, and Argon2 concurrency, plus an IP rate limiter to resist DoS |
 | **Audit trail** | Structured JSON audit log for every auth event, Compose operation, and exec session |
-| **Supply chain** | Cosign keyless signatures, CycloneDX SBOM, and SLSA provenance on every release |
+| **Supply chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA provenance on every release |
 
 ---
 
@@ -295,7 +295,10 @@ Example lines:
 {"time":"2026-01-15T10:24:01.500Z","level":"INFO","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
 ```
 
-Audit logging is disabled by default (`AUDIT_LOG` unset). When disabled, the overhead is a single nil pointer check per request. Log files are opened in append-only mode at `0600`.
+The persistent audit sink is disabled by default (`AUDIT_LOG` unset), while the
+in-memory ring retains 256 recent records by default for the audit APIs. Set
+`AUDIT_BUFFER_SIZE=0` to disable that retention. Configured log files are opened
+in append-only mode at `0600`.
 
 The local file is not cryptographically tamper-evident: a principal that can rewrite the host filesystem can truncate, replace, or delete it. For tamper evidence, ship records immediately to append-only or WORM storage under separate credentials and monitor delivery gaps.
 
@@ -308,26 +311,26 @@ See [Audit Logging](/audit-logging) for the full schema and aggregator integrati
 Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0 -trimpath -s -w`) and attested with:
 
 - **Cosign keyless signatures** — both the checksums file and the container image are signed via GitHub Actions OIDC. No operator-managed signing keys are required.
-- **CycloneDX SBOM** — a full software bill of materials (`portwing-${TAG}-sbom.cdx.json`) is attached as a release asset and can be verified with cosign.
-- **SLSA provenance** — build provenance is generated and attached so the build inputs can be independently verified.
+- **CycloneDX SBOMs** — every archive has a sibling named `<archive>.cyclonedx.json`; the image carries a separate Buildx OCI SBOM attestation covering its OS packages.
+- **SLSA provenance** — for public releases, GitHub build provenance covers every asset listed in `checksums.txt`, including archives, packages, and per-archive SBOMs, plus the container manifest.
 
 Verify a release before running it:
 
 ```bash
-TAG=v0.8.1
+VERSION=0.9.0
 
 # Verify the checksums file
 cosign verify-blob \
-  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/.*" \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --bundle "checksums.txt.bundle" \
   "checksums.txt"
 
 # Verify the container image
 cosign verify \
-  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/.*" \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  "ghcr.io/codeswhat/portwing:${TAG}"
+  "ghcr.io/codeswhat/portwing:${VERSION}"
 ```
 
 See [Verification](/verification) for SBOM inspection and SLSA provenance verification.
@@ -336,8 +339,8 @@ See [Verification](/verification) for SBOM inspection and SLSA provenance verifi
 
 ## Control 14 — Static-site browser policy
 
-The marketing and documentation exports ship a checked-in Vercel header
-policy generated from the final HTML. Every route receives
+The marketing and documentation exports generate a Vercel Build Output API
+header policy from the final HTML during each build. Every route receives
 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, a strict referrer
 policy, and a restrictive permissions policy. Each HTML route also receives a
 Content Security Policy whose `script-src` contains only `self` plus SHA-256
@@ -345,9 +348,9 @@ hashes of that route's generated inline scripts; arbitrary inline JavaScript
 is not allowed. `frame-ancestors 'none'`, `object-src 'none'`, and
 `base-uri 'self'` further reduce browser-side injection and framing exposure.
 
-The site build fails if the generated route policy differs from
-`website/vercel.json`, preventing content changes from silently deploying with
-stale script hashes.
+The build packages the exact rendered files and their matching route policy in
+`.vercel/output`, preventing local and remote builds from deploying stale
+script hashes.
 
 ---
 

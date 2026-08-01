@@ -8,19 +8,19 @@ Remote container control|Yes (via Periphery agent)|Yes|tie
 Full orchestration UI|Yes (Git-integrated stacks, builds, deploys)|No (Drydock + Portwing only)|competitor
 Auth model|Time-based passkey (server-synced)|Ed25519 per-request signing|self
 Structured audit log|No|Yes (JSON, built-in)|self
-Signed images + SBOM + provenance|No|Yes (cosign + SBOM + SLSA)|self
+Signed images + SBOMs + provenance|No|Yes (cosign + archive/image SBOMs + SLSA)|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Partial (some system metrics)|Yes (agent request + health metrics)|self
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|No|Yes (Drydock 1.6+)|self
+Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|GPL-3.0|AGPL-3.0|tie
 `,
   highlightsTable: `
-key|Ed25519 Per-Request Auth|Komodo Periphery uses a time-based passkey that must stay in sync with the server clock. Portwing uses Ed25519 asymmetric signing on every request — clock-independent, no shared secret on the wire.
+key|Ed25519 Per-Request Auth|Komodo Periphery uses a time-based passkey that must stay in sync with the server clock. Portwing signs every request with a per-client Ed25519 key, a bounded timestamp, and a one-time nonce — no shared secret on the wire.
 shield|Default-Deny Socket Filter|Portwing pairs with sockguard so the agent never touches the raw Docker socket directly. Even a compromised Portwing instance is constrained to the explicit API allowlist in sockguard.yaml. Komodo Periphery mounts the socket unfiltered.
 filetext|Structured Audit Log|Portwing writes structured JSON for every proxied Docker API call; immutable external storage provides tamper evidence. Komodo has no built-in agent-level audit trail.
-packagecheck|Signed Images + SBOM|Every Portwing release ships a CycloneDX SBOM, cosign image signatures, and SLSA build provenance. Komodo Periphery publishes none of these supply-chain artifacts.
+packagecheck|Signed Images + SBOMs|Every Portwing release ships per-archive CycloneDX SBOMs, an image SBOM attestation, cosign image signatures, and SLSA build provenance. Komodo Periphery publishes none of these supply-chain artifacts.
 activity|Prometheus Metrics|Portwing exposes a Prometheus metrics endpoint covering agent health, request counts, and latency. Komodo's metrics are limited to system-level data from Periphery.
 bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool integration. Komodo has no MCP endpoint.
 `,
@@ -58,7 +58,7 @@ bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool int
       <strong className="text-neutral-900 dark:text-neutral-200">
         auth (Ed25519), audit logging, supply-chain artifacts, and sockguard socket filtering
       </strong>
-      . Komodo is production-mature; Portwing v0.8.x is a supported pre-v1 release.
+      . Komodo is production-mature; Portwing v0.9.x is a supported pre-v1 release.
     </p>
   ),
   migrationTitle: "Coming from Komodo Periphery?",

@@ -1,4 +1,4 @@
-# Full v0.8 operations topology. Start one mode at a time:
+# Full v0.9 operations topology. Start one mode at a time:
 #
 #   docker compose --profile standard up -d
 #   DRYDOCK_URL=https://drydock.example.com docker compose --profile edge up -d
@@ -7,7 +7,7 @@
 name: portwing-observability
 
 x-portwing-runtime: &portwing-runtime
-  image: ghcr.io/codeswhat/portwing:v0.8.1
+  image: ghcr.io/codeswhat/portwing:0.9.0
   restart: unless-stopped
   read_only: true
   cap_drop: [ALL]
@@ -90,9 +90,14 @@ services:
     <<: *portwing-runtime
     profiles: [edge]
     # No host port is published. Prometheus reaches the operations endpoint
-    # only across this private Compose network.
+    # only across this private Compose network. The Edge listener also exposes
+    # retained audit records without inbound auth, so do not attach untrusted
+    # workloads to this network or add a host port without an auth proxy.
     environment:
       DRYDOCK_URL: "${DRYDOCK_URL:-https://drydock.example.com}"
+      # Explicit opt-in: Prometheus and the audit forwarder reach this listener
+      # only through the private portwing-observability network.
+      BIND_ADDRESS: "0.0.0.0"
       PRIVATE_KEY_FILE: /run/secrets/portwing_key
       AGENT_NAME: "${AGENT_NAME:-edge-host-01}"
       AUDIT_LOG: /var/log/portwing/audit.ndjson

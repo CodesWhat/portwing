@@ -161,6 +161,15 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("TLS_CERT and TLS_KEY must either both be set or both be empty")
 	}
 
+	// Standard mode must accept inbound controller traffic by default. Edge
+	// mode's HTTP listener is operational-only and intentionally unauthenticated,
+	// so keep its health, metrics, and audit-export surface on loopback unless an
+	// operator explicitly opts into a broader BIND_ADDRESS.
+	bindAddressDefault := "0.0.0.0"
+	if drydockURL != "" {
+		bindAddressDefault = "127.0.0.1"
+	}
+
 	cfg := &Config{
 		DrydockURL:                 drydockURL,
 		Token:                      token,
@@ -168,7 +177,7 @@ func Load() (*Config, error) {
 		CACert:                     getEnv("CA_CERT", ""),
 		TLSSkipVerify:              getEnvBool("TLS_SKIP_VERIFY", false),
 		Port:                       getEnv("PORT", "3000"),
-		BindAddress:                getEnv("BIND_ADDRESS", "0.0.0.0"),
+		BindAddress:                getEnv("BIND_ADDRESS", bindAddressDefault),
 		TLSCert:                    tlsCert,
 		TLSKey:                     tlsKey,
 		TrustedProxies:             splitCSV(getEnv("TRUSTED_PROXIES", "")),

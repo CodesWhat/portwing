@@ -18,7 +18,7 @@
 >
 > ### 🚧 Pre-1.0 software — APIs may still change
 >
-> Portwing is pre-`v1.0.0` (currently `v0.8.1`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> Portwing is pre-`v1.0.0` (currently `v0.9.0`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
@@ -76,7 +76,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.8.1 is the current release.** It includes the v0.8 edge, continuous-log, stability, native-package, and operations work plus the native-install verification fix. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.0 is the current release.** It adds controller-owned Drydock watcher/update execution, shared Edge audit export, and actionable exec/sockguard error propagation. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
@@ -104,13 +104,13 @@ flowchart LR
     DD -- "HTTPS + SSE · X-Dd-Agent-Secret" --> LB
 ```
 
-> The Drydock controller connects **inbound** to each standard-mode Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). Each agent reaches the Docker Engine only through a sockguard socket filter. In production-supported **edge mode**, the agent instead dials Drydock 1.6 over the stable `portwing/1.0` WebSocket tunnel, so the host needs no inbound port — see [Connection Modes](#connection-modes).
+> The Drydock controller connects **inbound** to each standard-mode Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). Each agent reaches the Docker Engine only through a sockguard socket filter. In production-supported **edge mode**, the agent instead dials Drydock over the stable `portwing/1.0` WebSocket tunnel, so no inbound control port needs publishing. Full v0.9 watcher/update integration requires Drydock `v1.6.0-rc.11+`. Keep the separate unauthenticated operations listener private — see [Connection Modes](#connection-modes).
 
 <h2 align="center" id="quick-start">🚀 Quick Start</h2>
 
 ### Recommended deployment (hardened)
 
-The strongest posture combines three controls: **sockguard** (socket-level request filtering so Portwing never touches the raw Docker socket directly), **Ed25519 authentication** (signed requests or the required signed edge hello, with replay protection and no shared secret), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted credentials). Use **standard mode behind a TLS reverse proxy** when Drydock can reach the host, or production-supported [edge mode](#connection-modes) with Drydock 1.6 when the host must dial out.
+The strongest posture combines three controls: **sockguard** (socket-level request filtering so Portwing never touches the raw Docker socket directly), **Ed25519 authentication** (signed requests or the required signed edge hello, with replay protection and no shared secret), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted credentials). Use **standard mode behind a TLS reverse proxy** when Drydock can reach the host, or production-supported [edge mode](#connection-modes) when the host must dial out. Use Drydock `v1.6.0-rc.11+` for the complete v0.9 watcher/update contract.
 
 **Step 1 — generate a token and pull the example:**
 
@@ -139,15 +139,15 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.8.1_linux_amd64.deb
+sudo apt install ./portwing_0.9.0_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.8.1_linux_amd64.rpm
+sudo rpm --install ./portwing_0.9.0_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
 do not start it before authentication is configured. See the
-[native installation guide](https://portwing.codeswhat.com/docs/installation)
+[native installation guide](https://getportwing-codeswhat.vercel.app/docs/installation)
 for artifact verification, configuration, upgrade, uninstall, and service-user
 expectations.
 
@@ -230,7 +230,7 @@ By design, the `sockguard.yaml` preset above (a copy of sockguard's `portwing.ya
 <details>
 <summary>Edge mode variant (outbound WebSocket — stable portwing/1.0)</summary>
 
-> **Production supported.** Edge mode uses the stable `portwing/1.0` protocol and is covered by a real multi-agent reconnect, exec, backpressure, and continuous-log soak. Drydock 1.6 enables the endpoint by default; Drydock 1.5 requires `DD_EXPERIMENTAL_PORTWING=true`.
+> **Production supported.** Edge mode uses the stable `portwing/1.0` protocol and is covered by a real multi-agent reconnect, exec, backpressure, and continuous-log soak. Use Drydock `v1.6.0-rc.11+` for full v0.9 watcher/update feature compatibility; older controllers may remain wire-compatible without that behavior.
 
 For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml) has Portwing dial out to your Drydock controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`); no port is published on the remote host.
 
@@ -315,7 +315,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-For v0.4.0 and later — including v0.8.1, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+For v0.4.0 and later — including v0.9.0, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 - **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
 - **v0.2.0** — the security & observability release. Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`. Also shipped in v0.2.0:
@@ -326,7 +326,7 @@ For v0.4.0 and later — including v0.8.1, the current release — see [CHANGELO
   - **Structured audit logging** — `AUDIT_LOG` env var records auth events, Compose operations, and exec sessions as JSON lines.
   - **Generic REST adapter** — headless REST + SSE management API for standalone mode without a Drydock platform connection (`ADAPTER=generic`).
 - **v0.1.0** — initial release: transparent Docker API proxy, Edge mode WebSocket tunnel, Drydock adapter, SSE event stream, token auth, rate limiting, multi-arch image.
-- **Cross-cutting: CI & supply-chain hardening** (v0.2.0 onward, deepened through v0.5.0) — SHA-pinned actions, five Go fuzz targets (60s CI / 5m nightly), integration suite against a real Docker daemon, weekly vulnerability scans (govulncheck/grype/gosec), monthly mutation testing, OpenSSF Scorecard, CodeQL, and cosign keyless signing + CycloneDX SBOM + SLSA provenance on every release.
+- **Cross-cutting: CI & supply-chain hardening** (v0.2.0 onward, deepened through v0.5.0) — SHA-pinned actions, five Go fuzz targets (60s CI / 5m nightly), integration suite against a real Docker daemon, weekly vulnerability scans (govulncheck/grype/gosec), monthly mutation testing, OpenSSF Scorecard, CodeQL, cosign keyless signing, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA provenance on every release.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
@@ -338,19 +338,19 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 | | Feature | Description |
 |---|---|---|
-| 🔄 | **Connection Modes** | Standard mode lets Drydock connect inbound over HTTP/SSE. Production-supported edge mode lets the agent dial Drydock 1.6 outbound over the stable `portwing/1.0` WebSocket tunnel for NAT/firewalled hosts; Portwing itself remains pre-`v1.0.0`. |
+| 🔄 | **Connection Modes** | Standard mode lets Drydock connect inbound over HTTP/SSE. Production-supported edge mode lets the agent dial outbound over the stable `portwing/1.0` WebSocket tunnel for NAT/firewalled hosts; full v0.9 watcher/update support requires Drydock `v1.6.0-rc.11+`. |
 | 🐳 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
 | 🔑 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
 | 🔐 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
 | 🤖 | **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
-| 📦 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting, including `dd:watcher-snapshot` events for Drydock compatibility. |
+| 📦 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting. Portwing marks watcher execution as controller-owned so compatible Drydock runs native watcher/update calls through the Standard or Edge Docker proxy. |
 | 📈 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_portwing/metrics`. Zero external dependencies. |
-| 📋 | **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Disabled by default (single nil check overhead when off). |
+| 📋 | **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Recent records are retained in memory by default; file/stdout/stderr persistence is opt-in. |
 | 🖥️ | **Host Metrics** | CPU, memory, disk, network, and uptime collection. |
 | ⚡ | **Interactive Exec** | Terminal sessions via WebSocket or HTTP hijack with 100 concurrent session cap. |
 | 🗂️ | **Docker Compose** | Full lifecycle management with security hardening — path traversal protection, env var denylist, service name injection prevention. |
 | 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
-| ✍️ | **Signed Supply Chain** | Cosign keyless signatures, CycloneDX SBOM, and SLSA provenance on every release. Verifiable without managing signing keys. |
+| ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA provenance on every release. Verifiable without managing signing keys. |
 | 🛡️ | **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
 | 🪶 | **Minimal Footprint** | Static Go binary, ~10 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
 | 🔌 | **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
@@ -448,11 +448,13 @@ Portwing runs an HTTP(S) server; the **Drydock controller connects inbound** and
 
 ### Edge Mode — production supported
 
-Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound port. The stable `portwing/1.0` path is covered by a real multi-agent reconnect/load soak, including concurrent exec and continuous logs under controller backpressure. Drydock 1.6 enables the endpoint by default; Drydock 1.5 requires `DD_EXPERIMENTAL_PORTWING=true`. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
+Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound control port. The stable `portwing/1.0` path is covered by a real multi-agent reconnect/load soak, including concurrent exec and continuous logs under controller backpressure. Drydock `v1.6.0-rc.11+` provides full v0.9 watcher/update feature compatibility; older compatible controllers can establish the wire connection but lack that coordinated execution model. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
 
 - Set when `DRYDOCK_URL` is configured along with `PRIVATE_KEY_FILE` — mandatory, not optional; Drydock rejects token-only agents, so `TOKEN` or `AUTHORIZED_KEYS` alone are not sufficient
 - Targets hosts behind NAT, firewalls, and dynamic IPs
 - Auto-reconnect with exponential backoff + jitter; signed hello via `PRIVATE_KEY_FILE`
+- Sends watcher component ownership before raw inventory; controller-owned
+  Docker calls use correlated WebSocket `request`/`response` messages
 
 ```text
 DRYDOCK_URL set + PRIVATE_KEY_FILE set  →  Edge Mode (outbound WebSocket)
@@ -561,7 +563,7 @@ the connection alive through proxies.
 | `CA_CERT` | -- | Custom CA certificate for Edge mode |
 | `TLS_SKIP_VERIFY` | `false` | Skip TLS verification (testing only) |
 | `PORT` | `3000` | HTTP server port |
-| `BIND_ADDRESS` | `0.0.0.0` | Bind address |
+| `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | HTTP/operations listener bind address. Set Edge mode to a non-loopback address only on an isolated monitoring network. |
 | `TLS_CERT` | -- | Server TLS certificate (Standard mode) |
 | `TLS_KEY` | -- | Server TLS key (Standard mode) |
 | `TRUSTED_PROXIES` | -- | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` is trusted; unset means forwarding headers are ignored |
@@ -598,7 +600,7 @@ Portwing talks to the Docker daemon over the Unix socket only — there is no `D
 | `MAX_RECONNECT_DELAY` | `60` | Max reconnect delay (seconds) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `SKIP_DF_COLLECTION` | -- | Disable disk metrics |
-| `AUDIT_LOG` | -- | Audit log sink: `stdout`, `stderr`, or a file path; unset disables auditing |
+| `AUDIT_LOG` | -- | Optional persistent audit sink: `stdout`, `stderr`, or a file path; unset disables only the sink (the in-memory ring is controlled by `AUDIT_BUFFER_SIZE`) |
 | `AUDIT_BUFFER_SIZE` | `256` | In-memory audit records retained for `GET /_portwing/audit`; `0` disables. Independent of `AUDIT_LOG`. |
 
 ### Adapter
@@ -646,8 +648,15 @@ Kubernetes examples use `/health` for liveness and `/ready` for readiness.
 | `/_portwing/metrics` | GET | Yes | Prometheus metrics (agent-scoped) |
 | `/metrics` | GET | Yes | Prometheus metrics (Drydock agent secret) |
 | `/_portwing/audit` | GET | Yes | Recent audit records (JSON, newest-first; `?limit=N`) |
-| `/_portwing/audit/export` | GET | Yes | Cursor-based NDJSON export (oldest-first) |
+| `/_portwing/audit/export` | GET | Standard: yes; edge: no | Cursor-based NDJSON export (oldest-first) |
 | `/_portwing/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol 2025-11-25) |
+
+In Edge Mode, `/_portwing/audit/export` is served without inbound
+authentication on the same limited operations listener as `/metrics`,
+`/health`, and `/ready`. Audit records can contain client addresses, request
+paths, container identifiers, and operation names. Never publish this listener
+to a host port or untrusted network; restrict it to the local/private
+observability network and allow only the exporter that consumes it.
 
 ### MCP — AI Assistant Integration
 
@@ -739,7 +748,8 @@ All other paths (`/*`) are transparently proxied to the Docker Engine API, inclu
 
 Portwing exposes Prometheus metrics at `/_portwing/metrics` (and the alias
 `/metrics`). Standard mode requires bearer auth; edge mode exposes `/metrics`
-on its limited private operations listener. In addition to
+and `/_portwing/audit/export` without authentication on its limited private
+operations listener. In addition to
 build/host/per-container and HTTP series, the endpoint reports edge-controller
 connection/reconnect/backpressure state plus audit ring, sink, and export
 health.
@@ -843,10 +853,10 @@ verified without managing signing keys.
 ### Verify the checksums file
 
 ```bash
-TAG=v0.1.0
+VERSION=0.9.0
 
 cosign verify-blob \
-  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/.*" \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --bundle "checksums.txt.bundle" \
   "checksums.txt"
@@ -855,20 +865,22 @@ cosign verify-blob \
 ### Verify the container image
 
 ```bash
-TAG=v0.1.0
+VERSION=0.9.0
 
 cosign verify \
-  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/.*" \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  "ghcr.io/codeswhat/portwing:${TAG}"
+  "ghcr.io/codeswhat/portwing:${VERSION}"
 ```
 
 ### SBOM
 
-Each release includes a CycloneDX SBOM attached as a release asset
-(`portwing-${TAG}-sbom.cdx.json`). Download and inspect it with any
-CycloneDX-compatible tool, or verify it with cosign the same way as the
-checksums file.
+Each binary archive has a matching CycloneDX release asset, for example
+`portwing_0.9.0_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
+cosign bundle; verify the signed `checksums.txt`, then verify the SBOM's digest
+against that manifest. Public releases also give every checksummed asset its
+own GitHub build-provenance attestation. The container image carries a separate
+OCI SBOM attestation.
 
 </details>
 
@@ -908,11 +920,14 @@ docker run -e AUDIT_LOG=/var/log/portwing-audit.log ...
 docker run -e AUDIT_LOG=stdout ...
 ```
 
-Auditing is disabled by default (`AUDIT_LOG` unset). When disabled the overhead
-is a single nil pointer check per request. Separately, setting
-`AUDIT_BUFFER_SIZE` (default 256) keeps recent records in an in-memory ring for
+The persistent file/stdout/stderr sink is disabled by default (`AUDIT_LOG`
+unset). Independently, `AUDIT_BUFFER_SIZE` defaults to 256 and keeps recent
+records in an in-memory ring; set it to `0` to disable retention. The ring feeds
 `GET /_portwing/audit` and cursor-based NDJSON export at
-`GET /_portwing/audit/export` (both auth required). A 409 response detects
+`GET /_portwing/audit/export`. Standard mode authenticates both paths. Edge
+mode exposes only the NDJSON export, without authentication, on its private
+operations listener; never publish that listener to an untrusted network. A
+409 response detects
 overwritten history or a restarted cursor generation instead of silently
 dropping records. The sink and export schemas are stable from v0.8.0.
 

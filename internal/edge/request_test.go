@@ -59,6 +59,51 @@ func TestHandleRequestNonStream(t *testing.T) {
 	}
 }
 
+func TestHandleRequestForwardsAllowedDockerHeaders(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	//nolint:bodyclose // the response body is consumed and closed by handleRequest, the code under test.
+	fd := &fakeDocker{streamResp: mkResp(http.StatusOK, "application/json", `{}`)}
+	c.dockerClient = fd
+
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "registry-auth",
+		Method:    http.MethodPost,
+		Path:      "/images/create?fromImage=registry.example/private/app",
+		Headers: map[string]string{
+			"Accept":            "application/json",
+			"Content-Type":      "application/json",
+			"X-Registry-Auth":   "base64-registry-credential",
+			"X-Registry-Config": "base64-registry-config",
+			"Authorization":     "must-not-reach-dockerd",
+			"Connection":        "upgrade",
+		},
+	})
+
+	fd.mu.Lock()
+	defer fd.mu.Unlock()
+	if len(fd.doCalls) != 1 {
+		t.Fatalf("Docker calls = %d, want 1", len(fd.doCalls))
+	}
+	got := fd.doCalls[0].headers
+	for key, want := range map[string]string{
+		"Accept":            "application/json",
+		"Content-Type":      "application/json",
+		"X-Registry-Auth":   "base64-registry-credential",
+		"X-Registry-Config": "base64-registry-config",
+	} {
+		if value := got.Get(key); value != want {
+			t.Errorf("%s = %q, want %q", key, value, want)
+		}
+	}
+	for _, key := range []string{"Authorization", "Connection"} {
+		if value := got.Get(key); value != "" {
+			t.Errorf("unsafe %s forwarded as %q", key, value)
+		}
+	}
+}
+
 // A request that fails at the Docker client is reported as an error envelope
 // tagged with the originating request id.
 func TestHandleRequestError(t *testing.T) {

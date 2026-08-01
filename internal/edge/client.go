@@ -64,7 +64,9 @@ const (
 type dockerAPI interface {
 	GetVersion(ctx context.Context) (string, error)
 	Do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error)
+	DoWithHeaders(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error)
 	DoStream(ctx context.Context, method, path string, body io.Reader) (*http.Response, error)
+	DoStreamWithHeaders(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error)
 	CreateExec(ctx context.Context, containerID string, cmd []string, user string, tty bool) (string, error)
 	StartExec(ctx context.Context, execID string, tty bool) (net.Conn, error)
 	ResizeExec(ctx context.Context, execID string, cols, rows int) error
@@ -642,11 +644,12 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 
 	var resp *http.Response
 	var err error
+	requestHeaders := allowedDockerRequestHeaders(req.Headers)
 
 	if isStream {
-		resp, err = c.dockerClient.DoStream(ctx, req.Method, req.Path, bodyReader)
+		resp, err = c.dockerClient.DoStreamWithHeaders(ctx, req.Method, req.Path, requestHeaders, bodyReader)
 	} else {
-		resp, err = c.dockerClient.Do(ctx, req.Method, req.Path, bodyReader)
+		resp, err = c.dockerClient.DoWithHeaders(ctx, req.Method, req.Path, requestHeaders, bodyReader)
 	}
 
 	if err != nil {
@@ -711,6 +714,29 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			ContentType: resp.Header.Get("Content-Type"),
 		})
 	}
+}
+
+// allowedDockerRequestHeaders forwards only Docker API metadata needed by the
+// controller-owned transport. Controller/session authentication and hop-by-hop
+// headers must never cross the Portwing-to-dockerd trust boundary.
+func allowedDockerRequestHeaders(headers map[string]string) http.Header {
+	allowed := http.Header{}
+	for name, value := range headers {
+		if strings.ContainsAny(value, "\r\n") || len(value) > 64*1024 {
+			continue
+		}
+		switch strings.ToLower(name) {
+		case "accept":
+			allowed.Set("Accept", value)
+		case "content-type":
+			allowed.Set("Content-Type", value)
+		case "x-registry-auth":
+			allowed.Set("X-Registry-Auth", value)
+		case "x-registry-config":
+			allowed.Set("X-Registry-Config", value)
+		}
+	}
+	return allowed
 }
 
 // writePump handles periodic outgoing messages: metrics, container refreshes,
@@ -968,6 +994,9 @@ func (c *Client) startHealthServer() {
 	}
 	mux.HandleFunc("GET /ready", readiness)
 	mux.HandleFunc("GET /_portwing/health", readiness)
+	mux.HandleFunc("GET /_portwing/audit/export", func(w http.ResponseWriter, r *http.Request) {
+		audit.ServeExportHTTP(w, r, c.auditor, c.metrics)
+	})
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		if c.auditor != nil {
 			stats := c.auditor.Stats()

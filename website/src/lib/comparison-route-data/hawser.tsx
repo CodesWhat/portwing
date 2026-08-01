@@ -8,19 +8,19 @@ Remote container control|Yes (Dockhand agent)|Yes (Drydock agent)|tie
 Compatible controller|Dockhand only|Drydock (+ standalone mode)|self
 Auth model|Shared secret|Ed25519 per-request signing|self
 Structured audit log|No|Yes (JSON, built-in)|self
-Signed images + SBOM + provenance|No|Yes (cosign + SBOM + SLSA)|self
+Signed images + SBOMs + provenance|No|Yes (cosign + archive/image SBOMs + SLSA)|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|No|Yes|self
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|Yes (Dockhand edge)|Yes (Drydock 1.6+)|tie
+Edge / NAT outbound tunnel|Yes (Dockhand edge)|Yes (Drydock v1.6.0-rc.11+)|tie
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|MIT|AGPL-3.0|tie
 `,
   highlightsTable: `
-key|Ed25519 Per-Request Auth|Hawser uses a shared secret passed per-request. Portwing uses Ed25519 asymmetric signing — no secret on the wire, revocable per-client keys, and clock-independent verification.
+key|Ed25519 Per-Request Auth|Hawser uses a shared secret passed per-request. Portwing uses Ed25519 asymmetric signing — no secret on the wire, revocable per-client keys, timestamp bounds, and nonce replay protection.
 globe|Standalone Mode|Portwing runs in standalone mode without a Drydock controller, exposing Docker API endpoints for any compatible client. Hawser requires the Dockhand controller.
 filetext|Structured Audit Log|Portwing writes structured JSON for every proxied Docker API call; immutable external storage provides tamper evidence. Hawser has no built-in audit trail.
-packagecheck|Signed Images + SBOM|Every Portwing release ships a CycloneDX SBOM, cosign image signatures, and SLSA build provenance. Hawser publishes no supply-chain artifacts.
+packagecheck|Signed Images + SBOMs|Every Portwing release ships per-archive CycloneDX SBOMs, an image SBOM attestation, cosign image signatures, and SLSA build provenance. Hawser publishes no supply-chain artifacts.
 activity|Prometheus Metrics|Portwing exposes agent health, request counts, and latency histograms. Hawser has no metrics endpoint.
 bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool integration. Hawser has no MCP support.
 `,
@@ -59,7 +59,7 @@ bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool int
         Ed25519 per-request signing, sockguard integration, structured audit logging, and an MCP
         server
       </strong>
-      . Hawser ships today as a more mature option; Portwing v0.8.x is a supported pre-v1 release.
+      . Hawser ships today as a more mature option; Portwing v0.9.x is a supported pre-v1 release.
     </p>
   ),
   migrationTitle: "Coming from Hawser?",

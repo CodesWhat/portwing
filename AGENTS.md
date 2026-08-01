@@ -19,7 +19,7 @@ Portwing is a security-first remote Docker agent written in Go. It exposes a tra
 - `internal/protocol/` — wire types shared between standard and edge modes; `version.go` holds `AgentVersion`
 - `api/openapi.yaml` — generic adapter API contract
 - `docs/` — security model, drydock integration notes
-- `scripts/drydock-compat-check.sh` — 31-check live compatibility suite against a running agent
+- `scripts/drydock-compat-check.sh` — 35-check live compatibility suite against a running agent
 
 ## Build, test, lint
 

@@ -8,11 +8,11 @@ Image update notifications|Yes (multi-registry polling + 20+ notifiers)|No (Dryd
 Remote Docker API proxy|No (monitoring only, no remote control)|Yes (full Docker API proxy with auth)|self
 Auth for remote access|No (local only)|Yes (Ed25519 per-request signing)|self
 Structured audit log|No|Yes (JSON, built-in)|self
-Image signature verification|No|Yes (cosign + SBOM + SLSA)|self
+Signed release artifacts|No|Yes (cosign + archive/image SBOMs + SLSA)|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Yes|Yes|tie
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|No|Yes (Drydock 1.6+)|self
+Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|MIT|AGPL-3.0|tie
 `,
@@ -20,7 +20,7 @@ License|MIT|AGPL-3.0|tie
 key|Remote Auth (Ed25519)|Diun has no remote access model — it runs locally and pushes notifications outward. Portwing exposes the Docker API over authenticated HTTP with Ed25519 per-request signing so each client gets a revocable key pair.
 shield|Default-Deny Socket Filter|Portwing pairs with sockguard to constrain Docker API calls at the socket level. Diun mounts the raw socket and has no filtering layer.
 filetext|Structured Audit Log|Portwing logs every Docker API call it proxies as structured JSON for export to immutable storage. Diun has no audit trail beyond its own notification records.
-packagecheck|Image Signature Verification|Portwing verifies image signatures via cosign and ships CycloneDX SBOMs and SLSA build provenance on its own releases. Diun detects new tags but does not verify image signatures.
+packagecheck|Signed Release Artifacts|Portwing publishes cosign signatures, CycloneDX SBOMs, and SLSA build provenance for its own releases. Diun detects new tags but does not publish an equivalent signed release bundle.
 bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server so AI tools can inspect containers, images, and events. Diun has no MCP support.
 activity|Complementary, Not Competing|Diun and Portwing solve different problems and run happily side-by-side. Diun monitors registries and notifies; Portwing gives Drydock secure remote control. You likely want both.
 `,

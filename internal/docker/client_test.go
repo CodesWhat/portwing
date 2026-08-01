@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -856,6 +857,42 @@ func TestDo_NoContentTypeForNilBody(t *testing.T) {
 	}
 }
 
+func TestDoWithHeadersPreservesDockerMetadata(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = r.Header.Clone()
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	headers := http.Header{
+		"Content-Type":    []string{"application/vnd.docker.raw-stream"},
+		"X-Registry-Auth": []string{"registry-credential"},
+	}
+	resp, err := c.DoWithHeaders(context.Background(), http.MethodPost, "/images/create", headers, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("DoWithHeaders: %v", err)
+	}
+	resp.Body.Close()
+
+	mu.Lock()
+	gotContentType := got.Get("Content-Type")
+	gotRegistryAuth := got.Get("X-Registry-Auth")
+	mu.Unlock()
+	if gotContentType != "application/vnd.docker.raw-stream" {
+		t.Errorf("Content-Type = %q", gotContentType)
+	}
+	if gotRegistryAuth != "registry-credential" {
+		t.Errorf("X-Registry-Auth = %q", gotRegistryAuth)
+	}
+}
+
 func TestDoStream_SetsContentTypeForBodyRequests(t *testing.T) {
 	t.Parallel()
 
@@ -876,6 +913,40 @@ func TestDoStream_SetsContentTypeForBodyRequests(t *testing.T) {
 
 	if gotContentType != "application/json" {
 		t.Fatalf("Content-Type = %q, want %q", gotContentType, "application/json")
+	}
+}
+
+func TestDoStreamWithHeadersPreservesDockerMetadata(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var gotRegistryAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotRegistryAuth = r.Header.Get("X-Registry-Auth")
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	resp, err := c.DoStreamWithHeaders(
+		context.Background(),
+		http.MethodPost,
+		"/images/create",
+		http.Header{"X-Registry-Auth": []string{"stream-registry-credential"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("DoStreamWithHeaders: %v", err)
+	}
+	resp.Body.Close()
+
+	mu.Lock()
+	gotAuth := gotRegistryAuth
+	mu.Unlock()
+	if gotAuth != "stream-registry-credential" {
+		t.Errorf("X-Registry-Auth = %q", gotAuth)
 	}
 }
 

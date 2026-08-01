@@ -204,26 +204,42 @@ func (c *Client) buildURL(path string) string {
 
 // Do performs a normal HTTP request against the Docker daemon.
 func (c *Client) Do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	return c.do(ctx, method, path, nil, body, c.httpClient)
+}
+
+// DoWithHeaders performs a normal HTTP request while preserving explicitly
+// approved Docker API headers supplied by an authenticated caller.
+func (c *Client) DoWithHeaders(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error) {
+	return c.do(ctx, method, path, headers, body, c.httpClient)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, headers http.Header, body io.Reader, client *http.Client) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.buildURL(path), body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating Docker API request: %w", err)
 	}
-	if body != nil {
+	if headers != nil {
+		req.Header = headers.Clone()
+	}
+	if body != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	return c.httpClient.Do(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sending Docker API request %s %s: %w", method, path, err)
+	}
+	return resp, nil
 }
 
 // DoStream performs an HTTP request using the streaming client (no timeout).
 func (c *Client) DoStream(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.buildURL(path), body)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	return c.streamClient.Do(req)
+	return c.do(ctx, method, path, nil, body, c.streamClient)
+}
+
+// DoStreamWithHeaders performs a streaming request while preserving explicitly
+// approved Docker API headers supplied by an authenticated caller.
+func (c *Client) DoStreamWithHeaders(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error) {
+	return c.do(ctx, method, path, headers, body, c.streamClient)
 }
 
 // DoRaw forwards an arbitrary *http.Request to the Docker daemon using the

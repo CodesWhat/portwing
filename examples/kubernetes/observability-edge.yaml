@@ -1,6 +1,7 @@
-# Prometheus scraper for kubernetes/edge.yaml. The edge operations listener
-# exposes only health/readiness and metrics; control traffic still dials Drydock
-# outbound and no external Service type is created.
+# Prometheus scraper for kubernetes/edge.yaml. The unauthenticated Edge
+# operations listener also exposes retained audit records, so the agent manifest
+# uses a headless Service plus NetworkPolicy that admits only this labeled pod.
+# Control traffic still dials Drydock outbound; no external Service is created.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,8 +15,11 @@ data:
       - job_name: portwing-edge
         scheme: http
         metrics_path: /metrics
-        static_configs:
-          - targets: [portwing-edge-metrics.portwing.svc:3000]
+        dns_sd_configs:
+          - names:
+              - portwing-edge-operations.portwing.svc.cluster.local
+            type: A
+            port: 3000
 ---
 apiVersion: apps/v1
 kind: Deployment

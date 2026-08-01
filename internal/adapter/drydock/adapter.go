@@ -87,8 +87,6 @@ func (a *Adapter) Name() string { return "drydock" }
 
 func (a *Adapter) Capabilities() []string {
 	return []string{
-		"dd:watch",
-		"dd:trigger",
 		"dd:container-sync",
 		"dd:logs",
 	}
@@ -104,17 +102,18 @@ func (a *Adapter) HelloExtension() *adapter.HelloExtension {
 
 func (a *Adapter) PollInterval() int { return 0 }
 
-// OnConnect sends the initial container sync and component sync after an
-// edge-mode connection is established.
+// OnConnect sends the component contract before the initial inventory after
+// an edge-mode connection is established. Controllers must know which fields
+// they own before ingesting Portwing's raw container state.
 func (a *Adapter) OnConnect(ctx context.Context, sender adapter.MessageSender) error {
+	a.sendComponentSync(sender)
+
 	containers, err := a.containers.BuildInventory(ctx)
 	if err != nil {
 		slog.Warn("initial container sync failed", "error", err)
 	} else {
 		a.sendContainerSync(sender, containers)
 	}
-
-	a.sendComponentSync(sender)
 	return nil
 }
 
@@ -264,6 +263,9 @@ func GetWatcherComponents() []protocol.ComponentDescriptor {
 			Configuration: map[string]any{
 				"description":  "Watches Docker containers for updates via Docker Engine API",
 				"capabilities": []string{"container-sync", "labels"},
+				"transport":    "docker-api",
+				"execution":    "controller",
+				"events":       "portwing",
 			},
 		},
 	}
