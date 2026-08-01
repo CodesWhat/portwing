@@ -138,6 +138,12 @@ if [[ $WATCHERS_OK == "true" ]]; then
 	W_NAME=$(printf '%s' "$WATCHERS" | jq -r '.[0].name // empty' 2>/dev/null)
 	[[ -n $W_TYPE ]] && assert "watchers[0].type present" "pass" || assert "watchers[0].type present" "fail"
 	[[ -n $W_NAME ]] && assert "watchers[0].name present" "pass" || assert "watchers[0].name present" "fail"
+	W_TRANSPORT=$(printf '%s' "$WATCHERS" | jq -r '.[0].configuration.transport // empty' 2>/dev/null)
+	W_EXECUTION=$(printf '%s' "$WATCHERS" | jq -r '.[0].configuration.execution // empty' 2>/dev/null)
+	W_EVENTS=$(printf '%s' "$WATCHERS" | jq -r '.[0].configuration.events // empty' 2>/dev/null)
+	[[ $W_TRANSPORT == "docker-api" ]] && assert "watcher transport == docker-api" "pass" || assert "watcher transport == docker-api" "fail" "got: $W_TRANSPORT"
+	[[ $W_EXECUTION == "controller" ]] && assert "watcher execution == controller" "pass" || assert "watcher execution == controller" "fail" "got: $W_EXECUTION"
+	[[ $W_EVENTS == "portwing" ]] && assert "watcher events == portwing" "pass" || assert "watcher events == portwing" "fail" "got: $W_EVENTS"
 else
 	assert "/api/watchers returns 200" "fail" "curl failed"
 	assert "/api/watchers body is JSON array" "fail" "skipped"
@@ -169,7 +175,7 @@ bold "5. GET /api/watchers/unknown/missing (should 404)"
 
 if [[ -n $TOKEN ]]; then
 	HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-		-H "X-Portwing-Token: " \
+		-H "X-Portwing-Token: ${TOKEN}" \
 		"${HOST}/api/watchers/unknown/missing" 2>/dev/null || echo "000")
 else
 	HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
@@ -187,9 +193,12 @@ if [[ $TRIGGERS_OK == "true" ]]; then
 	assert "/api/triggers returns 200" "pass"
 	IS_ARRAY=$(printf '%s' "$TRIGGERS" | jq 'type == "array"' 2>/dev/null)
 	[[ $IS_ARRAY == "true" ]] && assert "/api/triggers body is JSON array" "pass" || assert "/api/triggers body is JSON array" "fail" "got: $(printf '%s' "$TRIGGERS" | head -c 200)"
+	TRIGGER_COUNT=$(printf '%s' "$TRIGGERS" | jq 'length' 2>/dev/null)
+	[[ $TRIGGER_COUNT == "0" ]] && assert "/api/triggers advertises no remote trigger" "pass" || assert "/api/triggers advertises no remote trigger" "fail" "got: $TRIGGERS"
 else
 	assert "/api/triggers returns 200" "fail" "curl failed"
 	assert "/api/triggers body is JSON array" "fail" "skipped"
+	assert "/api/triggers advertises no remote trigger" "fail" "skipped"
 fi
 
 # ── /api/log/entries ──────────────────────────────────────────────────────────
@@ -211,7 +220,7 @@ fi
 bold "8. GET /api/events SSE headers"
 
 AUTH_ARGS=()
-[[ -n $TOKEN ]] && AUTH_ARGS+=(-H "X-Portwing-Token: ")
+[[ -n $TOKEN ]] && AUTH_ARGS+=(-H "X-Portwing-Token: ${TOKEN}")
 
 SSE_HEADERS=$(curl -sf --max-time 5 -D - -o /dev/null \
 	${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \

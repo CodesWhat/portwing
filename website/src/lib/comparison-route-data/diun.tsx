@@ -8,11 +8,11 @@ Image update notifications|Yes (multi-registry polling + 20+ notifiers)|No (Dryd
 Remote Docker API proxy|No (monitoring only, no remote control)|Yes (full Docker API proxy with auth)|self
 Auth for remote access|No (local only)|Yes (Ed25519 per-request signing)|self
 Structured audit log|No|Yes (JSON, built-in)|self
-Image signature verification|No|Yes (cosign + SBOM + SLSA)|self
+Image signature verification|No|Yes (cosign + archive/image SBOMs + SLSA)|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Yes|Yes|tie
 MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|No|Yes (Drydock 1.6+)|self
+Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|MIT|AGPL-3.0|tie
 `,

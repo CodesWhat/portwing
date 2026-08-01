@@ -13,17 +13,17 @@ Drydock supports two agent connectivity patterns. Portwing implements both.
 
 **Standard Mode** (fully implemented): The Drydock controller opens an inbound HTTP connection to each remote host's Portwing agent. Portwing runs an HTTP server; the controller polls `/api/*` and holds a long-lived SSE stream.
 
-**Edge Mode** (stable `portwing/1.0`; enabled by default in Drydock 1.6): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
+**Edge Mode** (stable `portwing/1.0`): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
 
 <Callout type="info">
-Edge Mode is implemented on both sides and is covered by a real multi-agent reconnect/load soak. Drydock 1.6 enables its Ed25519-only endpoint by default; `DD_EXPERIMENTAL_PORTWING=false` is retained as an emergency disable. Drydock 1.5 deployments must explicitly set `DD_EXPERIMENTAL_PORTWING=true`.
+Edge Mode is implemented on both sides and is covered by a real multi-agent reconnect/load soak. Drydock `v1.6.0-rc.11+` is the minimum for Portwing v0.9.0's complete controller-owned watcher/update behavior. Older 1.6 prereleases and Drydock 1.5 may remain wire-compatible, but do not provide that full feature contract.
 </Callout>
 
 ---
 
 ## Standard Mode: Handshake Sequence
 
-Verified against Drydock 1.6.x (`app/agent/AgentClient.ts`).
+Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`).
 
 When a Drydock controller connects to a Portwing agent in Standard Mode, the following sequence occurs:
 
@@ -48,15 +48,15 @@ All `/api/*` endpoints require an `X-Dd-Agent-Secret` or `X-Portwing-Token` head
 | `AgentClient.getWatcher()` | `GET /api/watchers/{type}/{name}` | GET | Single watcher descriptor |
 | `AgentClient.getContainerLogs()` | `GET /api/containers/{id}/logs` | GET | Plain text or `{"logs":"..."}` |
 | `AgentClient.deleteContainer()` | `DELETE /api/containers/{id}` | DELETE | 204 on success |
-| `AgentClient.watch()` | `POST /api/watchers/{type}/{name}` | POST | 501 — controller performs registry checks |
-| `AgentClient.watchContainer()` | `POST /api/watchers/{type}/{name}/container/{id}` | POST | 501 |
-| `AgentClient.runRemoteTrigger()` | `POST /api/triggers/{type}/{name}` | POST | 501 — no agent-side triggers in v1 |
-| `AgentClient.runRemoteTriggerBatch()` | `POST /api/triggers/{type}/{name}/batch` | POST | 501 |
+| `AgentClient.watch()` | `POST /api/watchers/{type}/{name}` | POST | 501 — legacy route; controller runs the watcher through the Docker proxy |
+| `AgentClient.watchContainer()` | `POST /api/watchers/{type}/{name}/container/{id}` | POST | 501 — same controller-owned path |
+| `AgentClient.runRemoteTrigger()` | `POST /api/triggers/{type}/{name}` | POST | 501 — Portwing advertises no remote trigger |
+| `AgentClient.runRemoteTriggerBatch()` | `POST /api/triggers/{type}/{name}/batch` | POST | 501 — same compatibility behavior |
 | `AgentClient.getLogEntries()` | `GET /api/log/entries` | GET | Returns `[]` (no in-memory buffer) |
 | Drydock health probe | `GET /health` | GET | `{"status":"ok"}` — no auth |
 
 <Callout type="info">
-The 501 responses on `POST /api/watchers/*` and `POST /api/triggers/*` are intentional. In Drydock v1, the controller performs registry checks itself rather than delegating them to the agent via these endpoints. Portwing's role is container inventory and event streaming.
+The 501 responses on `POST /api/watchers/*` and `POST /api/triggers/*` are intentional compatibility behavior. A compatible Drydock controller runs its native Docker watcher and update trigger through Portwing's authenticated transparent Docker API proxy instead of delegating execution to these legacy endpoints. Portwing supplies the proxy transport, container inventory, and lifecycle events.
 </Callout>
 
 ---
@@ -73,7 +73,7 @@ Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`,
 {
   "type": "dd:ack",
   "data": {
-    "version": "0.1.0",
+    "version": "0.9.0",
     "os": "linux",
     "arch": "amd64",
     "cpus": 4,
@@ -146,7 +146,7 @@ Portwing's `GET /api/containers` and all container events return objects in this
 | `image.digest` | object | `{watch:false, value:"sha256:…"}` |
 | `image.architecture` | string | Image architecture, with agent architecture as fallback |
 | `image.os` | string | Image OS, with agent OS as fallback |
-| `updateAvailable` | bool | Always `false` — Drydock controller performs registry checks |
+| `updateAvailable` | bool | Always `false` in Portwing's raw inventory; Drydock enriches its controller-side watcher result |
 | `updateKind` | object | Always `{"kind":"unknown"}` |
 | `labels` | object? | All Docker labels |
 | `details` | object? | Runtime details; ports and volumes use Drydock's string-array wire representation |
@@ -182,7 +182,10 @@ Drydock reads `type`, `name`, `configuration`, and `metadata` from each descript
   "name": "docker",
   "configuration": {
     "description": "Watches Docker containers for updates via Docker Engine API",
-    "capabilities": ["container-sync", "labels"]
+    "capabilities": ["container-sync", "labels"],
+    "transport": "docker-api",
+    "execution": "controller",
+    "events": "portwing"
   }
 }]
 ```
@@ -191,14 +194,36 @@ Drydock reads `type`, `name`, `configuration`, and `metadata` from each descript
 
 ## Watcher Delegation Model
 
-Portwing reports container inventory. The Drydock controller performs registry checks.
+The watcher descriptor declares `transport: "docker-api"`,
+`execution: "controller"`, and `events: "portwing"`. Together these fields
+define the integration contract:
 
-1. Portwing monitors Docker containers via the Docker Engine API.
-2. It reads `dd.*` labels and constructs Container objects with image metadata.
-3. It emits `dd:container_sync`, `dd:container_added`, `dd:container_updated`, and `dd:container_removed` events.
-4. The Drydock controller receives the inventory, runs registry checks independently, and writes the `Result` back.
+1. A compatible Drydock controller runs its native Docker watcher and update
+   trigger controller-side.
+2. Docker inspection and update calls traverse Portwing's authenticated,
+   transparent proxy: inbound HTTP in Standard Mode or correlated
+   `request`/`response` messages over the outbound WebSocket in Edge Mode.
+3. Portwing reports inventory, reads `dd.*` labels, and emits Docker lifecycle
+   events. `events: "portwing"` prevents Drydock from opening a second Docker
+   event stream through the proxy.
+4. Drydock records the watcher result and owns update orchestration and update
+   operation events.
 
-`updateAvailable` is always `false` and `updateKind` is always `"unknown"` in Portwing responses. Drydock sets these fields after its own registry check.
+`updateAvailable` is always `false` and `updateKind` is always `"unknown"` in
+Portwing's raw inventory. That metadata is not ignored: Drydock enriches its
+controller-side result after running the native watcher through Portwing.
+
+<Callout type="warn">
+  This complete watcher/update execution model requires Drydock
+  `v1.6.0-rc.11` or later in both Standard and Edge modes. The marker fields
+  are additive and `DrydockCompat` remains 1.4.0, so an older controller can be
+  wire-compatible without implementing these feature semantics.
+</Callout>
+
+Portwing advertises no remote trigger: `GET /api/triggers`, edge `triggerTypes`,
+and the trigger portion of component sync remain empty. The `dd:trigger`
+protocol vocabulary is retained for wire compatibility, but the watcher and
+trigger POST endpoints continue to return 501 for older clients.
 
 ---
 
@@ -207,11 +232,11 @@ Portwing reports container inventory. The Drydock controller performs registry c
 When `DRYDOCK_URL` is set, Portwing dials outbound to `DRYDOCK_URL/api/portwing/ws` and sends `portwing/1.0` as the protocol identifier inside its `hello` message — an application-level field, not a negotiated `Sec-WebSocket-Protocol` sub-protocol header.
 
 <Callout type="info">
-The sequence below is the production handshake, implemented on the agent side in `internal/edge/client.go` and `internal/protocol/messages.go` and on the controller side in Drydock 1.6's `/api/portwing/ws` endpoint. The controller requires an Ed25519-signed hello.
+The sequence below is the production handshake, implemented on the agent side in `internal/edge/client.go` and `internal/protocol/messages.go` and on the controller side in Drydock `v1.6.0-rc.11+`'s `/api/portwing/ws` endpoint. The controller requires an Ed25519-signed hello.
 </Callout>
 
 <Callout type="info">
-Drydock 1.6 enables the endpoint by default. `DD_EXPERIMENTAL_PORTWING=false` is an emergency disable. Drydock 1.5 deployments must set `DD_EXPERIMENTAL_PORTWING=true`.
+Drydock `v1.6.0-rc.11+` supplies the complete v0.9 watcher/update contract. Earlier controllers may accept the stable wire protocol but lack the coordinated execution markers and ordering.
 </Callout>
 
 Handshake sequence:
@@ -219,7 +244,10 @@ Handshake sequence:
 1. Portwing connects via WSS to `/api/portwing/ws`.
 2. Portwing sends a `hello` message (see payload below).
 3. Controller responds with `welcome` containing the poll interval.
-4. Portwing sends `dd:container_sync` (full container inventory) then `dd:component_sync` (watcher/trigger descriptors) then an initial `metrics` payload.
+4. Portwing sends `dd:component_sync` (watcher/trigger descriptors) before
+   `dd:container_sync` (full container inventory), then sends an initial
+   `metrics` payload. The ordering lets Drydock establish controller-owned
+   update state before it ingests Portwing's raw inventory.
 
 ### `hello` Message
 
@@ -260,12 +288,12 @@ When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `
 |---|---|---|
 | `hello` | Agent → Controller | Auth + capability exchange |
 | `welcome` | Controller → Agent | Connection accepted |
-| `request` | Controller → Agent | Docker API request (with `requestId`) |
+| `request` | Controller → Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls |
 | `response` | Agent → Controller | Docker API response (correlated by `requestId`) |
 | `stream` | Bidirectional | Streaming data (logs, exec, build) |
 | `stream_end` | Bidirectional | End of stream |
 | `metrics` | Agent → Controller | Host metrics payload |
-| `container_event` | Agent → Controller | Docker lifecycle event |
+| `container_event` | Agent → Controller | Docker lifecycle event; used instead of a duplicate controller event stream |
 | `ping` / `pong` | Either | Keepalive (30s default) |
 | `error` | Either | Error with optional `code` |
 
@@ -298,12 +326,12 @@ exec error display.
 | `dd:container_updated` | Agent → Controller | Container state/metadata changed |
 | `dd:container_removed` | Agent → Controller | Container removed |
 | `dd:component_sync` | Agent → Controller | Watcher + trigger component descriptors |
-| `dd:watch_request` | Controller → Agent | Trigger a watcher poll cycle |
-| `dd:watch_response` | Agent → Controller | Poll results |
-| `dd:watch_container_request` | Controller → Agent | Check single container |
-| `dd:watch_container_response` | Agent → Controller | Single container result |
-| `dd:trigger_request` | Controller → Agent | Execute trigger |
-| `dd:trigger_response` | Agent → Controller | Trigger result |
+| `dd:watch_request` | Controller → Agent | Reserved legacy remote-watcher message; not used by the controller-owned Docker watcher contract |
+| `dd:watch_response` | Agent → Controller | Reserved legacy remote-watcher response |
+| `dd:watch_container_request` | Controller → Agent | Reserved legacy single-container watcher message |
+| `dd:watch_container_response` | Agent → Controller | Reserved legacy single-container watcher response |
+| `dd:trigger_request` | Controller → Agent | Reserved legacy remote-trigger message; no Portwing trigger is advertised |
+| `dd:trigger_response` | Agent → Controller | Reserved legacy remote-trigger response |
 | `dd:container_log_request` | Controller → Agent | Request container logs (`requestId`, `stream`, `tail`, `since`, `until`, `follow`, `timestamps`) |
 | `dd:container_log_chunk` | Agent → Controller | Continuous stdout/stderr chunk for a streaming request |
 | `dd:container_log_end` | Agent → Controller | Streaming request completed or was canceled |
@@ -349,7 +377,7 @@ unrecognized code are retried with backoff.
 | `DD_AGENT_SECRET_FILE` | Path to file containing token | Drydock `DD_AGENT_SECRET_FILE` |
 | `TOKEN_HASH` | Argon2id PHC hash of token (Standard Mode only) | n/a |
 | `PORT` | HTTP listen port (default `3000`) | Drydock agent `port` |
-| `BIND_ADDRESS` | Bind address (default `0.0.0.0`) | n/a |
+| `BIND_ADDRESS` | Standard default `0.0.0.0`; Edge operations default `127.0.0.1` | n/a |
 | `TLS_CERT` / `TLS_KEY` | TLS certificate/key | Drydock agent `certfile`/`keyfile` |
 | `CA_CERT` | CA cert for Edge Mode TLS | Drydock agent `cafile` |
 | `TLS_SKIP_VERIFY` | Skip TLS verification in Edge Mode | n/a |
@@ -427,7 +455,7 @@ The `TOKEN` value on the Portwing side must match the `secret` value on the Dryd
 For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages are implemented and verified against a specific Drydock build.
 </Callout>
 
-Verified against Drydock 1.6.x (`app/agent/AgentClient.ts`, `app/agent/api/`).
+Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`, `app/agent/api/`).
 
 | Feature | Status | Notes |
 |---|---|---|
@@ -441,19 +469,19 @@ Verified against Drydock 1.6.x (`app/agent/AgentClient.ts`, `app/agent/api/`).
 | `dd:watcher-snapshot` SSE | Compatible | Emitted after every poll cycle and on SSE connect |
 | `GET /api/containers` returns `[]Container` | Compatible | `routes.go:27`; `AgentClient.ts:519` |
 | Container object shape | Compatible | `model.go`; Drydock `model/container.js` |
-| `GET /api/watchers` returns `[]ComponentDescriptor` | Compatible | `routes.go:103`; `AgentClient.ts:547` |
+| `GET /api/watchers` returns `[]ComponentDescriptor` | Compatible | Descriptor selects `transport=docker-api`, `execution=controller`, and `events=portwing` |
 | `GET /api/watchers/{type}/{name}` single descriptor | Compatible | `routes.go:handleWatcherGet`; `AgentClient.ts:1552` |
-| `GET /api/triggers` returns `[]` | Compatible | `routes.go:108`; `AgentClient.ts:559` |
+| `GET /api/triggers` returns `[]` | Compatible | Portwing advertises no remote trigger; Drydock uses its controller-owned update trigger through the Docker proxy |
 | `GET /api/containers/{id}/logs` plain text | Compatible | Drydock accepts both plain text and `{"logs":"..."}` |
 | `DELETE /api/containers/{id}` returns 204 | Compatible | `routes.go:92`; `AgentClient.ts:1543` |
-| `POST /api/watchers/{type}/{name}` | Compatible (501) | Controller performs registry checks itself |
-| `POST /api/watchers/{type}/{name}/container/{id}` | Compatible (501) | Same |
-| `POST /api/triggers/{type}/{name}` | Compatible (501) | No agent-side triggers in v1 |
-| `POST /api/triggers/{type}/{name}/batch` | Compatible (501) | Same |
+| `POST /api/watchers/{type}/{name}` | Compatible (501) | Legacy route; Drydock runs its watcher through the transparent Docker proxy |
+| `POST /api/watchers/{type}/{name}/container/{id}` | Compatible (501) | Same controller-owned execution path |
+| `POST /api/triggers/{type}/{name}` | Compatible (501) | No Portwing remote trigger is advertised; Drydock applies updates through the proxy |
+| `POST /api/triggers/{type}/{name}/batch` | Compatible (501) | Same compatibility behavior |
 | `GET /api/log/entries` returns `[]` | Compatible | `routes.go:handleLogEntries`; `AgentClient.ts:1503` |
 | `X-Dd-Agent-Secret` authentication | Compatible | `server/http.go` auth middleware; `AgentClient.ts:73` |
 | `/health` unauthenticated | Compatible | `routes.go:handleSimpleHealth`; `AgentClient.ts:152` |
-| Edge Mode WebSocket `/api/portwing/ws` | Stable (`portwing/1.0`) | Ed25519-only; Drydock 1.6 enables it by default. Continuous logs and the real fleet-soak gate require Portwing 0.8+. |
+| Edge Mode WebSocket `/api/portwing/ws` | Stable (`portwing/1.0`) | Ed25519-only; correlated `request`/`response` messages carry controller-owned watcher/update Docker API calls. Continuous logs and the real fleet-soak gate require Portwing 0.8+. |
 
 ---
 

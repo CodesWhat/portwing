@@ -81,33 +81,75 @@ function htmlFiles(root) {
   return files.sort();
 }
 
-function generateConfig(outputDir) {
-  const pageHeaders = htmlFiles(outputDir).map((file) => ({
-    source: routeForOutputPath(file),
-    headers: headersForHTML(fs.readFileSync(file, "utf8")).filter(
-      ({ key }) => key === "Content-Security-Policy",
-    ),
-  }));
+function headerMap(headers) {
+  return Object.fromEntries(headers.map(({ key, value }) => [key, value]));
+}
+
+function escapeRoute(route) {
+  return route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function outputRelativePath(outputDir, file) {
+  return path.relative(outputDir, file).replaceAll("\\", "/");
+}
+
+export function buildOutputConfig(outputDir) {
+  const routes = [];
+  const overrides = {};
+  for (const file of htmlFiles(outputDir)) {
+    const relative = outputRelativePath(outputDir, file);
+    const publicRoute = routeForOutputPath(relative);
+    const csp = headerMap(headersForHTML(fs.readFileSync(file, "utf8")))[
+      "Content-Security-Policy"
+    ];
+    const suffix = publicRoute === "/" ? "" : "/?";
+    routes.push({
+      src: `^${escapeRoute(publicRoute)}${suffix}$`,
+      headers: { "Content-Security-Policy": csp },
+      continue: true,
+    });
+
+    const fileRoute = `/${relative}`;
+    if (fileRoute !== publicRoute) {
+      routes.push({
+        src: `^${escapeRoute(fileRoute)}$`,
+        headers: { "Content-Security-Policy": csp },
+        continue: true,
+      });
+    }
+
+    if (publicRoute !== "/") {
+      overrides[relative] = { path: publicRoute.slice(1) };
+    }
+  }
+
+  routes.push({ src: "^/.*$", headers: headerMap(COMMON_HEADERS), continue: true });
   return {
-    headers: [{ source: "/(.*)", headers: COMMON_HEADERS }, ...pageHeaders],
+    version: 3,
+    routes,
+    overrides,
+    framework: { version: "next-static-export" },
   };
+}
+
+export function generateBuildOutput(outputDir, buildOutputDir) {
+  const staticDir = path.join(buildOutputDir, "static");
+  fs.rmSync(buildOutputDir, { recursive: true, force: true });
+  fs.mkdirSync(buildOutputDir, { recursive: true });
+  fs.cpSync(outputDir, staticDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(buildOutputDir, "config.json"),
+    `${JSON.stringify(buildOutputConfig(outputDir), null, 2)}\n`,
+  );
 }
 
 function main() {
   const outputDir = path.join(PROJECT_DIR, "out");
-  const configPath = path.join(PROJECT_DIR, "vercel.json");
+  const buildOutputDir = path.resolve(PROJECT_DIR, "..", ".vercel", "output");
   if (!fs.existsSync(outputDir)) {
     throw new Error(`static output not found: ${outputDir}; run next build first`);
   }
-  const generated = `${JSON.stringify(generateConfig(outputDir), null, 2)}\n`;
-  if (process.argv.includes("--check")) {
-    const current = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
-    if (current !== generated) {
-      throw new Error("vercel.json security headers are stale; run node scripts/security-headers.mjs");
-    }
-    return;
-  }
-  fs.writeFileSync(configPath, generated);
+  generateBuildOutput(outputDir, buildOutputDir);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_FILE) {

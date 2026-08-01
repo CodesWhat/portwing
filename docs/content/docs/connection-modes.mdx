@@ -71,17 +71,18 @@ See [Getting Started](/getting-started) for the full Sockguard variant and TLS e
 
 ## Edge Mode
 
-**Status: production supported with stable `portwing/1.0` — enabled by default in Drydock 1.6.**
+**Status: production supported with stable `portwing/1.0`; full v0.9 feature compatibility requires Drydock `v1.6.0-rc.11+`.**
 
 <Callout type="info">
   Edge mode is covered by a real multi-agent reconnect/load soak, including concurrent
-  exec, continuous logs, and controller backpressure. Drydock 1.6 enables the endpoint
-  by default; Drydock 1.5 requires `DD_EXPERIMENTAL_PORTWING=true`. The endpoint is
+  exec, continuous logs, and controller backpressure. Drydock `v1.6.0-rc.11+`
+  implements Portwing v0.9.0's controller-owned watcher/update contract; an
+  older controller may connect at the wire level without that behavior. The endpoint is
   **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock —
   token-only (`TOKEN` / `TOKEN_HASH`) connections are rejected.
 </Callout>
 
-In Edge mode the agent initiates an outbound WebSocket connection to the Drydock controller at `DRYDOCK_URL + /api/portwing/ws`. No inbound port is required on the agent host, making it suitable for hosts behind NAT, firewalls, and dynamic IP addresses.
+In Edge mode the agent initiates an outbound WebSocket connection to the Drydock controller at `DRYDOCK_URL + /api/portwing/ws`. No inbound **control** port needs to be published on the agent host, making it suitable for hosts behind NAT, firewalls, and dynamic IP addresses. A local operations listener still serves health, readiness, metrics, and audit export; keep it private.
 
 Edge mode is active when **both** of the following are true:
 
@@ -114,7 +115,8 @@ On each connection attempt the agent:
 1. Opens a WebSocket to `DRYDOCK_URL/api/portwing/ws` and identifies itself with the `portwing/1.0` protocol string carried in its `hello` message — an application-level identifier, not a negotiated `Sec-WebSocket-Protocol` sub-protocol header.
 2. Sends a `hello` message containing its agent ID, name, capabilities, Docker version, and a credential. When `PRIVATE_KEY_FILE` is configured the hello is Ed25519-signed (see [Authentication](/authentication)); otherwise the token SHA-256 hash is included.
 3. Waits up to `WELCOME_TIMEOUT` seconds for the controller's `welcome` response.
-4. On success, sends an initial container inventory (`dd:container_sync`), component descriptors (`dd:component_sync`), and host metrics.
+4. On success, sends component descriptors (`dd:component_sync`) before the
+   initial container inventory (`dd:container_sync`), then sends host metrics.
 
 ### Reconnection and keepalive
 
@@ -142,7 +144,15 @@ collision) rather than a transient network blip.
 
 During an established connection the agent sends a `ping` message every `HEARTBEAT_INTERVAL` seconds and expects a `pong` in return. The read deadline is set to `max(2 × HEARTBEAT_INTERVAL, 60s)`. A missing pong triggers an immediate close and reconnect cycle.
 
-A minimal HTTP server (`/_portwing/health`) remains running on the agent host throughout, so Docker HEALTHCHECK directives continue to work even when the WebSocket is down.
+An HTTP operations listener remains running on `BIND_ADDRESS:PORT` throughout,
+so Docker HEALTHCHECK directives and private monitoring continue to work even
+when the WebSocket is down. It serves `/health`, `/ready`,
+`/_portwing/health`, `/metrics`, and `/_portwing/audit/export`. The metrics and
+audit-export routes have no inbound authentication in Edge mode, so Edge mode
+defaults `BIND_ADDRESS` to `127.0.0.1`. Treat the entire listener as a
+private-operations trust boundary: set a broader bind explicitly only for a
+dedicated container/pod monitoring network, and never publish it through an
+ingress, public service, or host port without an authenticating proxy.
 
 On `SIGINT` or `SIGTERM` the agent closes all active exec sessions and sends a WebSocket close frame (code 1000, reason `shutdown`) before exiting.
 
@@ -183,7 +193,8 @@ secrets:
 | Inbound port required | Yes | No |
 | Works behind NAT / firewall | No | Yes |
 | Agent-side implementation | Complete | Complete |
-| Controller-side support | Complete | Drydock 1.6 (1.5 opt-in) |
-| Recommended for production | Yes | Yes (Drydock 1.6; Portwing 0.8+) |
+| Controller-side support | Complete | Drydock `v1.6.0-rc.11+` |
+| Full v0.9 feature compatibility | Drydock `v1.6.0-rc.11+` | Drydock `v1.6.0-rc.11+` |
+| Recommended for production | Yes | Yes (Drydock `v1.6.0-rc.11+`) |
 
 Use Standard mode when the controller can reach the host directly. Use Edge mode when the host cannot accept an inbound connection; both modes are production supported.

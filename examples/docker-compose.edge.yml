@@ -1,9 +1,12 @@
 # Portwing — edge mode: outbound WebSocket tunnel to Drydock.
 # No inbound ports are published; the agent dials out, so it works
-# behind NAT and firewalls. The built-in HEALTHCHECK still works
-# (the health endpoint listens container-locally in edge mode too).
+# behind NAT and firewalls. The built-in HEALTHCHECK still works because the
+# local operations listener remains active. That listener also exposes metrics
+# and retained audit records without inbound auth in Edge mode; this example
+# deliberately publishes no port, so keep it that way unless an authenticating
+# proxy and trusted network are in front.
 #
-# Edge mode against Drydock 1.6 is Ed25519-only: the controller's
+# Edge mode against Drydock v1.6.0-rc.11+ is Ed25519-only: the controller's
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a
 # keypair and register its public key with Drydock before starting:
 #

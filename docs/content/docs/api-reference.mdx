@@ -52,7 +52,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
   "live": true,
   "ready": false,
   "mode": "standard",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "uptimeSeconds": 3842.7,
   "docker": "unknown",
   "controller": "not_applicable"
@@ -67,7 +67,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
   "live": true,
   "ready": true,
   "mode": "standard",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "uptimeSeconds": 3842.7,
   "docker": "connected",
   "controller": "not_applicable"
@@ -81,7 +81,7 @@ edge mode, when the controller WebSocket is disconnected.
 
 ```json
 {
-  "version": "0.8.1",
+  "version": "0.9.0",
   "dockerVersion": "27.0.3",
   "mode": "standard",
   "uptime": "2h34m56.789s",
@@ -144,12 +144,20 @@ portwing_host_memory_used_bytes 4294967296
 ## Audit export
 
 Standard mode exposes both a human/operator JSON view and a polling-friendly
-NDJSON export. Both require authentication.
+NDJSON export; both require authentication. Edge mode exposes only the NDJSON
+export on its local operations listener, without inbound authentication.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/_portwing/audit` | Required | Recent ring-buffer records, newest first, wrapped in `{records,count}`. |
-| `GET` | `/_portwing/audit/export` | Required | Cursor-based NDJSON records, oldest first. |
+| `GET` | `/_portwing/audit/export` | Standard: required; Edge: none | Cursor-based NDJSON records, oldest first. |
+
+<Callout type="warn">
+  Treat the Edge operations listener as a private-operations trust boundary.
+  Anyone who can reach it can read retained audit records, which can contain
+  client addresses, request paths, stack names, and container identifiers. Do
+  not expose it through a public Service, ingress, host port, or shared network.
+</Callout>
 
 For initial export, omit `cursor`. After consuming the response, persist
 `X-Portwing-Next-Cursor` and pass it on the next poll:
@@ -164,6 +172,14 @@ The response also includes `X-Portwing-Oldest-Cursor`,
 `X-Portwing-Latest-Cursor`, and `X-Portwing-Record-Count`. HTTP `409` means the
 cursor was overwritten or belongs to a previous agent process; surface the gap
 and resume from the reset cursor in `X-Portwing-Next-Cursor`.
+
+For Edge mode, poll from the same private container or pod network and omit the
+Authorization header:
+
+```bash
+curl -sS -D headers.txt \
+  "http://portwing-edge:3000/_portwing/audit/export?cursor=42&limit=500"
+```
 
 See [Audit Logging](/audit-logging) for the stable sink/export schemas and
 shipping guidance.
@@ -246,7 +262,7 @@ Available when `ADAPTER=generic`. These endpoints expose container management wi
 
 ```json
 {
-  "agentVersion": "0.8.1",
+  "agentVersion": "0.9.0",
   "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"

@@ -59,3 +59,5 @@ website/public/docs/
 .qlty/out
 .qlty/plugin_cachedir
 .qlty/results
+.vercel
+.env.local

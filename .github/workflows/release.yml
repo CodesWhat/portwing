@@ -108,12 +108,13 @@ jobs:
           fi
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
-      # Attests every artifact listed in checksums.txt (all release archives).
-      # Verify with: gh attestation verify <archive> --repo CodesWhat/portwing
+      # Attests every artifact listed in checksums.txt: archives, packages, and
+      # per-archive SBOMs. Verify any one with:
+      # gh attestation verify <asset> --repo CodesWhat/portwing
       # Gated on public visibility: GitHub artifact attestation is not available
       # for private repos on this org's plan (cosign blob signatures in
-      # checksums.txt.bundle still cover the archives either way).
-      - name: Attest release archives
+      # checksums.txt.bundle still authenticates those assets either way).
+      - name: Attest checksummed release assets
         if: github.event.repository.visibility == 'public'
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
         with:

@@ -128,6 +128,37 @@ func TestLoadEdgeModeWithBothTokenAndURL(t *testing.T) {
 	}
 }
 
+func TestLoadEdgeModeDefaultsOperationsListenerToLoopback(t *testing.T) {
+	setEnv(t,
+		"DRYDOCK_URL", "https://drydock.example.com",
+		"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
+	)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.BindAddress != "127.0.0.1" {
+		t.Fatalf("edge BindAddress default: got %q, want 127.0.0.1", cfg.BindAddress)
+	}
+}
+
+func TestLoadEdgeModeHonorsExplicitOperationsBindAddress(t *testing.T) {
+	setEnv(t,
+		"DRYDOCK_URL", "https://drydock.example.com",
+		"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
+		"BIND_ADDRESS", "0.0.0.0",
+	)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.BindAddress != "0.0.0.0" {
+		t.Fatalf("explicit edge BindAddress: got %q, want 0.0.0.0", cfg.BindAddress)
+	}
+}
+
 // TestLoadAuthorizedKeysEnvVars verifies AUTHORIZED_KEYS and AUTHORIZED_KEYS_FILE.
 func TestLoadAuthorizedKeysEnvVars(t *testing.T) {
 	setEnv(t, "AUTHORIZED_KEYS", "/tmp/test_ak")

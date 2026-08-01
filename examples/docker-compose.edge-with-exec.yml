@@ -19,7 +19,7 @@
 # examples/compose/tri-tool/ bundle (pins SOCKGUARD_VERSION/PORTWING_VERSION/
 # DRYDOCK_VERSION with override env vars).
 #
-# Edge mode against Drydock 1.6 is Ed25519-only: the controller's
+# Edge mode against Drydock v1.6.0-rc.11+ is Ed25519-only: the controller's
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a keypair
 # and register its public key with Drydock before starting:
 #

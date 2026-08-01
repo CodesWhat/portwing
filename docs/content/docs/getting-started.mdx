@@ -182,7 +182,7 @@ volumes:
 Edge mode lets Portwing dial **out** to your Drydock controller over a WebSocket tunnel instead of listening for inbound connections. This is useful for hosts behind NAT or a firewall where you cannot publish an inbound port.
 
 <Callout type="info">
-**Production supported with Portwing 0.8+ and Drydock 1.6.** The stable `portwing/1.0` path is enabled by default in Drydock 1.6 and covered by a real multi-agent reconnect/load soak with concurrent exec, continuous logs, and controller backpressure. Drydock 1.5 remains an opt-in compatibility path via `DD_EXPERIMENTAL_PORTWING=true`. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
+**Production supported; use Drydock `v1.6.0-rc.11+` with Portwing v0.9.0.** The stable `portwing/1.0` path is covered by a real multi-agent reconnect/load soak with concurrent exec, continuous logs, and controller backpressure. Drydock `v1.6.0-rc.11+` implements the complete controller-owned watcher/update contract; older controllers may remain wire-compatible without that behavior. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
 </Callout>
 
 ```bash
@@ -201,7 +201,7 @@ docker compose -f docker-compose.edge.yml up -d
 # behind NAT and firewalls. The built-in HEALTHCHECK still works
 # (the health endpoint listens container-locally in edge mode too).
 #
-# Edge mode against Drydock 1.6 is Ed25519-only: the controller's
+# Edge mode against Drydock v1.6.0-rc.11+ is Ed25519-only: the controller's
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a
 # keypair and register its public key with Drydock before starting:
 #
@@ -250,7 +250,7 @@ volumes:
   portwing-stacks:
 ```
 
-Set `DRYDOCK_URL` to your Drydock instance, `AGENT_NAME` to a unique identifier for the host, and `PRIVATE_KEY_FILE` to the agent's Ed25519 key (register its public key with Drydock). No port needs to be published on the agent side. Drydock 1.6 enables edge mode by default; Drydock 1.5 requires `DD_EXPERIMENTAL_PORTWING=true`. See [Connection Modes](/connection-modes) for a full comparison of standard vs. edge mode.
+Set `DRYDOCK_URL` to your Drydock instance, `AGENT_NAME` to a unique identifier for the host, and `PRIVATE_KEY_FILE` to the agent's Ed25519 key (register its public key with Drydock). No control port needs to be published on the agent side. Use Drydock `v1.6.0-rc.11+` for the complete v0.9 watcher/update feature path. See [Connection Modes](/connection-modes) for a full comparison of standard vs. edge mode and the private operations-listener boundary.
 
 ---
 

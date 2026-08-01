@@ -98,6 +98,19 @@ export const roadmap: Milestone[] = [
     ],
   },
   {
+    version: "v0.9.0",
+    title: "Controller-Owned Updates",
+    emoji: "🔄",
+    status: "released",
+    items: [
+      "Drydock watcher/update execution runs controller-side through Portwing's authenticated Docker proxy in Standard and Edge modes",
+      "Watcher descriptor declares transport=docker-api, execution=controller, and events=portwing; no remote trigger is advertised",
+      "Edge sends component ownership before raw inventory; full feature compatibility requires Drydock v1.6.0-rc.11+ while DrydockCompat remains 1.4.0",
+      "Edge mode shares the cursor-based NDJSON audit exporter on its explicitly private, unauthenticated operations listener",
+      "Exec and Docker proxy failures preserve bounded daemon/sockguard error details through the controller path",
+    ],
+  },
+  {
     version: "v1.0",
     title: "Stable Release",
     emoji: "🚀",

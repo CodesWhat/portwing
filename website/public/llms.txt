@@ -4,15 +4,15 @@
 
 Portwing sits between the Drydock controller and the Docker Engine on each remote host. The controller connects inbound to Portwing over HTTP/SSE (standard mode), or Portwing dials outbound over a WebSocket tunnel when the host is behind NAT or a firewall (edge mode). All authentication is Ed25519 per-client signed requests (no shared secret on the wire) or Argon2id-hashed tokens. The audit log records every security-relevant action as structured JSON.
 
-Portwing v0.8.1 is a supported pre-v1 release. Its HTTP API, environment variables, MCP tool surface, and stable portwing/1.0 wire protocol follow the compatibility guarantees in STABILITY.md; operators should pin versions and review the changelog when upgrading.
+Portwing v0.9.0 is a supported pre-v1 release. Its HTTP API, environment variables, MCP tool surface, and stable portwing/1.0 wire protocol follow the compatibility guarantees in STABILITY.md; operators should pin versions and review the changelog when upgrading. Full controller-owned watcher/update feature compatibility requires Drydock v1.6.0-rc.11+ while DrydockCompat remains 1.4.0.
 
 ## Key capabilities
 
 - Standard mode: inbound HTTP/SSE on PORT (default 3000); controller connects and drives the session via GET /api/containers, /api/watchers, /api/triggers, and a long-lived /api/events stream
-- Edge mode: outbound WebSocket tunnel to the Drydock controller (DRYDOCK_URL + PRIVATE_KEY_FILE); no inbound port required on the agent host; exponential backoff reconnect with jitter; enabled by default in Drydock 1.6 with a Drydock 1.5 opt-in compatibility path
+- Edge mode: outbound WebSocket tunnel to the Drydock controller (DRYDOCK_URL + PRIVATE_KEY_FILE); no inbound control port needs publication, but the unauthenticated local operations listener must stay private; exponential backoff reconnect with jitter; full v0.9 feature path requires Drydock v1.6.0-rc.11+
 - Ed25519 per-client auth: signed requests with replay protection; generate keypairs with `portwing keygen`; enroll public keys via /api/portwing/enroll; token fallback (TOKEN / TOKEN_HASH / TOKEN_FILE) for initial setup
 - Argon2id hash-at-rest: generate hash with `portwing hash-token`; plaintext never stored in env vars or config files; constant-time comparison
-- Structured audit log: JSON lines with RFC 3339 nanosecond UTC timestamps; events include api_request, auth_failure, rate_limited, compose_op, exec_start, enrollment; export immediately to append-only/WORM storage for tamper evidence; in-memory ring buffer at GET /_portwing/audit
+- Structured audit log: JSON lines with RFC 3339 nanosecond UTC timestamps; events include api_request, auth_failure, rate_limited, compose_op, exec_start, enrollment; export immediately to append-only/WORM storage for tamper evidence; Standard mode exposes an authenticated JSON ring view and NDJSON export, while Edge mode exposes the NDJSON export without inbound auth on its private operations listener
 - Hardened runtime: ships to run read_only, cap_drop ALL, no-new-privileges, tokens as Docker secrets
 - Sockguard integration: optionally layer Sockguard as a sibling container filtering the raw Docker socket — even a fully compromised Portwing agent is then constrained to an explicit API allowlist
 - Docker Compose lifecycle management via /_portwing/compose (up, down, pull, etc.) with per-operation audit records
@@ -21,7 +21,7 @@ Portwing v0.8.1 is a supported pre-v1 release. Its HTTP API, environment variabl
 - Health endpoint: GET /_portwing/health (available even when WebSocket is down in edge mode)
 - MCP server: read-only Model Context Protocol endpoint exposes host and container state to MCP-aware agents
 - Zero-dependency metrics: cAdvisor-compatible /metrics endpoint for existing Prometheus/Grafana dashboards
-- Signed releases: every release ships cosign signatures, an SBOM, and SLSA provenance
+- Signed releases: every release ships cosign signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA provenance
 - Tiny and multi-arch: single static Go binary, ~10 MB, for linux/amd64 · linux/arm64 · linux/arm/v7
 
 ## License
@@ -30,18 +30,18 @@ AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 
 ## Links
 
-- Website: https://getportwing.com
+- Website: https://getportwing.vercel.app
 - GitHub: https://github.com/CodesWhat/portwing
 - Releases: https://github.com/CodesWhat/portwing/releases
-- Documentation: https://getportwing.com/docs
-- Getting started: https://getportwing.com/docs/getting-started
-- Connection modes: https://getportwing.com/docs/connection-modes
-- Authentication: https://getportwing.com/docs/authentication
-- Audit logging: https://getportwing.com/docs/audit-logging
-- Configuration: https://getportwing.com/docs/configuration
-- Compare to alternatives: https://getportwing.com/compare
-- vs Portainer: https://getportwing.com/compare/portainer
-- vs Komodo: https://getportwing.com/compare/komodo
-- vs Hawser: https://getportwing.com/compare/hawser
-- vs Watchtower: https://getportwing.com/compare/watchtower
-- vs Diun: https://getportwing.com/compare/diun
+- Documentation: https://getportwing.vercel.app/docs
+- Getting started: https://getportwing.vercel.app/docs/getting-started
+- Connection modes: https://getportwing.vercel.app/docs/connection-modes
+- Authentication: https://getportwing.vercel.app/docs/authentication
+- Audit logging: https://getportwing.vercel.app/docs/audit-logging
+- Configuration: https://getportwing.vercel.app/docs/configuration
+- Compare to alternatives: https://getportwing.vercel.app/compare
+- vs Portainer: https://getportwing.vercel.app/compare/portainer
+- vs Komodo: https://getportwing.vercel.app/compare/komodo
+- vs Hawser: https://getportwing.vercel.app/compare/hawser
+- vs Watchtower: https://getportwing.vercel.app/compare/watchtower
+- vs Diun: https://getportwing.vercel.app/compare/diun

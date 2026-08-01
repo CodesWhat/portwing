@@ -61,7 +61,7 @@ export const features: Feature[] = [
     color: "text-rose-500 dark:text-rose-400",
     bg: "bg-rose-100 dark:bg-rose-900/50",
     description:
-      "Every release ships cosign signatures, an SBOM, and SLSA build provenance. Verify the image before you ever trust it with your host — the supply chain is auditable end to end.",
+      "Every release ships cosign signatures, per-archive SBOMs, an image SBOM attestation, and SLSA build provenance. Verify the image before you ever trust it with your host — the supply chain is auditable end to end.",
     category: "security",
   },
   {

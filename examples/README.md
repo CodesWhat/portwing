@@ -67,15 +67,23 @@ For Ed25519 key-based auth instead of a shared token, see the Authentication sec
 | File | Mode | When to use |
 | ---- | ---- | ----------- |
 | [`kubernetes/standard.yaml`](kubernetes/standard.yaml) | Standard (inbound HTTP on :3000) | Cluster nodes can reach Portwing directly; Drydock or another in-cluster client connects on port 3000 |
-| [`kubernetes/edge.yaml`](kubernetes/edge.yaml) | Edge (outbound WebSocket, no inbound ports) | Nodes are behind NAT/firewall; the agent dials out to your Drydock instance |
+| [`kubernetes/edge.yaml`](kubernetes/edge.yaml) | Edge (outbound WebSocket, no inbound control port) | Nodes are behind NAT/firewall; the agent dials out to your Drydock instance while its private operations listener stays cluster-isolated |
 | [`kubernetes/observability-standard.yaml`](kubernetes/observability-standard.yaml) | Prometheus for standard mode | Authenticated HTTPS scrape using the Portwing token and TLS secrets |
-| [`kubernetes/observability-edge.yaml`](kubernetes/observability-edge.yaml) | Prometheus for edge mode | Private ClusterIP scrape of edge connection/backpressure metrics |
+| [`kubernetes/observability-edge.yaml`](kubernetes/observability-edge.yaml) | Prometheus for edge mode | Headless discovery plus NetworkPolicy for edge connection/backpressure metrics |
 
 Both agent manifests deploy a `DaemonSet` so one agent runs on each
 Docker-capable node. They use `/health` for liveness, `/ready` for readiness,
 and a pinned Fluent Bit sidecar to forward the audit file into the cluster log
 collector. Secrets are deliberately created out of band so applying a manifest
 can never replace a real credential with a checked-in placeholder.
+
+Edge mode's operations listener has no inbound authentication and serves
+`/_portwing/audit/export` as well as health and metrics. The example uses
+loopback exec probes, a headless discovery Service, and a NetworkPolicy that
+admits only the labeled Prometheus pod to port 3000. Use a CNI that enforces
+NetworkPolicy, and do not replace this with a generally reachable ClusterIP,
+`NodePort`, `LoadBalancer`, ingress, or host port without an authenticating
+proxy in front.
 
 Before applying, uncomment `supplementalGroups` in the manifest's pod `securityContext` and set it to the Docker socket's group ID on the node (the images run as the non-root `portwing` user, UID 65532, and need supplemental group access to reach the socket; `fsGroup` does not affect a `hostPath`-mounted socket):
 

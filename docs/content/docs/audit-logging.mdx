@@ -14,7 +14,11 @@ Portwing writes a structured JSON audit log — one event per line — that reco
 
 ## Enabling audit logging
 
-Set the `AUDIT_LOG` environment variable when starting the container. Auditing is **disabled by default** — when unset the overhead is a single nil-pointer check per request.
+Set the `AUDIT_LOG` environment variable when starting the container. The
+persistent file/stdout/stderr sink is **disabled by default**, but the in-memory
+audit ring remains enabled with its default `AUDIT_BUFFER_SIZE=256`. Set
+`AUDIT_BUFFER_SIZE=0` if you also want to disable in-memory retention and pull
+export.
 
 ```bash
 # Append to a dedicated file (opened append-only, mode 0600)
@@ -180,9 +184,20 @@ Set `AUDIT_BUFFER_SIZE=0` to disable the in-memory buffer entirely. This does no
 
 ### GET /_portwing/audit/export
 
-Auth required. This endpoint is designed for polling exporters and returns
+This endpoint is designed for polling exporters and returns
 `application/x-ndjson` in oldest-first order. Each line is one ring-buffer
-record using the stable export schema.
+record using the stable export schema. Standard mode requires authentication.
+Edge mode exposes this route on its local operations listener without inbound
+authentication.
+
+<Callout type="warn">
+  The Edge operations listener is a private-operations trust boundary. Anyone
+  who can reach it can export retained audit data, including client addresses,
+  request paths, stack names, and container identifiers. Keep it on a dedicated
+  container/pod network and restrict it to your exporter or Prometheus pod. Do
+  not publish it through an ingress, `NodePort`, `LoadBalancer`, host port, or a
+  cluster-wide Service without an authenticating proxy in front.
+</Callout>
 
 For the first poll, omit `cursor`:
 
@@ -200,6 +215,14 @@ zero or omission returns every retained match.
 curl -sS -D audit-headers.txt \
   -H "Authorization: Bearer $TOKEN" \
   "https://portwing.example.com/_portwing/audit/export?cursor=42&limit=500"
+```
+
+For Edge mode, make the same request from the private operations network and
+omit the Authorization header:
+
+```bash
+curl -sS -D audit-headers.txt \
+  "http://portwing-edge:3000/_portwing/audit/export?cursor=42&limit=500"
 ```
 
 | Response header | Meaning |

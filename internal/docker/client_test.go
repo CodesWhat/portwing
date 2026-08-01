@@ -856,6 +856,35 @@ func TestDo_NoContentTypeForNilBody(t *testing.T) {
 	}
 }
 
+func TestDoWithHeadersPreservesDockerMetadata(t *testing.T) {
+	t.Parallel()
+
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	headers := http.Header{
+		"Content-Type":    []string{"application/vnd.docker.raw-stream"},
+		"X-Registry-Auth": []string{"registry-credential"},
+	}
+	resp, err := c.DoWithHeaders(context.Background(), http.MethodPost, "/images/create", headers, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("DoWithHeaders: %v", err)
+	}
+	resp.Body.Close()
+
+	if value := got.Get("Content-Type"); value != "application/vnd.docker.raw-stream" {
+		t.Errorf("Content-Type = %q", value)
+	}
+	if value := got.Get("X-Registry-Auth"); value != "registry-credential" {
+		t.Errorf("X-Registry-Auth = %q", value)
+	}
+}
+
 func TestDoStream_SetsContentTypeForBodyRequests(t *testing.T) {
 	t.Parallel()
 
@@ -876,6 +905,34 @@ func TestDoStream_SetsContentTypeForBodyRequests(t *testing.T) {
 
 	if gotContentType != "application/json" {
 		t.Fatalf("Content-Type = %q, want %q", gotContentType, "application/json")
+	}
+}
+
+func TestDoStreamWithHeadersPreservesDockerMetadata(t *testing.T) {
+	t.Parallel()
+
+	var gotRegistryAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRegistryAuth = r.Header.Get("X-Registry-Auth")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	resp, err := c.DoStreamWithHeaders(
+		context.Background(),
+		http.MethodPost,
+		"/images/create",
+		http.Header{"X-Registry-Auth": []string{"stream-registry-credential"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("DoStreamWithHeaders: %v", err)
+	}
+	resp.Body.Close()
+
+	if gotRegistryAuth != "stream-registry-credential" {
+		t.Errorf("X-Registry-Auth = %q", gotRegistryAuth)
 	}
 }
 

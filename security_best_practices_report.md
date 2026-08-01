@@ -36,7 +36,7 @@ The following checks passed after remediation on 2026-07-20:
 - `go test -run='^$' -tags integration ./internal/integration` — integration suite compiles (live dockerd tests were not run)
 - `npm audit --audit-level=low` in both `docs/` and `website/` — zero vulnerabilities
 - `npm run lint` in both sites (`tsc --noEmit`)
-- `npm run build` in `website/` — includes a successful docs production build, website production build, and CSP freshness gate
+- `npm run build` in `website/` — includes successful docs and website production builds plus generation of the matching CSP Build Output API bundle
 - `npm run test:headers` — route CSP hashing, route mapping, and rendered image-origin allowlisting pass
 - `actionlint`
 - `zizmor .github/workflows/` — no findings in offline mode; 18 repository suppressions remain part of the existing policy
@@ -44,11 +44,11 @@ The following checks passed after remediation on 2026-07-20:
 - Current-source gitleaks scan (ignored build output excluded) — only the existing documentation/demo credential examples were identified; no apparent credential material
 - Generated hosting policy — 25 CSP-protected HTML routes plus global browser headers; maximum CSP value 3,469 bytes, no `unsafe-inline` in `script-src`, and `frame-ancestors 'none'` on every route
 
-Runtime response headers for `https://getportwing.com` were not changed or
-probed because this task did not authorize a deployment. `website/vercel.json`
-is now the checked-in Vercel-layer contract, and the build fails when its
-per-route script hashes are stale; deployment-side confirmation remains an
-operational release check.
+Runtime response headers for `https://getportwing.vercel.app` were not changed or
+probed because this task did not authorize a deployment. Each build now emits a
+Build Output API contract from the exact rendered HTML, so its per-route script
+hashes cannot become stale; deployment-side confirmation remains an operational
+release check.
 
 ## Critical findings
 
@@ -296,8 +296,8 @@ of each finding describe and locate the current implementation.
 ### PW-SEC-010 — Static-site security headers are not defined in the repository
 
 - **Remediation status:** Resolved on 2026-07-20 at the Vercel static-hosting layer.
-- **Remediated in:** `website/vercel.json`; `website/scripts/security-headers.mjs`; `website/scripts/security-headers.test.mjs`; `website/package.json`; both Next configs.
-- **Remediation evidence:** The generator hashes every rendered inline script per HTML route, derives only the external image origins actually rendered by that page, and emits CSP plus `nosniff`, frame denial, referrer, and permissions headers. Stable static build IDs make the route hashes reproducible, and `postbuild --check` fails on stale policy. The final export contains 25 CSP routes, no `unsafe-inline` in any `script-src`, `frame-ancestors 'none'` everywhere, and a 3,469-byte maximum CSP value.
+- **Remediated in:** generated `.vercel/output/config.json`; `website/scripts/security-headers.mjs`; `website/scripts/security-headers.test.mjs`; `website/package.json`; both Next configs.
+- **Remediation evidence:** The generator hashes every rendered inline script per HTML route, derives only the external image origins actually rendered by that page, and emits CSP plus `nosniff`, frame denial, referrer, and permissions headers. `postbuild` copies the exact rendered export and its matching low-level route contract into `.vercel/output`, so local and Vercel builds cannot disagree about hashes. The final export contains 25 CSP routes, no `unsafe-inline` in any `script-src`, `frame-ancestors 'none'` everywhere, and a 3,469-byte maximum CSP value.
 
 - **Rule ID:** NEXT-HEADERS-001 / REACT-HEADERS-001
 - **Severity:** Low

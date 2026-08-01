@@ -10,7 +10,7 @@ description: How to verify the authenticity and integrity of Portwing container 
 </Callout>
 
 <Callout type="info">
-  These examples target Portwing v0.8.x and the `release.yml` signing identity.
+  These examples target Portwing v0.9.x and the `release.yml` signing identity.
   If a verify command fails with a certificate mismatch, check the
   [release notes](https://github.com/CodesWhat/portwing/releases) for a documented
   signing-identity change before trusting the artifact.
@@ -53,10 +53,10 @@ brew install gh            # macOS
 Every image pushed to `ghcr.io/codeswhat/portwing` is cosign keyless-signed by
 the release workflow. Replace `TAG` with the version tag you are deploying
 (the tag is the semver without the leading `v`, matching GoReleaser's output —
-e.g. `0.8.1`, not `v0.8.1`):
+e.g. `0.9.0`, not `v0.9.0`):
 
 ```bash
-TAG=0.8.1
+TAG=0.9.0
 
 cosign verify \
   --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
@@ -75,7 +75,7 @@ to the container manifest. This uses the Sigstore Rekor ledger and is
 independently verifiable without cosign:
 
 ```bash
-TAG=0.8.1
+TAG=0.9.0
 
 gh attestation verify "oci://ghcr.io/codeswhat/portwing:${TAG}" \
   --repo CodesWhat/portwing
@@ -86,11 +86,12 @@ be considered trusted.
 
 ---
 
-## Verify Binary Release Archives
+## Verify Downloadable Release Assets
 
-Binary archives (`.tar.gz`, `.zip`) are listed in `checksums.txt` and attested
-with GitHub build provenance. Download both the archive and `checksums.txt`
-from the [Releases page](https://github.com/CodesWhat/portwing/releases), then:
+Binary archives (`.tar.gz`), native packages, and per-archive SBOMs are listed
+in `checksums.txt` and attested with GitHub build provenance. Download the asset,
+`checksums.txt`, and `checksums.txt.bundle` from the
+[Releases page](https://github.com/CodesWhat/portwing/releases), then:
 
 ### 1. Verify the checksums file itself
 
@@ -98,8 +99,6 @@ The `checksums.txt.bundle` file (also a release asset) contains the cosign
 keyless signature over `checksums.txt`:
 
 ```bash
-TAG=v0.8.1
-
 cosign verify-blob \
   --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
   --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
@@ -118,37 +117,57 @@ sha256sum --check --ignore-missing checksums.txt
 
 On macOS, use `shasum -a 256 --check --ignore-missing checksums.txt`.
 
-### 3. Verify GitHub provenance attestation for archives
+### 3. Verify the asset's GitHub provenance attestation
 
 ```bash
 # Verify a specific downloaded archive
-gh attestation verify portwing_Linux_x86_64.tar.gz \
+gh attestation verify portwing_0.9.0_linux_amd64.tar.gz \
   --repo CodesWhat/portwing
 ```
 
 ---
 
-## Download and Inspect the SBOM
+## Download, Authenticate, and Inspect an SBOM
 
-Each release ships a [CycloneDX](https://cyclonedx.org/) SBOM as a release
-asset named `portwing-${TAG}-sbom.cdx.json`. It enumerates every Go module
-dependency included in the binary.
+Each release archive has a corresponding [CycloneDX](https://cyclonedx.org/)
+SBOM named by appending `.cyclonedx.json` to the complete archive filename. For
+example, the Linux amd64 pair for v0.9.0 is
+`portwing_0.9.0_linux_amd64.tar.gz` and
+`portwing_0.9.0_linux_amd64.tar.gz.cyclonedx.json`.
 
 ```bash
-TAG=v0.8.1
+VERSION=0.9.0
+RELEASE_TAG="v${VERSION}"
+ARCHIVE="portwing_${VERSION}_linux_amd64.tar.gz"
+SBOM="${ARCHIVE}.cyclonedx.json"
 
-# Download the SBOM asset
-gh release download "${TAG}" \
+# Download the archive, its SBOM, and the signed checksum manifest
+gh release download "${RELEASE_TAG}" \
   --repo CodesWhat/portwing \
-  --pattern "portwing-${TAG}-sbom.cdx.json"
+  --pattern "${ARCHIVE}" \
+  --pattern "${SBOM}" \
+  --pattern "checksums.txt" \
+  --pattern "checksums.txt.bundle"
+
+# Authenticate checksums.txt, then verify both files are listed unchanged
+cosign verify-blob \
+  --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  --bundle "checksums.txt.bundle" \
+  "checksums.txt"
+sha256sum --check --ignore-missing checksums.txt
+
+# Independently verify GitHub provenance for the SBOM
+gh attestation verify "${SBOM}" --repo CodesWhat/portwing
 
 # Inspect with any CycloneDX-compatible tool, e.g. the CycloneDX CLI
-cyclonedx validate --input-file "portwing-${TAG}-sbom.cdx.json"
+cyclonedx validate --input-file "${SBOM}"
 ```
 
-The SBOM does **not** currently ship a detached cosign signature of its own,
-but the archive provenance attestation covers the same dependency set. If your
-compliance workflow requires a signed SBOM, open an issue.
+The SBOM does not have a separate cosign bundle. It is authenticated as an
+entry in the cosign-signed `checksums.txt` and as its own subject in the GitHub
+`subject-checksums` provenance attestation. Container images have a separate
+Buildx OCI SBOM attestation because they also include OS packages.
 
 ---
 
@@ -160,8 +179,9 @@ compliance workflow requires a signed SBOM, open an issue.
 | Container image | GitHub attestation | `gh attestation verify oci://ghcr.io/codeswhat/portwing:TAG` |
 | `checksums.txt` | cosign blob | `cosign verify-blob ... --bundle checksums.txt.bundle checksums.txt` |
 | Binary archive | SHA-256 checksum | `sha256sum --check --ignore-missing checksums.txt` |
-| Binary archive | GitHub attestation | `gh attestation verify portwing_Linux_x86_64.tar.gz --repo CodesWhat/portwing` |
-| SBOM | Inspect manually | `cyclonedx validate --input-file portwing-TAG-sbom.cdx.json` |
+| Binary archive | GitHub attestation | `gh attestation verify portwing_0.9.0_linux_amd64.tar.gz --repo CodesWhat/portwing` |
+| Per-archive SBOM | Signed checksum + GitHub attestation | `cosign verify-blob ... checksums.txt` and `gh attestation verify <archive>.cyclonedx.json ...` |
+| Container SBOM | OCI SBOM attestation | Inspect the attestation attached to `ghcr.io/codeswhat/portwing:TAG` with an OCI/SBOM-aware client |
 
 For the full security model — including authentication tokens, TLS configuration,
 and threat boundaries — see [Security Model](/security-model).

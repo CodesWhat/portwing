@@ -14,7 +14,7 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `3000` | TCP port the HTTP server listens on. |
-| `BIND_ADDRESS` | `0.0.0.0` | IP address the server binds to. |
+| `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | IP address the HTTP/operations listener binds to. Edge mode defaults to loopback because its operations routes have no inbound authentication; explicitly use a broader address only on an isolated monitoring network. |
 | `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Portwing operates in Edge mode and connects outbound to Drydock. |
 | `TLS_CERT` | — | Path to server TLS certificate (Standard mode). Must be set together with `TLS_KEY`; partial configuration is a startup error. |
 | `TLS_KEY` | — | Path to server TLS private key (Standard mode). Must be set together with `TLS_CERT`; partial configuration is a startup error. |
@@ -91,7 +91,7 @@ Portwing talks to the Docker daemon over the Unix socket only — there is no `D
 | `RECONNECT_DELAY` | `1` | Initial reconnect backoff delay in seconds (doubles on each failure, capped at `MAX_RECONNECT_DELAY`, with ±25% jitter). |
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff delay in seconds. |
 | `SKIP_DF_COLLECTION` | `false` | Set to `true` (or `1`/`yes`) to disable disk-usage metric collection. Useful when the host filesystem is inaccessible or collection is slow. |
-| `AUDIT_LOG` | — | Audit log destination. Accepted values: `stdout`, `stderr`, or an absolute file path. When unset, audit logging is disabled. |
+| `AUDIT_LOG` | — | Optional persistent audit destination: `stdout`, `stderr`, or an absolute file path. When unset, only the sink is disabled; `AUDIT_BUFFER_SIZE` still controls in-memory retention. |
 | `AUDIT_BUFFER_SIZE` | `256` | Number of audit records retained in the in-memory ring buffer for pull-based retrieval at `GET /_portwing/audit`. Set to `0` to disable the buffer. Independent of `AUDIT_LOG`. |
 
 ---

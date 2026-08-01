@@ -48,80 +48,16 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	s.recordAuditExport(true)
 }
 
-// handleAuditExport streams retained records as newline-delimited JSON in
-// oldest-first order. cursor is the last successfully consumed record cursor;
-// responses contain only records after it. A 409 reports when that cursor fell
-// behind the ring's retained window, allowing exporters to surface data loss
-// instead of silently skipping overwritten records.
 func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
-	cursor := uint64(0)
-	rawCursor, cursorProvided := r.URL.Query()["cursor"]
-	if cursorProvided {
-		raw := ""
-		if len(rawCursor) > 0 {
-			raw = rawCursor[0]
-		}
-		parsed, err := strconv.ParseUint(raw, 10, 64)
-		if err != nil {
-			s.recordAuditExport(false)
-			http.Error(w, "invalid cursor", http.StatusBadRequest)
-			return
-		}
-		cursor = parsed
+	var exportMetrics audit.ExportMetrics
+	if s.metrics != nil {
+		exportMetrics = s.metrics
 	}
-
-	limit := 0
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 0 {
-			s.recordAuditExport(false)
-			http.Error(w, "invalid limit", http.StatusBadRequest)
-			return
-		}
-		limit = parsed
-	}
-
-	records, stats := s.auditor.RecordsAfter(cursor, limit)
-	s.setAuditMetrics(stats)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Portwing-Oldest-Cursor", strconv.FormatUint(stats.OldestCursor, 10))
-	w.Header().Set("X-Portwing-Latest-Cursor", strconv.FormatUint(stats.LatestCursor, 10))
-	if cursorProvided && stats.OldestCursor > 0 && cursor < stats.OldestCursor-1 {
-		w.Header().Set("X-Portwing-Next-Cursor", strconv.FormatUint(auditResetCursor(stats), 10))
-		s.recordAuditExport(false)
-		http.Error(w, "audit cursor is older than the retained buffer", http.StatusConflict)
-		return
-	}
-	if cursorProvided && cursor > stats.LatestCursor {
-		w.Header().Set("X-Portwing-Next-Cursor", strconv.FormatUint(auditResetCursor(stats), 10))
-		s.recordAuditExport(false)
-		http.Error(w, "audit cursor is newer than the current buffer generation", http.StatusConflict)
-		return
-	}
-
-	nextCursor := cursor
-	if len(records) > 0 {
-		nextCursor = records[len(records)-1].Cursor
-	}
-	w.Header().Set("Content-Type", "application/x-ndjson")
-	w.Header().Set("X-Portwing-Next-Cursor", strconv.FormatUint(nextCursor, 10))
-	w.Header().Set("X-Portwing-Record-Count", strconv.Itoa(len(records)))
-
-	encoder := json.NewEncoder(w)
-	for i := range records {
-		if err := encoder.Encode(records[i]); err != nil {
-			s.recordAuditExport(false)
-			return
-		}
-	}
-	s.recordAuditExport(true)
+	audit.ServeExportHTTP(w, r, s.auditor, exportMetrics)
 }
 
 func auditResetCursor(stats audit.Stats) uint64 {
-	if stats.OldestCursor == 0 {
-		return 0
-	}
-	return stats.OldestCursor - 1
+	return audit.ResetCursor(stats)
 }
 
 func (s *Server) recordAuditExport(success bool) {

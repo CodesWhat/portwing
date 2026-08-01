@@ -7,7 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-08-01
+
 ### Added
+
+- **Controller-owned Drydock watcher and update execution.** The `docker`
+  watcher descriptor now declares `transport: "docker-api"`,
+  `execution: "controller"`, and `events: "portwing"`, telling Drydock to run
+  its native watcher and update trigger through Portwing's authenticated Docker
+  proxy while Portwing remains the lifecycle-event source. Standard Mode uses
+  the HTTP proxy; Edge Mode uses correlated WebSocket `request`/`response`
+  messages. Edge connections now send `dd:component_sync` before
+  `dd:container_sync` so the controller establishes ownership before ingesting
+  raw inventory, and Portwing advertises no remote trigger. Full feature
+  compatibility requires Drydock `v1.6.0-rc.11` or later; the additive
+  descriptor fields do not change `DrydockCompat` (`1.4.0`).
+- **Edge audit export.** Edge Mode now serves the same cursor-based
+  `GET /_portwing/audit/export` NDJSON exporter as Standard Mode on its private
+  operations listener. The Edge route intentionally has no inbound
+  authentication, so the documentation and Kubernetes example now treat the
+  listener as a sensitive trust boundary and restrict it to the monitoring
+  workload with a headless Service and NetworkPolicy.
+- **Edge operations bind defaults to loopback.** Because Edge health, metrics,
+  and audit export intentionally have no inbound authentication, Edge Mode now
+  defaults `BIND_ADDRESS` to `127.0.0.1`. Operators must explicitly choose a
+  broader address for an isolated container or Kubernetes monitoring network;
+  Standard Mode retains its `0.0.0.0` default for inbound controller traffic.
 
 - **Edge exec + sockguard example.** `examples/docker-compose.edge-with-exec.yml`
   pairs Portwing's edge mode with sockguard's `portwing-with-exec.yaml` preset
@@ -32,6 +57,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field — sockguard's detailed denial cause (populated only when
   `deny_verbosity` is `verbose`) lives there, not in `message`, which is
   always the generic `request denied by sockguard policy` sentence.
+- **Authenticated compatibility checks no longer drop credentials.**
+  `scripts/drydock-compat-check.sh` now preserves the configured token for its
+  expected-404 and SSE probes instead of accidentally sending an empty value.
+
+### Tests
+
+- **Drydock live compatibility gate expanded to 35 checks.** The live suite
+  now asserts the exact `transport=docker-api`, `execution=controller`, and
+  `events=portwing` watcher markers plus empty trigger discovery, alongside the
+  authenticated 404/SSE coverage.
+
+### Documentation
+
+- **Release and verification surfaces aligned.** Current-version examples now
+  target v0.9.0, the compatibility matrix separates wire compatibility from
+  the Drydock feature minimum, release verification documents the actual
+  per-archive SBOM/checksum/provenance model, and package/website links use the
+  controlled `getportwing.vercel.app` domain.
 
 ## [v0.8.1] - 2026-07-28
 
@@ -74,7 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTPS from `TLS_CERT`, preventing Docker/controller outages from causing
   container restart loops.
 - **Drydock wire objects track the current controller schema.** Drydock adapter responses and events now serialize nested registry, tag, digest, update-kind, and runtime-detail objects without changing the generic REST adapter's simpler public model.
-- **Edge mode is production supported.** Project docs, the documentation site, and getportwing.com now describe the stable `portwing/1.0` contract and Drydock 1.6's default-on endpoint; Drydock 1.5 still requires `DD_EXPERIMENTAL_PORTWING=true`.
+- **Edge mode is production supported.** Project docs, the documentation site, and getportwing.vercel.app now describe the stable `portwing/1.0` contract and Drydock 1.6's default-on endpoint; Drydock 1.5 still requires `DD_EXPERIMENTAL_PORTWING=true`.
 
 ### Tests
 
@@ -147,7 +190,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Coverage reporting moved from Codecov to Qlty Cloud.** Part of the org-wide consolidation onto Qlty (one vendor for code quality and coverage). CI now publishes the Go coverprofile to Qlty Cloud via GitHub OIDC — no stored coverage token — and enforces a vendor-free statement-coverage floor (96%) with `go tool cover`, replacing the Codecov project ratchet and `codecov.yml`. A coverage badge was added to the README.
 - **Blocking `qlty check` gate in CI.** A new CI job fails the build on any new qlty finding (shellcheck, hadolint, markdownlint, yamllint, and friends), with the linter configs (`.qlty/qlty.toml`, `.markdownlint.json`, `.yamllint.yml`) checked in and the existing scripts and Dockerfiles cleaned up to pass it. Standardizes the quality tooling with the sibling CodesWhat repos.
-- **Marketing and docs sites converted to the shared CodesWhat web shell**, bringing chrome parity with the sibling project sites (CLI demo, comparison hub, OG/share imagery, favicons), and the configured site domain corrected from `getportwing.dev` to `getportwing.com`. Source-only — nothing is deployed yet.
+- **Marketing and docs sites converted to the shared CodesWhat web shell**, bringing chrome parity with the sibling project sites (CLI demo, comparison hub, OG/share imagery, favicons), and the configured site domain corrected from `getportwing.dev` to the controlled `getportwing.vercel.app` fallback. Source-only — nothing is deployed yet.
 
 ### Fixed
 

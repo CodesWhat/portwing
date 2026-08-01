@@ -1,9 +1,11 @@
 # Portwing — edge mode: outbound WebSocket tunnel to Drydock.
-# No inbound ports are published and no Service is created; the agent dials
-# out, so it works behind NAT and firewalls. The built-in health endpoint
-# still works (it listens container-locally in edge mode too).
+# No host port or externally reachable Service is created; the agent dials out,
+# so it works behind NAT and firewalls. A headless operations Service exists
+# only for Prometheus discovery and is isolated by NetworkPolicy. The Edge
+# operations listener is unauthenticated and includes the audit export, so do
+# not weaken that policy or expose the Service without an authenticating proxy.
 #
-# Edge mode against Drydock 1.6 is Ed25519-only: the controller's
+# Edge mode against Drydock v1.6.0-rc.11+ is Ed25519-only: the controller's
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a keypair
 # and register its public key with Drydock before applying this manifest:
 #
@@ -90,7 +92,9 @@ spec:
         - name: portwing
           image: ghcr.io/codeswhat/portwing:latest
           imagePullPolicy: Always
-          # Cluster-internal operations port only; no host port is published.
+          # Private operations port only; no host port is published. The Edge
+          # listener has no inbound auth and includes audit export as well as
+          # health/metrics, so NetworkPolicy below limits who can reach it.
           ports:
             - name: operations
               containerPort: 3000
@@ -103,6 +107,10 @@ spec:
           env:
             - name: DRYDOCK_URL
               value: https://drydock.example.com
+            # Explicit opt-in for the NetworkPolicy-isolated operations Service.
+            # Edge mode otherwise defaults this unauthenticated listener to loopback.
+            - name: BIND_ADDRESS
+              value: "0.0.0.0"
             - name: PRIVATE_KEY_FILE
               value: /etc/portwing/portwing_ed25519.pem
             - name: AGENT_NAME
@@ -127,16 +135,22 @@ spec:
             - name: stacks
               mountPath: /data/stacks
           livenessProbe:
-            httpGet:
-              path: /health
-              port: 3000
+            exec:
+              command:
+                - wget
+                - -q
+                - --spider
+                - http://127.0.0.1:3000/health
             initialDelaySeconds: 10
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
-            httpGet:
-              path: /ready
-              port: 3000
+            exec:
+              command:
+                - wget
+                - -q
+                - --spider
+                - http://127.0.0.1:3000/ready
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
@@ -215,18 +229,46 @@ spec:
             path: /var/lib/portwing/stacks
             type: DirectoryOrCreate
 ---
-# Cluster-internal access for Prometheus only. Edge control traffic remains
-# outbound over the Drydock WebSocket and no NodePort/LoadBalancer is created.
+# Headless discovery for Prometheus. Edge control traffic remains outbound over
+# the Drydock WebSocket and no ClusterIP, NodePort, or LoadBalancer is created.
+# The NetworkPolicy below is the enforcement boundary; use a CNI that enforces
+# Kubernetes NetworkPolicy before relying on this example in a shared cluster.
 apiVersion: v1
 kind: Service
 metadata:
-  name: portwing-edge-metrics
+  name: portwing-edge-operations
   namespace: portwing
 spec:
-  type: ClusterIP
+  clusterIP: None
+  # Keep disconnected agents discoverable so Prometheus can alert on
+  # portwing_edge_controller_connected == 0 even while readiness is false.
+  publishNotReadyAddresses: true
   selector:
     app: portwing-edge
   ports:
-    - name: metrics
+    - name: operations
       port: 3000
       targetPort: operations
+---
+# Only the example Prometheus pod may reach the unauthenticated Edge operations
+# listener. Kubelet health probes for the Fluent Bit sidecar use Kubernetes'
+# node-to-pod probe path and do not require a broad pod-ingress rule for 2020.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: portwing-edge-operations
+  namespace: portwing
+spec:
+  podSelector:
+    matchLabels:
+      app: portwing-edge
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: portwing-prometheus
+      ports:
+        - protocol: TCP
+          port: 3000
