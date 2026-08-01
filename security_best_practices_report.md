@@ -44,7 +44,7 @@ The following checks passed after remediation on 2026-07-20:
 - Current-source gitleaks scan (ignored build output excluded) — only the existing documentation/demo credential examples were identified; no apparent credential material
 - Generated hosting policy — 25 CSP-protected HTML routes plus global browser headers; maximum CSP value 3,469 bytes, no `unsafe-inline` in `script-src`, and `frame-ancestors 'none'` on every route
 
-Runtime response headers for `https://getportwing.vercel.app` were not changed or
+Runtime response headers for `https://getportwing-codeswhat.vercel.app` were not changed or
 probed because this task did not authorize a deployment. Each build now emits a
 Build Output API contract from the exact rendered HTML, so its per-route script
 hashes cannot become stale; deployment-side confirmation remains an operational

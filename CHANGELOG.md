@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target v0.9.0, the compatibility matrix separates wire compatibility from
   the Drydock feature minimum, release verification documents the actual
   per-archive SBOM/checksum/provenance model, and package/website links use the
-  controlled `getportwing.vercel.app` domain.
+  controlled `getportwing-codeswhat.vercel.app` domain.
 
 ## [v0.8.1] - 2026-07-28
 
@@ -117,7 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTPS from `TLS_CERT`, preventing Docker/controller outages from causing
   container restart loops.
 - **Drydock wire objects track the current controller schema.** Drydock adapter responses and events now serialize nested registry, tag, digest, update-kind, and runtime-detail objects without changing the generic REST adapter's simpler public model.
-- **Edge mode is production supported.** Project docs, the documentation site, and getportwing.vercel.app now describe the stable `portwing/1.0` contract and Drydock 1.6's default-on endpoint; Drydock 1.5 still requires `DD_EXPERIMENTAL_PORTWING=true`.
+- **Edge mode is production supported.** Project docs, the documentation site, and getportwing-codeswhat.vercel.app now describe the stable `portwing/1.0` contract and Drydock 1.6's default-on endpoint; Drydock 1.5 still requires `DD_EXPERIMENTAL_PORTWING=true`.
 
 ### Tests
 
@@ -190,7 +190,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Coverage reporting moved from Codecov to Qlty Cloud.** Part of the org-wide consolidation onto Qlty (one vendor for code quality and coverage). CI now publishes the Go coverprofile to Qlty Cloud via GitHub OIDC — no stored coverage token — and enforces a vendor-free statement-coverage floor (96%) with `go tool cover`, replacing the Codecov project ratchet and `codecov.yml`. A coverage badge was added to the README.
 - **Blocking `qlty check` gate in CI.** A new CI job fails the build on any new qlty finding (shellcheck, hadolint, markdownlint, yamllint, and friends), with the linter configs (`.qlty/qlty.toml`, `.markdownlint.json`, `.yamllint.yml`) checked in and the existing scripts and Dockerfiles cleaned up to pass it. Standardizes the quality tooling with the sibling CodesWhat repos.
-- **Marketing and docs sites converted to the shared CodesWhat web shell**, bringing chrome parity with the sibling project sites (CLI demo, comparison hub, OG/share imagery, favicons), and the configured site domain corrected from `getportwing.dev` to the controlled `getportwing.vercel.app` fallback. Source-only — nothing is deployed yet.
+- **Marketing and docs sites converted to the shared CodesWhat web shell**, bringing chrome parity with the sibling project sites (CLI demo, comparison hub, OG/share imagery, favicons), and the configured site domain corrected from `getportwing.dev` to the controlled `getportwing-codeswhat.vercel.app` fallback. Source-only — nothing is deployed yet.
 
 ### Fixed
 

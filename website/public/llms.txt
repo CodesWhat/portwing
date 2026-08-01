@@ -30,18 +30,18 @@ AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 
 ## Links
 
-- Website: https://getportwing.vercel.app
+- Website: https://getportwing-codeswhat.vercel.app
 - GitHub: https://github.com/CodesWhat/portwing
 - Releases: https://github.com/CodesWhat/portwing/releases
-- Documentation: https://getportwing.vercel.app/docs
-- Getting started: https://getportwing.vercel.app/docs/getting-started
-- Connection modes: https://getportwing.vercel.app/docs/connection-modes
-- Authentication: https://getportwing.vercel.app/docs/authentication
-- Audit logging: https://getportwing.vercel.app/docs/audit-logging
-- Configuration: https://getportwing.vercel.app/docs/configuration
-- Compare to alternatives: https://getportwing.vercel.app/compare
-- vs Portainer: https://getportwing.vercel.app/compare/portainer
-- vs Komodo: https://getportwing.vercel.app/compare/komodo
-- vs Hawser: https://getportwing.vercel.app/compare/hawser
-- vs Watchtower: https://getportwing.vercel.app/compare/watchtower
-- vs Diun: https://getportwing.vercel.app/compare/diun
+- Documentation: https://getportwing-codeswhat.vercel.app/docs
+- Getting started: https://getportwing-codeswhat.vercel.app/docs/getting-started
+- Connection modes: https://getportwing-codeswhat.vercel.app/docs/connection-modes
+- Authentication: https://getportwing-codeswhat.vercel.app/docs/authentication
+- Audit logging: https://getportwing-codeswhat.vercel.app/docs/audit-logging
+- Configuration: https://getportwing-codeswhat.vercel.app/docs/configuration
+- Compare to alternatives: https://getportwing-codeswhat.vercel.app/compare
+- vs Portainer: https://getportwing-codeswhat.vercel.app/compare/portainer
+- vs Komodo: https://getportwing-codeswhat.vercel.app/compare/komodo
+- vs Hawser: https://getportwing-codeswhat.vercel.app/compare/hawser
+- vs Watchtower: https://getportwing-codeswhat.vercel.app/compare/watchtower
+- vs Diun: https://getportwing-codeswhat.vercel.app/compare/diun

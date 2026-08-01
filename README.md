@@ -147,7 +147,7 @@ sudo rpm --install ./portwing_0.9.0_linux_amd64.rpm
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
 do not start it before authentication is configured. See the
-[native installation guide](https://getportwing.vercel.app/docs/installation)
+[native installation guide](https://getportwing-codeswhat.vercel.app/docs/installation)
 for artifact verification, configuration, upgrade, uninstall, and service-user
 expectations.
 
