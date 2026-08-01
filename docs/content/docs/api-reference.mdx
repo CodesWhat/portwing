@@ -88,9 +88,13 @@ edge mode, when the controller WebSocket is disconnected.
   "hostname": "my-server",
   "agentId": "550e8400-e29b-41d4-a716-446655440000",
   "agentName": "my-server",
-  "capabilities": ["compose", "exec", "metrics", "events", "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"]
+  "capabilities": ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:logs"]
 }
 ```
+
+Unsupported legacy `dd:watch` and `dd:trigger` capabilities are absent. The
+watcher descriptor declares controller ownership and the trigger list remains
+empty; their reserved wire message types are not feature advertisements.
 
 ### curl example
 

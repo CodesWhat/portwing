@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -859,9 +860,12 @@ func TestDo_NoContentTypeForNilBody(t *testing.T) {
 func TestDoWithHeadersPreservesDockerMetadata(t *testing.T) {
 	t.Parallel()
 
+	var mu sync.Mutex
 	var got http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		got = r.Header.Clone()
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -877,11 +881,15 @@ func TestDoWithHeadersPreservesDockerMetadata(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if value := got.Get("Content-Type"); value != "application/vnd.docker.raw-stream" {
-		t.Errorf("Content-Type = %q", value)
+	mu.Lock()
+	gotContentType := got.Get("Content-Type")
+	gotRegistryAuth := got.Get("X-Registry-Auth")
+	mu.Unlock()
+	if gotContentType != "application/vnd.docker.raw-stream" {
+		t.Errorf("Content-Type = %q", gotContentType)
 	}
-	if value := got.Get("X-Registry-Auth"); value != "registry-credential" {
-		t.Errorf("X-Registry-Auth = %q", value)
+	if gotRegistryAuth != "registry-credential" {
+		t.Errorf("X-Registry-Auth = %q", gotRegistryAuth)
 	}
 }
 
@@ -911,9 +919,12 @@ func TestDoStream_SetsContentTypeForBodyRequests(t *testing.T) {
 func TestDoStreamWithHeadersPreservesDockerMetadata(t *testing.T) {
 	t.Parallel()
 
+	var mu sync.Mutex
 	var gotRegistryAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		gotRegistryAuth = r.Header.Get("X-Registry-Auth")
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -931,8 +942,11 @@ func TestDoStreamWithHeadersPreservesDockerMetadata(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if gotRegistryAuth != "stream-registry-credential" {
-		t.Errorf("X-Registry-Auth = %q", gotRegistryAuth)
+	mu.Lock()
+	gotAuth := gotRegistryAuth
+	mu.Unlock()
+	if gotAuth != "stream-registry-credential" {
+		t.Errorf("X-Registry-Auth = %q", gotAuth)
 	}
 }
 

@@ -241,9 +241,10 @@ participates in updates as the authenticated Docker transport and event source,
 even though Drydock owns watcher and trigger execution.
 
 Portwing still returns no trigger components (`GET /api/triggers` and edge
-`triggerTypes`/component sync remain empty). The `dd:trigger` protocol vocabulary
-is retained for wire compatibility, but it is not a remote trigger advertisement;
-the watcher/trigger POST endpoints continue to return 501 for older clients.
+`triggerTypes` remain empty), while `dd:component_sync` contains the Docker
+watcher descriptor. The `dd:trigger` protocol vocabulary is retained for wire
+compatibility, but it is not a remote trigger advertisement; the watcher/trigger
+POST endpoints continue to return 501 for older clients.
 
 The complete execution model requires Drydock `v1.6.0-rc.11` or later. Older
 controllers can remain wire-compatible because the descriptor fields and Edge

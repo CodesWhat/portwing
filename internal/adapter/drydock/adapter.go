@@ -87,8 +87,6 @@ func (a *Adapter) Name() string { return "drydock" }
 
 func (a *Adapter) Capabilities() []string {
 	return []string{
-		"dd:watch",
-		"dd:trigger",
 		"dd:container-sync",
 		"dd:logs",
 	}

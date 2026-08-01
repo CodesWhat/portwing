@@ -45,8 +45,6 @@ func TestCapabilities(t *testing.T) {
 		t.Fatal("Capabilities() returned empty slice")
 	}
 	want := map[string]bool{
-		"dd:watch":          true,
-		"dd:trigger":        true,
 		"dd:container-sync": true,
 		"dd:logs":           true,
 	}
@@ -58,6 +56,13 @@ func TestCapabilities(t *testing.T) {
 	}
 	for missing := range want {
 		t.Errorf("missing capability %q", missing)
+	}
+	for _, unsupported := range []string{"dd:watch", "dd:trigger"} {
+		for _, capability := range caps {
+			if capability == unsupported {
+				t.Errorf("unsupported capability %q must not be advertised", unsupported)
+			}
+		}
 	}
 }
 

@@ -216,7 +216,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, headers
 func (c *Client) do(ctx context.Context, method, path string, headers http.Header, body io.Reader, client *http.Client) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.buildURL(path), body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating Docker API request: %w", err)
 	}
 	if headers != nil {
 		req.Header = headers.Clone()
@@ -224,7 +224,11 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 	if body != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	return client.Do(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sending Docker API request %s %s: %w", method, path, err)
+	}
+	return resp, nil
 }
 
 // DoStream performs an HTTP request using the streaming client (no timeout).

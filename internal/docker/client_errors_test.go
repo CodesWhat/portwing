@@ -158,6 +158,9 @@ func TestDo_InvalidMethod(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid method, got nil")
 	}
+	if !strings.Contains(err.Error(), "creating Docker API request") {
+		t.Fatalf("error = %q, want request-construction context", err)
+	}
 }
 
 func TestDoStream_InvalidMethod(t *testing.T) {
@@ -175,6 +178,25 @@ func TestDoStream_InvalidMethod(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("expected error for invalid method, got nil")
+	}
+	if !strings.Contains(err.Error(), "creating Docker API request") {
+		t.Fatalf("error = %q, want request-construction context", err)
+	}
+}
+
+func TestDo_TransportErrorIncludesOperation(t *testing.T) {
+	t.Parallel()
+
+	c := newErrClient()
+	resp, err := c.Do(context.Background(), http.MethodGet, "/containers/json", nil)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected transport error, got nil")
+	}
+	if !strings.Contains(err.Error(), "sending Docker API request GET /containers/json") {
+		t.Fatalf("error = %q, want request-operation context", err)
 	}
 }
 

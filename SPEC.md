@@ -95,13 +95,18 @@ sequenceDiagram
     "dockerVersion": "27.0.3",
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
-                      "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"],
+                      "dd:container-sync", "dd:logs"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
     "triggerTypes": []
   }
 }
 ```
+
+The unsupported legacy `dd:watch` and `dd:trigger` capabilities are deliberately
+absent. Discovery uses the Docker watcher descriptor (`execution: controller`)
+and an empty trigger list; the corresponding wire message types remain reserved
+for compatibility but are not advertised.
 
 All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 

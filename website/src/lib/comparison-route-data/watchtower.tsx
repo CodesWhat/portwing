@@ -8,7 +8,7 @@ Auto-update containers|Yes (pull + restart on schedule)|No (Drydock handles upda
 Remote Docker API proxy|No (local/scheduled, no remote protocol)|Yes (full Docker API proxy with auth)|self
 Auth for remote access|No (local only)|Yes (Ed25519 per-request signing)|self
 Structured audit log|No|Yes (JSON, built-in)|self
-Image signature verification|Basic cosign support (newer builds)|Yes (cosign + archive/image SBOMs + SLSA)|self
+Runtime image signature verification|Basic cosign support (newer builds)|No|competitor
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|No|Yes|self
 MCP server (AI-native, read-only)|No|Yes|self

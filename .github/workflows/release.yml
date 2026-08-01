@@ -178,7 +178,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cosign verify \
-            --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+            --certificate-identity="https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
             "ghcr.io/codeswhat/portwing:${VERSION}"
 
@@ -235,7 +235,7 @@ jobs:
           set -euo pipefail
           for package in packages/*.deb packages/*.rpm; do
             cosign verify-blob \
-              --certificate-identity-regexp="https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+              --certificate-identity="https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}" \
               --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
               --bundle="${package}.bundle" \
               "${package}"

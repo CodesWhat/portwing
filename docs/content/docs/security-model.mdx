@@ -312,7 +312,7 @@ Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0
 
 - **Cosign keyless signatures** — both the checksums file and the container image are signed via GitHub Actions OIDC. No operator-managed signing keys are required.
 - **CycloneDX SBOMs** — every archive has a sibling named `<archive>.cyclonedx.json`; the image carries a separate Buildx OCI SBOM attestation covering its OS packages.
-- **SLSA provenance** — GitHub build provenance covers every asset listed in `checksums.txt`, including archives, packages, and per-archive SBOMs, plus the container manifest.
+- **SLSA provenance** — for public releases, GitHub build provenance covers every asset listed in `checksums.txt`, including archives, packages, and per-archive SBOMs, plus the container manifest.
 
 Verify a release before running it:
 
@@ -321,14 +321,14 @@ VERSION=0.9.0
 
 # Verify the checksums file
 cosign verify-blob \
-  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --bundle "checksums.txt.bundle" \
   "checksums.txt"
 
 # Verify the container image
 cosign verify \
-  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   "ghcr.io/codeswhat/portwing:${VERSION}"
 ```

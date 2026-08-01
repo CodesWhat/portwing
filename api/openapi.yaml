@@ -170,9 +170,15 @@ components:
           example: "my-server"
         capabilities:
           type: array
+          description: >
+            Adapter namespace and transport capabilities. Unsupported legacy
+            dd:watch and dd:trigger capabilities are omitted. Use the watcher
+            descriptor and empty trigger list to discover the v0.9.0
+            controller-owned execution contract; the corresponding wire message
+            types remain reserved but unadvertised.
           items:
             type: string
-          example: ["compose", "exec", "metrics", "events", "dd:watch", "dd:trigger", "dd:container-sync", "dd:logs"]
+          example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:logs"]
 
     ComposeRequest:
       type: object

@@ -853,8 +853,10 @@ verified without managing signing keys.
 ### Verify the checksums file
 
 ```bash
+VERSION=0.9.0
+
 cosign verify-blob \
-  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --bundle "checksums.txt.bundle" \
   "checksums.txt"
@@ -866,7 +868,7 @@ cosign verify-blob \
 VERSION=0.9.0
 
 cosign verify \
-  --certificate-identity-regexp "https://github.com/CodesWhat/portwing/.github/workflows/release.yml" \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   "ghcr.io/codeswhat/portwing:${VERSION}"
 ```
