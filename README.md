@@ -18,7 +18,7 @@
 >
 > ### 🚧 Pre-1.0 software — APIs may still change
 >
-> Portwing is pre-`v1.0.0` (currently `v0.9.0`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> Portwing is pre-`v1.0.0` (currently `v0.9.1`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
@@ -76,7 +76,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.9.0 is the current release.** It adds controller-owned Drydock watcher/update execution, shared Edge audit export, and actionable exec/sockguard error propagation. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.1 is the current release.** It keeps the v0.9.0 controller-owned watcher/update, Edge audit export, and exec/sockguard error improvements while correcting every active public website and package link to `portwing.codeswhat.com`. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
@@ -139,15 +139,15 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.9.0_linux_amd64.deb
+sudo apt install ./portwing_0.9.1_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.9.0_linux_amd64.rpm
+sudo rpm --install ./portwing_0.9.1_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
 do not start it before authentication is configured. See the
-[native installation guide](https://getportwing-codeswhat.vercel.app/docs/installation)
+[native installation guide](https://portwing.codeswhat.com/docs/installation)
 for artifact verification, configuration, upgrade, uninstall, and service-user
 expectations.
 
@@ -315,7 +315,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-For v0.4.0 and later — including v0.9.0, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+For v0.4.0 and later — including v0.9.1, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 - **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
 - **v0.2.0** — the security & observability release. Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`. Also shipped in v0.2.0:
@@ -853,7 +853,7 @@ verified without managing signing keys.
 ### Verify the checksums file
 
 ```bash
-VERSION=0.9.0
+VERSION=0.9.1
 
 cosign verify-blob \
   --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
@@ -865,7 +865,7 @@ cosign verify-blob \
 ### Verify the container image
 
 ```bash
-VERSION=0.9.0
+VERSION=0.9.1
 
 cosign verify \
   --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
@@ -876,7 +876,7 @@ cosign verify \
 ### SBOM
 
 Each binary archive has a matching CycloneDX release asset, for example
-`portwing_0.9.0_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
+`portwing_0.9.1_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
 cosign bundle; verify the signed `checksums.txt`, then verify the SBOM's digest
 against that manifest. Public releases also give every checksummed asset its
 own GitHub build-provenance attestation. The container image carries a separate

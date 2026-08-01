@@ -42,7 +42,34 @@ require_text ".goreleaser.yml" "dst: /usr/lib/systemd/system/portwing.service" "
 require_text ".goreleaser.yml" "homebrew_casks:" "GoReleaser must publish a Homebrew cask"
 require_text ".goreleaser.yml" "skip_upload: auto" "prereleases must not update the stable Homebrew channel"
 require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebrew publishing must use the dedicated tap token"
-require_text ".goreleaser.yml" "https://getportwing-codeswhat.vercel.app/" "published package metadata must use the live website"
+public_site="https://portwing.codeswhat.com"
+protected_site="https://getportwing-codeswhat.vercel.app"
+release_version="0.9.1"
+
+require_text ".goreleaser.yml" "${public_site}/" "published package metadata must use the public website"
+require_text "README.md" "${public_site}/docs/installation" "the repository landing page must link the public package guide"
+require_text "docs/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "documentation metadata must use the public website"
+require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "website metadata must use the public website"
+require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
+require_text "CHANGELOG.md" "## [v${release_version}] - 2026-08-01" "the patch release must be documented"
+require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
+require_text "website/src/lib/site-config.ts" "version: \"${release_version}\"" "website metadata must identify the current release"
+require_text "website/src/components/get-started.tsx" "portwing_${release_version}_linux_amd64.deb" "website package examples must use the current release"
+require_text "docs/content/docs/installation.mdx" "VERSION=${release_version}" "installation examples must use the current release"
+require_text "docs/content/docs/verification.mdx" "TAG=${release_version}" "verification examples must use the current release"
+require_text "website/public/llms.txt" "Portwing v${release_version} is" "agent discovery metadata must identify the current release"
+require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must identify the current release"
+require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`" "the compatibility matrix must identify the current release"
+require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
+require_text "examples/observability/docker-compose.yml" "ghcr.io/codeswhat/portwing:${release_version}" "the observability example must pin the current release"
+
+if git grep -F -- "$protected_site" -- . \
+	':(exclude)CHANGELOG.md' \
+	':(exclude)security_best_practices_report.md' \
+	':(exclude)scripts/package-release-config-test.sh'; then
+	echo "FAIL: active public surfaces must not link to Vercel's protected team alias" >&2
+	failures=$((failures + 1))
+fi
 
 # shellcheck disable=SC2016 # GitHub evaluates these literals in release.yml.
 require_text ".github/workflows/release.yml" 'HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}' "the release must pass the tap token to GoReleaser"
