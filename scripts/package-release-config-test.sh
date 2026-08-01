@@ -63,15 +63,13 @@ require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`
 require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
 require_text "examples/observability/docker-compose.yml" "ghcr.io/codeswhat/portwing:${release_version}" "the observability example must pin the current release"
 
-for active_surface in \
-	".goreleaser.yml" \
-	"README.md" \
-	"docs/src/lib/site-config.ts" \
-	"website/src/lib/site-config.ts" \
-	"website/public/llms.txt" \
-	"website/src/app/data/faq.ts"; do
-	reject_text "$active_surface" "$protected_site" "active public surfaces must not link to Vercel's protected team alias"
-done
+if git grep -F -- "$protected_site" -- . \
+	':(exclude)CHANGELOG.md' \
+	':(exclude)security_best_practices_report.md' \
+	':(exclude)scripts/package-release-config-test.sh'; then
+	echo "FAIL: active public surfaces must not link to Vercel's protected team alias" >&2
+	failures=$((failures + 1))
+fi
 
 # shellcheck disable=SC2016 # GitHub evaluates these literals in release.yml.
 require_text ".github/workflows/release.yml" 'HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}' "the release must pass the tap token to GoReleaser"
