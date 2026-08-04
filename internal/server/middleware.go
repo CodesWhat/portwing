@@ -722,6 +722,13 @@ func ParseTrustedProxies(entries []string) ([]*net.IPNet, error) {
 // headers are only consulted when the direct peer is a trusted proxy; the
 // X-Forwarded-For chain is then walked right to left and the first hop that
 // is not itself a trusted proxy wins.
+//
+// Every value taken from a forwarding header must parse as an IP address. The
+// return value keys the auth rate limiter and lands in audit records as the
+// actor, so accepting an arbitrary header string would let a caller behind a
+// trusted proxy mint a fresh limiter bucket per request — defeating the
+// failed-attempt throttle it is supposed to enforce — and write arbitrary
+// actor values into the audit trail.
 func (rl *RateLimiter) clientIP(r *http.Request) string {
 	remote := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(remote); err == nil {
@@ -744,7 +751,9 @@ func (rl *RateLimiter) clientIP(r *http.Request) string {
 	}
 
 	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri
+		if ip := net.ParseIP(xri); ip != nil && !ipInNets(ip, rl.trustedProxies) {
+			return xri
+		}
 	}
 
 	return remote

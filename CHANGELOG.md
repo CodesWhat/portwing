@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`X-Real-IP` is now validated before it can key the rate limiter.**
+  `clientIP` required every hop of an `X-Forwarded-For` chain to parse as an IP
+  address, but returned the `X-Real-IP` fallback header verbatim. Behind a
+  configured trusted proxy, a caller could therefore send a distinct arbitrary
+  string per request, mint a fresh limiter bucket each time, and walk past the
+  10-failures-per-minute throttle on the authentication path — and write that
+  same arbitrary string into audit records as the actor. The fallback now
+  applies the same rules as the chain walk: the value must parse as an IP and
+  must not itself be a trusted proxy, otherwise the direct peer is used.
 - **Compose env-file lookup is now contained by `os.Root`.** `buildCommand`
   checked for a stack's `.env.drydock` with a plain `os.Stat`, which follows
   symlinks. A symlink planted at that path by any means other than Portwing's

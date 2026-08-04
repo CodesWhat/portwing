@@ -66,8 +66,12 @@ pre-push:
       priority: 2
       timeout: 2m
 
+    # -count=1 disables the test cache. Without it a cached pass can be served
+    # for a package whose source changed only in ways the cache key misses,
+    # so a newly-introduced race is reported as green locally. CI runs on a
+    # cold cache; this keeps the local gate honest about what it checked.
     go-test:
-      run: go test -race ./...
+      run: go test -race -count=1 ./...
       priority: 3
       timeout: 5m
 

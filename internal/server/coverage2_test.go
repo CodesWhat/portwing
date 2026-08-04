@@ -1311,6 +1311,56 @@ func TestClientIPXRealIPFallback(t *testing.T) {
 	}
 }
 
+func TestClientIPRejectsNonIPXRealIP(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	nets, err := ParseTrustedProxies([]string{"192.0.2.0/24"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies: %v", err)
+	}
+	rl.SetTrustedProxies(nets)
+
+	// A caller behind a trusted proxy must not be able to key the rate limiter
+	// on an arbitrary string: each distinct value would otherwise mint its own
+	// bucket and defeat the failed-attempt throttle.
+	for _, xri := range []string{
+		"not-an-ip",
+		"bucket-" + strings.Repeat("a", 32),
+		"203.0.113.99 extra",
+		"attacker\nX-Injected: value",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "192.0.2.1:50000"
+		req.Header.Set("X-Real-IP", xri)
+
+		if got := rl.clientIP(req); got != "192.0.2.1" {
+			t.Errorf("X-Real-IP %q: expected fallback to remote 192.0.2.1, got %q", xri, got)
+		}
+	}
+}
+
+func TestClientIPIgnoresTrustedProxyXRealIP(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	nets, err := ParseTrustedProxies([]string{"192.0.2.0/24"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies: %v", err)
+	}
+	rl.SetTrustedProxies(nets)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.1:50000"
+	// Naming another trusted proxy identifies no real client, matching how the
+	// XFF walk skips trusted hops.
+	req.Header.Set("X-Real-IP", "192.0.2.7")
+
+	if got := rl.clientIP(req); got != "192.0.2.1" {
+		t.Fatalf("expected fallback to remote 192.0.2.1, got %q", got)
+	}
+}
+
 func TestClientIPAllHopsTrustedFallsBackToRemote(t *testing.T) {
 	t.Parallel()
 
