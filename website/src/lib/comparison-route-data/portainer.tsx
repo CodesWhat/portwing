@@ -1,71 +1,71 @@
-import { Activity, Bot, Key, Lock, PackageCheck, Shield } from "lucide-react";
+import { Activity, Bot, FileText, KeyRound, Network, ShieldCheck } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 
 export const portainerComparisonRouteData = {
   slug: "portainer",
   comparisonTable: `
-Remote container control|Yes (via Portainer Agent)|Yes|tie
-Full management UI|Yes (Portainer UI; RBAC requires Business)|No (Drydock controller only)|competitor
-Auth model|Shared secret / Edge key|Ed25519 per-request signing|self
-Structured audit log|Business tier only ($)|Yes (built-in, free, AGPL-3.0)|self
-Signed images + SBOMs + provenance|No|Yes (cosign + archive/image SBOMs + SLSA provenance)|self
-Default-deny socket filter|No|Yes (with sockguard)|self
-Prometheus metrics|Business tier only ($)|Yes|self
-MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|Yes (Edge Agent, mature)|Yes (Drydock v1.6.0-rc.11+)|competitor
+Remote Docker API proxy|Yes (Agent)|Yes|tie
+Connection modes|Classic inbound; outbound Edge; Async Edge|Standard inbound; persistent outbound edge (Drydock v1.6.0-rc.11+)|competitor
+Agent authentication|Claim key exchange; optional shared secret; Edge key and optional Business mTLS|Ed25519 per-request HTTP signatures; signed edge hello; token fallback in standard mode|tie
+Docker socket policy|Documented agent mounts Docker socket and host paths|Recommended Sockguard path-and-method policy|self
+Structured audit|Controller activity log in Business Edition|Agent-level structured audit and cursor export in every build|self
+Supply-chain evidence|Not published|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
+Fleet agent upgrades and policies|Yes|Not shipped; belongs in Drydock plus packaging|competitor
+Host file APIs and Swarm aggregation|Yes|Intentional non-goals|competitor
+Prometheus agent scrape endpoint|Not documented|Yes|self
+MCP server (read-only)|Not documented|Yes|self
 Single lightweight binary|No (~300 MB node image)|Yes (~10 MB Go binary)|self
-License|Zlib (core) / proprietary (Business)|AGPL-3.0|tie
+License|Zlib agent; proprietary Business features|AGPL-3.0|tie
 `,
   highlightsTable: `
-key|Ed25519 Per-Request Auth|Portainer agents authenticate with a shared secret or Edge key. Portwing uses Ed25519 asymmetric signing on every request — no secret on the wire, and each client gets its own key pair.
-shield|Structured Audit Log (Free)|Portainer locks audit logging to its Business tier. Portwing ships structured JSON audit logging in every build under AGPL-3.0 — no paid upgrade required. Export to immutable storage for tamper evidence.
-packagecheck|Signed Images + SBOMs|Portwing's build pipeline generates per-archive CycloneDX SBOMs, an image SBOM attestation, cosign image signatures, and SLSA build provenance on every release. Portainer has no supply-chain artifacts.
-activity|Prometheus Metrics (Free)|Portainer exposes metrics only in its Business tier. Portwing includes a Prometheus metrics endpoint in the base build, covering agent health, request counts, and latency.
-bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server so AI tools can inspect containers, images, and events without a browser. Portainer has no MCP integration.
-lock|Narrow Scope by Design|Portainer is a full management platform. Portwing is a security-first foothold agent — no bundled UI, no extra attack surface, just the Docker API behind auth and a sockguard socket filter.
+network|Portainer Leads Fleet Operations|Portainer's Edge and Async Edge products include mature fleet policies, edge stacks/jobs/configuration, and controller-managed agent updates. Portwing currently supports a persistent edge tunnel; Drydock owns future rollout policy.
+keyround|Different Authentication Layers|Portainer uses an Agent claim process, optional AGENT_SECRET, Edge credentials, and optional Business mTLS. Portwing signs each standard-mode request and its edge hello with Ed25519, with explicit timestamp and nonce replay checks on HTTP.
+shieldcheck|Narrow Socket Boundary|Portainer's documented agent deployment mounts the Docker socket and host paths. Portwing's hardened path puts Sockguard in between and permits only configured HTTP methods and Docker API paths.
+activity|Audit at the Agent|Portainer's controller Activity log is a Business feature. Portwing emits structured authentication and Docker mediation records in every build; Drydock can add user-level context above them.
+filetext|Host Access Is a Tradeoff|Portainer exposes file-browse APIs and Swarm-wide resource aggregation. Portwing intentionally avoids arbitrary host files and controls one Docker host to keep the privileged surface smaller.
+bot|Prometheus and Read-Only MCP|Portwing exposes an agent Prometheus endpoint and five read-only MCP inspection tools. Equivalent agent endpoints were not documented in the reviewed Portainer material.
 `,
   highlightIconMap: {
-    key: Key,
-    shield: Shield,
-    packagecheck: PackageCheck,
+    network: Network,
+    keyround: KeyRound,
+    shieldcheck: ShieldCheck,
     activity: Activity,
+    filetext: FileText,
     bot: Bot,
-    lock: Lock,
   },
   metadataTitle: "Portainer Agent vs Portwing — Remote Docker Agent Comparison",
   metadataDescription:
-    "Compare Portainer Agent and Portwing. Portainer is a full management platform — see how Portwing adds Ed25519 auth, free audit logging, signed images, and an MCP server without a paid Business tier.",
+    "Compare Portainer 2.39 Agent/Edge Agent and Portwing v0.8.1 across transport, authentication, socket policy, audit, fleet upgrades, host access, metrics, and MCP.",
   metadataKeywords: [
     "portainer agent vs portwing",
     "portainer alternative",
     "portainer agent replacement",
     "remote docker agent comparison",
+    "docker edge agent",
     "docker agent ed25519 auth",
-    "docker agent audit log",
-    "portainer business tier alternative",
   ],
   openGraphDescription:
-    "Portainer locks audit logs and metrics to Business tier. See how Portwing ships Ed25519 auth, structured audit logging, signed images, and an MCP server in the free AGPL-3.0 build.",
+    "Portainer leads mature fleet and async-edge operations; Portwing focuses on signed requests, narrow socket policy, agent audit export, Prometheus, and MCP.",
   twitterDescription:
-    "Compare Portainer Agent and Portwing for remote Docker access. Portwing: Ed25519 auth, free audit log, signed images.",
+    "Portainer 2.39 Agent vs Portwing v0.8.1: an evidence-backed comparison of transport, security, fleet operations, and scope.",
   competitorName: "Portainer",
   heroTitle: "Portainer vs Portwing",
   heroDescription: (
     <p>
-      Portainer is the most widely-deployed Docker management platform, and its agent bridges remote
-      hosts. Portwing is narrowly scoped — a{" "}
+      Portainer 2.39 is the mature fleet-management benchmark, with classic, Edge, and Async Edge
+      agents plus Swarm and controller-driven updates. Portwing v0.8.1 is a narrower Drydock agent
+      focused on{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
-        secure foothold agent without the management overhead
+        signed requests, replay defense, Sockguard policy, agent-level audit, Prometheus, and MCP
       </strong>{" "}
-      — and ships Ed25519 auth, audit logging, and Prometheus metrics in the free AGPL-3.0 build
-      without requiring a Business-tier upgrade. Portwing v0.9.x is a supported pre-v1 release;
-      Portainer is production-mature.
+      — in the free AGPL-3.0 build, without requiring a Business-tier upgrade. Portwing v0.9.x is a
+      supported pre-v1 release; Portainer is production-mature. Reviewed July 28, 2026.
     </p>
   ),
   migrationTitle: "Coming from Portainer Agent?",
   migrationDescription:
-    "If you're switching to Drydock as your controller, deploy Portwing on each host in place of the Portainer Agent. Generate a token hash, set TOKEN_HASH, and point Drydock at the agent URL. Add sockguard alongside for default-deny socket filtering, and enable Ed25519 key pairs when you're ready for the strongest auth posture.",
+    "Inventory Edge Stacks, Jobs, Configurations, RBAC, Swarm, host browsing, and agent update policies before moving controllers. Map those responsibilities to Drydock, then deploy Portwing with Ed25519 keys and the narrowest Sockguard preset that permits the workflows you actually need.",
   jsonLdName: "Portainer Agent vs Portwing — Remote Docker Agent Comparison",
   jsonLdDescription:
-    "Compare Portainer Agent and Portwing for remote Docker access, auth, audit logging, and supply-chain security.",
+    "Evidence-backed comparison of Portainer 2.39 Agent/Edge Agent and Portwing v0.8.1.",
 } satisfies ComparisonRouteRawConfig;

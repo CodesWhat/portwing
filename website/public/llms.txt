@@ -39,9 +39,11 @@ AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 - Authentication: https://portwing.codeswhat.com/docs/authentication
 - Audit logging: https://portwing.codeswhat.com/docs/audit-logging
 - Configuration: https://portwing.codeswhat.com/docs/configuration
+- Competitive landscape: https://portwing.codeswhat.com/docs/competitive-landscape
 - Compare to alternatives: https://portwing.codeswhat.com/compare
 - vs Portainer: https://portwing.codeswhat.com/compare/portainer
 - vs Komodo: https://portwing.codeswhat.com/compare/komodo
+- vs Arcane: https://portwing.codeswhat.com/compare/arcane
 - vs Hawser: https://portwing.codeswhat.com/compare/hawser
 - vs Watchtower: https://portwing.codeswhat.com/compare/watchtower
 - vs Diun: https://portwing.codeswhat.com/compare/diun

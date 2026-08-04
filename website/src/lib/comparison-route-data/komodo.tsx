@@ -1,70 +1,71 @@
-import { Activity, Bot, FileText, Key, PackageCheck, Shield } from "lucide-react";
+import { Activity, Bot, KeyRound, Network, ShieldCheck, Terminal } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 
 export const komodoComparisonRouteData = {
   slug: "komodo",
   comparisonTable: `
-Remote container control|Yes (via Periphery agent)|Yes|tie
-Full orchestration UI|Yes (Git-integrated stacks, builds, deploys)|No (Drydock + Portwing only)|competitor
-Auth model|Time-based passkey (server-synced)|Ed25519 per-request signing|self
-Structured audit log|No|Yes (JSON, built-in)|self
-Signed images + SBOMs + provenance|No|Yes (cosign + archive/image SBOMs + SLSA)|self
-Default-deny socket filter|No|Yes (with sockguard)|self
-Prometheus metrics|Partial (some system metrics)|Yes (agent request + health metrics)|self
-MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
-Single lightweight Go binary|Yes|Yes (~10 MB)|tie
+Remote container control|Yes (Periphery)|Yes|tie
+Connection modes|Core-to-Periphery or outbound Periphery WebSocket|Standard HTTP/S or outbound edge WebSocket (Drydock v1.6.0-rc.11+)|tie
+Agent authentication|Public-key handshake; automatic per-server key rotation|Ed25519 per-request HTTP signatures; signed edge hello; manual trust-root rotation|tie
+Transparent Docker API|No (Komodo resource/command API)|Yes|self
+Structured audit|Full controller audit trail|Agent-level API/auth/Compose/exec audit with cursor export|tie
+Host metrics|Collected for dashboards and alerts|Prometheus scrape endpoint plus edge metrics|tie
+Docker socket policy|Documented deployment mounts the raw socket|Recommended Sockguard path-and-method policy|self
+Supply-chain evidence|Not published|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
+Host shell, builds, automation, and Swarm|Yes|Host shell and Swarm are non-goals; Drydock owns fleet workflows|competitor
+MCP server (read-only)|Not documented|Yes|self
 License|GPL-3.0|AGPL-3.0|tie
 `,
   highlightsTable: `
-key|Ed25519 Per-Request Auth|Komodo Periphery uses a time-based passkey that must stay in sync with the server clock. Portwing signs every request with a per-client Ed25519 key, a bounded timestamp, and a one-time nonce — no shared secret on the wire.
-shield|Default-Deny Socket Filter|Portwing pairs with sockguard so the agent never touches the raw Docker socket directly. Even a compromised Portwing instance is constrained to the explicit API allowlist in sockguard.yaml. Komodo Periphery mounts the socket unfiltered.
-filetext|Structured Audit Log|Portwing writes structured JSON for every proxied Docker API call; immutable external storage provides tamper evidence. Komodo has no built-in agent-level audit trail.
-packagecheck|Signed Images + SBOMs|Every Portwing release ships per-archive CycloneDX SBOMs, an image SBOM attestation, cosign image signatures, and SLSA build provenance. Komodo Periphery publishes none of these supply-chain artifacts.
-activity|Prometheus Metrics|Portwing exposes a Prometheus metrics endpoint covering agent health, request counts, and latency. Komodo's metrics are limited to system-level data from Periphery.
-bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool integration. Komodo has no MCP endpoint.
+keyround|Komodo v2 Closed the Auth Gap|Komodo v2 replaced the old passkey-only model with public-key handshakes, onboarding keys, and automatic Periphery key rotation. Portwing's remaining distinction is signature and replay verification on each standard-mode HTTP request.
+network|Both Support Outbound Agents|Periphery can now dial Komodo Core over a bidirectional WebSocket. Portwing dials Drydock over its stable edge wire protocol. Outbound/NAT mode is parity, not a Portwing-only feature.
+shieldcheck|Last-Mile Socket Policy|Portwing's hardened path places Sockguard between the agent and Docker with method-and-path rules. Komodo's documented Periphery container mounts the Docker socket directly.
+activity|Audit at Different Layers|Komodo records a full controller audit trail. Portwing emits structured records at the Docker mediation point and offers cursor-based NDJSON export. Drydock owns user-level audit context.
+terminal|Komodo Is the Broader Platform|Komodo includes host terminals, builds, automation, schedules, configuration, and Swarm. Those are real strengths, but most belong in Drydock rather than in a privileged Portwing agent.
+bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes five read-only MCP inspection tools. Komodo exposes a strong documented platform API, but not a transparent Docker proxy or documented MCP server.
 `,
   highlightIconMap: {
-    key: Key,
-    shield: Shield,
-    filetext: FileText,
-    packagecheck: PackageCheck,
+    keyround: KeyRound,
+    network: Network,
+    shieldcheck: ShieldCheck,
     activity: Activity,
+    terminal: Terminal,
     bot: Bot,
   },
   metadataTitle: "Komodo Periphery vs Portwing — Remote Docker Agent Comparison",
   metadataDescription:
-    "Compare Komodo (Periphery agent) and Portwing. Komodo is a full Git-integrated orchestration platform — see how Portwing adds Ed25519 auth, structured audit logging, signed images, and an MCP server.",
+    "Compare Komodo Periphery v2.2 and Portwing v0.8.1 across outbound agents, public-key authentication, Docker API compatibility, socket policy, audit, metrics, and product scope.",
   metadataKeywords: [
     "komodo periphery vs portwing",
     "komodo alternative",
     "periphery agent alternative",
-    "komodo docker agent comparison",
-    "docker agent ed25519 auth",
-    "docker agent audit log",
-    "remote docker agent golang",
+    "remote docker agent comparison",
+    "docker agent public key authentication",
+    "docker socket policy",
   ],
   openGraphDescription:
-    "Komodo is a powerful Git-integrated orchestration platform. See how Portwing adds Ed25519 auth, structured audit logging, signed images, and an MCP server focused on secure agent access.",
+    "Komodo v2 and Portwing both support outbound public-key-authenticated agents. Compare transparent Docker access, socket policy, audit placement, and controller scope.",
   twitterDescription:
-    "Compare Komodo Periphery and Portwing for remote Docker agent access. Portwing: Ed25519, audit log, sockguard.",
+    "Komodo Periphery v2.2 vs Portwing v0.8.1: outbound transport, key auth, audit, and socket containment.",
   competitorName: "Komodo",
   heroTitle: "Komodo vs Portwing",
   heroDescription: (
     <p>
-      Komodo (formerly Mogh) is a self-hosted Git-integrated orchestration platform with Periphery
-      as its remote agent. Portwing is purpose-built for Drydock&apos;s remote access use case —
-      narrower in scope but stronger on{" "}
+      Komodo v2.2 is a full build, deployment, automation, and Swarm platform. Its Periphery agent
+      now supports outbound WebSockets, public-key authentication, and automatic key rotation.
+      Portwing v0.8.1 is narrower and pairs with Drydock, emphasizing{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
-        auth (Ed25519), audit logging, supply-chain artifacts, and sockguard socket filtering
+        per-request verification, transparent Docker compatibility, Sockguard containment, and
+        agent-level audit export
       </strong>
-      . Komodo is production-mature; Portwing v0.9.x is a supported pre-v1 release.
+      . Komodo is production-mature; Portwing v0.9.x is a supported pre-v1 release. Reviewed July
+      28, 2026.
     </p>
   ),
   migrationTitle: "Coming from Komodo Periphery?",
   migrationDescription:
-    "If you're moving to Drydock as your controller, deploy Portwing on each host. Set TOKEN_HASH with a token you generate, and point Drydock at the agent URL. Portwing's Go binary is a similar size to Periphery — no runtime dependency changes. Add sockguard for default-deny socket filtering and enable Ed25519 key pairs for the strongest auth.",
+    "Treat this as a controller migration, not an agent image swap. Inventory Komodo builds, procedures, host terminals, Swarm resources, secrets, and Git-backed stacks; map controller responsibilities to Drydock first. Then deploy Portwing with Ed25519 keys and the narrowest Sockguard preset that covers the required Docker operations.",
   jsonLdName: "Komodo Periphery vs Portwing — Remote Docker Agent Comparison",
   jsonLdDescription:
-    "Compare Komodo Periphery and Portwing for remote Docker access, auth model, audit logging, and supply-chain security.",
+    "Evidence-backed comparison of Komodo Periphery v2.2 and Portwing v0.8.1 for remote Docker access.",
 } satisfies ComparisonRouteRawConfig;

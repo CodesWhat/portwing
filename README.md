@@ -65,6 +65,7 @@
 - [⚙️ Configuration](#configuration)
 - [📡 API Reference](#api-reference)
 - [📐 Stability Policy](#stability-policy)
+- [🧭 Competitive Landscape](#competitive-landscape)
 - [🔑 Token Security](#token-security)
 - [✅ Verify a Release](#verify-a-release)
 - [🛡️ Security](#security)
@@ -788,6 +789,17 @@ sockguard versions tested together.
 
 <hr>
 
+<h2 align="center" id="competitive-landscape">🧭 Competitive Landscape</h2>
+
+The versioned [competitive landscape](COMPETITIVE-LANDSCAPE.md) compares
+Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, Docker's
+native remote-access options, and adjacent agents. It records primary sources,
+feature ownership across Portwing/Drydock/Sockguard, pre-v1 gates, candidate
+work, and explicit non-goals. Unknown competitor behavior is recorded as “not
+documented,” not guessed as absent.
+
+<hr>
+
 <h2 align="center" id="token-security">🔑 Token Security</h2>
 
 <details>
@@ -967,6 +979,7 @@ Exec tunnel events:
 
 | Resource | Link |
 | --- | --- |
+| Competitive Landscape | [`COMPETITIVE-LANDSCAPE.md`](COMPETITIVE-LANDSCAPE.md) |
 | Security Model | [`docs/security-model.md`](docs/security-model.md) |
 | Ed25519 Auth Design | [`docs/design/ed25519-auth.md`](docs/design/ed25519-auth.md) |
 | Watchtower Migration | [`docs/migrating-from-watchtower.md`](docs/migrating-from-watchtower.md) |

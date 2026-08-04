@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Versioned competitive landscape.** Added a primary-source comparison of
+  Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, Docker-native access,
+  socket proxies, and adjacent agents. Corrected stale Komodo authentication
+  and edge-mode claims, added Arcane to the website, separated agent features
+  from Drydock controller responsibilities, and recorded pre-v1 gates,
+  candidate work, and explicit security non-goals.
+
 ## [v0.9.1] - 2026-08-01
 
 ### Fixed

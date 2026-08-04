@@ -41,6 +41,14 @@ particular:
 The path to `v1.0.0` is gated on concrete, verifiable items rather than a
 calendar date:
 
+- **Competitive review gate.** The 2026-07-28 market audit is published in
+  [COMPETITIVE-LANDSCAPE.md](COMPETITIVE-LANDSCAPE.md). Before v1.0, comparison
+  claims must stay tied to primary sources, the tagged Portwing × Drydock ×
+  sockguard artifacts must pass the full standard/edge acceptance matrix, and
+  a real controller must exercise enrollment, overlapping-key rotation,
+  revocation, SIGHUP reload, and recovery from clock skew. The audit found no
+  missing container lifecycle, streaming, Compose, observability, or
+  authentication primitive that requires new Portwing code for v1.0.
 - **Completed for v0.8 — Edge-mode graduation.** Drydock 1.6 enables
   `/api/portwing/ws` by default, with `DD_EXPERIMENTAL_PORTWING=false` retained
   as an emergency disable. A real cross-repo multi-agent soak covers reconnect
@@ -69,12 +77,22 @@ calendar date:
   modes share one exporter implementation; public docs and Kubernetes examples
   explicitly isolate Edge Mode's unauthenticated operations listener.
 
+Post-v1 candidates are intentionally demand-driven: controller-managed
+Portwing upgrade/rollback waves, optional client-certificate authentication,
+polling/intermittent edge transport, controller-assisted two-key rotation, and
+a BuildKit-aware Sockguard profile. None should expand the base socket policy
+or add an unaudited self-update path merely for feature-table parity.
+
 ## Non-goals
 
 - **Container orchestration** — Portwing controls a single host's Docker daemon.
   It is not a scheduler and not a Swarm / Kubernetes replacement.
 - **A bundled UI** — Portwing is an agent; the control plane (e.g. Drydock) owns
   the user-facing interface.
+- **Host administration** — arbitrary host shells, host-file browsing, volume
+  backup, and secrets-vault behavior do not belong in the agent.
+- **Fleet product features** — RBAC, GitOps, schedules, alert routing,
+  vulnerability workflows, and agent rollout policy belong in Drydock.
 
 ---
 
