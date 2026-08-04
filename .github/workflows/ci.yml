@@ -102,13 +102,18 @@ jobs:
 
       - name: Coverage gate
         # Vendor-free floor: fails when the weighted statement total (product
-        # packages only — see the Test step) drops below COVERAGE_MIN. Achieved
-        # 97.5% after systematic gap-fill (2026-06). Residual 2.5% is structurally
-        # unreachable: os.Exit in main, crypto/rand failure, json.Marshal on safe
-        # primitive-only types, WebSocket SetWriteDeadline errors, 5-min cleanup
-        # ticker, and compile-time GOOS=windows branches. See COVERAGE.md.
-        # Floor is set conservatively at 96 (~1.5% below achieved) so CI never
-        # flakes red on coverage. go.mod is at the repo root; no path rewrite needed.
+        # packages only — see the Test step) drops below COVERAGE_MIN. Residual
+        # uncovered code is structurally unreachable: os.Exit in main, crypto/rand
+        # failure, json.Marshal on safe primitive-only types, WebSocket
+        # SetWriteDeadline errors, filepath.Abs failures (only reachable if
+        # os.Getwd fails), and compile-time GOOS=windows branches. See COVERAGE.md.
+        #
+        # The margin here is thin, not the ~1.5% an earlier version of this
+        # comment claimed. Measured 96.3% on 2026-08-04 against a floor of 96, and
+        # linux CI reads ~0.1 below a darwin dev box, so three or four new
+        # uncovered statements are enough to turn this red. That is the intent —
+        # new error paths get tests — but do not read a passing run as slack.
+        # go.mod is at the repo root; no path rewrite needed.
         env:
           COVERAGE_MIN: "96"
         run: |

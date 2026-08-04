@@ -120,19 +120,27 @@ func (rl *RateLimiter) cleanup() {
 		case <-rl.done:
 			return
 		case <-ticker.C:
-			rl.mu.Lock()
-			now := time.Now()
-			for ip, a := range rl.attempts {
-				if a.inFlight == 0 && !a.firstFail.IsZero() && now.Sub(a.firstFail) > rl.window {
-					delete(rl.attempts, ip)
-				}
-			}
-			for ip, a := range rl.abuse {
-				if now.Sub(a.firstFail) > rl.window {
-					delete(rl.abuse, ip)
-				}
-			}
-			rl.mu.Unlock()
+			rl.sweepExpired(time.Now())
+		}
+	}
+}
+
+// sweepExpired drops entries whose window closed before now. It is split out of
+// cleanup so the pruning rules can be exercised without waiting on the ticker.
+// In-flight entries are kept regardless of age: their firstFail is only written
+// once the check completes, so evicting one would lose the concurrency count.
+func (rl *RateLimiter) sweepExpired(now time.Time) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	for ip, a := range rl.attempts {
+		if a.inFlight == 0 && !a.firstFail.IsZero() && now.Sub(a.firstFail) > rl.window {
+			delete(rl.attempts, ip)
+		}
+	}
+	for ip, a := range rl.abuse {
+		if now.Sub(a.firstFail) > rl.window {
+			delete(rl.abuse, ip)
 		}
 	}
 }

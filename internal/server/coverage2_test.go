@@ -2107,5 +2107,46 @@ func TestHandleInfoUptimePositive(t *testing.T) {
 	}
 }
 
+func TestSweepExpiredPrunesOnlyClosedWindows(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	defer rl.Stop()
+
+	now := time.Now()
+	old := now.Add(-2 * rl.window)
+
+	rl.mu.Lock()
+	rl.attempts["expired"] = &ipAttempts{count: 3, firstFail: old}
+	rl.attempts["recent"] = &ipAttempts{count: 3, firstFail: now}
+	// An in-flight entry is old by wall clock but its firstFail is not final
+	// yet, so dropping it would lose the concurrency count it is holding.
+	rl.attempts["inflight"] = &ipAttempts{count: 1, firstFail: old, inFlight: 1}
+	// A zero firstFail means the entry only ever tracked in-flight work.
+	rl.attempts["nofail"] = &ipAttempts{}
+	rl.abuse["expired"] = &ipAttempts{count: 9, firstFail: old}
+	rl.abuse["recent"] = &ipAttempts{count: 9, firstFail: now}
+	rl.mu.Unlock()
+
+	rl.sweepExpired(now)
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	for _, keep := range []string{"recent", "inflight", "nofail"} {
+		if _, ok := rl.attempts[keep]; !ok {
+			t.Errorf("sweepExpired: dropped attempts entry %q that should survive", keep)
+		}
+	}
+	if _, ok := rl.attempts["expired"]; ok {
+		t.Error("sweepExpired: kept an attempts entry whose window had closed")
+	}
+	if _, ok := rl.abuse["recent"]; !ok {
+		t.Error("sweepExpired: dropped an abuse entry still inside its window")
+	}
+	if _, ok := rl.abuse["expired"]; ok {
+		t.Error("sweepExpired: kept an abuse entry whose window had closed")
+	}
+}
+
 // Ensure strconv is used (compile guard).
 var _ = strconv.Itoa

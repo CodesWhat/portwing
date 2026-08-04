@@ -518,6 +518,36 @@ func TestResolveStackRoot_AbsolutePathRejected(t *testing.T) {
 	}
 }
 
+func TestStatRootedEnvFile_RejectsStackDirEscapingStacksDir(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir(), composeBin: "docker", isV2: true}
+
+	// The rooted-path step is purely lexical, so it rejects the traversal before
+	// any filesystem call. buildCommand drops the flag on this error rather than
+	// falling back to an unrooted stat.
+	if _, err := cm.statRootedEnvFile("../escape"); err == nil {
+		t.Fatal("statRootedEnvFile: expected error for stack dir escaping stacks dir, got nil")
+	}
+}
+
+func TestStatRootedEnvFile_ErrorsWhenStacksDirMissing(t *testing.T) {
+	t.Parallel()
+
+	missing := filepath.Join(t.TempDir(), "no-such-stacks-dir")
+	cm := &ComposeManager{stacksDir: missing, composeBin: "docker", isV2: true}
+
+	// rootedPath still succeeds because it never touches disk; opening the root
+	// is the first step that can observe the missing directory.
+	envFile, err := cm.statRootedEnvFile("myapp")
+	if err == nil {
+		t.Fatalf("statRootedEnvFile: expected error for missing stacks dir, got %q", envFile)
+	}
+	if !strings.Contains(err.Error(), "opening stacks directory") {
+		t.Fatalf("statRootedEnvFile: want an open-root error, got %v", err)
+	}
+}
+
 // containsAll returns true if slice contains all the given strings.
 func containsAll(slice []string, targets ...string) bool {
 	for _, target := range targets {

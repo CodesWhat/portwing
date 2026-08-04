@@ -151,4 +151,3 @@ observable primitives the controller needs.
 - Distr: [Docker Agent](https://distr.sh/docs/agents/docker-agent/) and [logs and metrics](https://distr.sh/docs/agents/logs-and-metrics/)
 - Docker Surgeon: [repository](https://github.com/kRYstall9/docker-surgeon)
 - Socket proxies: [Tecnativa](https://github.com/Tecnativa/docker-socket-proxy), [LinuxServer](https://github.com/linuxserver/docker-socket-proxy), and [Wollomatic](https://github.com/wollomatic/socket-proxy)
-
