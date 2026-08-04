@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release, including the `actions/checkout` and `actions/setup-go` v7 majors
   (ESM migrations; the checkout v7 fork-ref restriction does not apply because
   no workflow uses `pull_request_target` or `workflow_run`). The
-  `cgr.dev/chainguard/wolfi-base` digest, the docs/website npm tree,
+  `cgr.dev/chainguard/wolfi-base` digest, the macOS runner the Homebrew cask
+  gate uses (`macos-15` → `macos-26`), the docs/website npm tree,
   TypeScript 7, Next 16.3, `@types/node` 26, and npm 12 are all current.
   TypeScript 7 removed `baseUrl`, so `docs/tsconfig.json` now uses the
   `paths`-only form the website config already used, and `engines.node` states
