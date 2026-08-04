@@ -142,7 +142,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	// Resize terminal to requested dimensions.
 	if msg.Cols > 0 && msg.Rows > 0 {
 		if err := c.dockerClient.ResizeExec(ctx, execID, msg.Cols, msg.Rows); err != nil {
-			slog.Warn("initial resize failed", "execID", execID, "error", err)
+			slog.Warn("initial resize failed", "execID", applog.Sanitize(execID), "error", applog.Sanitize(err.Error()))
 		}
 	}
 

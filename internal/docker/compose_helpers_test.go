@@ -333,6 +333,62 @@ func TestBuildCommand_UsesEnvFileWhenPresent(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_IgnoresEnvFileSymlinkEscapingStacksDir(t *testing.T) {
+	t.Parallel()
+
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.env")
+	if err := os.WriteFile(secret, []byte("TOKEN=leaked\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	cm := &ComposeManager{stacksDir: dir, composeBin: "docker", isV2: true}
+	stackDir := filepath.Join(dir, "myapp")
+	if err := os.MkdirAll(stackDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// Point .env.drydock at a file outside STACKS_DIR. os.Root must refuse to
+	// traverse it, so the flag is dropped rather than leaking the outside file.
+	if err := os.Symlink(secret, filepath.Join(stackDir, ".env.drydock")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	cmd, err := cm.buildCommand(t.Context(), ComposeRequest{StackName: "myapp", Operation: "up"})
+	if err != nil {
+		t.Fatalf("buildCommand: %v", err)
+	}
+	for _, a := range cmd.Args {
+		if a == "--env-file" {
+			t.Fatalf("buildCommand: escaping env-file symlink was accepted, got %v", cmd.Args)
+		}
+		if a == secret {
+			t.Fatalf("buildCommand: leaked path outside stacks dir, got %v", cmd.Args)
+		}
+	}
+}
+
+func TestBuildCommand_IgnoresNonRegularEnvFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cm := &ComposeManager{stacksDir: dir, composeBin: "docker", isV2: true}
+	// .env.drydock as a directory is not a usable env file.
+	if err := os.MkdirAll(filepath.Join(dir, "myapp", ".env.drydock"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, err := cm.buildCommand(t.Context(), ComposeRequest{StackName: "myapp", Operation: "up"})
+	if err != nil {
+		t.Fatalf("buildCommand: %v", err)
+	}
+	for _, a := range cmd.Args {
+		if a == "--env-file" {
+			t.Fatalf("buildCommand: directory accepted as env file, got %v", cmd.Args)
+		}
+	}
+}
+
 func TestBuildCommand_StackDirOverride(t *testing.T) {
 	t.Parallel()
 

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Compose env-file lookup is now contained by `os.Root`.** `buildCommand`
+  checked for a stack's `.env.drydock` with a plain `os.Stat`, which follows
+  symlinks. A symlink planted at that path by any means other than Portwing's
+  own writer (which already refuses to create symlinks) would have been
+  resolved outside `STACKS_DIR` and passed to `docker compose --env-file`. The
+  existence check now goes through `os.Root`, matching the containment the
+  stack-file writer already used, and non-regular files are ignored. Closes the
+  `go/path-injection` scanning alert.
+- **Edge exec resize failures no longer log unsanitized values.** The initial
+  `ResizeExec` failure path logged `execID` and the error without
+  `applog.Sanitize`, the only such call in `internal/edge/tunnel.go`. Closes the
+  `go/log-injection` scanning alert.
+
 ### Documentation
 
 - **Versioned competitive landscape.** Added a primary-source comparison of
