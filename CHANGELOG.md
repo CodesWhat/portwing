@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependency sweep.** Every pinned GitHub Action moved to its current
+  release, including the `actions/checkout` and `actions/setup-go` v7 majors
+  (ESM migrations; the checkout v7 fork-ref restriction does not apply because
+  no workflow uses `pull_request_target` or `workflow_run`). The
+  `cgr.dev/chainguard/wolfi-base` digest, the docs/website npm tree,
+  TypeScript 7, Next 16.3, `@types/node` 26, and npm 12 are all current.
+  TypeScript 7 removed `baseUrl`, so `docs/tsconfig.json` now uses the
+  `paths`-only form the website config already used, and `engines.node` states
+  npm 12's actual requirement instead of a looser `>=22.0.0`. The dead
+  `js-yaml` override was dropped — nothing in the tree depends on it. Renovate
+  no longer reports `google/uuid`, `gorilla/websocket`,
+  `class-variance-authority`, or `clsx` as abandoned; they are stable by
+  design, not unmaintained.
+
 ### Security
 
 - **Compose env-file lookup is now contained by `os.Root`.** `buildCommand`
