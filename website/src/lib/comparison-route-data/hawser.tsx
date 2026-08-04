@@ -34,7 +34,7 @@ bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container
   },
   metadataTitle: "Hawser vs Portwing — Remote Docker Agent Comparison",
   metadataDescription:
-    "Compare Hawser v0.2.46 and Portwing v0.8.1. Both are lightweight Go Docker proxies with standard and edge modes; compare auth, socket policy, auditing, metrics, and release evidence.",
+    "Compare Hawser v0.2.46 and Portwing v0.9.2. Both are lightweight Go Docker proxies with standard and edge modes; compare auth, socket policy, auditing, metrics, and release evidence.",
   metadataKeywords: [
     "hawser vs portwing",
     "hawser alternative",
@@ -46,14 +46,14 @@ bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container
   openGraphDescription:
     "Hawser and Portwing have closely matched agent scope. Compare bearer-token vs signed-key auth, raw socket vs Sockguard, audit export, metrics, and MCP.",
   twitterDescription:
-    "Hawser v0.2.46 vs Portwing v0.8.1: two close Go agent peers compared without stale marketing claims.",
+    "Hawser v0.2.46 vs Portwing v0.9.2: two close Go agent peers compared without stale marketing claims.",
   competitorName: "Hawser",
   heroTitle: "Hawser vs Portwing",
   heroDescription: (
     <p>
       Hawser v0.2.46 is Dockhand&apos;s remote Docker agent and the closest Portwing peer in scope.
       Both are lightweight Go binaries with transparent Docker proxying, Compose, metrics, and
-      outbound edge transport. Portwing v0.8.1 adds{" "}
+      outbound edge transport. Portwing v0.9.2 adds{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
         signed-key authentication, Sockguard containment, structured audit export, Prometheus, and
         read-only MCP
@@ -67,5 +67,5 @@ bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container
     "The agent capabilities map closely, but the wire controllers do not. Move the environment to Drydock, deploy Portwing with Ed25519 keys, choose the smallest Sockguard preset that covers the Dockhand workflows you used, and test Compose paths and streaming behavior against tagged artifacts.",
   jsonLdName: "Hawser vs Portwing — Remote Docker Agent Comparison",
   jsonLdDescription:
-    "Evidence-backed comparison of Hawser v0.2.46 and Portwing v0.8.1 for remote Docker access.",
+    "Evidence-backed comparison of Hawser v0.2.46 and Portwing v0.9.2 for remote Docker access.",
 } satisfies ComparisonRouteRawConfig;

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.2] - 2026-08-04
+
 ### Changed
 
 - **Dependency sweep.** Every pinned GitHub Action moved to its current
