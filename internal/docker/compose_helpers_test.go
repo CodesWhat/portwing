@@ -333,6 +333,62 @@ func TestBuildCommand_UsesEnvFileWhenPresent(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_IgnoresEnvFileSymlinkEscapingStacksDir(t *testing.T) {
+	t.Parallel()
+
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.env")
+	if err := os.WriteFile(secret, []byte("TOKEN=leaked\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	cm := &ComposeManager{stacksDir: dir, composeBin: "docker", isV2: true}
+	stackDir := filepath.Join(dir, "myapp")
+	if err := os.MkdirAll(stackDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// Point .env.drydock at a file outside STACKS_DIR. os.Root must refuse to
+	// traverse it, so the flag is dropped rather than leaking the outside file.
+	if err := os.Symlink(secret, filepath.Join(stackDir, ".env.drydock")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	cmd, err := cm.buildCommand(t.Context(), ComposeRequest{StackName: "myapp", Operation: "up"})
+	if err != nil {
+		t.Fatalf("buildCommand: %v", err)
+	}
+	for _, a := range cmd.Args {
+		if a == "--env-file" {
+			t.Fatalf("buildCommand: escaping env-file symlink was accepted, got %v", cmd.Args)
+		}
+		if a == secret {
+			t.Fatalf("buildCommand: leaked path outside stacks dir, got %v", cmd.Args)
+		}
+	}
+}
+
+func TestBuildCommand_IgnoresNonRegularEnvFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cm := &ComposeManager{stacksDir: dir, composeBin: "docker", isV2: true}
+	// .env.drydock as a directory is not a usable env file.
+	if err := os.MkdirAll(filepath.Join(dir, "myapp", ".env.drydock"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, err := cm.buildCommand(t.Context(), ComposeRequest{StackName: "myapp", Operation: "up"})
+	if err != nil {
+		t.Fatalf("buildCommand: %v", err)
+	}
+	for _, a := range cmd.Args {
+		if a == "--env-file" {
+			t.Fatalf("buildCommand: directory accepted as env file, got %v", cmd.Args)
+		}
+	}
+}
+
 func TestBuildCommand_StackDirOverride(t *testing.T) {
 	t.Parallel()
 
@@ -459,6 +515,36 @@ func TestResolveStackRoot_AbsolutePathRejected(t *testing.T) {
 	_, err := cm.resolveStackRoot("/absolute/path")
 	if err == nil {
 		t.Fatal("expected error for absolute stack path, got nil")
+	}
+}
+
+func TestStatRootedEnvFile_RejectsStackDirEscapingStacksDir(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir(), composeBin: "docker", isV2: true}
+
+	// The rooted-path step is purely lexical, so it rejects the traversal before
+	// any filesystem call. buildCommand drops the flag on this error rather than
+	// falling back to an unrooted stat.
+	if _, err := cm.statRootedEnvFile("../escape"); err == nil {
+		t.Fatal("statRootedEnvFile: expected error for stack dir escaping stacks dir, got nil")
+	}
+}
+
+func TestStatRootedEnvFile_ErrorsWhenStacksDirMissing(t *testing.T) {
+	t.Parallel()
+
+	missing := filepath.Join(t.TempDir(), "no-such-stacks-dir")
+	cm := &ComposeManager{stacksDir: missing, composeBin: "docker", isV2: true}
+
+	// rootedPath still succeeds because it never touches disk; opening the root
+	// is the first step that can observe the missing directory.
+	envFile, err := cm.statRootedEnvFile("myapp")
+	if err == nil {
+		t.Fatalf("statRootedEnvFile: expected error for missing stacks dir, got %q", envFile)
+	}
+	if !strings.Contains(err.Error(), "opening stacks directory") {
+		t.Fatalf("statRootedEnvFile: want an open-root error, got %v", err)
 	}
 }
 

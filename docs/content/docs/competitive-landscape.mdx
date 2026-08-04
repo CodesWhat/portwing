@@ -1,0 +1,95 @@
+---
+title: Competitive Landscape
+description: An evidence-backed comparison of Portwing with current remote Docker agents, including explicit pre-v1 decisions and non-goals.
+---
+
+<Callout type="info">
+This review is a snapshot from **July 28, 2026**. Competitor behavior changes independently of Portwing. The canonical matrix, decision record, and primary-source links live in [`COMPETITIVE-LANDSCAPE.md`](https://github.com/CodesWhat/portwing/blob/main/COMPETITIVE-LANDSCAPE.md).
+</Callout>
+
+Portwing is the host agent in a three-layer system:
+
+- **Portwing** authenticates the controller, mediates Docker operations, and
+  produces audit and metrics data.
+- **Drydock** owns users, RBAC, fleet workflows, UI, GitOps, schedules,
+  update policy, alerts, and vulnerability workflows.
+- **Sockguard** enforces the final Docker API path-and-method allowlist.
+
+That boundary matters. Portainer, Komodo, Arcane, and Dockhand combine their
+agents with broader controllers. A controller feature is not automatically a
+missing Portwing feature.
+
+## Direct peers reviewed
+
+| Product | Release reviewed | Relevant agent model |
+| --- | --- | --- |
+| Portainer Agent / Edge Agent | [2.39.5](https://github.com/portainer/portainer/releases/tag/2.39.5) | Classic inbound agent, outbound Edge Agent, and Async Edge fleet operation |
+| Komodo Periphery | [v2.2.0](https://github.com/moghtech/komodo/releases/tag/v2.2.0) | Public-key authenticated bidirectional WebSocket; Periphery can dial Core |
+| Arcane Agent | [v2.5.0](https://github.com/getarcaneapp/arcane/releases/tag/v2.5.0) | Direct or outbound edge mode over gRPC/WebSocket, plus polling transport and optional mTLS |
+| Hawser | [v0.2.46](https://github.com/Finsys/hawser/releases/tag/v0.2.46) | Small Go Docker API proxy for Dockhand with inbound and outbound modes |
+
+Docker's native SSH/TLS access and local socket proxies are security
+baselines. Distr, Docker Surgeon, Beszel, Diun, and Watchtower are adjacent
+products rather than direct general-purpose agent peers.
+
+## High-signal comparison
+
+| Capability | Portwing | Market finding |
+| --- | --- | --- |
+| Inbound and outbound edge modes | Supported | All four direct peers now cover both directions. This is required parity, not a unique claim. |
+| Transparent Docker API | Supported | Portainer and Hawser also proxy Docker's API. Komodo and Arcane expose controller-specific operations. |
+| Per-request signed HTTP | Ed25519 signature binds method, exact request target, body hash, timestamp, and nonce | No reviewed peer documents an equivalent per-request replay-resistant HTTP scheme. Komodo uses a public-key channel handshake; Arcane offers mTLS; Portainer uses claim/Edge credentials; Hawser uses a token. |
+| Edge authentication | Ed25519-signed hello over TLS | Komodo has automatic key rotation; Arcane has automated mTLS enrollment and renewal; Portainer has a mature Edge key and optional Business mTLS. |
+| Least-privilege Docker socket | Recommended Sockguard path/method policy | Arcane documents an optional Tecnativa category-level proxy. Other reviewed default deployments mount the Docker socket directly. |
+| Agent audit and metrics | Structured audit export plus Prometheus scrape endpoint | Competing controllers record activity and collect metrics, but the reviewed agents do not document the same mediation-point audit/export and scrape surfaces. |
+| Polling edge transport | Not supported | Arcane and Portainer cover intermittently connected fleets. Defer until a Drydock deployment requires it. |
+| Controller-managed agent upgrades | Not shipped | Portainer and Arcane provide fleet upgrade workflows. This belongs in Drydock plus Portwing packaging, not in an unaudited self-update endpoint. |
+| Builds behind the hardened socket profile | Denied | Keep builds opt-in until BuildKit session and gRPC paths can be constrained and tested in Sockguard. |
+| Host shell, file browser, and Swarm | Not supported | Intentional agent non-goals even though broader competitors provide them. |
+
+## What changed since the older comparison
+
+- **Komodo is no longer passkey-only.** Komodo v2 added outbound Periphery,
+  public-key authentication, and automatic key rotation.
+- **Arcane is now a direct peer.** It offers direct and edge agents, polling,
+  automated mTLS, optional socket-proxy hardening, signed artifacts, Swarm,
+  and controller-managed upgrades.
+- **Hawser is the closest scope match.** Both Hawser and Portwing are small Go
+  binaries with transparent Docker proxying, Compose, metrics collection, and
+  outbound WebSocket transport.
+
+Portwing's differentiators should therefore be stated precisely: per-request
+replay protection, signed edge enrollment without a reusable bearer credential
+on the agent, Sockguard's narrow policy boundary, agent-level structured audit,
+a native Prometheus endpoint, read-only MCP, and deliberately low dependency
+count.
+
+## Pre-v1 decisions
+
+The review found no missing lifecycle, streaming, Compose, observability, or
+authentication primitive that requires new Portwing code before v1.0. The
+remaining gates are operational:
+
+1. Validate tagged Portwing, Drydock, and Sockguard artifacts together across
+   the complete standard/edge and allow/deny matrix.
+2. Exercise enrollment, overlapping-key rotation, revocation, SIGHUP reload,
+   clock-skew failure, and recovery against a real controller.
+3. Keep the OpenAPI contract, compatibility matrix, Sockguard presets, and
+   competitive claims synchronized.
+4. Continue denying builds in hardened profiles until a least-privilege
+   BuildKit policy exists.
+
+## Deliberate non-goals
+
+Portwing will not add arbitrary host shell access, host-file browsing, volume
+backup, Swarm/Kubernetes orchestration, a UI, RBAC database, GitOps engine,
+scheduler, scanner, notification system, or secrets vault for feature-table
+parity. Those capabilities belong in Drydock or a specialized service.
+
+## Primary evidence
+
+- [Docker daemon access security](https://docs.docker.com/engine/security/protect-access/)
+- Portainer [agent security](https://docs.portainer.io/faqs/getting-started/how-does-portainer-secure-connectivity-to-and-from-agents-and-edge-agents) and [Edge architecture](https://docs.portainer.io/advanced/edge-agent)
+- Komodo [server onboarding](https://komo.do/docs/setup/connect-servers) and [v2 changes](https://komo.do/docs/releases/v2.0.0)
+- Arcane [remote environments](https://getarcane.app/docs/features/environments), [edge mTLS](https://getarcane.app/docs/security/edge-mtls), and [socket proxy](https://getarcane.app/docs/setup/socket-proxy)
+- [Hawser repository](https://github.com/Finsys/hawser)

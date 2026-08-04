@@ -7,10 +7,11 @@ export const metadata: Metadata = {
   // absolute: this title already carries the brand; opt out of the root template.
   title: { absolute: "Portwing vs Alternatives — Remote Docker Agent Comparisons" },
   description:
-    "Compare Portwing to Portainer Agent, Komodo Periphery, Hawser, Watchtower, and Diun. Feature-by-feature breakdowns for remote Docker agent tools.",
+    "Evidence-backed comparisons of Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, and adjacent Docker tools. Reviewed July 28, 2026.",
   keywords: [
     "portainer agent alternative",
     "komodo periphery alternative",
+    "arcane agent alternative",
     "hawser alternative",
     "watchtower alternative",
     "diun alternative",
@@ -23,7 +24,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Portwing vs Alternatives — Remote Docker Agent Comparisons",
     description:
-      "Compare Portwing to Portainer Agent, Komodo Periphery, Hawser, Watchtower, and Diun. Feature-by-feature breakdowns.",
+      "Compare Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, and adjacent Docker tools using a July 2026 primary-source review.",
     url: `${BASE_URL}/compare`,
     siteName: SITE_CONFIG.name,
     locale: SITE_CONFIG.locale,
@@ -34,7 +35,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Portwing vs Alternatives — Remote Docker Agent Comparisons",
     description:
-      "Compare Portwing to Portainer Agent, Komodo Periphery, Hawser, Watchtower, and Diun.",
+      "Compare Portwing with Portainer, Komodo, Arcane, Hawser, and adjacent Docker tools using current primary sources.",
     creator: SITE_CONFIG.twitterCreator,
     images: [SITE_CONFIG.ogImage],
   },
@@ -46,6 +47,7 @@ export const metadata: Metadata = {
 const tools = [
   { name: "Portainer Agent", slug: "portainer" },
   { name: "Komodo (Periphery)", slug: "komodo" },
+  { name: "Arcane Agent", slug: "arcane" },
   { name: "Hawser", slug: "hawser" },
   { name: "Watchtower", slug: "watchtower" },
   { name: "Diun", slug: "diun" },
@@ -66,7 +68,7 @@ export default function ComparePage() {
         "@type": "CollectionPage",
         name: "Portwing vs Alternatives — Remote Docker Agent Comparisons",
         description:
-          "Compare Portwing to Portainer Agent, Komodo Periphery, Hawser, Watchtower, and Diun.",
+          "Evidence-backed comparisons of Portwing with current remote Docker agents and adjacent tools.",
         url: `${BASE_URL}/compare`,
         mainEntity: {
           "@type": "ItemList",
@@ -110,8 +112,8 @@ export default function ComparePage() {
               Portwing vs Alternatives
             </h1>
             <p className="mx-auto max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
-              We built Portwing to be the most security-focused remote Docker agent in the stack.
-              Click any tool to see exactly how we compare.
+              Current agent capabilities, controller tradeoffs, and deliberate non-goals — sourced
+              from published product documentation and reviewed July 28, 2026.
             </p>
           </div>
         </section>

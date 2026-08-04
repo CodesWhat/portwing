@@ -1311,6 +1311,56 @@ func TestClientIPXRealIPFallback(t *testing.T) {
 	}
 }
 
+func TestClientIPRejectsNonIPXRealIP(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	nets, err := ParseTrustedProxies([]string{"192.0.2.0/24"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies: %v", err)
+	}
+	rl.SetTrustedProxies(nets)
+
+	// A caller behind a trusted proxy must not be able to key the rate limiter
+	// on an arbitrary string: each distinct value would otherwise mint its own
+	// bucket and defeat the failed-attempt throttle.
+	for _, xri := range []string{
+		"not-an-ip",
+		"bucket-" + strings.Repeat("a", 32),
+		"203.0.113.99 extra",
+		"attacker\nX-Injected: value",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "192.0.2.1:50000"
+		req.Header.Set("X-Real-IP", xri)
+
+		if got := rl.clientIP(req); got != "192.0.2.1" {
+			t.Errorf("X-Real-IP %q: expected fallback to remote 192.0.2.1, got %q", xri, got)
+		}
+	}
+}
+
+func TestClientIPIgnoresTrustedProxyXRealIP(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	nets, err := ParseTrustedProxies([]string{"192.0.2.0/24"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies: %v", err)
+	}
+	rl.SetTrustedProxies(nets)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.1:50000"
+	// Naming another trusted proxy identifies no real client, matching how the
+	// XFF walk skips trusted hops.
+	req.Header.Set("X-Real-IP", "192.0.2.7")
+
+	if got := rl.clientIP(req); got != "192.0.2.1" {
+		t.Fatalf("expected fallback to remote 192.0.2.1, got %q", got)
+	}
+}
+
 func TestClientIPAllHopsTrustedFallsBackToRemote(t *testing.T) {
 	t.Parallel()
 
@@ -2054,6 +2104,47 @@ func TestHandleInfoUptimePositive(t *testing.T) {
 	uptime, ok := body["uptime"].(string)
 	if !ok || uptime == "" {
 		t.Errorf("uptime missing or not a string: %v", body["uptime"])
+	}
+}
+
+func TestSweepExpiredPrunesOnlyClosedWindows(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	defer rl.Stop()
+
+	now := time.Now()
+	old := now.Add(-2 * rl.window)
+
+	rl.mu.Lock()
+	rl.attempts["expired"] = &ipAttempts{count: 3, firstFail: old}
+	rl.attempts["recent"] = &ipAttempts{count: 3, firstFail: now}
+	// An in-flight entry is old by wall clock but its firstFail is not final
+	// yet, so dropping it would lose the concurrency count it is holding.
+	rl.attempts["inflight"] = &ipAttempts{count: 1, firstFail: old, inFlight: 1}
+	// A zero firstFail means the entry only ever tracked in-flight work.
+	rl.attempts["nofail"] = &ipAttempts{}
+	rl.abuse["expired"] = &ipAttempts{count: 9, firstFail: old}
+	rl.abuse["recent"] = &ipAttempts{count: 9, firstFail: now}
+	rl.mu.Unlock()
+
+	rl.sweepExpired(now)
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	for _, keep := range []string{"recent", "inflight", "nofail"} {
+		if _, ok := rl.attempts[keep]; !ok {
+			t.Errorf("sweepExpired: dropped attempts entry %q that should survive", keep)
+		}
+	}
+	if _, ok := rl.attempts["expired"]; ok {
+		t.Error("sweepExpired: kept an attempts entry whose window had closed")
+	}
+	if _, ok := rl.abuse["recent"]; !ok {
+		t.Error("sweepExpired: dropped an abuse entry still inside its window")
+	}
+	if _, ok := rl.abuse["expired"]; ok {
+		t.Error("sweepExpired: kept an abuse entry whose window had closed")
 	}
 }
 

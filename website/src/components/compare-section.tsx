@@ -4,58 +4,65 @@ import { type CellValue, ComparisonCellIcon } from "@/components/comparison-cell
 import { SectionHeading } from "@/components/section-heading";
 import { SITE_CONFIG } from "@/lib/site-config";
 
-// Mini comparison teaser — 6 rows, 3 rivals (closest peers: Portainer Agent, Hawser, Komodo).
+// Mini comparison teaser for the four direct remote-agent peers.
 
 interface FeatureRow {
   label: string;
   portwing: CellValue;
   portainer: CellValue;
-  hawser: CellValue;
   komodo: CellValue;
+  arcane: CellValue;
+  hawser: CellValue;
 }
 
 const featureRows: FeatureRow[] = [
   {
-    label: "Remote container control",
+    label: "Inbound + outbound edge modes",
     portwing: "yes",
     portainer: "yes",
-    hawser: "yes",
     komodo: "yes",
+    arcane: "yes",
+    hawser: "yes",
   },
   {
-    label: "Per-client key auth (Ed25519)",
+    label: "Asymmetric agent identity",
     portwing: "yes",
     portainer: "partial",
-    hawser: "partial",
+    komodo: "yes",
+    arcane: "partial",
+    hawser: "no",
+  },
+  {
+    label: "Documented socket policy layer",
+    portwing: "yes",
+    portainer: "no",
+    komodo: "no",
+    arcane: "partial",
+    hawser: "no",
+  },
+  {
+    label: "Structured agent-level audit",
+    portwing: "yes",
+    portainer: "partial",
     komodo: "partial",
+    arcane: "partial",
+    hawser: "partial",
   },
   {
-    label: "Default-deny socket filter",
+    label: "Transparent Docker API",
+    portwing: "yes",
+    portainer: "yes",
+    komodo: "no",
+    arcane: "no",
+    hawser: "yes",
+  },
+  {
+    label: "Read-only MCP server",
     portwing: "yes",
     portainer: "no",
-    hawser: "no",
     komodo: "no",
-  },
-  {
-    label: "Structured audit log",
-    portwing: "yes",
-    portainer: "partial",
+    arcane: "no",
     hawser: "no",
-    komodo: "no",
-  },
-  {
-    label: "Signed images + SBOM",
-    portwing: "yes",
-    portainer: "no",
-    hawser: "no",
-    komodo: "no",
-  },
-  {
-    label: "MCP server (AI-native)",
-    portwing: "yes",
-    portainer: "no",
-    hawser: "no",
-    komodo: "no",
   },
 ];
 
@@ -71,15 +78,16 @@ function ViewAllLink() {
   );
 }
 
-const tools = [SITE_CONFIG.name, "Portainer", "Hawser", "Komodo"] as const;
+const tools = [SITE_CONFIG.name, "Portainer", "Komodo", "Arcane", "Hawser"] as const;
 type Tool = (typeof tools)[number];
 
 function cellValue(row: FeatureRow, tool: Tool): CellValue {
   const map: Record<Tool, CellValue> = {
     [SITE_CONFIG.name]: row.portwing,
     Portainer: row.portainer,
-    Hawser: row.hawser,
     Komodo: row.komodo,
+    Arcane: row.arcane,
+    Hawser: row.hawser,
   };
   return map[tool];
 }
@@ -91,7 +99,7 @@ export function CompareSection() {
         <SectionHeading
           eyebrow={`Why ${SITE_CONFIG.name}`}
           title="How we compare"
-          subtitle="A quick look at what Portwing ships that Portainer Agent, Hawser, and Komodo Periphery don't."
+          subtitle="A sourced snapshot of the four closest remote-agent peers. Partial marks usually mean the capability exists at the controller layer or is optional."
           align="right"
         />
 

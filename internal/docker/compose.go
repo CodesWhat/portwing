@@ -351,6 +351,40 @@ func mkdirRootedNoSymlinks(root *os.Root, dir string) error {
 	return nil
 }
 
+// statRootedEnvFile reports the absolute path of the stack's .env.drydock file
+// when it exists as a regular file beneath STACKS_DIR. The lookup is performed
+// through os.Root so path resolution stays contained even if a component is
+// swapped for a symlink between resolution and use. An empty path and a nil
+// error mean the stack simply has no env file.
+func (cm *ComposeManager) statRootedEnvFile(stackDir string) (string, error) {
+	rootedEnv, err := cm.rootedPath(stackDir, ".env.drydock")
+	if err != nil {
+		return "", err
+	}
+
+	root, err := os.OpenRoot(cm.stacksDir)
+	if err != nil {
+		return "", fmt.Errorf("opening stacks directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	info, err := root.Stat(rootedEnv)
+	switch {
+	case os.IsNotExist(err):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("checking env file: %w", err)
+	case !info.Mode().IsRegular():
+		return "", nil
+	}
+
+	absRoot, err := filepath.Abs(cm.stacksDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving stacks directory: %w", err)
+	}
+	return filepath.Join(absRoot, rootedEnv), nil
+}
+
 // buildCommand constructs the exec.Cmd for the requested compose operation.
 func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) (*exec.Cmd, error) {
 	stackDir := req.StackDir
@@ -372,9 +406,9 @@ func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) 
 	// Project directory.
 	args = append(args, "--project-directory", projectDir)
 
-	// Env file if it exists.
-	envFile := filepath.Join(projectDir, ".env.drydock")
-	if _, err := os.Stat(envFile); err == nil {
+	// Env file if it exists. The existence check goes through os.Root so a
+	// swapped symlink cannot make it stat a file outside STACKS_DIR.
+	if envFile, err := cm.statRootedEnvFile(stackDir); err == nil && envFile != "" {
 		args = append(args, "--env-file", envFile)
 	}
 

@@ -1,71 +1,71 @@
-import { Activity, Bot, FileText, Globe, Key, PackageCheck } from "lucide-react";
+import { Activity, Bot, Gauge, KeyRound, Network, ShieldCheck } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 
 export const hawserComparisonRouteData = {
   slug: "hawser",
   comparisonTable: `
-Remote container control|Yes (Dockhand agent)|Yes (Drydock agent)|tie
-Compatible controller|Dockhand only|Drydock (+ standalone mode)|self
-Auth model|Shared secret|Ed25519 per-request signing|self
-Structured audit log|No|Yes (JSON, built-in)|self
-Signed images + SBOMs + provenance|No|Yes (cosign + archive/image SBOMs + SLSA)|self
-Default-deny socket filter|No|Yes (with sockguard)|self
-Prometheus metrics|No|Yes|self
-MCP server (AI-native, read-only)|No|Yes|self
-Edge / NAT outbound tunnel|Yes (Dockhand edge)|Yes (Drydock v1.6.0-rc.11+)|tie
-Single lightweight Go binary|Yes|Yes (~10 MB)|tie
+Remote Docker API proxy|Yes|Yes|tie
+Connection modes|Inbound HTTP/S and outbound Dockhand WebSocket|Inbound HTTP/S and outbound Drydock WebSocket (Drydock v1.6.0-rc.11+)|tie
+Container, image, network, volume, logs, and exec|Yes|Yes|tie
+Compose lifecycle|Yes|Yes|tie
+Agent authentication|Bearer token; optional server TLS / WSS|Ed25519 per-request signatures or token in standard mode; signed edge hello|self
+Docker socket policy|Documented deployment mounts the raw socket|Recommended Sockguard path-and-method policy|self
+Host metrics|Forwarded to Dockhand every 30 seconds in edge mode|Prometheus scrape endpoint and edge metrics|tie
+Request audit|Debug request logging|Structured audit records with cursor export|self
+Supply-chain evidence|Checksummed release assets|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
+MCP server (read-only)|Not documented|Yes|self
 License|MIT|AGPL-3.0|tie
 `,
   highlightsTable: `
-key|Ed25519 Per-Request Auth|Hawser uses a shared secret passed per-request. Portwing uses Ed25519 asymmetric signing — no secret on the wire, revocable per-client keys, timestamp bounds, and nonce replay protection.
-globe|Standalone Mode|Portwing runs in standalone mode without a Drydock controller, exposing Docker API endpoints for any compatible client. Hawser requires the Dockhand controller.
-filetext|Structured Audit Log|Portwing writes structured JSON for every proxied Docker API call; immutable external storage provides tamper evidence. Hawser has no built-in audit trail.
-packagecheck|Signed Images + SBOMs|Every Portwing release ships per-archive CycloneDX SBOMs, an image SBOM attestation, cosign image signatures, and SLSA build provenance. Hawser publishes no supply-chain artifacts.
-activity|Prometheus Metrics|Portwing exposes agent health, request counts, and latency histograms. Hawser has no metrics endpoint.
-bot|MCP Server (AI-Native)|Portwing ships a read-only MCP server for AI tool integration. Hawser has no MCP support.
+network|The Closest Scope Match|Hawser and Portwing are both small Go agents, transparent Docker proxies, Compose runners, metrics collectors, and outbound WebSocket clients. Neither product should pretend the topology itself is unique.
+keyround|No Reusable Edge Token|Hawser authenticates with a bearer token over WSS. Portwing signs the edge hello with an Ed25519 private key and signs individual standard-mode requests with timestamp bounds and nonce replay checks.
+shieldcheck|Default-Deny Socket Boundary|Hawser's documented deployment mounts the Docker socket directly. Portwing's production path uses a separate Sockguard process with method-and-path allowlist rules.
+activity|Structured Agent Audit|Hawser can log Docker requests at debug level. Portwing emits stable structured events for API access, auth failures, enrollment, Compose, and exec, with cursor-based NDJSON export.
+gauge|Different Metrics Surfaces|Hawser sends host metrics to Dockhand in edge mode. Portwing supports controller metrics and a Prometheus endpoint that can be scraped independently.
+bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container_logs, host_metrics, and container_stats. Hawser does not document an MCP endpoint.
 `,
   highlightIconMap: {
-    key: Key,
-    globe: Globe,
-    filetext: FileText,
-    packagecheck: PackageCheck,
+    network: Network,
+    keyround: KeyRound,
+    shieldcheck: ShieldCheck,
     activity: Activity,
+    gauge: Gauge,
     bot: Bot,
   },
   metadataTitle: "Hawser vs Portwing — Remote Docker Agent Comparison",
   metadataDescription:
-    "Compare Hawser (Dockhand agent) and Portwing. Both are lightweight Go remote Docker agents with outbound edge tunnels. See how Portwing adds Ed25519 auth, structured audit logging, signed images, and an MCP server.",
+    "Compare Hawser v0.2.46 and Portwing v0.9.2. Both are lightweight Go Docker proxies with standard and edge modes; compare auth, socket policy, auditing, metrics, and release evidence.",
   metadataKeywords: [
     "hawser vs portwing",
     "hawser alternative",
     "dockhand agent alternative",
     "remote docker agent comparison",
     "docker agent ed25519 auth",
-    "docker agent audit log",
     "docker agent outbound tunnel",
   ],
   openGraphDescription:
-    "Hawser and Portwing are both lightweight Go remote Docker agents with outbound edge modes. See how Portwing adds Ed25519 auth, structured audit logging, signed images, and an MCP server.",
+    "Hawser and Portwing have closely matched agent scope. Compare bearer-token vs signed-key auth, raw socket vs Sockguard, audit export, metrics, and MCP.",
   twitterDescription:
-    "Compare Hawser (Dockhand agent) and Portwing. Portwing: Ed25519, audit log, sockguard, MCP server.",
+    "Hawser v0.2.46 vs Portwing v0.9.2: two close Go agent peers compared without stale marketing claims.",
   competitorName: "Hawser",
   heroTitle: "Hawser vs Portwing",
   heroDescription: (
     <p>
-      Hawser is the remote Docker agent for the Dockhand controller — the closest peer to Portwing
-      in scope. Both are lightweight Go binaries, both support an outbound edge tunnel for
-      NAT/firewalled hosts. Portwing adds{" "}
+      Hawser v0.2.46 is Dockhand&apos;s remote Docker agent and the closest Portwing peer in scope.
+      Both are lightweight Go binaries with transparent Docker proxying, Compose, metrics, and
+      outbound edge transport. Portwing v0.9.2 adds{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
-        Ed25519 per-request signing, sockguard integration, structured audit logging, and an MCP
-        server
+        signed-key authentication, Sockguard containment, structured audit export, Prometheus, and
+        read-only MCP
       </strong>
       . Hawser ships today as a more mature option; Portwing v0.9.x is a supported pre-v1 release.
+      Reviewed July 28, 2026.
     </p>
   ),
   migrationTitle: "Coming from Hawser?",
   migrationDescription:
-    "Hawser and Portwing are near-peers in scope. Map your Hawser shared secret to Portwing's TOKEN_HASH, swap the image, and point Drydock at the agent URL. Add sockguard alongside for default-deny socket filtering, then upgrade to Ed25519 key pairs at your own pace for the strongest auth posture.",
+    "The agent capabilities map closely, but the wire controllers do not. Move the environment to Drydock, deploy Portwing with Ed25519 keys, choose the smallest Sockguard preset that covers the Dockhand workflows you used, and test Compose paths and streaming behavior against tagged artifacts.",
   jsonLdName: "Hawser vs Portwing — Remote Docker Agent Comparison",
   jsonLdDescription:
-    "Compare Hawser and Portwing for remote Docker access, auth model, audit logging, and supply-chain security.",
+    "Evidence-backed comparison of Hawser v0.2.46 and Portwing v0.9.2 for remote Docker access.",
 } satisfies ComparisonRouteRawConfig;

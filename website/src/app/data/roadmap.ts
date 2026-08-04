@@ -119,6 +119,9 @@ export const roadmap: Milestone[] = [
       "Stable HTTP API and environment-variable surface under semantic-versioning guarantees",
       "Stable agent ↔ controller wire protocol — no breaking changes without a major bump",
       "Threat model review, CVE-clean base image, published security policy at security@codeswhat.com",
+      "Tagged Portwing × Drydock × Sockguard acceptance matrix in standard and edge modes",
+      "Controller-backed enrollment, overlapping-key rotation, revocation, and clock-skew recovery exercise",
+      "Versioned competitive review with sourced feature ownership and explicit non-goals",
     ],
   },
 ];

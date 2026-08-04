@@ -44,14 +44,16 @@ require_text ".goreleaser.yml" "skip_upload: auto" "prereleases must not update 
 require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebrew publishing must use the dedicated tap token"
 public_site="https://portwing.codeswhat.com"
 protected_site="https://getportwing-codeswhat.vercel.app"
-release_version="0.9.1"
+release_version="0.9.2"
+release_date="2026-08-04"
+previous_version="0.9.1"
 
 require_text ".goreleaser.yml" "${public_site}/" "published package metadata must use the public website"
 require_text "README.md" "${public_site}/docs/installation" "the repository landing page must link the public package guide"
 require_text "docs/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "documentation metadata must use the public website"
 require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "website metadata must use the public website"
 require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
-require_text "CHANGELOG.md" "## [v${release_version}] - 2026-08-01" "the patch release must be documented"
+require_text "CHANGELOG.md" "## [v${release_version}] - ${release_date}" "the patch release must be documented"
 require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
 require_text "website/src/lib/site-config.ts" "version: \"${release_version}\"" "website metadata must identify the current release"
 require_text "website/src/components/get-started.tsx" "portwing_${release_version}_linux_amd64.deb" "website package examples must use the current release"
@@ -62,6 +64,19 @@ require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must 
 require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`" "the compatibility matrix must identify the current release"
 require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
 require_text "examples/observability/docker-compose.yml" "ghcr.io/codeswhat/portwing:${release_version}" "the observability example must pin the current release"
+
+# The checks above assert the new version is present on each surface they name.
+# This asserts the previous one is gone everywhere else, which is what actually
+# catches a half-finished bump: an rpm example sitting next to a checked deb
+# example, a sample JSON payload, an attestation command in a doc. Enumerating
+# surfaces only ever finds the surfaces someone remembered to enumerate.
+if git grep -n -F -- "$previous_version" -- \
+	'*.md' '*.mdx' '*.ts' '*.tsx' '*.yaml' '*.yml' '*.txt' \
+	':(exclude)CHANGELOG.md' \
+	':(exclude)scripts/package-release-config-test.sh'; then
+	echo "FAIL: stale references to v${previous_version} remain outside the changelog" >&2
+	failures=$((failures + 1))
+fi
 
 if git grep -F -- "$protected_site" -- . \
 	':(exclude)CHANGELOG.md' \

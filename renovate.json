@@ -1,4 +1,16 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>CodesWhat/.github:renovate-config"]
+  "extends": ["local>CodesWhat/.github:renovate-config"],
+  "packageRules": [
+    {
+      "description": "Stable-by-design libraries. These are feature-complete, not unmaintained: release inactivity is the intended steady state, so suppress abandonment reporting rather than tracking them as decaying dependencies.",
+      "matchPackageNames": [
+        "github.com/google/uuid",
+        "github.com/gorilla/websocket",
+        "class-variance-authority",
+        "clsx"
+      ],
+      "abandonmentThreshold": null
+    }
+  ]
 }

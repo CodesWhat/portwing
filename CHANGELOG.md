@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.2] - 2026-08-04
+
+### Changed
+
+- **Dependency sweep.** Every pinned GitHub Action moved to its current
+  release, including the `actions/checkout` and `actions/setup-go` v7 majors
+  (ESM migrations; the checkout v7 fork-ref restriction does not apply because
+  no workflow uses `pull_request_target` or `workflow_run`). The
+  `cgr.dev/chainguard/wolfi-base` digest, the macOS runner the Homebrew cask
+  gate uses (`macos-15` → `macos-26`), the docs/website npm tree,
+  TypeScript 7, Next 16.3, `@types/node` 26, and npm 12 are all current.
+  TypeScript 7 removed `baseUrl`, so `docs/tsconfig.json` now uses the
+  `paths`-only form the website config already used, and `engines.node` states
+  npm 12's actual requirement instead of a looser `>=22.0.0`. The dead
+  `js-yaml` override was dropped — nothing in the tree depends on it. Renovate
+  no longer reports `google/uuid`, `gorilla/websocket`,
+  `class-variance-authority`, or `clsx` as abandoned; they are stable by
+  design, not unmaintained.
+
+### Security
+
+- **`X-Real-IP` is now validated before it can key the rate limiter.**
+  `clientIP` required every hop of an `X-Forwarded-For` chain to parse as an IP
+  address, but returned the `X-Real-IP` fallback header verbatim. Behind a
+  configured trusted proxy, a caller could therefore send a distinct arbitrary
+  string per request, mint a fresh limiter bucket each time, and walk past the
+  10-failures-per-minute throttle on the authentication path — and write that
+  same arbitrary string into audit records as the actor. The fallback now
+  applies the same rules as the chain walk: the value must parse as an IP and
+  must not itself be a trusted proxy, otherwise the direct peer is used.
+- **Compose env-file lookup is now contained by `os.Root`.** `buildCommand`
+  checked for a stack's `.env.drydock` with a plain `os.Stat`, which follows
+  symlinks. A symlink planted at that path by any means other than Portwing's
+  own writer (which already refuses to create symlinks) would have been
+  resolved outside `STACKS_DIR` and passed to `docker compose --env-file`. The
+  existence check now goes through `os.Root`, matching the containment the
+  stack-file writer already used, and non-regular files are ignored. Closes the
+  `go/path-injection` scanning alert.
+- **Edge exec resize failures no longer log unsanitized values.** The initial
+  `ResizeExec` failure path logged `execID` and the error without
+  `applog.Sanitize`, the only such call in `internal/edge/tunnel.go`. Closes the
+  `go/log-injection` scanning alert.
+
+### Documentation
+
+- **Versioned competitive landscape.** Added a primary-source comparison of
+  Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, Docker-native access,
+  socket proxies, and adjacent agents. Corrected stale Komodo authentication
+  and edge-mode claims, added Arcane to the website, separated agent features
+  from Drydock controller responsibilities, and recorded pre-v1 gates,
+  candidate work, and explicit security non-goals.
+
 ## [v0.9.1] - 2026-08-01
 
 ### Fixed

@@ -120,19 +120,27 @@ func (rl *RateLimiter) cleanup() {
 		case <-rl.done:
 			return
 		case <-ticker.C:
-			rl.mu.Lock()
-			now := time.Now()
-			for ip, a := range rl.attempts {
-				if a.inFlight == 0 && !a.firstFail.IsZero() && now.Sub(a.firstFail) > rl.window {
-					delete(rl.attempts, ip)
-				}
-			}
-			for ip, a := range rl.abuse {
-				if now.Sub(a.firstFail) > rl.window {
-					delete(rl.abuse, ip)
-				}
-			}
-			rl.mu.Unlock()
+			rl.sweepExpired(time.Now())
+		}
+	}
+}
+
+// sweepExpired drops entries whose window closed before now. It is split out of
+// cleanup so the pruning rules can be exercised without waiting on the ticker.
+// In-flight entries are kept regardless of age: their firstFail is only written
+// once the check completes, so evicting one would lose the concurrency count.
+func (rl *RateLimiter) sweepExpired(now time.Time) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	for ip, a := range rl.attempts {
+		if a.inFlight == 0 && !a.firstFail.IsZero() && now.Sub(a.firstFail) > rl.window {
+			delete(rl.attempts, ip)
+		}
+	}
+	for ip, a := range rl.abuse {
+		if now.Sub(a.firstFail) > rl.window {
+			delete(rl.abuse, ip)
 		}
 	}
 }
@@ -722,6 +730,13 @@ func ParseTrustedProxies(entries []string) ([]*net.IPNet, error) {
 // headers are only consulted when the direct peer is a trusted proxy; the
 // X-Forwarded-For chain is then walked right to left and the first hop that
 // is not itself a trusted proxy wins.
+//
+// Every value taken from a forwarding header must parse as an IP address. The
+// return value keys the auth rate limiter and lands in audit records as the
+// actor, so accepting an arbitrary header string would let a caller behind a
+// trusted proxy mint a fresh limiter bucket per request — defeating the
+// failed-attempt throttle it is supposed to enforce — and write arbitrary
+// actor values into the audit trail.
 func (rl *RateLimiter) clientIP(r *http.Request) string {
 	remote := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(remote); err == nil {
@@ -744,7 +759,9 @@ func (rl *RateLimiter) clientIP(r *http.Request) string {
 	}
 
 	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri
+		if ip := net.ParseIP(xri); ip != nil && !ipInNets(ip, rl.trustedProxies) {
+			return xri
+		}
 	}
 
 	return remote

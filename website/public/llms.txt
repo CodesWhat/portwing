@@ -4,7 +4,7 @@
 
 Portwing sits between the Drydock controller and the Docker Engine on each remote host. The controller connects inbound to Portwing over HTTP/SSE (standard mode), or Portwing dials outbound over a WebSocket tunnel when the host is behind NAT or a firewall (edge mode). All authentication is Ed25519 per-client signed requests (no shared secret on the wire) or Argon2id-hashed tokens. The audit log records every security-relevant action as structured JSON.
 
-Portwing v0.9.1 is a supported pre-v1 release. Its HTTP API, environment variables, MCP tool surface, and stable portwing/1.0 wire protocol follow the compatibility guarantees in STABILITY.md; operators should pin versions and review the changelog when upgrading. Full controller-owned watcher/update feature compatibility requires Drydock v1.6.0-rc.11+ while DrydockCompat remains 1.4.0.
+Portwing v0.9.2 is a supported pre-v1 release. Its HTTP API, environment variables, MCP tool surface, and stable portwing/1.0 wire protocol follow the compatibility guarantees in STABILITY.md; operators should pin versions and review the changelog when upgrading. Full controller-owned watcher/update feature compatibility requires Drydock v1.6.0-rc.11+ while DrydockCompat remains 1.4.0.
 
 ## Key capabilities
 
@@ -39,9 +39,11 @@ AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 - Authentication: https://portwing.codeswhat.com/docs/authentication
 - Audit logging: https://portwing.codeswhat.com/docs/audit-logging
 - Configuration: https://portwing.codeswhat.com/docs/configuration
+- Competitive landscape: https://portwing.codeswhat.com/docs/competitive-landscape
 - Compare to alternatives: https://portwing.codeswhat.com/compare
 - vs Portainer: https://portwing.codeswhat.com/compare/portainer
 - vs Komodo: https://portwing.codeswhat.com/compare/komodo
+- vs Arcane: https://portwing.codeswhat.com/compare/arcane
 - vs Hawser: https://portwing.codeswhat.com/compare/hawser
 - vs Watchtower: https://portwing.codeswhat.com/compare/watchtower
 - vs Diun: https://portwing.codeswhat.com/compare/diun

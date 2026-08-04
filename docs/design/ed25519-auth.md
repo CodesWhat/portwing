@@ -401,31 +401,37 @@ This means the authorized-keys file remains the single source of truth regardles
 
 ---
 
-## 6. Comparison Table
+## 6. Current comparison
 
-| Property | Portwing (proposed) | Komodo v2 Periphery | Arcane Edge Agent |
-|----------|--------------------|---------------------|-------------------|
-| Algorithm | Ed25519 (stdlib) | Ed25519 (auto-generated) | X.509 / mTLS (CA-issued) |
-| Enrollment model | Operator-provisioned file (recommended) or enrollment token | Onboarding key (burn-once bootstrap) | Agent token bootstraps cert issuance |
-| Key storage (server side) | `authorized_keys` file, SIGHUP reload | Core DB / `./keys/` directory | Manager-side CA + SPIFFE URI |
-| Key storage (client side) | Operator-held private key | Periphery generates; private key stays on server | Agent generates; `agent.crt`/`agent.key` on disk |
-| Multi-key / multi-client | Yes (multiple lines in file) | One key per Periphery server | One cert per environment |
-| Per-request proof | Detached versioned header signature over (method, full request-target, body-hash, timestamp, nonce) | Long-term key exchange; request-level detail not public | TLS handshake per connection; no per-request overhead |
-| Replay protection | Timestamp window + nonce LRU | Not specified publicly | TLS session binding |
-| Revocation | Remove line from file + SIGHUP (seconds) | Key rotation via Komodo UI | Delete/regenerate API key in Manager UI |
-| Zero new deps | Yes (stdlib only) | Rust crate ecosystem | Requires CA infrastructure |
-| Legacy fallback | Yes (TOKEN/TOKEN_HASH still works) | Passkeys removed in v2 | Token still used for enrollment |
-| mTLS composability | Explicit forward path (same pubkey) | Not documented | Native design |
+This design is implemented as of Portwing v0.8.1. The canonical cross-product
+review now lives in [`COMPETITIVE-LANDSCAPE.md`](../../COMPETITIVE-LANDSCAPE.md);
+this table retains only the authentication-specific comparison.
 
-Sources consulted:
+| Property | Portwing v0.8.1 | Komodo v2 Periphery | Arcane v2.5 Agent |
+|----------|-----------------|---------------------|-------------------|
+| Credential | Ed25519 key | Per-server public/private key pair | Environment token plus optional X.509 client certificate |
+| Enrollment | Operator-provisioned `authorized_keys` file or one-time enrollment token | Onboarding key; Periphery generates its key pair | Agent token; optional automatic certificate enrollment |
+| Client private key | Operator-held; loaded from a permission-checked file | Generated and retained by Periphery | Generated and retained by the Agent when mTLS is enabled |
+| Authentication boundary | Detached signature on each standard-mode request; signed edge hello | Cryptographic handshake on the Core/Periphery channel | Token-authenticated channel; optional mTLS handshake |
+| Application replay defense | Timestamp window plus atomic nonce LRU for signed HTTP | No per-request scheme documented; relies on the authenticated channel | No per-request scheme documented; relies on TLS/channel authentication |
+| Rotation | Overlap keys, update file, SIGHUP, then remove old key | Automatic Periphery key rotation | Automatic certificate renewal; regenerate the environment token to revoke access |
+| Multi-client identity | Multiple independent authorized keys | One expected Periphery identity per server | One agent identity per environment |
+| mTLS | Future-compatible design, not currently implemented | Not documented | Native optional or required mode with automated CA/certificate lifecycle |
 
-- Komodo v2.0.0 release notes: [v2.0.0 | Komodo](https://komo.do/docs/releases/v2.0.0)
-- Komodo key exchange discussion: [Discussion #1319](https://github.com/moghtech/komodo/discussions/1319)
-- Komodo authentication improvement issue: [Issue #123](https://github.com/moghtech/komodo/issues/123)
-- Salt Data Blog v1-to-v2 upgrade guide: [Upgrading Komodo](https://blog.saltdata.ro/upgrading-komodo-v1-to-v2)
-- Arcane edge mTLS docs: [Edge Agent mTLS](https://getarcane.app/docs/security/edge-mtls)
+These are different security and operational tradeoffs. Portwing provides
+explicit application-layer proof for each HTTP request, including replay
+checks that remain visible to the agent after TLS termination. Komodo and
+Arcane provide stronger automated credential lifecycle today. A correctly
+implemented authenticated TLS or WebSocket channel already supplies channel
+confidentiality, integrity, and replay ordering; this document does not claim
+that application signatures make those channel designs categorically weaker.
 
-**Why Portwing's design is ahead:** Komodo replaced a shared passkey with PKI but its request-level signing protocol is not publicly documented; community evidence suggests long-term key exchange without per-request signatures, meaning a captured TLS session (at a terminating load balancer) could replay requests. Portwing's design binds every request to a timestamp and nonce, making replay impossible even against TLS-terminating intermediaries. Arcane's mTLS model is strong but requires a CA infrastructure and certificate lifecycle management; Portwing achieves equivalent per-request proof with only stdlib crypto.
+Primary sources:
+
+- Komodo [server onboarding and key lifecycle](https://komo.do/docs/setup/connect-servers)
+  and [v2.0 architecture changes](https://komo.do/docs/releases/v2.0.0)
+- Arcane [remote environments](https://getarcane.app/docs/features/environments)
+  and [Edge Agent mTLS](https://getarcane.app/docs/security/edge-mtls)
 
 ---
 
