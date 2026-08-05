@@ -13,8 +13,8 @@
     "format": "biome format --write ."
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
-    "turbo": "^2.9.17"
+    "@biomejs/biome": "2.5.7",
+    "turbo": "2.10.8"
   },
   "overrides": {
     "postcss": "^8.5.25",
