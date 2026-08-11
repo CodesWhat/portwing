@@ -98,16 +98,21 @@ jobs:
           else
             # Determine bump level from conventional commits since last tag.
             # feat = minor bump, fix/anything else = patch bump.
-            # A "!" suffix on the commit subject = major bump (body/footer not read).
-            # Tolerates an optional legacy leading emoji + whitespace ahead of
-            # the type, so pre-migration history (emoji conventional commits)
-            # still computes correctly alongside new plain commits.
+            # A "!" before ":" in the commit subject = major bump (body/footer
+            # not read). Only subjects matching the full header grammar count:
+            # optional legacy emoji prefix (non-ASCII run + whitespace, so
+            # pre-migration gitmoji history still computes), then a known
+            # type, optional scope, optional "!", then ":". Anything else —
+            # "urgent!: x", "feature: x" — is ignored, not misclassified.
+            header_prefix='^([^ -~]+[[:space:]]+)?'
+            header_types='(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)'
+            header_scope='(\([A-Za-z0-9._/-]+\))?'
             bump="patch"
             while IFS= read -r subject; do
-              if echo "${subject}" | grep -qP '^[^:]+!:'; then
+              if echo "${subject}" | grep -qE "${header_prefix}${header_types}${header_scope}!:[[:space:]]"; then
                 bump="major"
                 break
-              elif echo "${subject}" | grep -qP '^(\p{So}|\p{Emoji_Presentation})*\s*feat'; then
+              elif echo "${subject}" | grep -qE "${header_prefix}feat${header_scope}!?:[[:space:]]"; then
                 if [ "${bump}" != "major" ]; then
                   bump="minor"
                 fi

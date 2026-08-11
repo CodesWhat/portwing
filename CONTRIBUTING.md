@@ -77,7 +77,7 @@ We use **Conventional Commits** — no emoji:
 <type>(<scope>): <description>
 ```
 
-Scope is optional. A `!` before the colon marks a breaking change (`feat(api)!: drop v1 tokens`); a `BREAKING CHANGE:` footer also works.
+Scope is optional. A `!` before the colon marks a breaking change (`feat(api)!: drop v1 tokens`). A `BREAKING CHANGE:` footer is valid Conventional Commit syntax, but release versioning currently reads only the subject-line `!` for major bumps.
 
 | Type | Use |
 |------|-----|
