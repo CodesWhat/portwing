@@ -5,6 +5,9 @@
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
 
+This direction covers at least the next twelve months, through August 2027.
+Items without a release assignment remain demand-driven rather than promised.
+
 ## Shipped — edge mode, hardening, and quality gates
 
 The security-hardening, release/supply-chain, test-coverage, and edge-tunnel
