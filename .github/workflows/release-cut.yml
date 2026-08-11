@@ -99,12 +99,15 @@ jobs:
             # Determine bump level from conventional commits since last tag.
             # feat = minor bump, fix/anything else = patch bump.
             # A "!" suffix on the commit subject = major bump (body/footer not read).
+            # Tolerates an optional legacy leading emoji + whitespace ahead of
+            # the type, so pre-migration history (emoji conventional commits)
+            # still computes correctly alongside new plain commits.
             bump="patch"
             while IFS= read -r subject; do
               if echo "${subject}" | grep -qP '^[^:]+!:'; then
                 bump="major"
                 break
-              elif echo "${subject}" | grep -qP '^✨\s+feat'; then
+              elif echo "${subject}" | grep -qP '^(\p{So}|\p{Emoji_Presentation})*\s*feat'; then
                 if [ "${bump}" != "major" ]; then
                   bump="minor"
                 fi
