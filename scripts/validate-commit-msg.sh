@@ -59,7 +59,7 @@ echo "    $first_line" >&2
 echo "" >&2
 echo "  Expected: <type>(scope): <description>" >&2
 echo "  Example:  feat(auth): add Ed25519 enrollment" >&2
-echo "  \"!\" before the colon marks a breaking change: feat(api)!: drop v1 tokens" >&2
+echo '  "!" before the colon marks a breaking change: feat(api)!: drop v1 tokens' >&2
 echo "" >&2
 echo "  Allowed types:" >&2
 for ctype in "${types[@]}"; do
