@@ -49,6 +49,7 @@
   <a href="https://pkg.go.dev/github.com/codeswhat/portwing"><img src="https://pkg.go.dev/badge/github.com/codeswhat/portwing.svg" alt="Go Reference"></a>
   <a href="https://qlty.sh/gh/CodesWhat/projects/portwing"><img src="https://qlty.sh/badges/0c146428-4c10-46d3-8b6e-0622a7b07720/coverage.svg" alt="Coverage"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/portwing"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/portwing?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
+  <a href="https://www.bestpractices.dev/projects/14029"><img src="https://www.bestpractices.dev/projects/14029/badge" alt="OpenSSF Best Practices"></a>
 </p>
 
 <hr>
@@ -988,6 +989,8 @@ Exec tunnel events:
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Code of Conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
+| Governance | [`GOVERNANCE.md`](GOVERNANCE.md) |
+| Security Assurance | [`SECURITY-ASSURANCE.md`](SECURITY-ASSURANCE.md) |
 | Security Policy | [`SECURITY.md`](SECURITY.md) |
 | Releasing | [`RELEASING.md`](RELEASING.md) |
 | Examples | [`examples/`](examples/) |
