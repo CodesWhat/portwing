@@ -71,26 +71,31 @@ go test -run=^$ -fuzz=^FuzzEnvelope$            -fuzztime=5s ./internal/protocol
 
 ## Commit convention
 
-We use **Gitmoji + Conventional Commits**:
+We use **Conventional Commits** — no emoji:
 
 ```text
-<emoji> <type>(<scope>): <description>
+<type>(<scope>): <description>
 ```
 
-| Emoji | Type | Use |
-|-------|------|-----|
-| ✨ | `feat` | New feature |
-| 🐛 | `fix` | Bug fix |
-| 📝 | `docs` | Documentation |
-| 🎨 | `style` | Formatting only |
-| 🔄 | `refactor` | Refactor (no feature/fix) |
-| 🧪 | `test` | Tests |
-| 📦 | `deps` | Dependencies |
-| 🔧 | `config` | Configuration / tooling |
-| 🚀 | `deploy` | Deployment / release |
-| 🗑️ | `remove` | Removing code/files |
+Scope is optional. A `!` before the colon marks a breaking change (`feat(api)!: drop v1 tokens`). A `BREAKING CHANGE:` footer is valid Conventional Commit syntax, but release versioning currently reads only the subject-line `!` for major bumps.
 
-Multi-change commits: lead emoji+type on first line, bulleted sub-changes in body. Reference Linear issues in footer as `Fixes: LIN-XXX`.
+| Type | Use |
+|------|-----|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation |
+| `style` | Formatting only |
+| `refactor` | Refactor (no feature/fix) |
+| `perf` | Performance improvement |
+| `test` | Tests |
+| `build` | Build system / dependencies (e.g. `build(deps): bump gorilla/websocket`) |
+| `ci` | CI / deployment config (e.g. `ci(deploy): add release-cut concurrency guard`) |
+| `chore` | Everything else / tooling / config (e.g. `chore(config): tune lefthook timeouts`) |
+| `revert` | Reverting a previous commit |
+
+Example: `feat(auth): add Ed25519 enrollment`
+
+Multi-change commits: lead type on first line, bulleted sub-changes in body. Reference Linear issues in footer as `Fixes: LIN-XXX`.
 
 ## Pull request guidelines
 

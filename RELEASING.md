@@ -54,7 +54,7 @@
 Go to **Actions → 🏷️ Release: Cut** → **Run workflow** on `main`. The workflow:
 
 - Polls until `ci.yml` has a successful run on HEAD
-- Computes the next semver from emoji-conventional-commit history (`✨ feat` = minor, anything else = patch, `!` in the commit subject = major; a `BREAKING CHANGE` footer alone does not trigger a major bump today)
+- Computes the next semver from Conventional Commit history (`feat` = minor, anything else = patch, `!` in the commit subject = major; a `BREAKING CHANGE` footer alone does not trigger a major bump today). Tolerates a legacy leading emoji from pre-migration history, so old commits still compute correctly.
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 

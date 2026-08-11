@@ -241,20 +241,27 @@ jobs:
           fetch-depth: 0
 
       - name: Validate commit messages
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
 
+          # Only inspects commits introduced by this PR (base branch..HEAD),
+          # and delegates to the same validator the commit-msg hook runs so
+          # CI and the hook can't drift apart on scope charset or exemptions.
           failed=0
-          while IFS= read -r msg; do
-            first_line="$(echo "${msg}" | head -n1)"
-            if ! echo "${first_line}" | grep -qP '^(\p{So}|\p{Emoji_Presentation})+\s+\w+(\(\w[\w-]*\))?!?:\s.+$'; then
-              echo "::warning::Non-conventional commit: ${first_line}"
+          tmp="$(mktemp)"
+          trap 'rm -f "${tmp}"' EXIT
+          while IFS= read -r subject; do
+            printf '%s\n' "${subject}" > "${tmp}"
+            if ! bash scripts/validate-commit-msg.sh "${tmp}" >/dev/null 2>&1; then
+              echo "::warning::Non-conventional commit: ${subject}"
               failed=1
             fi
-          done < <(git log --format=%s origin/main..HEAD)
+          done < <(git log --format=%s "origin/${BASE_REF}..HEAD")
 
           if [ "${failed}" -eq 1 ]; then
-            echo "::warning::Some commits don't follow emoji conventional format. Expected: <emoji> <type>(scope): description"
+            echo "::warning::Some commits don't follow Conventional Commits format. Expected: <type>(scope): description — no emoji. See scripts/validate-commit-msg.sh for allowed types."
           fi
 
   goreleaser-check:

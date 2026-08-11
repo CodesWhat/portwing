@@ -21,7 +21,7 @@ commit-msg:
   commands:
     convention:
       run: scripts/validate-commit-msg.sh {1}
-      fail_text: "Commit message does not follow emoji conventional commit format"
+      fail_text: "Commit message does not follow Conventional Commits format"
 
 pre-commit:
   piped: true
