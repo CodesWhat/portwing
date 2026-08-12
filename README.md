@@ -25,7 +25,7 @@
   <a href="https://github.com/CodesWhat/portwing/pkgs/container/portwing"><img src="https://img.shields.io/badge/GHCR-image-2ea44f?logo=github&logoColor=white" alt="GHCR"></a>
   <br>
   <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white" alt="Multi-arch"></a>
-  <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/image%20size-~10%20MB-informational?logo=docker&logoColor=white" alt="Image size"></a>
+  <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/image%20size-~47%20MB-informational?logo=docker&logoColor=white" alt="Image size"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-C9A227" alt="License AGPL-3.0"></a>
 </p>
 
@@ -44,8 +44,8 @@
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-integration.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-integration.yml/badge.svg?branch=main" alt="Integration Tests"></a>
   <br>
-  <a href="https://goreportcard.com/report/github.com/codeswhat/portwing"><img src="https://goreportcard.com/badge/github.com/codeswhat/portwing" alt="Go Report Card"></a>
   <a href="https://pkg.go.dev/github.com/codeswhat/portwing"><img src="https://pkg.go.dev/badge/github.com/codeswhat/portwing.svg" alt="Go Reference"></a>
   <a href="https://qlty.sh/gh/CodesWhat/projects/portwing"><img src="https://qlty.sh/badges/0c146428-4c10-46d3-8b6e-0622a7b07720/coverage.svg" alt="Coverage"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/portwing"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/portwing?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
@@ -354,7 +354,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 | 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
 | ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA provenance on every release. Verifiable without managing signing keys. |
 | 🛡️ | **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
-| 🪶 | **Minimal Footprint** | Static Go binary, ~10 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
+| 🪶 | **Minimal Footprint** | Static Go binary, ~47 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
 | 🔌 | **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
 
 <hr>
