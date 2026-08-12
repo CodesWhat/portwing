@@ -1,7 +1,7 @@
 # Compatibility and Stability Policy
 
 This document defines the compatibility promises Portwing intends to make at
-`v1.0.0`. Portwing `v0.8.x` publishes this policy as a release candidate so
+`v1.0.0`. Portwing `v0.9.x` publishes this policy as a release candidate so
 integrators can review it before the guarantees become binding.
 
 The version matrix in [COMPATIBILITY.md](COMPATIBILITY.md) remains the
