@@ -224,7 +224,6 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true  # advisory — does not block merge
 
     steps:
       - name: Harden Runner
@@ -255,13 +254,14 @@ jobs:
           while IFS= read -r subject; do
             printf '%s\n' "${subject}" > "${tmp}"
             if ! bash scripts/validate-commit-msg.sh "${tmp}" >/dev/null 2>&1; then
-              echo "::warning::Non-conventional commit: ${subject}"
+              echo "::error::Non-conventional commit: ${subject}"
               failed=1
             fi
           done < <(git log --format=%s "origin/${BASE_REF}..HEAD")
 
           if [ "${failed}" -eq 1 ]; then
-            echo "::warning::Some commits don't follow Conventional Commits format. Expected: <type>(scope): description — no emoji. See scripts/validate-commit-msg.sh for allowed types."
+            echo "::error::Some commits don't follow Conventional Commits format. Expected: <type>(scope): description — no emoji. See scripts/validate-commit-msg.sh for allowed types."
+            exit 1
           fi
 
   goreleaser-check:

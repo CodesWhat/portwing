@@ -71,6 +71,12 @@ jobs:
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@"${GREMLINS_VERSION}"
 
       - name: Run Gremlins mutation testing
+        # shell: bash (rather than the default `bash -e {0}`) is required here:
+        # GitHub's default bash has -e but not -o pipefail, so `| tee` would
+        # report tee's exit code and hide a Gremlins crash behind a green step.
+        # The job stays advisory via continue-on-error; this only makes the
+        # step's own status honest.
+        shell: bash
         run: |
           gremlins unleash --tags="" ${{ matrix.package }} 2>&1 | tee mutation-report.txt
         env:
