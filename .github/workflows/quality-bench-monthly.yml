@@ -55,6 +55,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Run benchmarks
+        # shell: bash (rather than the default `bash -e {0}`) is required here:
+        # GitHub's default bash has -e but not -o pipefail, so `| tee` would
+        # report tee's exit code and mask a failing benchmark run.
+        shell: bash
         run: |
           # -run='^$' skips the unit tests (CI already gates those) so the job
           # spends its time only on benchmarks. -count=5 gives benchstat-ready
