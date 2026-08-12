@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.4] - 2026-08-12
+
+### Fixed
+
+- **The monthly benchmark, weekly soak, and monthly mutation jobs could not
+  report failure.** Each piped its run into `tee`, and GitHub's default step
+  shell is `bash -e {0}` — `-e` without `-o pipefail` — so the step took
+  `tee`'s exit code and went green no matter what the tool underneath did.
+  The benchmark job had been silently timing out for roughly three months
+  behind that mask. All three steps now set `shell: bash`, which turns on
+  `pipefail`. The fuzz jobs were already correct; they capture
+  `${PIPESTATUS[0]}` by hand.
+- **The commit-message gate could never fail.** The `💬 Commit Message` job is
+  a required status check, but carried `continue-on-error: true` and only
+  emitted a `::warning::` on a bad subject, so a malformed commit message
+  passed a check that existed to reject it. It now errors and exits non-zero.
+
+### Changed
+
+- **Grype vulnerability suppressions re-reviewed.** Every entry had passed
+  its stated review date. Each was re-checked against the current advisory:
+  nine no longer applied and were deleted outright, and the nine that remain
+  carry a specific justification and a real next-review date instead of a
+  lapsed one.
+- **README badges corrected.** The Go Report Card badge was dead and is
+  gone, the integration-test workflow now has a badge, and the container
+  image size was stated as ~10 MB in two places when it is ~47 MB.
+
 ## [v0.9.3] - 2026-08-11
 
 ### Changed
