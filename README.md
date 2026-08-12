@@ -78,7 +78,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.9.4 is the current release.** It keeps the v0.9.0 controller-owned watcher/update, Edge audit export, and exec/sockguard error improvements, and the v0.9.2 security fixes: `X-Real-IP` is validated before it can key the auth rate limiter, the Compose env-file lookup is contained by `os.Root`, and the edge exec resize log is sanitized. v0.9.3 and v0.9.4 hardened CI (Conventional Commits migration, dependency updates, and fixing exit-code masking in the benchmark/soak/mutation jobs) rather than changing product behavior. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.4 is the current release.** It keeps the v0.9.0 controller-owned watcher/update, Edge audit export, and exec/sockguard error improvements, and the v0.9.2 security fixes: `X-Real-IP` is validated before it can key the auth rate limiter, the Compose env-file lookup is contained by `os.Root`, and the edge exec resize log is sanitized. The two patch releases since then hardened CI (Conventional Commits migration, dependency updates, and fixing exit-code masking in the benchmark/soak/mutation jobs) rather than changing product behavior. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
