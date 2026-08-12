@@ -61,9 +61,9 @@ release_version="$(printf '%s\n' "${release_heading}" | sed -E 's/^## \[v([0-9.]
 release_date="$(printf '%s\n' "${release_heading}" | sed -E 's/.*- ([0-9-]+)$/\1/')"
 previous_version="$(printf '%s\n' "${previous_heading}" | sed -E 's/^## \[v([0-9.]+)\].*/\1/')"
 
-if ! echo "${release_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
-	|| ! echo "${release_date}" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
-	|| ! echo "${previous_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+if ! echo "${release_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' ||
+	! echo "${release_date}" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' ||
+	! echo "${previous_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
 	echo "FAIL: could not derive release_version, release_date, and previous_version from CHANGELOG.md's two newest dated '## [vX.Y.Z] - YYYY-MM-DD' headings" >&2
 	failures=$((failures + 1))
 	release_version="unresolved"
