@@ -172,8 +172,13 @@ jobs:
           RELEASE_TAG: ${{ steps.next.outputs.release_tag }}
         run: |
           set -euo pipefail
+          # `|| true` matters: with no matching heading grep exits 1, pipefail
+          # propagates it, and set -e kills the step at the assignment — so the
+          # explicit error below, and its ${newest:-none} fallback, would never
+          # run. The bare failure looks like a broken workflow rather than a
+          # missing changelog entry.
           newest="$(grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md \
-            | sed -n '1p' | sed -E 's/^## \[(v[0-9.]+)\].*/\1/')"
+            | sed -n '1p' | sed -E 's/^## \[(v[0-9.]+)\].*/\1/' || true)"
           if [ "${newest}" != "${RELEASE_TAG}" ]; then
             echo "::error::Cutting ${RELEASE_TAG} but CHANGELOG's newest dated entry is ${newest:-none}. The package release contract polices ${newest:-none}, so the docs would be verified against a different release than the one being tagged."
             exit 1
