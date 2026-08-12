@@ -120,6 +120,13 @@ changelog:
   sort: asc
   filters:
     exclude:
+      # Plain Conventional Commits (current convention).
+      - "^docs"
+      - "^test"
+      - "^style"
+      - "^chore\\(config\\)"
+      # Legacy emoji-conventional history (pre-migration) — kept so old
+      # tags still exclude the same commit categories.
       - "^📝"
       - "^🧪"
       - "^🔧"

@@ -98,13 +98,21 @@ jobs:
           else
             # Determine bump level from conventional commits since last tag.
             # feat = minor bump, fix/anything else = patch bump.
-            # A "!" suffix on the commit subject = major bump (body/footer not read).
+            # A "!" before ":" in the commit subject = major bump (body/footer
+            # not read). Only subjects matching the full header grammar count:
+            # optional legacy emoji prefix (non-ASCII run + whitespace, so
+            # pre-migration gitmoji history still computes), then a known
+            # type, optional scope, optional "!", then ":". Anything else —
+            # "urgent!: x", "feature: x" — is ignored, not misclassified.
+            header_prefix='^([^ -~]+[[:space:]]+)?'
+            header_types='(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)'
+            header_scope='(\([A-Za-z0-9._/-]+\))?'
             bump="patch"
             while IFS= read -r subject; do
-              if echo "${subject}" | grep -qP '^[^:]+!:'; then
+              if echo "${subject}" | grep -qE "${header_prefix}${header_types}${header_scope}!:[[:space:]]"; then
                 bump="major"
                 break
-              elif echo "${subject}" | grep -qP '^✨\s+feat'; then
+              elif echo "${subject}" | grep -qE "${header_prefix}feat${header_scope}!?:[[:space:]]"; then
                 if [ "${bump}" != "major" ]; then
                   bump="minor"
                 fi
@@ -142,8 +150,12 @@ jobs:
             echo "::error::CHANGELOG has no entry for ${RELEASE_TAG}. Add release notes before cutting a tag."
             exit 1
           fi
-          # Verify the entry is non-empty (has at least one non-heading line after it)
-          awk "/## \[${RELEASE_TAG}\]|## \[${RELEASE_TAG#v}\]/{found=1; next} found && /^## /{exit} found && /\S/{ok=1; exit} END{exit ok ? 0 : 1}" CHANGELOG.md || {
+          # Verify the entry is non-empty (has at least one non-heading line after it).
+          # Use [^[:space:]] rather than \S: mawk (the default awk on the ubuntu
+          # runners) has no Perl character classes and reads \S as a literal "S",
+          # so the check silently passed only for entries that happened to contain
+          # a capital S and failed for ones that did not.
+          awk "/## \[${RELEASE_TAG}\]|## \[${RELEASE_TAG#v}\]/{found=1; next} found && /^## /{exit} found && /[^[:space:]]/{ok=1; exit} END{exit ok ? 0 : 1}" CHANGELOG.md || {
             echo "::error::CHANGELOG entry for ${RELEASE_TAG} appears empty. Add content before cutting a tag."
             exit 1
           }

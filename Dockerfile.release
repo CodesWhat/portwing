@@ -16,7 +16,7 @@
 # Wolfi rootfs — amd64 and arm64 share one recipe; buildx pulls the per-arch
 # wolfi-base via --platform, so the arm64 build of this stage installs arm64
 # packages even though the stage is named "-amd64".
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:d2ad9a742d38e1ab550fbb20911056339632a5ca2f01777a32422a4c944fcb99 AS rootfs-amd64
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:003627df3c1e1bba0c4116afcddb314aca9594ee2328c7e876a8081a6c988b2e AS rootfs-amd64
 RUN apk add --no-cache --initdb --root /out \
     --repository https://packages.wolfi.dev/os \
     --keys-dir /etc/apk/keys \

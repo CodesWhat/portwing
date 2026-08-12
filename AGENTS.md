@@ -54,7 +54,7 @@ go test -run='^$' -fuzz='^FuzzMCPHandler$' -fuzztime=5s ./internal/mcp/
 
 ## Conventions
 
-- **Commits:** emoji conventional commits — `<emoji> <type>(scope): <description>` (see CONTRIBUTING.md). Enforced by lefthook via `scripts/validate-commit-msg.sh`.
+- **Commits:** plain Conventional Commits, no emoji — `<type>(scope): <description>` (see CONTRIBUTING.md). Enforced by lefthook via `scripts/validate-commit-msg.sh`.
 - **Branches:** `main` is production; one active dev branch is the next release; feature branches merge into the dev branch promptly and are deleted after merge.
 - **Tests:** table-driven with `httptest`; anything touching goroutines runs under `-race` in CI — write tests accordingly (no unsynchronized `httptest.ResponseRecorder` access from a handler goroutine; wrap with a mutex-guarded recorder).
 - **Errors:** wrap with `fmt.Errorf("context: %w", err)`; structured logging via `log/slog` only.

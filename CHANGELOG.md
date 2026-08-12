@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.3] - 2026-08-11
+
+### Changed
+
+- **Commit convention migrated from gitmoji to plain Conventional Commits.**
+  The commit-msg validator, the git hook, and the CI commit-check workflow
+  all moved to the new convention. `release-cut`'s bump-math grammar was
+  hardened to parse the full commit header, so subjects like `urgent!:` no
+  longer falsely trigger a major version bump. CI's commit check now
+  delegates to the same shared validator script the hook uses, instead of
+  duplicating the logic.
+- **Renovate dependency updates applied.** `biome`, `turbo`, `@types/react`,
+  `@types/node`, `postcss`, `typescript`, and `@types/react-dom` were bumped
+  to their current pinned versions, and a stale `wolfi-base` digest
+  reference in `Dockerfile.release` — missed when `Dockerfile` got the same
+  bump — was corrected.
+
+### Fixed
+
+- **Lockfile regenerated to restore cross-platform optional dependencies.**
+  The lockfile only carried resolved entries for the `darwin-arm64`
+  platform, so `npm ci` on Linux CI builders never installed
+  `lightningcss`'s native binaries, breaking website deploys. A full
+  regeneration restores the complete platform matrix.
+
 ## [v0.9.2] - 2026-08-04
 
 ### Changed
