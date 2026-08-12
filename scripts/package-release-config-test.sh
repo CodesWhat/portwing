@@ -44,16 +44,38 @@ require_text ".goreleaser.yml" "skip_upload: auto" "prereleases must not update 
 require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebrew publishing must use the dedicated tap token"
 public_site="https://portwing.codeswhat.com"
 protected_site="https://getportwing-codeswhat.vercel.app"
-release_version="0.9.4"
-release_date="2026-08-12"
-previous_version="0.9.3"
+
+# release_version, release_date, and previous_version come from CHANGELOG.md
+# rather than being hand-set here. A hand-set constant can only ever agree
+# with the docs it was written to expect, not with the version actually
+# being released — that's exactly how this contract sat pinned at v0.9.2
+# through two release cuts and stayed green while the docs it exists to
+# police went stale. CHANGELOG.md's newest dated "## [vX.Y.Z] - YYYY-MM-DD"
+# heading is the same value release-cut.yml already requires to exist
+# before it will push a tag ("Validate CHANGELOG entry for release tag"),
+# so sourcing it from there too leaves no separate constant to forget.
+changelog_heading_regex='^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$'
+release_heading="$(grep -E "${changelog_heading_regex}" CHANGELOG.md | sed -n '1p' || true)"
+previous_heading="$(grep -E "${changelog_heading_regex}" CHANGELOG.md | sed -n '2p' || true)"
+release_version="$(printf '%s\n' "${release_heading}" | sed -E 's/^## \[v([0-9.]+)\].*/\1/')"
+release_date="$(printf '%s\n' "${release_heading}" | sed -E 's/.*- ([0-9-]+)$/\1/')"
+previous_version="$(printf '%s\n' "${previous_heading}" | sed -E 's/^## \[v([0-9.]+)\].*/\1/')"
+
+if ! echo "${release_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+	|| ! echo "${release_date}" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+	|| ! echo "${previous_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+	echo "FAIL: could not derive release_version, release_date, and previous_version from CHANGELOG.md's two newest dated '## [vX.Y.Z] - YYYY-MM-DD' headings" >&2
+	failures=$((failures + 1))
+	release_version="unresolved"
+	release_date="unresolved"
+	previous_version="unresolved"
+fi
 
 require_text ".goreleaser.yml" "${public_site}/" "published package metadata must use the public website"
 require_text "README.md" "${public_site}/docs/installation" "the repository landing page must link the public package guide"
 require_text "docs/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "documentation metadata must use the public website"
 require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "website metadata must use the public website"
 require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
-require_text "CHANGELOG.md" "## [v${release_version}] - ${release_date}" "the patch release must be documented"
 require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
 require_text "website/src/lib/site-config.ts" "version: \"${release_version}\"" "website metadata must identify the current release"
 require_text "website/src/components/get-started.tsx" "portwing_${release_version}_linux_amd64.deb" "website package examples must use the current release"
