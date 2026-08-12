@@ -44,9 +44,9 @@ require_text ".goreleaser.yml" "skip_upload: auto" "prereleases must not update 
 require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebrew publishing must use the dedicated tap token"
 public_site="https://portwing.codeswhat.com"
 protected_site="https://getportwing-codeswhat.vercel.app"
-release_version="0.9.2"
-release_date="2026-08-04"
-previous_version="0.9.1"
+release_version="0.9.4"
+release_date="2026-08-12"
+previous_version="0.9.3"
 
 require_text ".goreleaser.yml" "${public_site}/" "published package metadata must use the public website"
 require_text "README.md" "${public_site}/docs/installation" "the repository landing page must link the public package guide"
