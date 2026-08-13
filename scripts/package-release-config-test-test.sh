@@ -11,8 +11,12 @@ git -C "${fixture}" add .
 
 release_version="$(
 	grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md |
-		sed -n '1{s/^## \[v\([0-9.]*\)\].*/\1/p;}'
+		sed -n '1{s/^## \[v\([0-9.]*\)\].*/\1/p;}' || true
 )"
+if [ -z "${release_version}" ]; then
+	echo "FAIL: could not derive release version from CHANGELOG.md" >&2
+	exit 1
+fi
 prefix_version="${release_version}0"
 
 awk -v from="VERSION=${release_version}" -v to="VERSION=${prefix_version}" '
@@ -25,8 +29,19 @@ awk -v from="VERSION=${release_version}" -v to="VERSION=${prefix_version}" '
 ' "${fixture}/README.md" >"${fixture}/README.md.tmp"
 mv "${fixture}/README.md.tmp" "${fixture}/README.md"
 
-if (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null 2>&1); then
+set +e
+validator_output="$(cd "${fixture}" && bash scripts/package-release-config-test.sh 2>&1)"
+validator_status=$?
+set -e
+expected_diagnostic="FAIL: README release commands and asset names must use ${release_version}:"
+
+if [ "${validator_status}" -eq 0 ]; then
 	echo "FAIL: prefix version ${prefix_version} must not match current version ${release_version}" >&2
+	exit 1
+fi
+if ! grep -Fq "${expected_diagnostic}" <<<"${validator_output}"; then
+	echo "FAIL: prefix-version fixture failed without the expected stale README diagnostic" >&2
+	echo "${validator_output}" >&2
 	exit 1
 fi
 

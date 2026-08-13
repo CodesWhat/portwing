@@ -291,6 +291,7 @@ jobs:
 
       - name: Verify package release contract
         run: |
+          bash scripts/package-release-config-self-test-test.sh
           bash scripts/package-release-config-test-test.sh
           bash scripts/package-release-config-test.sh
 
