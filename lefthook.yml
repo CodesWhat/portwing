@@ -5,14 +5,15 @@
 #   1. Clean-tree check (no stray artifacts before push)
 #   2. GoReleaser snapshot dry-run (full release pipeline, skip publish)
 #   3. golangci-lint
-#   4. go test -race
-#   5. govulncheck (reachable CVEs in deps + stdlib)
-#   6. Go fuzz smoke (5 s per fuzzer, all 5 fuzzers) — tier 0 of the fuzz
+#   4. Qlty full-repository check
+#   5. go test -race
+#   6. govulncheck (reachable CVEs in deps + stdlib)
+#   7. Go fuzz smoke (5 s per fuzzer, all 6 fuzzers) — tier 0 of the fuzz
 #      strategy. Catches broken fuzz drivers and stale seed corpora before
 #      the push leaves the machine. Real coverage tiers live in
 #      .github/workflows/ci-verify.yml (60 s, every push/PR) and
 #      quality-fuzz-nightly.yml (5 m, daily).
-#   7. actionlint + zizmor (workflow correctness + security)
+#   8. actionlint + zizmor (workflow correctness + security)
 #
 # Tools that may not be installed locally (goreleaser, govulncheck,
 # actionlint, zizmor) are skipped when absent — CI still enforces them.
@@ -66,20 +67,25 @@ pre-push:
       priority: 2
       timeout: 2m
 
+    qlty:
+      run: ./scripts/qlty-check-gate.sh all
+      priority: 3
+      timeout: 4m
+
     # -count=1 disables the test cache. Without it a cached pass can be served
     # for a package whose source changed only in ways the cache key misses,
     # so a newly-introduced race is reported as green locally. CI runs on a
     # cold cache; this keeps the local gate honest about what it checked.
     go-test:
       run: go test -race -count=1 ./...
-      priority: 3
+      priority: 4
       timeout: 5m
 
     govulncheck:
       run: govulncheck ./...
       skip:
         - run: '! command -v govulncheck >/dev/null 2>&1'
-      priority: 4
+      priority: 5
       timeout: 2m
 
     # Fuzz smoke — 5 s per fuzzer, all 6 in series. Keep a finite Go
@@ -127,7 +133,7 @@ pre-push:
           set -- $entry
           run_fuzz "$1" "$2"
         done
-      priority: 5
+      priority: 6
       timeout: 3m
 
     actionlint:
@@ -135,7 +141,7 @@ pre-push:
       run: actionlint
       skip:
         - run: '! command -v actionlint >/dev/null 2>&1'
-      priority: 6
+      priority: 7
       timeout: 30s
 
     zizmor:
@@ -143,5 +149,5 @@ pre-push:
       run: zizmor .github/workflows/
       skip:
         - run: '! command -v zizmor >/dev/null 2>&1'
-      priority: 7
+      priority: 8
       timeout: 30s
