@@ -2,6 +2,7 @@
 set -euo pipefail
 
 failures=0
+config_file="${LEFTHOOK_CONFIG:-lefthook.yml}"
 
 fail() {
 	echo "FAIL: $1" >&2
@@ -9,17 +10,21 @@ fail() {
 }
 
 qlty_block="$(awk '
-	/^    qlty:$/ { capture = 1 }
+	/^pre-push:$/ { in_pre_push = 1; next }
+	in_pre_push && /^[^[:space:]#]/ { exit }
+	in_pre_push && /^  commands:$/ { in_commands = 1; next }
+	in_commands && /^  [[:alnum:]_-]+:$/ { in_commands = 0 }
+	in_commands && /^    qlty:$/ { capture = 1 }
 	capture && seen && /^    [[:alnum:]_-]+:$/ { exit }
 	capture { print; seen = 1 }
-' lefthook.yml)"
+' "$config_file")"
 
 if [ -z "$qlty_block" ]; then
 	fail "pre-push must define a qlty command"
 else
-	grep -Fq 'run: ./scripts/qlty-check-gate.sh all' <<<"$qlty_block" ||
+	grep -Eq '^[[:space:]]+run:[[:space:]]+\./scripts/qlty-check-gate\.sh[[:space:]]+all[[:space:]]*$' <<<"$qlty_block" ||
 		fail "pre-push qlty must run the full local gate"
-	grep -Fq 'priority: 3' <<<"$qlty_block" ||
+	grep -Eq '^[[:space:]]+priority:[[:space:]]+3[[:space:]]*$' <<<"$qlty_block" ||
 		fail "pre-push qlty must run after golangci-lint and before tests"
 	if grep -Eq 'skip:|\|\|[[:space:]]*true' <<<"$qlty_block"; then
 		fail "pre-push qlty must not skip or swallow failures"
