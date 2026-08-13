@@ -62,7 +62,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          # Reads the `toolchain go1.26.5` directive from go.mod (setup-go honors
+          # Reads the exact `toolchain` directive from go.mod (setup-go honors
           # toolchain over the `go` line), so the scan runs on the same pinned,
           # patched toolchain the binary is built with — one source of truth.
           go-version-file: go.mod

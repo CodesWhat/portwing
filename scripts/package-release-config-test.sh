@@ -71,6 +71,28 @@ require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebre
 public_site="https://portwing.codeswhat.com"
 protected_site="https://getportwing-codeswhat.vercel.app"
 
+toolchain_version="$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2 }' go.mod)"
+if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"${toolchain_version}"; then
+	echo "FAIL: go.mod must pin an exact Go toolchain patch version" >&2
+	failures=$((failures + 1))
+	toolchain_version="unresolved"
+fi
+
+builder_ref=""
+for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
+	current_ref="$(grep -E '^FROM golang:' "${dockerfile}" | sed -n '1p')"
+	if ! grep -Eq "^FROM golang:${toolchain_version//./\\.}-alpine@sha256:[0-9a-f]{64}([[:space:]]+AS[[:space:]]+builder)?$" <<<"${current_ref}"; then
+		echo "FAIL: ${dockerfile} must use the exact go.mod toolchain in a digest-pinned Alpine builder" >&2
+		failures=$((failures + 1))
+	fi
+	if [ -z "${builder_ref}" ]; then
+		builder_ref="${current_ref%% AS builder}"
+	elif [ "${current_ref%% AS builder}" != "${builder_ref}" ]; then
+		echo "FAIL: all from-source Dockerfiles must use the same Go builder reference" >&2
+		failures=$((failures + 1))
+	fi
+done
+
 # release_version, release_date, and previous_version come from CHANGELOG.md
 # rather than being hand-set here. A hand-set constant can only ever agree
 # with the docs it was written to expect, not with the version actually
