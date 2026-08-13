@@ -296,6 +296,7 @@ jobs:
         run: |
           bash scripts/pre-push-config-test-test.sh
           bash scripts/pre-push-config-test.sh
+          bash scripts/fuzz-tier-config-test.sh
 
       - name: Verify Drydock compatibility script failure handling
         run: bash scripts/drydock-compat-script-test.sh
