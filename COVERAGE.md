@@ -22,7 +22,7 @@ impractical test infrastructure:
 - Compile-time `GOOS=windows` branches — dead code on linux/darwin; cannot be
   compiled or executed in CI
 
-The **enforced floor is 96%** (set in `.github/workflows/ci.yml` as
+The **enforced floor is 96%** (set in `.github/workflows/ci-verify.yml` as
 `COVERAGE_MIN`). Achieved total as of 2026-06: **97.5%**. The floor is set
 ~1.5% below the achieved total so CI never fails on coverage noise — the org
 standard for the Go repos (drydock stays at 100% because TypeScript supports
@@ -150,7 +150,7 @@ fragility for 3 statements.
 
 ## How Coverage Is Measured
 
-The CI coverage job (`.github/workflows/ci.yml`, `test` job) runs:
+The CI coverage job (`.github/workflows/ci-verify.yml`, `test` job) runs:
 
 ```sh
 go test -race -covermode=atomic -coverprofile=coverage.out \

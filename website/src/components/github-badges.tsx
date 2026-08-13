@@ -13,8 +13,8 @@ const quality: Badge[] = [
     alt: "License AGPL-3.0",
   },
   {
-    href: `${GITHUB_URL}/actions/workflows/ci.yml`,
-    src: `https://github.com/${REPO_SLUG}/actions/workflows/ci.yml/badge.svg?branch=main`,
+    href: `${GITHUB_URL}/actions/workflows/ci-verify.yml`,
+    src: `https://github.com/${REPO_SLUG}/actions/workflows/ci-verify.yml/badge.svg?branch=main`,
     alt: "CI",
   },
   {

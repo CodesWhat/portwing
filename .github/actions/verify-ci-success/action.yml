@@ -3,7 +3,7 @@ description: "Poll the CI workflow for a successful run on the given SHA."
 
 inputs:
   workflow-file:
-    description: "CI workflow filename (e.g. ci.yml)"
+    description: "CI workflow filename (e.g. ci-verify.yml)"
     required: true
   target-sha:
     description: "Git SHA to check for a successful CI run"

@@ -41,7 +41,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-integration.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-integration.yml/badge.svg?branch=main" alt="Integration Tests"></a>

@@ -109,7 +109,7 @@ coverage floor. The release workflow creates signed images and archives,
 CycloneDX SBOMs, and provenance, then verifies the published artifacts against
 the expected workflow identity.
 
-Evidence: [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
+Evidence: [`.github/workflows/ci-verify.yml`](.github/workflows/ci-verify.yml),
 [`.github/workflows/release.yml`](.github/workflows/release.yml), the public
 [coverage report](https://qlty.sh/gh/CodesWhat/projects/portwing), and
 [`docs/content/docs/verification.mdx`](docs/content/docs/verification.mdx).
