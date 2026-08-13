@@ -61,4 +61,4 @@ go test -run='^$' -fuzz='^FuzzMCPHandler$' -fuzztime=5s ./internal/mcp/
 
 ## CI map
 
-`ci.yml` (lint, test -race, fuzz smoke, build matrix, zizmor, actionlint) on every push/PR · `quality-fuzz-nightly.yml` (5m per fuzzer) · `quality-integration.yml` (real dockerd) · `quality-mutation-monthly.yml` (Gremlins) · `security-vuln-weekly.yml` (govulncheck, grype, gosec) · `security-scorecard.yml` (OpenSSF) · `release-cut.yml` → `release.yml` (GoReleaser + cosign + provenance; see RELEASING.md).
+`ci-verify.yml` (lint, test -race, fuzz smoke, build matrix, zizmor, actionlint) on every push/PR · `quality-fuzz-nightly.yml` (5m per fuzzer) · `quality-integration.yml` (real dockerd) · `quality-mutation-monthly.yml` (Gremlins) · `security-vuln-weekly.yml` (govulncheck, grype, gosec) · `security-scorecard.yml` (OpenSSF) · `release-cut.yml` → `release.yml` (GoReleaser + cosign + provenance; see RELEASING.md).

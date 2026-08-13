@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CI_WORKFLOW_FILE: ci.yml
+  CI_WORKFLOW_FILE: ci-verify.yml
 
 jobs:
   cut:

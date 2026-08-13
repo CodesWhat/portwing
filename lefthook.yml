@@ -10,7 +10,7 @@
 #   6. Go fuzz smoke (5 s per fuzzer, all 5 fuzzers) — tier 0 of the fuzz
 #      strategy. Catches broken fuzz drivers and stale seed corpora before
 #      the push leaves the machine. Real coverage tiers live in
-#      .github/workflows/ci.yml (60 s, every push/PR) and
+#      .github/workflows/ci-verify.yml (60 s, every push/PR) and
 #      quality-fuzz-nightly.yml (5 m, daily).
 #   7. actionlint + zizmor (workflow correctness + security)
 #
@@ -101,7 +101,7 @@ pre-push:
         [ "$workers" -gt 4 ] && workers=4
         # Retry once on the coordinator-starvation flake ("context deadline
         # exceeded" with no failing input) — mirrors the backstop in
-        # ci.yml. Never retry a real crash ("Failing input written").
+        # ci-verify.yml. Never retry a real crash ("Failing input written").
         run_fuzz() {
           fuzzer="$1"; pkg="$2"; attempt=1
           while [ "$attempt" -le 2 ]; do
