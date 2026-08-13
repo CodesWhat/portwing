@@ -510,6 +510,13 @@ jobs:
           # Broadest list in CI: qlty fetches per-language plugin toolchains
           # (Go, Node, Python) and vuln databases at runtime. All observed
           # across 3 audited runs; trimming means a plugin fails closed.
+          #
+          # objects.githubusercontent.com is the older of GitHub's two
+          # release-asset CDNs. release-assets.githubusercontent.com alone
+          # isn't enough: python-build-standalone's assets still redirect to
+          # the objects host, and a blocked redirect surfaces as a truncated
+          # download ("Unexpected EOF") rather than a refused connection, so
+          # it reads as flake. See #94.
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
@@ -524,6 +531,7 @@ jobs:
             go.dev:443
             mirror.gcr.io:443
             nodejs.org:443
+            objects.githubusercontent.com:443
             proxy.golang.org:443
             pypi.org:443
             qlty-releases.s3.amazonaws.com:443
