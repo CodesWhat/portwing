@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   build:
-    name: "🏗️ Build & Test"
+    name: "Build & Test"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # OIDC for the Qlty coverage upload: id-token mints the token, contents is
@@ -125,7 +125,7 @@ jobs:
           }
 
   lint:
-    name: "🧹 Lint"
+    name: "Lint"
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -157,7 +157,7 @@ jobs:
           version: v2.12.2
 
   vuln:
-    name: "🔍 Govulncheck"
+    name: "Govulncheck"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -192,7 +192,7 @@ jobs:
         run: govulncheck ./...
 
   zizmor:
-    name: "🔒 Workflow Security"
+    name: "Workflow Security"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -222,7 +222,7 @@ jobs:
           advanced-security: false
 
   commit-message:
-    name: "💬 Commit Message"
+    name: "Commit Message"
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -249,7 +249,7 @@ jobs:
           bash scripts/validate-commit-range.sh "origin/${BASE_REF}"
 
   goreleaser-check:
-    name: "📦 GoReleaser Config"
+    name: "GoReleaser Config"
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10

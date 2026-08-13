@@ -141,6 +141,34 @@ require_text "website/src/components/get-started.tsx" "apt install ./portwing_" 
 
 require_text ".github/workflows/ci-verify.yml" "bash scripts/package-release-config-test.sh" "CI must enforce the package release contract"
 
+required_ci_contexts=(
+	"Build & Test"
+	"Lint"
+	"Govulncheck"
+	"Workflow Security"
+	"Commit Message"
+	"GoReleaser Config"
+)
+
+for context in "${required_ci_contexts[@]}"; do
+	require_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "required CI context must use the stable plain name ${context}"
+	require_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must require the stable plain context ${context}"
+done
+
+retired_ci_contexts=(
+	"🏗️ Build & Test"
+	"🧹 Lint"
+	"🔍 Govulncheck"
+	"🔒 Workflow Security"
+	"💬 Commit Message"
+	"📦 GoReleaser Config"
+)
+
+for context in "${retired_ci_contexts[@]}"; do
+	reject_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "workflow must not report the retired CI context ${context}"
+	reject_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must not require the retired CI context ${context}"
+done
+
 if [ "$failures" -ne 0 ]; then
 	echo "${failures} package release contract check(s) failed" >&2
 	exit 1
