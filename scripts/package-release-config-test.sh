@@ -103,8 +103,9 @@ require_text "docs/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "d
 require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "website metadata must use the public website"
 require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
 require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
+release_version_regex="${release_version//./\\.}"
 stale_readme_examples="$(grep -Eo '(VERSION=|portwing_)[0-9]+\.[0-9]+\.[0-9]+' README.md |
-	grep -Fv -- "${release_version}" || true)"
+	grep -Ev "^(VERSION=|portwing_)${release_version_regex}$" || true)"
 if [ -n "${stale_readme_examples}" ]; then
 	echo "FAIL: README release commands and asset names must use ${release_version}:" >&2
 	echo "${stale_readme_examples}" >&2

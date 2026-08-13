@@ -290,12 +290,15 @@ jobs:
           args: check
 
       - name: Verify package release contract
-        run: bash scripts/package-release-config-test.sh
+        run: |
+          bash scripts/package-release-config-test-test.sh
+          bash scripts/package-release-config-test.sh
 
       - name: Verify pre-push contract
         run: |
           bash scripts/pre-push-config-test-test.sh
           bash scripts/pre-push-config-test.sh
+          bash scripts/fuzz-tier-config-test-test.sh
           bash scripts/fuzz-tier-config-test.sh
 
       - name: Verify Drydock compatibility script failure handling

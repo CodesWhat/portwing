@@ -8,6 +8,10 @@ fail() {
 	failures=$((failures + 1))
 }
 
+escape_ere() {
+	printf '%s\n' "$1" | sed 's/[][(){}.^$*+?|\\]/\\&/g'
+}
+
 fuzzers=(
 	"FuzzParsePHC|./internal/server/"
 	"FuzzParseTrustedProxies|./internal/server/"
@@ -18,17 +22,29 @@ fuzzers=(
 	"FuzzVerifyRequest|./internal/auth/"
 )
 
+lefthook_fuzz_entries="$(
+	awk '
+		/^[[:space:]]*for entry in \\[[:space:]]*$/ { in_entries = 1 }
+		in_entries { print }
+		in_entries && /;[[:space:]]*do[[:space:]]*$/ { exit }
+	' lefthook.yml
+)"
+
 for spec in "${fuzzers[@]}"; do
 	fuzzer="${spec%%|*}"
 	pkg="${spec#*|}"
+	fuzzer_regex="$(escape_ere "${fuzzer}")"
+	pkg_regex="$(escape_ere "${pkg}")"
+	workflow_mapping="^[[:space:]]*-[[:space:]]*\\{[[:space:]]*name:[[:space:]]*${fuzzer_regex}[[:space:]]*,[[:space:]]*pkg:[[:space:]]*${pkg_regex}[[:space:]]*\\}[[:space:]]*$"
+	lefthook_entry="^[[:space:]]*\"${fuzzer_regex}[[:space:]]+${pkg_regex}\"([[:space:]]+\\\\|;[[:space:]]*do)[[:space:]]*$"
 
-	grep -Eq "name: ${fuzzer},[[:space:]]+pkg: ${pkg}" .github/workflows/ci-verify.yml ||
+	grep -Eq "${workflow_mapping}" .github/workflows/ci-verify.yml ||
 		fail "ci-verify.yml must run ${fuzzer} in ${pkg}"
-	grep -Fq "\"${fuzzer} ${pkg}\"" lefthook.yml ||
+	grep -Eq "${lefthook_entry}" <<<"${lefthook_fuzz_entries}" ||
 		fail "lefthook.yml must run ${fuzzer} in ${pkg}"
-	grep -Eq "name: ${fuzzer},[[:space:]]+pkg: ${pkg}" .github/workflows/quality-fuzz-nightly.yml ||
+	grep -Eq "${workflow_mapping}" .github/workflows/quality-fuzz-nightly.yml ||
 		fail "quality-fuzz-nightly.yml must run ${fuzzer} in ${pkg}"
-	grep -Eq "name: ${fuzzer},[[:space:]]+pkg: ${pkg}" .github/workflows/quality-fuzz-monthly.yml ||
+	grep -Eq "${workflow_mapping}" .github/workflows/quality-fuzz-monthly.yml ||
 		fail "quality-fuzz-monthly.yml must run ${fuzzer} in ${pkg}"
 done
 
