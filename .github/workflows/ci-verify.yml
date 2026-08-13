@@ -153,6 +153,8 @@ jobs:
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9.3.0
+        with:
+          version: v2.12.2
 
   vuln:
     name: "🔍 Govulncheck"
@@ -243,26 +245,8 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          set -euo pipefail
-
-          # Only inspects commits introduced by this PR (base branch..HEAD),
-          # and delegates to the same validator the commit-msg hook runs so
-          # CI and the hook can't drift apart on scope charset or exemptions.
-          failed=0
-          tmp="$(mktemp)"
-          trap 'rm -f "${tmp}"' EXIT
-          while IFS= read -r subject; do
-            printf '%s\n' "${subject}" > "${tmp}"
-            if ! bash scripts/validate-commit-msg.sh "${tmp}" >/dev/null 2>&1; then
-              echo "::error::Non-conventional commit: ${subject}"
-              failed=1
-            fi
-          done < <(git log --format=%s "origin/${BASE_REF}..HEAD")
-
-          if [ "${failed}" -eq 1 ]; then
-            echo "::error::Some commits don't follow Conventional Commits format. Expected: <type>(scope): description — no emoji. See scripts/validate-commit-msg.sh for allowed types."
-            exit 1
-          fi
+          bash scripts/validate-commit-range-test.sh
+          bash scripts/validate-commit-range.sh "origin/${BASE_REF}"
 
   goreleaser-check:
     name: "📦 GoReleaser Config"
