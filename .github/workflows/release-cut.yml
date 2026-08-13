@@ -161,6 +161,33 @@ jobs:
           }
           echo "Validated CHANGELOG entry for ${RELEASE_TAG}."
 
+      # The check above finds the tag's entry anywhere in the file, so cutting a
+      # tag whose notes are buried under newer ones would pass it. That matters
+      # because scripts/package-release-config-test.sh derives the version it
+      # polices from the NEWEST dated heading: if the tag being cut isn't that
+      # heading, the contract is asserting a different release than the one
+      # about to ship, and both gates go green while disagreeing.
+      - name: Require the release tag to be the newest CHANGELOG entry
+        env:
+          RELEASE_TAG: ${{ steps.next.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          # `|| true` matters: with no matching heading grep exits 1, pipefail
+          # propagates it, and set -e kills the step at the assignment — so the
+          # explicit error below, and its ${newest:-none} fallback, would never
+          # run. The bare failure looks like a broken workflow rather than a
+          # missing changelog entry.
+          newest="$(grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md \
+            | sed -n '1p' | sed -E 's/^## \[(v[0-9.]+)\].*/\1/' || true)"
+          if [ "${newest}" != "${RELEASE_TAG}" ]; then
+            echo "::error::Cutting ${RELEASE_TAG} but CHANGELOG's newest dated entry is ${newest:-none}. The package release contract polices ${newest:-none}, so the docs would be verified against a different release than the one being tagged."
+            exit 1
+          fi
+          echo "${RELEASE_TAG} is the newest CHANGELOG entry."
+
+      - name: Verify the package release contract against the tag
+        run: bash scripts/package-release-config-test.sh
+
       - name: Create and push release tag
         env:
           RELEASE_TAG: ${{ steps.next.outputs.release_tag }}
