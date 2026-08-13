@@ -24,6 +24,19 @@ require_file() {
 	fi
 }
 
+require_first_line() {
+	local file="$1"
+	local expected="$2"
+	local description="$3"
+	local actual
+
+	actual="$(sed -n '1p' "$file")"
+	if [ "$actual" != "$expected" ]; then
+		echo "FAIL: ${description} (${file} first line must be: ${expected})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
 reject_text() {
 	local file="$1"
 	local text="$2"
@@ -120,6 +133,14 @@ require_text ".github/workflows/release.yml" 'release.yml@refs/tags/${GITHUB_REF
 reject_text ".github/workflows/release.yml" "certificate-identity-regexp" "release verification must not accept an unanchored signer identity"
 
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
+require_file "NOTICE" "project identity and copyright must live outside the standard license text"
+require_first_line "LICENSE" "                    GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must begin with the canonical AGPL-3.0 text"
+reject_text "LICENSE" "Portwing - Lightweight Remote Docker Agent" "LICENSE must not carry a project-specific preamble"
+reject_text "LICENSE" "Copyright (C) 2026 CodesWhat" "LICENSE must not carry a project-specific copyright preamble"
+if [ -f "NOTICE" ]; then
+	require_text "NOTICE" "Portwing - Lightweight Remote Docker Agent" "NOTICE must preserve the project identity"
+	require_text "NOTICE" "Copyright (C) 2026 CodesWhat" "NOTICE must preserve the project copyright"
+fi
 if [ -f "docs/content/docs/installation.mdx" ]; then
 	require_text "docs/content/docs/installation.mdx" "brew install --cask codeswhat/tap/portwing" "Homebrew installation must be documented"
 	require_text "docs/content/docs/installation.mdx" "apt install" "deb installation must be documented"
