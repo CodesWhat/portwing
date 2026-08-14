@@ -14,6 +14,7 @@
 #      .github/workflows/ci-verify.yml (60 s, every push/PR) and
 #      quality-fuzz-nightly.yml (5 m, daily).
 #   8. actionlint + zizmor (workflow correctness + security)
+#   9. Web analytics contract, lint, and production static build
 #
 # Tools that may not be installed locally (goreleaser, govulncheck,
 # actionlint, zizmor) are skipped when absent — CI still enforces them.
@@ -152,3 +153,8 @@ pre-push:
         - run: '! command -v zizmor >/dev/null 2>&1'
       priority: 8
       timeout: 30s
+
+    web:
+      run: npm run check:web
+      priority: 9
+      timeout: 15m

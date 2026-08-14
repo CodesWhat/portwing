@@ -1,6 +1,6 @@
-import { Analytics } from "@vercel/analytics/next";
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { AnalyticsRuntime } from "@/components/analytics-runtime";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BASE_URL, SITE_CONFIG } from "@/lib/site-config";
 import "./globals.css";
@@ -87,7 +87,7 @@ export default function RootLayout({
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: intentional inline bootstrap — see comment above */}
         <script dangerouslySetInnerHTML={{ __html: REVEAL_BOOTSTRAP }} />
         <ThemeProvider>{children}</ThemeProvider>
-        <Analytics />
+        <AnalyticsRuntime />
       </body>
     </html>
   );
