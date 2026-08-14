@@ -4,6 +4,7 @@ set -euo pipefail
 workflow="${1:-.github/workflows/ci-verify.yml}"
 expected_condition="    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))"
 expected_push_branches='    branches: [main, "dev/**"]'
+expected_category='          category: .github/workflows/ci.yml:codeql'
 
 fail() {
 	echo "FAIL: $1" >&2
@@ -37,6 +38,48 @@ codeql_condition="$({
 })"
 if [ "${codeql_condition}" != "${expected_condition}" ]; then
 	fail "CodeQL job must run for pull requests, schedules, main pushes, and dev/** pushes"
+fi
+
+analyze_step_count="$({
+	awk '
+		$0 == "  codeql:" {
+			in_codeql = 1
+			next
+		}
+		in_codeql && /^  [^[:space:]][[:alnum:]_.-]*:[[:space:]]*$/ {
+			in_codeql = 0
+		}
+		in_codeql && /^        uses: github\/codeql-action\/analyze@/ {
+			count++
+		}
+		END { print count + 0 }
+	' "${workflow}"
+})"
+
+analyze_categories="$({
+	awk '
+		$0 == "  codeql:" {
+			in_codeql = 1
+			next
+		}
+		in_codeql && /^  [^[:space:]][[:alnum:]_.-]*:[[:space:]]*$/ {
+			in_codeql = 0
+			in_analyze = 0
+		}
+		in_codeql && /^      - / {
+			in_analyze = 0
+		}
+		in_codeql && /^        uses: github\/codeql-action\/analyze@/ {
+			in_analyze = 1
+			next
+		}
+		in_analyze && /^          category:/ {
+			print
+		}
+	' "${workflow}"
+})"
+if [ "${analyze_step_count}" -ne 1 ] || [ "${analyze_categories}" != "${expected_category}" ]; then
+	fail "CodeQL analyze step must set exactly one stable category"
 fi
 
 push_branches="$({
