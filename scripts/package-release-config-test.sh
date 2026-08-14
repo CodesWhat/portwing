@@ -80,7 +80,7 @@ fi
 
 builder_ref=""
 for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
-	current_ref="$(grep -E '^FROM golang:' "${dockerfile}" | sed -n '1p')"
+	current_ref="$(grep -E '^FROM golang:' "${dockerfile}" | sed -n '1p' || true)"
 	if ! grep -Eq "^FROM golang:${toolchain_version//./\\.}-alpine@sha256:[0-9a-f]{64}([[:space:]]+AS[[:space:]]+builder)?$" <<<"${current_ref}"; then
 		echo "FAIL: ${dockerfile} must use the exact go.mod toolchain in a digest-pinned Alpine builder" >&2
 		failures=$((failures + 1))

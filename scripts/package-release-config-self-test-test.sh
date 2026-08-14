@@ -20,7 +20,8 @@ new_fixture() {
 
 missing_heading_fixture="$(new_fixture)"
 unrelated_failure_fixture="$(new_fixture)"
-trap 'rm -rf "${missing_heading_fixture}" "${unrelated_failure_fixture}"' EXIT
+missing_builder_fixture="$(new_fixture)"
+trap 'rm -rf "${missing_heading_fixture}" "${unrelated_failure_fixture}" "${missing_builder_fixture}"' EXIT
 
 sed -E 's/^## \[v([0-9]+\.[0-9]+\.[0-9]+)\] - ([0-9]{4}-[0-9]{2}-[0-9]{2})$/## [v\1] (\2)/' \
 	"${missing_heading_fixture}/CHANGELOG.md" >"${missing_heading_fixture}/CHANGELOG.md.tmp"
@@ -42,6 +43,21 @@ printf '%s\n' '#!/usr/bin/env bash' 'exit 42' >"${unrelated_failure_fixture}/scr
 
 if (cd "${unrelated_failure_fixture}" && bash scripts/package-release-config-test-test.sh >/dev/null 2>&1); then
 	echo "FAIL: an unrelated validator error must not satisfy the prefix-version self-test" >&2
+	failures=$((failures + 1))
+fi
+
+sed '/^FROM golang:/d' "${missing_builder_fixture}/Dockerfile" >"${missing_builder_fixture}/Dockerfile.tmp"
+mv "${missing_builder_fixture}/Dockerfile.tmp" "${missing_builder_fixture}/Dockerfile"
+
+set +e
+missing_builder_output="$(
+	cd "${missing_builder_fixture}" && bash scripts/package-release-config-test.sh 2>&1
+)"
+missing_builder_status=$?
+set -e
+if [ "${missing_builder_status}" -eq 0 ] ||
+	! grep -Fq "FAIL: Dockerfile must use the exact go.mod toolchain in a digest-pinned Alpine builder" <<<"${missing_builder_output}"; then
+	echo "FAIL: the validator must report a missing Go builder" >&2
 	failures=$((failures + 1))
 fi
 

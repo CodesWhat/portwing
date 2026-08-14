@@ -38,7 +38,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             o4506826106929152.ingest.us.sentry.io:443
             proxy.golang.org:443
             qlty-releases.s3.amazonaws.com:443
@@ -136,7 +138,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             proxy.golang.org:443
             raw.githubusercontent.com:443
             release-assets.githubusercontent.com:443
@@ -169,7 +173,9 @@ jobs:
           # outside the repo's go.sum, so GOSUMDB verification goes online.
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
             sum.golang.org:443
@@ -261,7 +267,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             goreleaser.com:443
             release-assets.githubusercontent.com:443
 
@@ -294,6 +302,7 @@ jobs:
           bash scripts/package-release-config-self-test-test.sh
           bash scripts/package-release-config-test-test.sh
           bash scripts/package-release-config-test.sh
+          bash scripts/setup-go-egress-config-test.sh
 
       - name: Verify pre-push contract
         run: |
@@ -324,7 +333,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
             uploads.github.com:443
@@ -413,7 +424,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
 
