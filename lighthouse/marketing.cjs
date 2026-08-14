@@ -1,5 +1,7 @@
 module.exports = {
   site: "marketing",
+  outputRoot: "website/out",
+  mountPath: "/",
   url: "http://127.0.0.1:{PORT}/",
   numberOfRuns: 5,
   baseline: {

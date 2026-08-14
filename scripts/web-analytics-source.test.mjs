@@ -32,6 +32,10 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
   for (const app of ["website", "docs"]) {
     assert.match(read(`${app}/src/instrumentation-client.ts`), /initializeAnalytics/);
     assert.match(read(`${app}/src/app/layout.tsx`), /<AnalyticsRuntime\s*\/>/);
+    const runtime = read(`${app}/src/components/analytics-runtime.tsx`);
+    assert.match(runtime, /useRef\(pathname\)/);
+    assert.match(runtime, /useCallback/);
+    assert.match(runtime, /captureWebVital\(pathnameRef\.current,/);
   }
 });
 

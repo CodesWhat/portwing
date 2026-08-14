@@ -14,6 +14,15 @@ for (const site of ["marketing", "docs"]) {
   });
 }
 
+test("each Lighthouse budget serves its own build output", async () => {
+  const marketing = (await import("../lighthouse/marketing.cjs")).default;
+  const docs = (await import("../lighthouse/docs.cjs")).default;
+  assert.equal(marketing.outputRoot, "website/out");
+  assert.equal(marketing.mountPath, "/");
+  assert.equal(docs.outputRoot, "docs/out");
+  assert.equal(docs.mountPath, "/docs");
+});
+
 test("marketing Lighthouse budget admits the recorded GitHub runner baseline", async () => {
   const config = (await import("../lighthouse/marketing.cjs")).default;
   const githubRunnerBaseline = {

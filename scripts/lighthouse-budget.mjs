@@ -41,8 +41,9 @@ export function verifyLighthouseRuns(config, runs) {
   return result;
 }
 
-function serveStatic(outputRoot) {
+function serveStatic(outputRoot, mountPath) {
   const rootPrefix = `${path.resolve(outputRoot)}${path.sep}`;
+  const mountPrefix = mountPath === "/" ? "" : mountPath;
   const server = http.createServer((request, response) => {
     let pathname;
     try {
@@ -51,7 +52,12 @@ function serveStatic(outputRoot) {
       response.writeHead(400).end("bad request");
       return;
     }
-    let file = path.resolve(outputRoot, `.${pathname}`);
+    if (mountPrefix && pathname !== mountPrefix && !pathname.startsWith(`${mountPrefix}/`)) {
+      response.writeHead(404).end("not found");
+      return;
+    }
+    const outputPathname = mountPrefix ? pathname.slice(mountPrefix.length) || "/" : pathname;
+    let file = path.resolve(outputRoot, `.${outputPathname}`);
     if (file !== path.resolve(outputRoot) && !file.startsWith(rootPrefix)) {
       response.writeHead(403).end("forbidden");
       return;
@@ -103,10 +109,20 @@ function metrics(lhr) {
 
 async function run(configPath) {
   const config = (await import(pathToFileURL(path.resolve(configPath)).href)).default;
-  const outputRoot = path.join(ROOT, "website", "out");
+  if (typeof config.outputRoot !== "string" || config.outputRoot.length === 0) {
+    throw new Error(`Lighthouse output root is missing for ${config.site ?? configPath}`);
+  }
+  if (
+    typeof config.mountPath !== "string" ||
+    !config.mountPath.startsWith("/") ||
+    (config.mountPath !== "/" && config.mountPath.endsWith("/"))
+  ) {
+    throw new Error(`Lighthouse mount path is invalid for ${config.site ?? configPath}`);
+  }
+  const outputRoot = path.resolve(ROOT, config.outputRoot);
   if (!fs.existsSync(outputRoot))
-    throw new Error("website/out is missing; run npm run build first");
-  const server = await serveStatic(outputRoot);
+    throw new Error(`${config.outputRoot} is missing; run npm run build first`);
+  const server = await serveStatic(outputRoot, config.mountPath);
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("static server has no TCP port");
   const chrome = await launch({ chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"] });

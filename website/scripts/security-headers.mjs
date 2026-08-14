@@ -43,7 +43,7 @@ export function headersForHTML(html) {
   const imageOrigins = externalImageOrigins(html);
   const csp = [
     "default-src 'self'",
-    `script-src 'self' ${POSTHOG_PROXY_ORIGIN} ${scriptHashes.join(" ")}`.trim(),
+    `script-src 'self' ${scriptHashes.join(" ")}`.trim(),
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: ${imageOrigins.join(" ")}`.trim(),
     "font-src 'self' data:",
