@@ -6,7 +6,7 @@ failures=0
 new_fixture() {
 	local fixture
 
-	fixture="$(mktemp -d)"
+	fixture="$(mktemp -d "${fixture_root}/fixture.XXXXXX")"
 	git archive HEAD | tar -x -C "${fixture}"
 	cp scripts/package-release-config-test-test.sh "${fixture}/scripts/"
 	cp scripts/package-release-config-test.sh "${fixture}/scripts/"
@@ -18,10 +18,15 @@ new_fixture() {
 	printf '%s\n' "${fixture}"
 }
 
+fixture_root="$(mktemp -d)"
+missing_heading_fixture=''
+unrelated_failure_fixture=''
+missing_builder_fixture=''
+trap 'rm -rf "${fixture_root}" "${missing_heading_fixture}" "${unrelated_failure_fixture}" "${missing_builder_fixture}"' EXIT
+
 missing_heading_fixture="$(new_fixture)"
 unrelated_failure_fixture="$(new_fixture)"
 missing_builder_fixture="$(new_fixture)"
-trap 'rm -rf "${missing_heading_fixture}" "${unrelated_failure_fixture}" "${missing_builder_fixture}"' EXIT
 
 sed -E 's/^## \[v([0-9]+\.[0-9]+\.[0-9]+)\] - ([0-9]{4}-[0-9]{2}-[0-9]{2})$/## [v\1] (\2)/' \
 	"${missing_heading_fixture}/CHANGELOG.md" >"${missing_heading_fixture}/CHANGELOG.md.tmp"

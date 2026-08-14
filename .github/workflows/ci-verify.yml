@@ -300,8 +300,10 @@ jobs:
       - name: Verify package release contract
         run: |
           bash scripts/package-release-config-self-test-test.sh
+          bash scripts/package-release-config-self-test-cleanup-test.sh
           bash scripts/package-release-config-test-test.sh
           bash scripts/package-release-config-test.sh
+          bash scripts/setup-go-egress-config-test-test.sh
           bash scripts/setup-go-egress-config-test.sh
 
       - name: Verify pre-push contract

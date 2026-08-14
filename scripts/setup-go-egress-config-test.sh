@@ -5,9 +5,13 @@ failures=0
 setup_count=0
 
 while IFS= read -r workflow; do
-	while IFS='|' read -r line has_go_dev has_dl_google; do
+	while IFS='|' read -r line has_block_policy has_go_dev has_dl_google; do
 		[ -n "${line}" ] || continue
 		setup_count=$((setup_count + 1))
+		if [ "${has_block_policy}" -ne 1 ]; then
+			echo "FAIL: ${workflow}:${line} Setup Go job must use egress-policy: block" >&2
+			failures=$((failures + 1))
+		fi
 		if [ "${has_go_dev}" -ne 1 ]; then
 			echo "FAIL: ${workflow}:${line} Setup Go job must allow go.dev:443" >&2
 			failures=$((failures + 1))
@@ -18,16 +22,25 @@ while IFS= read -r workflow; do
 		fi
 	done < <(
 		awk '
-			/- name: Harden Runner/ {
-				harden = "\n"
-				found_harden = 1
+			/^  [[:alnum:]_.-]+:[[:space:]]*$/ {
+				capture_harden = 0
+				harden = ""
 			}
-			found_harden { harden = harden $0 "\n" }
+			/^[[:space:]]+- name: Harden Runner[[:space:]]*$/ {
+				capture_harden = 1
+				harden = "\n" $0 "\n"
+				next
+			}
+			capture_harden && /^[[:space:]]+- (name|uses):/ {
+				capture_harden = 0
+			}
+			capture_harden { harden = harden $0 "\n" }
 			/uses: actions\/setup-go@/ {
+				has_block_policy = harden ~ /\n[[:space:]]+egress-policy:[[:space:]]+block[[:space:]]*\n/
 				has_go_dev = harden ~ /\n[[:space:]]+go[.]dev:443[[:space:]]*\n/
 				has_dl_google = harden ~ /\n[[:space:]]+dl[.]google[.]com:443[[:space:]]*\n/
-				printf "%d|%d|%d\n", NR, has_go_dev, has_dl_google
-				found_harden = 0
+				printf "%d|%d|%d|%d\n", NR, has_block_policy, has_go_dev, has_dl_google
+				capture_harden = 0
 				harden = ""
 			}
 		' "${workflow}"
