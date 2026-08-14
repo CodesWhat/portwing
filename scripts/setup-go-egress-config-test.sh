@@ -32,7 +32,13 @@ while IFS= read -r workflow; do
 			}
 		' "${workflow}"
 	)
-done < <(rg -l 'uses: actions/setup-go@' .github/workflows | sort)
+done < <(
+	grep -rl \
+		--include='*.yml' \
+		--include='*.yaml' \
+		'uses: actions/setup-go@' \
+		.github/workflows | sort
+)
 
 if [ "${setup_count}" -eq 0 ]; then
 	echo "FAIL: no actions/setup-go steps found" >&2
