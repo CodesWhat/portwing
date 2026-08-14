@@ -5,6 +5,8 @@ export const POSTHOG_UI_HOST = "https://us.posthog.com";
 
 const SCHEMA_VERSION = 1;
 const SITE = "portwing";
+const PROJECT_TOKEN_PATTERN = /^phc_[A-Za-z0-9_-]+$/u;
+const COOKIELESS_DISTINCT_ID = "$posthog_cookieless";
 
 const MARKETING_PATHS = new Set([
   "/",
@@ -56,9 +58,8 @@ export type CtaPlacement =
   | "get_started"
   | "footer"
   | "star_history";
-export type WebVitalName = "CLS" | "FCP" | "INP" | "LCP";
 
-type EventProperties = Record<string, boolean | number | string>;
+type EventProperties = Record<string, unknown>;
 
 export type AnalyticsEvent = {
   event: "$pageview" | "$web_vitals" | "cta activated";
@@ -69,24 +70,35 @@ export type PostHogOptions = {
   api_host: typeof POSTHOG_PROXY_HOST;
   ui_host: typeof POSTHOG_UI_HOST;
   autocapture: false;
+  rageclick: false;
   capture_pageview: false;
   capture_pageleave: false;
+  capture_heatmaps: false;
   capture_dead_clicks: false;
   capture_exceptions: false;
-  enable_heatmaps: false;
   disable_session_recording: true;
   disable_surveys: true;
-  disable_external_dependency_loading: true;
+  disable_surveys_automatic_display: true;
+  disable_product_tours: true;
+  disable_web_experiments: true;
   advanced_disable_flags: true;
-  advanced_disable_feature_flags: true;
-  advanced_disable_feature_flags_on_first_load: true;
-  capture_performance: false;
   cookieless_mode: "always";
   person_profiles: "never";
   persistence: "memory";
+  disable_persistence: true;
   respect_dnt: true;
   save_campaign_params: false;
   save_referrer: false;
+  disable_capture_url_hashes: true;
+  disable_scroll_properties: true;
+  mask_all_element_attributes: true;
+  mask_all_text: true;
+  capture_performance: {
+    network_timing: false;
+    web_vitals: true;
+    web_vitals_allowed_metrics: ["CLS", "FCP", "INP", "LCP"];
+    web_vitals_attribution: false;
+  };
   before_send: BeforeSendFn;
 };
 
@@ -107,7 +119,12 @@ const CTA_COMBINATIONS = new Set<string>([
   "community_discord:footer",
 ]);
 
-const WEB_VITALS = new Set<WebVitalName>(["CLS", "FCP", "INP", "LCP"]);
+const WEB_VITAL_KEYS = [
+  "$web_vitals_CLS_value",
+  "$web_vitals_FCP_value",
+  "$web_vitals_INP_value",
+  "$web_vitals_LCP_value",
+] as const;
 
 function normalizedPath(rawPath: string): string {
   const withoutQuery = rawPath.split(/[?#]/u, 1)[0] || "/";
@@ -156,30 +173,24 @@ export function buildCtaEvent(
   };
 }
 
-export function buildWebVitalsEvent(
-  rawPath: string,
-  metricName: WebVitalName,
-  metricValue: number,
-): AnalyticsEvent | null {
-  if (!WEB_VITALS.has(metricName) || !Number.isFinite(metricValue)) return null;
-  return {
-    event: "$web_vitals",
-    properties: {
-      ...baseProperties(rawPath),
-      metric_name: metricName,
-      metric_value: metricValue,
-    },
-  };
+function rawPathFromProperties(properties: EventProperties): string | undefined {
+  if (typeof properties.path === "string") return properties.path;
+  if (typeof properties.$current_url !== "string") return undefined;
+  try {
+    return new URL(properties.$current_url).pathname;
+  } catch {
+    return undefined;
+  }
 }
 
 export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
   if (!envelope || typeof envelope.event !== "string" || !envelope.properties) return null;
-  const rawPath = envelope.properties.path;
+  const rawPath = rawPathFromProperties(envelope.properties);
   const token = envelope.properties.token;
   if (
     typeof rawPath !== "string" ||
     typeof token !== "string" ||
-    !token.startsWith("phc_") ||
+    !PROJECT_TOKEN_PATTERN.test(token) ||
     envelope.properties.$cookieless_mode !== true ||
     envelope.properties.$process_person_profile !== false
   ) {
@@ -195,10 +206,17 @@ export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
     if (typeof ctaId !== "string" || typeof placement !== "string") return null;
     sanitized = buildCtaEvent(rawPath, ctaId as CtaId, placement as CtaPlacement);
   } else if (envelope.event === "$web_vitals") {
-    const metricName = envelope.properties.metric_name;
-    const metricValue = envelope.properties.metric_value;
-    if (typeof metricName !== "string" || typeof metricValue !== "number") return null;
-    sanitized = buildWebVitalsEvent(rawPath, metricName as WebVitalName, metricValue);
+    const properties: EventProperties = baseProperties(rawPath);
+    let metricCount = 0;
+    for (const key of WEB_VITAL_KEYS) {
+      const value = envelope.properties[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        properties[key] = value;
+        metricCount += 1;
+      }
+    }
+    if (metricCount === 0) return null;
+    sanitized = { event: "$web_vitals", properties };
   } else {
     return null;
   }
@@ -214,7 +232,12 @@ export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
     },
     uuid: envelope.uuid,
   };
-  if (envelope.timestamp instanceof Date) output.timestamp = envelope.timestamp;
+  if (envelope.properties.distinct_id === COOKIELESS_DISTINCT_ID) {
+    output.properties.distinct_id = COOKIELESS_DISTINCT_ID;
+  }
+  if (envelope.timestamp instanceof Date && Number.isFinite(envelope.timestamp.getTime())) {
+    output.timestamp = envelope.timestamp;
+  }
   return output;
 };
 
@@ -224,7 +247,8 @@ export function createPostHogOptions(
   uiHost: string | undefined,
 ): PostHogOptions | null {
   if (
-    !projectToken?.startsWith("phc_") ||
+    !projectToken ||
+    !PROJECT_TOKEN_PATTERN.test(projectToken) ||
     proxyHost !== POSTHOG_PROXY_HOST ||
     uiHost !== POSTHOG_UI_HOST
   ) {
@@ -234,24 +258,35 @@ export function createPostHogOptions(
     api_host: POSTHOG_PROXY_HOST,
     ui_host: POSTHOG_UI_HOST,
     autocapture: false,
+    rageclick: false,
     capture_pageview: false,
     capture_pageleave: false,
+    capture_heatmaps: false,
     capture_dead_clicks: false,
     capture_exceptions: false,
-    enable_heatmaps: false,
     disable_session_recording: true,
     disable_surveys: true,
-    disable_external_dependency_loading: true,
+    disable_surveys_automatic_display: true,
+    disable_product_tours: true,
+    disable_web_experiments: true,
     advanced_disable_flags: true,
-    advanced_disable_feature_flags: true,
-    advanced_disable_feature_flags_on_first_load: true,
-    capture_performance: false,
     cookieless_mode: "always",
     person_profiles: "never",
     persistence: "memory",
+    disable_persistence: true,
     respect_dnt: true,
     save_campaign_params: false,
     save_referrer: false,
+    disable_capture_url_hashes: true,
+    disable_scroll_properties: true,
+    mask_all_element_attributes: true,
+    mask_all_text: true,
+    capture_performance: {
+      network_timing: false,
+      web_vitals: true,
+      web_vitals_allowed_metrics: ["CLS", "FCP", "INP", "LCP"],
+      web_vitals_attribution: false,
+    },
     before_send: sanitizeEvent,
   };
 }

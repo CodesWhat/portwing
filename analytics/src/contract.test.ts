@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   buildCtaEvent,
   buildPageviewEvent,
-  buildWebVitalsEvent,
   createPostHogOptions,
   POSTHOG_PROXY_HOST,
   POSTHOG_UI_HOST,
@@ -76,22 +75,6 @@ test("CTA events accept only real Portwing component combinations", () => {
   assert.equal(buildCtaEvent("/", "install_secure", "header"), null);
   assert.equal(buildCtaEvent("/", "free-form" as never, "hero"), null);
   assert.equal(buildCtaEvent("/", "docs_root", "free-form" as never), null);
-});
-
-test("web vitals emit only finite Core Web Vitals", () => {
-  assert.deepEqual(buildWebVitalsEvent("/compare/portainer", "INP", 81.25), {
-    event: "$web_vitals",
-    properties: {
-      ...BASE_PROPERTIES,
-      surface: "marketing",
-      path: "/compare/portainer",
-      metric_name: "INP",
-      metric_value: 81.25,
-    },
-  });
-  assert.equal(buildWebVitalsEvent("/", "TTFB" as never, 4), null);
-  assert.equal(buildWebVitalsEvent("/", "LCP", Number.NaN), null);
-  assert.equal(buildWebVitalsEvent("/", "CLS", Number.POSITIVE_INFINITY), null);
 });
 
 test("before_send reconstructs a strict event and property allowlist", () => {
@@ -178,6 +161,65 @@ test("before_send reconstructs a strict event and property allowlist", () => {
   }
 });
 
+test("before_send keeps one buffered Core Web Vitals envelope", () => {
+  const timestamp = new Date("2026-08-14T00:00:00Z");
+  assert.deepEqual(
+    sanitizeEvent({
+      event: "$web_vitals",
+      uuid: "internal-posthog-id",
+      timestamp,
+      properties: {
+        $current_url: "https://portwing.codeswhat.com/docs?secret=1#private",
+        token: "phc_project-token",
+        distinct_id: "$posthog_cookieless",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+        $web_vitals_CLS_value: 0.01,
+        $web_vitals_FCP_value: 123.4,
+        $web_vitals_INP_value: -1,
+        $web_vitals_LCP_value: 456.7,
+        $web_vitals_TTFB_value: 8,
+        $web_vitals_LCP_event: { navigationEntry: "private" },
+        metric_name: "INP",
+        metric_value: 81.25,
+      },
+    }),
+    {
+      event: "$web_vitals",
+      uuid: "internal-posthog-id",
+      timestamp,
+      properties: {
+        ...BASE_PROPERTIES,
+        surface: "docs",
+        path: "/docs",
+        token: "phc_project-token",
+        distinct_id: "$posthog_cookieless",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+        $web_vitals_CLS_value: 0.01,
+        $web_vitals_FCP_value: 123.4,
+        $web_vitals_LCP_value: 456.7,
+      },
+    },
+  );
+  assert.equal(
+    sanitizeEvent({
+      event: "$web_vitals",
+      properties: {
+        path: "/",
+        token: "phc_project-token",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+        $web_vitals_INP_value: Number.NaN,
+        $web_vitals_LCP_value: -1,
+        metric_name: "LCP",
+        metric_value: 123,
+      },
+    }),
+    null,
+  );
+});
+
 test("PostHog initializes only with the exact production proxy contract", () => {
   assert.equal(createPostHogOptions(undefined, undefined, undefined), null);
   assert.equal(createPostHogOptions("phc_project", POSTHOG_PROXY_HOST, undefined), null);
@@ -198,26 +240,38 @@ test("PostHog initializes only with the exact production proxy contract", () => 
       api_host: "https://e.codeswhat.com",
       ui_host: "https://us.posthog.com",
       autocapture: false,
+      rageclick: false,
       capture_pageview: false,
       capture_pageleave: false,
+      capture_heatmaps: false,
       capture_dead_clicks: false,
       capture_exceptions: false,
-      enable_heatmaps: false,
       disable_session_recording: true,
       disable_surveys: true,
-      disable_external_dependency_loading: true,
+      disable_surveys_automatic_display: true,
+      disable_product_tours: true,
+      disable_web_experiments: true,
       advanced_disable_flags: true,
-      advanced_disable_feature_flags: true,
-      advanced_disable_feature_flags_on_first_load: true,
-      capture_performance: false,
       cookieless_mode: "always",
       person_profiles: "never",
       persistence: "memory",
+      disable_persistence: true,
       respect_dnt: true,
       save_campaign_params: false,
       save_referrer: false,
+      disable_capture_url_hashes: true,
+      disable_scroll_properties: true,
+      mask_all_element_attributes: true,
+      mask_all_text: true,
+      capture_performance: {
+        network_timing: false,
+        web_vitals: true,
+        web_vitals_allowed_metrics: ["CLS", "FCP", "INP", "LCP"],
+        web_vitals_attribution: false,
+      },
       before_send: undefined,
     },
   );
+  assert.equal("disable_external_dependency_loading" in options, false);
   assert.equal(options.before_send, sanitizeEvent);
 });

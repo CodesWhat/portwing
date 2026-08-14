@@ -1,13 +1,11 @@
-import posthog from "posthog-js/dist/module.slim.no-external";
+import posthog from "posthog-js/dist/module.slim";
 
 import {
   buildCtaEvent,
   buildPageviewEvent,
-  buildWebVitalsEvent,
   type CtaId,
   type CtaPlacement,
   createPostHogOptions,
-  type WebVitalName,
 } from "./contract";
 
 let initialized = false;
@@ -37,8 +35,4 @@ export function captureCta(path: string, ctaId: CtaId, placement: CtaPlacement):
   capture(buildCtaEvent(path, ctaId, placement));
 }
 
-export function captureWebVital(path: string, metricName: WebVitalName, metricValue: number): void {
-  capture(buildWebVitalsEvent(path, metricName, metricValue));
-}
-
-export type { CtaId, CtaPlacement, WebVitalName } from "./contract";
+export type { CtaId, CtaPlacement } from "./contract";

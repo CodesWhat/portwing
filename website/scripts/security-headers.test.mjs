@@ -13,7 +13,7 @@ test("CSP hashes inline scripts and ignores external scripts", () => {
   assert.match(csp, /script-src[^;]*'sha256-bhHHL3z2vDgxUt0W3dWQOrprscmda2Y5pLsLg4GF\+pI='/);
   assert.doesNotMatch(csp.match(/script-src[^;]+/)?.[0] ?? "", /unsafe-inline/);
   assert.match(csp, /frame-ancestors 'none'/);
-  assert.doesNotMatch(csp, /script-src[^;]*https:\/\/e\.codeswhat\.com/);
+  assert.match(csp, /script-src[^;]*https:\/\/e\.codeswhat\.com/);
   assert.match(csp, /connect-src 'self' https:\/\/e\.codeswhat\.com/);
   assert.doesNotMatch(csp, /us\.i\.posthog\.com|us\.posthog\.com|\*\.posthog\.com/);
 });
