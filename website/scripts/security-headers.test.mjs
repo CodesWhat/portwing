@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -35,6 +36,24 @@ test("CSP permits only image origins present in the rendered page", () => {
   const csp = headers.find((header) => header.key === "Content-Security-Policy")?.value;
   assert.match(csp ?? "", /img-src 'self' data: https:\/\/pkg\.go\.dev/);
   assert.doesNotMatch(csp ?? "", /unrelated\.example/);
+});
+
+test("website source and runtime CSP contain no Go Report Card surface", () => {
+  const source = fs.readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "src",
+      "components",
+      "github-badges.tsx",
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /goreportcard\.com|Go Report Card/i);
+
+  const headers = headersForHTML('<img src="https://pkg.go.dev/badge.svg">');
+  const csp = headers.find((header) => header.key === "Content-Security-Policy")?.value;
+  assert.doesNotMatch(csp ?? "", /goreportcard\.com/i);
 });
 
 test("build output packages the exact rendered files and per-page CSP", () => {
