@@ -65,15 +65,24 @@ analyze_categories="$({
 		in_codeql && /^  [^[:space:]][[:alnum:]_.-]*:[[:space:]]*$/ {
 			in_codeql = 0
 			in_analyze = 0
+			in_with = 0
 		}
 		in_codeql && /^      - / {
 			in_analyze = 0
+			in_with = 0
 		}
 		in_codeql && /^        uses: github\/codeql-action\/analyze@/ {
 			in_analyze = 1
 			next
 		}
-		in_analyze && /^          category:/ {
+		in_analyze && $0 == "        with:" {
+			in_with = 1
+			next
+		}
+		in_analyze && /^        [^[:space:]]/ {
+			in_with = 0
+		}
+		in_with && /^          category:/ {
 			print
 		}
 	' "${workflow}"

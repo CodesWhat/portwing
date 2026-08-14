@@ -11,6 +11,7 @@ write_fixture() {
 	local condition="$1"
 	local push_branches="$2"
 	local category_lines="${3-          category: .github/workflows/ci.yml:codeql}"
+	local category_map="${4-with}"
 
 	cat >"${test_root}/workflow.yml" <<EOF
 name: Contract fixture
@@ -28,7 +29,7 @@ ${condition}
     steps:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3
-        with:
+        ${category_map}:
 ${category_lines}
 EOF
 }
@@ -132,6 +133,15 @@ write_fixture \
 assert_rejected \
 	"CodeQL analyze step must set exactly one stable category" \
 	"CodeQL contract must reject duplicate analyze categories"
+
+write_fixture \
+	"${valid_condition}" \
+	"${valid_push_branches}" \
+	"          category: .github/workflows/ci.yml:codeql" \
+	"env"
+assert_rejected \
+	"CodeQL analyze step must set exactly one stable category" \
+	"CodeQL contract must reject a stable category outside the analyze with map"
 
 cat >>"${test_root}/workflow.yml" <<EOF
   codeql:
