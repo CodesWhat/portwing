@@ -10,6 +10,8 @@ cp scripts/codeql-trigger-config-test.sh "${test_root}/scripts/"
 write_fixture() {
 	local condition="$1"
 	local push_branches="$2"
+	local category_lines="${3-          category: .github/workflows/ci.yml:codeql}"
+	local category_map="${4-with}"
 
 	cat >"${test_root}/workflow.yml" <<EOF
 name: Contract fixture
@@ -24,6 +26,11 @@ jobs:
   codeql:
 ${condition}
     runs-on: ubuntu-latest
+    steps:
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3
+        ${category_map}:
+${category_lines}
 EOF
 }
 
@@ -105,6 +112,36 @@ write_fixture "${valid_condition}" '    branches: [main]'
 assert_rejected \
 	"push trigger must include main and dev/**" \
 	"CodeQL contract must reject a workflow that never emits dev push runs"
+
+write_fixture "${valid_condition}" "${valid_push_branches}" ""
+assert_rejected \
+	"CodeQL analyze step must set exactly one stable category" \
+	"CodeQL contract must reject a missing analyze category"
+
+write_fixture \
+	"${valid_condition}" \
+	"${valid_push_branches}" \
+	"          category: .github/workflows/ci-verify.yml:codeql"
+assert_rejected \
+	"CodeQL analyze step must set exactly one stable category" \
+	"CodeQL contract must reject the renamed workflow's implicit category"
+
+write_fixture \
+	"${valid_condition}" \
+	"${valid_push_branches}" \
+	$'          category: .github/workflows/ci.yml:codeql\n          category: .github/workflows/ci.yml:codeql'
+assert_rejected \
+	"CodeQL analyze step must set exactly one stable category" \
+	"CodeQL contract must reject duplicate analyze categories"
+
+write_fixture \
+	"${valid_condition}" \
+	"${valid_push_branches}" \
+	"          category: .github/workflows/ci.yml:codeql" \
+	"env"
+assert_rejected \
+	"CodeQL analyze step must set exactly one stable category" \
+	"CodeQL contract must reject a stable category outside the analyze with map"
 
 cat >>"${test_root}/workflow.yml" <<EOF
   codeql:
