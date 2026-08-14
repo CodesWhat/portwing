@@ -65,4 +65,63 @@ if [ "${push_branches}" != "${expected_push_branches}" ]; then
 	fail "push trigger must include main and dev/**"
 fi
 
+pull_request_branches="$({
+	awk '
+		$0 == "on:" {
+			in_on = 1
+			next
+		}
+		in_on && $0 == "  pull_request:" {
+			in_pull_request = 1
+			next
+		}
+		in_on && /^jobs:[[:space:]]*$/ {
+			in_on = 0
+			in_pull_request = 0
+		}
+		in_pull_request && /^  [^[:space:]]/ {
+			in_pull_request = 0
+		}
+		in_pull_request && /^    branches:/ {
+			print
+		}
+	' "${workflow}"
+})"
+if [ "${pull_request_branches}" != "${expected_push_branches}" ]; then
+	fail "pull_request trigger must include main and dev/**"
+fi
+
+schedule_entry_count="$({
+	awk '
+		$0 == "on:" {
+			in_on = 1
+			next
+		}
+		in_on && $0 == "  schedule:" {
+			in_schedule = 1
+			next
+		}
+		in_on && /^jobs:[[:space:]]*$/ {
+			in_on = 0
+			in_schedule = 0
+		}
+		in_schedule && /^  [^[:space:]]/ {
+			in_schedule = 0
+		}
+		in_schedule && /^[[:space:]]+- cron:/ {
+			value = $0
+			sub(/^[[:space:]]+- cron:[[:space:]]*/, "", value)
+			sub(/[[:space:]]+#.*/, "", value)
+			gsub(/[[:space:]\047\042]/, "", value)
+			if (length(value) > 0) {
+				count++
+			}
+		}
+		END { print count + 0 }
+	' "${workflow}"
+})"
+if [ "${schedule_entry_count}" -eq 0 ]; then
+	fail "schedule trigger must include at least one cron entry"
+fi
+
 echo "CodeQL trigger contract checks passed."

@@ -46,11 +46,40 @@ assert_rejected() {
 	fi
 }
 
+remove_trigger_block() {
+	local start_line="$1"
+	local next_line="$2"
+
+	awk -v start_line="${start_line}" -v next_line="${next_line}" '
+		$0 == start_line {
+			skipping = 1
+			next
+		}
+		$0 == next_line {
+			skipping = 0
+		}
+		!skipping { print }
+	' "${test_root}/workflow.yml" >"${test_root}/workflow.tmp"
+	mv "${test_root}/workflow.tmp" "${test_root}/workflow.yml"
+}
+
 valid_condition="    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))"
 valid_push_branches='    branches: [main, "dev/**"]'
 
 write_fixture "${valid_condition}" "${valid_push_branches}"
 (cd "${test_root}" && bash scripts/codeql-trigger-config-test.sh workflow.yml >/dev/null)
+
+write_fixture "${valid_condition}" "${valid_push_branches}"
+remove_trigger_block "  pull_request:" "  schedule:"
+assert_rejected \
+	"pull_request trigger must include main and dev/**" \
+	"CodeQL contract must reject a missing pull request trigger"
+
+write_fixture "${valid_condition}" "${valid_push_branches}"
+remove_trigger_block "  schedule:" "jobs:"
+assert_rejected \
+	"schedule trigger must include at least one cron entry" \
+	"CodeQL contract must reject a missing schedule trigger"
 
 write_fixture "${valid_condition/dev\//feature\/}" "${valid_push_branches}"
 assert_rejected \
