@@ -42,6 +42,12 @@ if [ "${self_test_status}" -eq 0 ]; then
 	exit 1
 fi
 
+mktemp_count="$(cat "${test_root}/mktemp-count")"
+if [ "${mktemp_count}" -ne 2 ]; then
+	echo "FAIL: fixture creation must stop at the injected second mktemp failure (got ${mktemp_count} calls)" >&2
+	exit 1
+fi
+
 if find "${generated_fixtures}" -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .; then
 	echo "FAIL: package release self-test must clean earlier fixtures after setup failure" >&2
 	exit 1
