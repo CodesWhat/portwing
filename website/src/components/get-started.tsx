@@ -1,9 +1,12 @@
 "use client";
 
+import { type CtaId, captureCta } from "@codeswhat/public-analytics";
 import { PackageOpen, ShieldCheck, Terminal, TriangleAlert, Zap } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { DockerRunSnippet } from "@/components/docker-run-snippet";
 import { SectionHeading } from "@/components/section-heading";
+import { TrackedLink } from "@/components/tracked-link";
 import { YamlBlock } from "@/components/yaml-block";
 import { SITE_CONFIG } from "@/lib/site-config";
 
@@ -14,6 +17,12 @@ const TABS: { id: Tab; label: string; icon: typeof Zap }[] = [
   { id: "secure", label: "Secure", icon: ShieldCheck },
   { id: "native", label: "Native", icon: PackageOpen },
 ];
+
+const INSTALL_CTA: Record<Tab, CtaId> = {
+  quick: "install_quick",
+  secure: "install_secure",
+  native: "install_native",
+};
 
 // Hardened standard-mode compose from docs/getting-started.mdx.
 // Runs read_only, drops all caps, and delivers the token as a
@@ -52,6 +61,12 @@ volumes:
 
 export function GetStarted() {
   const [tab, setTab] = useState<Tab>("quick");
+  const pathname = usePathname();
+
+  const selectTab = (nextTab: Tab) => {
+    setTab(nextTab);
+    captureCta(pathname, INSTALL_CTA[nextTab], "get_started");
+  };
 
   return (
     <section className="border-t border-border/60 px-4 py-16">
@@ -73,16 +88,16 @@ export function GetStarted() {
               const currentIndex = TABS.findIndex((t) => t.id === tab);
               if (e.key === "ArrowRight") {
                 e.preventDefault();
-                setTab(TABS[(currentIndex + 1) % TABS.length].id);
+                selectTab(TABS[(currentIndex + 1) % TABS.length].id);
               } else if (e.key === "ArrowLeft") {
                 e.preventDefault();
-                setTab(TABS[(currentIndex - 1 + TABS.length) % TABS.length].id);
+                selectTab(TABS[(currentIndex - 1 + TABS.length) % TABS.length].id);
               } else if (e.key === "Home") {
                 e.preventDefault();
-                setTab(TABS[0].id);
+                selectTab(TABS[0].id);
               } else if (e.key === "End") {
                 e.preventDefault();
-                setTab(TABS[TABS.length - 1].id);
+                selectTab(TABS[TABS.length - 1].id);
               }
             }}
           >
@@ -97,7 +112,7 @@ export function GetStarted() {
                   aria-selected={active}
                   aria-controls="get-started-panel"
                   tabIndex={active ? 0 : -1}
-                  onClick={() => setTab(id)}
+                  onClick={() => selectTab(id)}
                   className={[
                     "flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors",
                     active
@@ -158,23 +173,27 @@ sudo rpm --install ./portwing_0.9.4_linux_amd64.rpm`}</code>
               <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
                 <ShieldCheck className="h-4 w-4 shrink-0 text-violet-500" />
                 Token delivered as a Docker secret — never in env vars or inspect output.{" "}
-                <a
+                <TrackedLink
                   href="/docs/getting-started"
+                  ctaId="docs_getting_started"
+                  placement="get_started"
                   className="font-medium text-neutral-900 underline-offset-4 hover:underline dark:text-neutral-100"
                 >
                   Full getting-started docs →
-                </a>
+                </TrackedLink>
               </p>
             ) : (
               <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
                 <ShieldCheck className="h-4 w-4 shrink-0 text-violet-500" />
                 Stable packages are checksummed, keyless-signed, and install-tested.{" "}
-                <a
+                <TrackedLink
                   href="/docs/installation"
+                  ctaId="docs_installation"
+                  placement="get_started"
                   className="font-medium text-neutral-900 underline-offset-4 hover:underline dark:text-neutral-100"
                 >
                   Install and verify →
-                </a>
+                </TrackedLink>
               </p>
             )}
           </div>

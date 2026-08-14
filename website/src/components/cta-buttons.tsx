@@ -1,5 +1,6 @@
 import { BookOpen } from "lucide-react";
 import { GithubIcon } from "@/components/github-icon";
+import { TrackedLink } from "@/components/tracked-link";
 import { Button } from "@/components/ui/button";
 import { GITHUB_URL } from "@/lib/site-config";
 
@@ -8,16 +9,22 @@ export function CtaButtons({ align = "center" }: { align?: "center" | "start" } 
   return (
     <div className={`grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:gap-4 ${justifyClass}`}>
       <Button size="lg" className="w-full sm:w-auto" asChild>
-        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+        <TrackedLink
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          ctaId="github_repository"
+          placement="hero"
+        >
           <GithubIcon className="h-4 w-4" />
           View on GitHub
-        </a>
+        </TrackedLink>
       </Button>
       <Button variant="outline" size="lg" className="w-full sm:w-auto" asChild>
-        <a href="/docs">
+        <TrackedLink href="/docs" ctaId="docs_root" placement="hero">
           <BookOpen className="h-4 w-4" />
           Read the docs
-        </a>
+        </TrackedLink>
       </Button>
     </div>
   );

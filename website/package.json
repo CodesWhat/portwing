@@ -13,9 +13,9 @@
     "test:headers": "node --test scripts/security-headers.test.mjs"
   },
   "dependencies": {
+    "@codeswhat/public-analytics": "*",
     "@radix-ui/react-slot": "^1.2.4",
     "@tailwindcss/postcss": "^4.3.3",
-    "@vercel/analytics": "^2.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.17.0",

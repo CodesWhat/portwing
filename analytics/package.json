@@ -1,0 +1,13 @@
+{
+  "name": "@codeswhat/public-analytics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/client.ts",
+    "./contract": "./src/contract.ts"
+  },
+  "dependencies": {
+    "posthog-js": "1.417.0"
+  }
+}
