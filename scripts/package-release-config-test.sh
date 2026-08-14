@@ -71,6 +71,28 @@ require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebre
 public_site="https://portwing.codeswhat.com"
 protected_site="https://getportwing-codeswhat.vercel.app"
 
+toolchain_version="$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2 }' go.mod)"
+if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"${toolchain_version}"; then
+	echo "FAIL: go.mod must pin an exact Go toolchain patch version" >&2
+	failures=$((failures + 1))
+	toolchain_version="unresolved"
+fi
+
+builder_ref=""
+for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
+	current_ref="$(grep -E '^FROM golang:' "${dockerfile}" | sed -n '1p' || true)"
+	if ! grep -Eq "^FROM golang:${toolchain_version//./\\.}-alpine@sha256:[0-9a-f]{64}([[:space:]]+AS[[:space:]]+builder)?$" <<<"${current_ref}"; then
+		echo "FAIL: ${dockerfile} must use the exact go.mod toolchain in a digest-pinned Alpine builder" >&2
+		failures=$((failures + 1))
+	fi
+	if [ -z "${builder_ref}" ]; then
+		builder_ref="${current_ref%% AS builder}"
+	elif [ "${current_ref%% AS builder}" != "${builder_ref}" ]; then
+		echo "FAIL: all from-source Dockerfiles must use the same Go builder reference" >&2
+		failures=$((failures + 1))
+	fi
+done
+
 # release_version, release_date, and previous_version come from CHANGELOG.md
 # rather than being hand-set here. A hand-set constant can only ever agree
 # with the docs it was written to expect, not with the version actually
@@ -103,6 +125,14 @@ require_text "docs/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "d
 require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "website metadata must use the public website"
 require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
 require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
+release_version_regex="${release_version//./\\.}"
+stale_readme_examples="$(grep -Eo '(VERSION=|portwing_)[0-9]+\.[0-9]+\.[0-9]+' README.md |
+	grep -Ev "^(VERSION=|portwing_)${release_version_regex}$" || true)"
+if [ -n "${stale_readme_examples}" ]; then
+	echo "FAIL: README release commands and asset names must use ${release_version}:" >&2
+	echo "${stale_readme_examples}" >&2
+	failures=$((failures + 1))
+fi
 require_text "website/src/lib/site-config.ts" "version: \"${release_version}\"" "website metadata must identify the current release"
 require_text "website/src/components/get-started.tsx" "portwing_${release_version}_linux_amd64.deb" "website package examples must use the current release"
 require_text "docs/content/docs/installation.mdx" "VERSION=${release_version}" "installation examples must use the current release"
