@@ -6,15 +6,15 @@ failures=0
 new_fixture() {
 	local fixture
 
-	fixture="$(mktemp -d "${fixture_root}/fixture.XXXXXX")"
-	git archive HEAD | tar -x -C "${fixture}"
-	cp scripts/package-release-config-test-test.sh "${fixture}/scripts/"
-	cp scripts/package-release-config-test.sh "${fixture}/scripts/"
-	git -C "${fixture}" init -q
-	git -C "${fixture}" config user.email "contract-test@codeswhat.com"
-	git -C "${fixture}" config user.name "Contract Test"
-	git -C "${fixture}" add .
-	git -C "${fixture}" commit -qm "test fixture"
+	fixture="$(mktemp -d "${fixture_root}/fixture.XXXXXX")" || return
+	git archive HEAD | tar -x -C "${fixture}" || return
+	cp scripts/package-release-config-test-test.sh "${fixture}/scripts/" || return
+	cp scripts/package-release-config-test.sh "${fixture}/scripts/" || return
+	git -C "${fixture}" init -q || return
+	git -C "${fixture}" config user.email "contract-test@codeswhat.com" || return
+	git -C "${fixture}" config user.name "Contract Test" || return
+	git -C "${fixture}" add . || return
+	git -C "${fixture}" commit -qm "test fixture" || return
 	printf '%s\n' "${fixture}"
 }
 
