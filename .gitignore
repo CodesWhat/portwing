@@ -33,6 +33,9 @@ Thumbs.db
 # Local agent worktrees
 .claude/
 
+# Local planning docs
+.planning/
+
 # Playwright MCP session artifacts
 .playwright-mcp/
 

@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   build:
-    name: "🏗️ Build & Test"
+    name: "Build & Test"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # OIDC for the Qlty coverage upload: id-token mints the token, contents is
@@ -38,7 +38,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             o4506826106929152.ingest.us.sentry.io:443
             proxy.golang.org:443
             qlty-releases.s3.amazonaws.com:443
@@ -125,7 +127,7 @@ jobs:
           }
 
   lint:
-    name: "🧹 Lint"
+    name: "Lint"
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -136,7 +138,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             proxy.golang.org:443
             raw.githubusercontent.com:443
             release-assets.githubusercontent.com:443
@@ -153,9 +157,11 @@ jobs:
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9.3.0
+        with:
+          version: v2.12.2
 
   vuln:
-    name: "🔍 Govulncheck"
+    name: "Govulncheck"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -167,7 +173,9 @@ jobs:
           # outside the repo's go.sum, so GOSUMDB verification goes online.
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
             sum.golang.org:443
@@ -190,7 +198,7 @@ jobs:
         run: govulncheck ./...
 
   zizmor:
-    name: "🔒 Workflow Security"
+    name: "Workflow Security"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -220,7 +228,7 @@ jobs:
           advanced-security: false
 
   commit-message:
-    name: "💬 Commit Message"
+    name: "Commit Message"
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -243,29 +251,11 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          set -euo pipefail
-
-          # Only inspects commits introduced by this PR (base branch..HEAD),
-          # and delegates to the same validator the commit-msg hook runs so
-          # CI and the hook can't drift apart on scope charset or exemptions.
-          failed=0
-          tmp="$(mktemp)"
-          trap 'rm -f "${tmp}"' EXIT
-          while IFS= read -r subject; do
-            printf '%s\n' "${subject}" > "${tmp}"
-            if ! bash scripts/validate-commit-msg.sh "${tmp}" >/dev/null 2>&1; then
-              echo "::error::Non-conventional commit: ${subject}"
-              failed=1
-            fi
-          done < <(git log --format=%s "origin/${BASE_REF}..HEAD")
-
-          if [ "${failed}" -eq 1 ]; then
-            echo "::error::Some commits don't follow Conventional Commits format. Expected: <type>(scope): description — no emoji. See scripts/validate-commit-msg.sh for allowed types."
-            exit 1
-          fi
+          bash scripts/validate-commit-range-test.sh
+          bash scripts/validate-commit-range.sh "origin/${BASE_REF}"
 
   goreleaser-check:
-    name: "📦 GoReleaser Config"
+    name: "GoReleaser Config"
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -277,7 +267,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             goreleaser.com:443
             release-assets.githubusercontent.com:443
 
@@ -306,7 +298,22 @@ jobs:
           args: check
 
       - name: Verify package release contract
-        run: bash scripts/package-release-config-test.sh
+        run: |
+          bash scripts/package-release-config-self-test-test.sh
+          bash scripts/package-release-config-self-test-cleanup-test.sh
+          bash scripts/package-release-config-test-test.sh
+          bash scripts/package-release-config-test.sh
+          bash scripts/setup-go-egress-config-test-test.sh
+          bash scripts/setup-go-egress-config-test.sh
+
+      - name: Verify pre-push contract
+        run: |
+          bash scripts/pre-push-config-test-test.sh
+          bash scripts/pre-push-config-test.sh
+          bash scripts/fuzz-tier-config-test-test.sh
+          bash scripts/fuzz-tier-config-test.sh
+          bash scripts/codeql-trigger-config-test-test.sh
+          bash scripts/codeql-trigger-config-test.sh
 
       - name: Verify Drydock compatibility script failure handling
         run: bash scripts/drydock-compat-script-test.sh
@@ -315,7 +322,7 @@ jobs:
     name: "🔍 CodeQL Analysis"
     # CodeQL SARIF upload requires GitHub Advanced Security (GHAS), which is not
     # available on free private repos. Skip unless the repo is public.
-    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -330,7 +337,9 @@ jobs:
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
             uploads.github.com:443
@@ -356,6 +365,9 @@ jobs:
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        with:
+          # Keep the default-branch SARIF identity stable across workflow renames.
+          category: .github/workflows/ci.yml:codeql
 
   dependency-review:
     name: "📦 Dependency Review"
@@ -408,17 +420,20 @@ jobs:
           - { name: FuzzParseLabels,         pkg: ./internal/adapter/drydock/ }
           - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
           - { name: FuzzEnvelope,           pkg: ./internal/protocol/ }
+          - { name: FuzzVerifyRequest,      pkg: ./internal/auth/ }
 
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
         with:
-          # One allowlist shared by all 6 matrix variants (harden-runner config
+          # One allowlist shared by all 7 matrix variants (harden-runner config
           # is per-step, not per-matrix-value).
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             github.com:443
+            go.dev:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
 
@@ -510,6 +525,13 @@ jobs:
           # Broadest list in CI: qlty fetches per-language plugin toolchains
           # (Go, Node, Python) and vuln databases at runtime. All observed
           # across 3 audited runs; trimming means a plugin fails closed.
+          #
+          # objects.githubusercontent.com is the older of GitHub's two
+          # release-asset CDNs. release-assets.githubusercontent.com alone
+          # isn't enough: python-build-standalone's assets still redirect to
+          # the objects host, and a blocked redirect surfaces as a truncated
+          # download ("Unexpected EOF") rather than a refused connection, so
+          # it reads as flake. See #94.
           egress-policy: block
           allowed-endpoints: >
             api.github.com:443
@@ -524,6 +546,7 @@ jobs:
             go.dev:443
             mirror.gcr.io:443
             nodejs.org:443
+            objects.githubusercontent.com:443
             proxy.golang.org:443
             pypi.org:443
             qlty-releases.s3.amazonaws.com:443

@@ -54,12 +54,12 @@ RULESET="$(
       "parameters": {
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          { "context": "🏗️ Build & Test",    "integration_id": 15368 },
-          { "context": "🧹 Lint",             "integration_id": 15368 },
-          { "context": "🔍 Govulncheck",      "integration_id": 15368 },
-          { "context": "🔒 Workflow Security", "integration_id": 15368 },
-          { "context": "💬 Commit Message",   "integration_id": 15368 },
-          { "context": "📦 GoReleaser Config", "integration_id": 15368 }
+          { "context": "Build & Test",      "integration_id": 15368 },
+          { "context": "Lint",              "integration_id": 15368 },
+          { "context": "Govulncheck",       "integration_id": 15368 },
+          { "context": "Workflow Security", "integration_id": 15368 },
+          { "context": "Commit Message",    "integration_id": 15368 },
+          { "context": "GoReleaser Config", "integration_id": 15368 }
         ]
       }
     },

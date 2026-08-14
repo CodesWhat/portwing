@@ -24,6 +24,32 @@ require_file() {
 	fi
 }
 
+require_first_line() {
+	local file="$1"
+	local expected="$2"
+	local description="$3"
+	local actual
+
+	actual="$(sed -n '1p' "$file")"
+	if [ "$actual" != "$expected" ]; then
+		echo "FAIL: ${description} (${file} first line must be: ${expected})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_sha256() {
+	local file="$1"
+	local expected="$2"
+	local description="$3"
+	local actual
+
+	actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+	if [ "$actual" != "$expected" ]; then
+		echo "FAIL: ${description} (${file} SHA-256 must be ${expected}, got ${actual})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
 reject_text() {
 	local file="$1"
 	local text="$2"
@@ -44,17 +70,69 @@ require_text ".goreleaser.yml" "skip_upload: auto" "prereleases must not update 
 require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebrew publishing must use the dedicated tap token"
 public_site="https://portwing.codeswhat.com"
 protected_site="https://getportwing-codeswhat.vercel.app"
-release_version="0.9.2"
-release_date="2026-08-04"
-previous_version="0.9.1"
+
+toolchain_version="$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2 }' go.mod)"
+if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"${toolchain_version}"; then
+	echo "FAIL: go.mod must pin an exact Go toolchain patch version" >&2
+	failures=$((failures + 1))
+	toolchain_version="unresolved"
+fi
+
+builder_ref=""
+for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
+	current_ref="$(grep -E '^FROM golang:' "${dockerfile}" | sed -n '1p' || true)"
+	if ! grep -Eq "^FROM golang:${toolchain_version//./\\.}-alpine@sha256:[0-9a-f]{64}([[:space:]]+AS[[:space:]]+builder)?$" <<<"${current_ref}"; then
+		echo "FAIL: ${dockerfile} must use the exact go.mod toolchain in a digest-pinned Alpine builder" >&2
+		failures=$((failures + 1))
+	fi
+	if [ -z "${builder_ref}" ]; then
+		builder_ref="${current_ref%% AS builder}"
+	elif [ "${current_ref%% AS builder}" != "${builder_ref}" ]; then
+		echo "FAIL: all from-source Dockerfiles must use the same Go builder reference" >&2
+		failures=$((failures + 1))
+	fi
+done
+
+# release_version, release_date, and previous_version come from CHANGELOG.md
+# rather than being hand-set here. A hand-set constant can only ever agree
+# with the docs it was written to expect, not with the version actually
+# being released — that's exactly how this contract sat pinned at v0.9.2
+# through two release cuts and stayed green while the docs it exists to
+# police went stale. CHANGELOG.md's newest dated "## [vX.Y.Z] - YYYY-MM-DD"
+# heading is the same value release-cut.yml already requires to exist
+# before it will push a tag ("Validate CHANGELOG entry for release tag"),
+# so sourcing it from there too leaves no separate constant to forget.
+changelog_heading_regex='^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$'
+release_heading="$(grep -E "${changelog_heading_regex}" CHANGELOG.md | sed -n '1p' || true)"
+previous_heading="$(grep -E "${changelog_heading_regex}" CHANGELOG.md | sed -n '2p' || true)"
+release_version="$(printf '%s\n' "${release_heading}" | sed -E 's/^## \[v([0-9.]+)\].*/\1/')"
+release_date="$(printf '%s\n' "${release_heading}" | sed -E 's/.*- ([0-9-]+)$/\1/')"
+previous_version="$(printf '%s\n' "${previous_heading}" | sed -E 's/^## \[v([0-9.]+)\].*/\1/')"
+
+if ! echo "${release_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' ||
+	! echo "${release_date}" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' ||
+	! echo "${previous_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+	echo "FAIL: could not derive release_version, release_date, and previous_version from CHANGELOG.md's two newest dated '## [vX.Y.Z] - YYYY-MM-DD' headings" >&2
+	failures=$((failures + 1))
+	release_version="unresolved"
+	release_date="unresolved"
+	previous_version="unresolved"
+fi
 
 require_text ".goreleaser.yml" "${public_site}/" "published package metadata must use the public website"
 require_text "README.md" "${public_site}/docs/installation" "the repository landing page must link the public package guide"
 require_text "docs/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "documentation metadata must use the public website"
 require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "website metadata must use the public website"
 require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
-require_text "CHANGELOG.md" "## [v${release_version}] - ${release_date}" "the patch release must be documented"
 require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
+release_version_regex="${release_version//./\\.}"
+stale_readme_examples="$(grep -Eo '(VERSION=|portwing_)[0-9]+\.[0-9]+\.[0-9]+' README.md |
+	grep -Ev "^(VERSION=|portwing_)${release_version_regex}$" || true)"
+if [ -n "${stale_readme_examples}" ]; then
+	echo "FAIL: README release commands and asset names must use ${release_version}:" >&2
+	echo "${stale_readme_examples}" >&2
+	failures=$((failures + 1))
+fi
 require_text "website/src/lib/site-config.ts" "version: \"${release_version}\"" "website metadata must identify the current release"
 require_text "website/src/components/get-started.tsx" "portwing_${release_version}_linux_amd64.deb" "website package examples must use the current release"
 require_text "docs/content/docs/installation.mdx" "VERSION=${release_version}" "installation examples must use the current release"
@@ -98,6 +176,15 @@ require_text ".github/workflows/release.yml" 'release.yml@refs/tags/${GITHUB_REF
 reject_text ".github/workflows/release.yml" "certificate-identity-regexp" "release verification must not accept an unanchored signer identity"
 
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
+require_file "NOTICE" "project identity and copyright must live outside the standard license text"
+require_first_line "LICENSE" "                    GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must begin with the canonical AGPL-3.0 text"
+require_sha256 "LICENSE" "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef" "LICENSE must match GitHub's canonical AGPL-3.0 template byte for byte"
+reject_text "LICENSE" "Portwing - Lightweight Remote Docker Agent" "LICENSE must not carry a project-specific preamble"
+reject_text "LICENSE" "Copyright (C) 2026 CodesWhat" "LICENSE must not carry a project-specific copyright preamble"
+if [ -f "NOTICE" ]; then
+	require_text "NOTICE" "Portwing - Lightweight Remote Docker Agent" "NOTICE must preserve the project identity"
+	require_text "NOTICE" "Copyright (C) 2026 CodesWhat" "NOTICE must preserve the project copyright"
+fi
 if [ -f "docs/content/docs/installation.mdx" ]; then
 	require_text "docs/content/docs/installation.mdx" "brew install --cask codeswhat/tap/portwing" "Homebrew installation must be documented"
 	require_text "docs/content/docs/installation.mdx" "apt install" "deb installation must be documented"
@@ -117,7 +204,35 @@ require_text "RELEASING.md" "verify-native-packages" "maintainer release docs mu
 require_text "website/src/components/get-started.tsx" "codeswhat/tap/portwing" "the website must advertise the Homebrew cask"
 require_text "website/src/components/get-started.tsx" "apt install ./portwing_" "the website must advertise the deb package"
 
-require_text ".github/workflows/ci.yml" "bash scripts/package-release-config-test.sh" "CI must enforce the package release contract"
+require_text ".github/workflows/ci-verify.yml" "bash scripts/package-release-config-test.sh" "CI must enforce the package release contract"
+
+required_ci_contexts=(
+	"Build & Test"
+	"Lint"
+	"Govulncheck"
+	"Workflow Security"
+	"Commit Message"
+	"GoReleaser Config"
+)
+
+for context in "${required_ci_contexts[@]}"; do
+	require_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "required CI context must use the stable plain name ${context}"
+	require_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must require the stable plain context ${context}"
+done
+
+retired_ci_contexts=(
+	"🏗️ Build & Test"
+	"🧹 Lint"
+	"🔍 Govulncheck"
+	"🔒 Workflow Security"
+	"💬 Commit Message"
+	"📦 GoReleaser Config"
+)
+
+for context in "${retired_ci_contexts[@]}"; do
+	reject_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "workflow must not report the retired CI context ${context}"
+	reject_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must not require the retired CI context ${context}"
+done
 
 if [ "$failures" -ne 0 ]; then
 	echo "${failures} package release contract check(s) failed" >&2

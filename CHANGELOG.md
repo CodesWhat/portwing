@@ -274,7 +274,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- **`FuzzEnvelope` added to every fuzz tier.** The wire-envelope fuzzer (`internal/protocol`), which exercises the `portwing/1.0` parser on the untrusted edge-WebSocket input path, existed but was wired into none of the coverage tiers. It now runs in the `ci.yml` smoke tier, the nightly and monthly deep-fuzz matrices, and the lefthook pre-push hook, and is listed in the CONTRIBUTING local-fuzz instructions.
+- **`FuzzEnvelope` added to every fuzz tier.** The wire-envelope fuzzer (`internal/protocol`), which exercises the `portwing/1.0` parser on the untrusted edge-WebSocket input path, existed but was wired into none of the coverage tiers. It now runs in the `ci-verify.yml` smoke tier, the nightly and monthly deep-fuzz matrices, and the lefthook pre-push hook, and is listed in the CONTRIBUTING local-fuzz instructions.
 
 ## [0.6.0] - 2026-07-10
 

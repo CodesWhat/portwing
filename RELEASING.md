@@ -43,7 +43,7 @@
 
 6. **No source version bump needed** — the binary's version is injected at build time via GoReleaser ldflags (`-X github.com/codeswhat/portwing/internal/protocol.AgentVersion={{.Version}}`). `AgentVersion` in `internal/protocol/version.go` must stay a `var`: `-X` silently does nothing to a `const`.
 
-7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → goreleaser snapshot → lint → test (-race) → govulncheck → fuzz smoke → zizmor. The push is blocked if any step fails.
+7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → goreleaser snapshot → lint → Qlty → test (-race) → govulncheck → fuzz smoke → actionlint → zizmor. The push is blocked if any step fails.
 
 ---
 
@@ -53,7 +53,7 @@
 
 Go to **Actions → 🏷️ Release: Cut** → **Run workflow** on `main`. The workflow:
 
-- Polls until `ci.yml` has a successful run on HEAD
+- Polls until `ci-verify.yml` has a successful run on HEAD
 - Computes the next semver from Conventional Commit history (`feat` = minor, anything else = patch, `!` in the commit subject = major; a `BREAKING CHANGE` footer alone does not trigger a major bump today). Tolerates a legacy leading emoji from pre-migration history, so old commits still compute correctly.
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
