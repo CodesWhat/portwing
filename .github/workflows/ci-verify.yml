@@ -312,6 +312,8 @@ jobs:
           bash scripts/pre-push-config-test.sh
           bash scripts/fuzz-tier-config-test-test.sh
           bash scripts/fuzz-tier-config-test.sh
+          bash scripts/codeql-trigger-config-test-test.sh
+          bash scripts/codeql-trigger-config-test.sh
 
       - name: Verify Drydock compatibility script failure handling
         run: bash scripts/drydock-compat-script-test.sh
@@ -320,7 +322,7 @@ jobs:
     name: "🔍 CodeQL Analysis"
     # CodeQL SARIF upload requires GitHub Advanced Security (GHAS), which is not
     # available on free private repos. Skip unless the repo is public.
-    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
