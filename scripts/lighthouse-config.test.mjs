@@ -25,3 +25,14 @@ test("marketing Lighthouse budget admits the recorded GitHub runner baseline", a
     verifyLighthouseRuns(config, Array(config.numberOfRuns).fill(githubRunnerBaseline)),
   );
 });
+
+test("docs Lighthouse budget admits the recorded GitHub runner performance", async () => {
+  const config = (await import("../lighthouse/docs.cjs")).default;
+  const githubRunnerBaseline = {
+    ...config.baseline,
+    performance: 0.67,
+  };
+  assert.doesNotThrow(() =>
+    verifyLighthouseRuns(config, Array(config.numberOfRuns).fill(githubRunnerBaseline)),
+  );
+});
