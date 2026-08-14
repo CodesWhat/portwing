@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { GithubIcon } from "@/components/github-icon";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { TrackedLink } from "@/components/tracked-link";
 import { iconButtonCn, navLinkCn } from "@/lib/class-names";
 import { GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 
@@ -26,18 +27,25 @@ export function SiteHeader() {
           </span>
         </a>
         <nav className="flex items-center gap-1 sm:gap-2">
-          <a href="/docs" className={`hidden px-3 py-2 sm:inline-block ${navLinkCn}`}>
+          <TrackedLink
+            href="/docs"
+            ctaId="docs_root"
+            placement="header"
+            className={`hidden px-3 py-2 sm:inline-block ${navLinkCn}`}
+          >
             Docs
-          </a>
-          <a
+          </TrackedLink>
+          <TrackedLink
             href={GITHUB_URL}
             target="_blank"
             rel="noopener noreferrer"
             aria-label="GitHub"
             className={iconButtonCn}
+            ctaId="github_repository"
+            placement="header"
           >
             <GithubIcon className="h-5 w-5" />
-          </a>
+          </TrackedLink>
           <ThemeToggle />
         </nav>
       </div>

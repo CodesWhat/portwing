@@ -8,6 +8,7 @@ const withMDX = createMDX();
 // `basePath: "/docs"` prefixes every internal link and asset URL so navigation
 // keeps working once the website serves the export at portwing.codeswhat.com/docs/...
 export default withMDX({
+  transpilePackages: ["@codeswhat/public-analytics"],
   output: "export",
   // Keep the exported inline bootstrap deterministic for the website's
   // route-specific CSP hash generation. Static assets remain content-hashed.

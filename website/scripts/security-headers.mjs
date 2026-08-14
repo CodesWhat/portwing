@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT_FILE = fileURLToPath(import.meta.url);
 const PROJECT_DIR = path.resolve(path.dirname(SCRIPT_FILE), "..");
+const POSTHOG_PROXY_ORIGIN = "https://e.codeswhat.com";
 
 const COMMON_HEADERS = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -42,11 +43,11 @@ export function headersForHTML(html) {
   const imageOrigins = externalImageOrigins(html);
   const csp = [
     "default-src 'self'",
-    `script-src 'self' ${scriptHashes.join(" ")}`.trim(),
+    `script-src 'self' ${scriptHashes.join(" ")} ${POSTHOG_PROXY_ORIGIN}`.trim(),
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: ${imageOrigins.join(" ")}`.trim(),
     "font-src 'self' data:",
-    "connect-src 'self'",
+    `connect-src 'self' ${POSTHOG_PROXY_ORIGIN}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -99,9 +100,7 @@ export function buildOutputConfig(outputDir) {
   for (const file of htmlFiles(outputDir)) {
     const relative = outputRelativePath(outputDir, file);
     const publicRoute = routeForOutputPath(relative);
-    const csp = headerMap(headersForHTML(fs.readFileSync(file, "utf8")))[
-      "Content-Security-Policy"
-    ];
+    const csp = headerMap(headersForHTML(fs.readFileSync(file, "utf8")))["Content-Security-Policy"];
     const suffix = publicRoute === "/" ? "" : "/?";
     routes.push({
       src: `^${escapeRoute(publicRoute)}${suffix}$`,

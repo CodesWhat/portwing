@@ -49,6 +49,7 @@ node_modules/
 out/
 .turbo/
 .vercel/
+.lighthouseci/
 *.tsbuildinfo
 next-env.d.ts
 .source/
