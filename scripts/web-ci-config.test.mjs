@@ -6,6 +6,7 @@ import test from "node:test";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const workflow = fs.readFileSync(path.join(ROOT, ".github/workflows/ci-verify.yml"), "utf8");
 const lefthook = fs.readFileSync(path.join(ROOT, "lefthook.yml"), "utf8");
+const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
 test("CI has one fail-closed root web lane", () => {
   assert.equal((workflow.match(/^ {2}web:\s*$/gm) ?? []).length, 1);
@@ -18,4 +19,7 @@ test("CI has one fail-closed root web lane", () => {
 test("pre-push mirrors the root web lane", () => {
   assert.equal((lefthook.match(/^ {4}web:\s*$/gm) ?? []).length, 1);
   assert.match(lefthook, /run: npm run check:web/);
+  assert.equal(fs.readFileSync(path.join(ROOT, ".node-version"), "utf8").trim(), "24");
+  assert.match(packageJson.scripts["check:web"], /^node scripts\/node-version-contract\.mjs && /);
+  assert.equal(packageJson.engines.node, ">=24.0.0");
 });

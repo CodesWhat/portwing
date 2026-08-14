@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { measurePage, verifyPageBudgets } from "./page-weight-budget.mjs";
+import {
+  measurePage,
+  verifyPageBudgets,
+  verifyProductionPageBudgets,
+} from "./page-weight-budget.mjs";
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-page-weight-"));
@@ -67,6 +71,26 @@ test("page measurement ignores local navigation links", () => {
   }
 });
 
+test("page measurement resolves root-relative assets below the configured mount", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-mounted-page-weight-"));
+  try {
+    fs.mkdirSync(path.join(root, "assets"), { recursive: true });
+    const html = '<script src="/docs/assets/app.js"></script>';
+    fs.writeFileSync(path.join(root, "index.html"), html);
+    fs.writeFileSync(path.join(root, "assets", "app.js"), "12345");
+    assert.deepEqual(measurePage(root, "index.html", "/docs"), {
+      totalBytes: html.length + 5,
+      scriptBytes: 5,
+      assetCount: 2,
+    });
+
+    fs.writeFileSync(path.join(root, "index.html"), '<script src="/other/app.js"></script>');
+    assert.throws(() => measurePage(root, "index.html", "/docs"), /missing local asset/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("page budgets fail closed for missing routes and oversized scripts", () => {
   const root = fixture();
   try {
@@ -77,6 +101,29 @@ test("page budgets fail closed for missing routes and oversized scripts", () => 
     assert.throws(
       () => verifyPageBudgets(root, [{ route: "index.html", totalBytes: 1_000, scriptBytes: 4 }]),
       /script budget exceeded/,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("production budgets measure each site's own output root", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-production-page-weight-"));
+  try {
+    const marketing = path.join(root, "website", "out");
+    const docs = path.join(root, "docs", "out");
+    fs.mkdirSync(marketing, { recursive: true });
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(marketing, "index.html"), "marketing");
+    fs.writeFileSync(path.join(docs, "index.html"), "docs");
+
+    const results = verifyProductionPageBudgets(root);
+    assert.deepEqual(
+      results.map(({ site, route, totalBytes }) => ({ site, route, totalBytes })),
+      [
+        { site: "marketing", route: "index.html", totalBytes: 9 },
+        { site: "docs", route: "index.html", totalBytes: 4 },
+      ],
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

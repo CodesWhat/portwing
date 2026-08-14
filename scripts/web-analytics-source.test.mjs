@@ -133,4 +133,5 @@ test("the finite CTA source map covers actual tracked component calls", () => {
   }
 
   assert.doesNotMatch(trackedSources.join("\n"), /docs_security/);
+  assert.doesNotMatch(contract, /docs_security/);
 });

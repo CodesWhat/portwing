@@ -45,7 +45,6 @@ export type CtaId =
   | "install_secure"
   | "install_native"
   | "docs_root"
-  | "docs_security"
   | "docs_getting_started"
   | "docs_installation"
   | "github_org"

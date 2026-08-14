@@ -10,7 +10,7 @@ test("CSP hashes inline scripts and ignores external scripts", () => {
   const headers = headersForHTML('<script>alert(1)</script><script src="/_next/app.js"></script>');
   const csp = headers.find((header) => header.key === "Content-Security-Policy")?.value;
   assert.ok(csp);
-  assert.match(csp, /script-src[^;]*'sha256-bhHHL3z2vDgxUt0W3dWQOrprscmda2Y5pLsLg4GF\+pI='/);
+  assert.match(csp, /script-src 'self'[^;]*'sha256-bhHHL3z2vDgxUt0W3dWQOrprscmda2Y5pLsLg4GF\+pI='/);
   assert.doesNotMatch(csp.match(/script-src[^;]+/)?.[0] ?? "", /unsafe-inline/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /script-src[^;]*https:\/\/e\.codeswhat\.com/);
