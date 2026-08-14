@@ -107,6 +107,21 @@ function metrics(lhr) {
   return { performance, totalByteWeight, scriptTransferBytes: scripts.transferSize };
 }
 
+export async function withLighthouseResources({ startServer, startChrome, run }) {
+  const server = await startServer();
+  let chrome;
+  try {
+    chrome = await startChrome();
+    return await run({ server, chrome });
+  } finally {
+    try {
+      if (chrome) await chrome.kill();
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+}
+
 async function run(configPath) {
   const config = (await import(pathToFileURL(path.resolve(configPath)).href)).default;
   if (typeof config.outputRoot !== "string" || config.outputRoot.length === 0) {
@@ -122,31 +137,33 @@ async function run(configPath) {
   const outputRoot = path.resolve(ROOT, config.outputRoot);
   if (!fs.existsSync(outputRoot))
     throw new Error(`${config.outputRoot} is missing; run npm run build first`);
-  const server = await serveStatic(outputRoot, config.mountPath);
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("static server has no TCP port");
-  const chrome = await launch({ chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"] });
-  const outputDir = path.join(ROOT, ".lighthouseci", config.site);
-  fs.rmSync(outputDir, { recursive: true, force: true });
-  fs.mkdirSync(outputDir, { recursive: true });
-  const url = config.url.replace("{PORT}", String(address.port));
-  const runs = [];
-  try {
-    for (let index = 0; index < config.numberOfRuns; index += 1) {
-      const result = await lighthouse(url, {
-        port: chrome.port,
-        output: "json",
-        logLevel: "error",
-        onlyCategories: ["performance"],
-      });
-      if (!result) throw new Error(`Lighthouse returned no result for run ${index + 1}`);
-      fs.writeFileSync(path.join(outputDir, `run-${index + 1}.json`), JSON.stringify(result.lhr));
-      runs.push(metrics(result.lhr));
-    }
-  } finally {
-    await chrome.kill();
-    await new Promise((resolve) => server.close(resolve));
-  }
+  const runs = await withLighthouseResources({
+    startServer: () => serveStatic(outputRoot, config.mountPath),
+    startChrome: () => launch({ chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"] }),
+    run: async ({ server, chrome }) => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("static server has no TCP port");
+      }
+      const outputDir = path.join(ROOT, ".lighthouseci", config.site);
+      fs.rmSync(outputDir, { recursive: true, force: true });
+      fs.mkdirSync(outputDir, { recursive: true });
+      const url = config.url.replace("{PORT}", String(address.port));
+      const completedRuns = [];
+      for (let index = 0; index < config.numberOfRuns; index += 1) {
+        const result = await lighthouse(url, {
+          port: chrome.port,
+          output: "json",
+          logLevel: "error",
+          onlyCategories: ["performance"],
+        });
+        if (!result) throw new Error(`Lighthouse returned no result for run ${index + 1}`);
+        fs.writeFileSync(path.join(outputDir, `run-${index + 1}.json`), JSON.stringify(result.lhr));
+        completedRuns.push(metrics(result.lhr));
+      }
+      return completedRuns;
+    },
+  });
   const verified = verifyLighthouseRuns(config, runs);
   process.stdout.write(
     `${config.site}: five-run median performance=${verified.performance.toFixed(2)}, total=${verified.totalByteWeight}, scripts=${verified.scriptTransferBytes}\n`,

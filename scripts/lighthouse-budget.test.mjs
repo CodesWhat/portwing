@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { median, verifyLighthouseRuns } from "./lighthouse-budget.mjs";
+import { median, verifyLighthouseRuns, withLighthouseResources } from "./lighthouse-budget.mjs";
 
 test("median is stable for unsorted odd and even inputs", () => {
   assert.equal(median([5, 1, 3]), 3);
@@ -31,4 +31,52 @@ test("Lighthouse budgets use the median and fail closed", () => {
     /total byte weight budget exceeded/,
   );
   assert.throws(() => verifyLighthouseRuns(config, []), /expected Lighthouse runs/);
+});
+
+test("Lighthouse resource cleanup closes the server across setup failures", async () => {
+  let serverCloseCount = 0;
+  const server = {
+    close(callback) {
+      serverCloseCount += 1;
+      callback();
+    },
+  };
+
+  await assert.rejects(
+    withLighthouseResources({
+      startServer: async () => server,
+      startChrome: async () => {
+        throw new Error("fixture Chrome launch failed");
+      },
+      run: async () => assert.fail("runs must not start after Chrome launch fails"),
+    }),
+    /fixture Chrome launch failed/,
+  );
+  assert.equal(serverCloseCount, 1);
+});
+
+test("Lighthouse resource cleanup closes the server when Chrome cleanup fails", async () => {
+  let serverCloseCount = 0;
+  const server = {
+    close(callback) {
+      serverCloseCount += 1;
+      callback();
+    },
+  };
+
+  await assert.rejects(
+    withLighthouseResources({
+      startServer: async () => server,
+      startChrome: async () => ({
+        kill: async () => {
+          throw new Error("fixture Chrome cleanup failed");
+        },
+      }),
+      run: async () => {
+        throw new Error("fixture report setup failed");
+      },
+    }),
+    /fixture Chrome cleanup failed/,
+  );
+  assert.equal(serverCloseCount, 1);
 });
