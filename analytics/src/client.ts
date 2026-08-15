@@ -1,12 +1,16 @@
 import posthog from "posthog-js/dist/module.slim";
 
 import {
+  type AnalyticsEvent,
   buildCtaEvent,
   buildPageviewEvent,
+  buildWebVitalsEvent,
   type CtaId,
   type CtaPlacement,
+  canonicalizeAnalyticsRoute,
   createPostHogOptions,
 } from "./contract";
+import { createWebVitalsReporter as createBufferedWebVitalsReporter } from "./web-vitals-buffer";
 
 let initialized = false;
 
@@ -22,13 +26,23 @@ export function initializeAnalytics(
   initialized = true;
 }
 
-function capture(event: ReturnType<typeof buildPageviewEvent> | null): void {
+function capture(event: AnalyticsEvent | null): void {
   if (!initialized || !event) return;
   posthog.capture(event.event, event.properties);
 }
 
 export function capturePageview(path: string): void {
   capture(buildPageviewEvent(path));
+}
+
+export function createWebVitalsReporter(path: string): (name: string, value: number) => void {
+  const reporter = createBufferedWebVitalsReporter(
+    path,
+    capture,
+    buildWebVitalsEvent,
+    canonicalizeAnalyticsRoute,
+  );
+  return reporter.record;
 }
 
 export function captureCta(path: string, ctaId: CtaId, placement: CtaPlacement): void {
