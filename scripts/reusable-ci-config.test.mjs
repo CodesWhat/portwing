@@ -60,6 +60,20 @@ function jobSection(source, jobId) {
   return lines.slice(start, end).join("\n");
 }
 
+function mappingSection(source, mappingName) {
+  const lines = source.split("\n");
+  const start = lines.indexOf(`    ${mappingName}:`);
+  if (start === -1) return "";
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^ {4}[a-z][a-z0-9-]*:/u.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
 function inputBlock(source, inputName) {
   const lines = source.split("\n");
   const start = lines.indexOf(`      ${inputName}: >-`);
@@ -77,9 +91,11 @@ function inputBlock(source, inputName) {
 function assertReusableCaller(source) {
   const go = jobSection(source, "go-ci");
   const node = jobSection(source, "node-ci");
-  const goLines = new Set(go.split("\n"));
   assert.ok(go, "missing go-ci reusable caller");
   assert.ok(node, "missing node-ci reusable caller");
+  const goWith = mappingSection(go, "with");
+  assert.ok(goWith, "go-ci is missing its with mapping");
+  const goWithLines = new Set(goWith.split("\n"));
   assert.match(
     go,
     new RegExp(`uses: CodesWhat/\\.github/\\.github/workflows/go-ci\\.yml@${SHARED_SHA}`),
@@ -113,7 +129,7 @@ function assertReusableCaller(source) {
     `run-goreleaser: \${{ github.event_name != 'schedule' }}`,
     `run-qlty: \${{ github.event_name != 'schedule' }}`,
   ]) {
-    assert.ok(goLines.has(`      ${input}`), `go-ci is missing ${input}`);
+    assert.ok(goWithLines.has(`      ${input}`), `go-ci is missing ${input}`);
   }
   assert.match(
     go,
@@ -211,6 +227,11 @@ test("required Go workflow inputs must be exact YAML lines", () => {
     assert.throws(() =>
       assertReusableCaller(source.replace(`      ${input}`, `      decoy-${input}`)),
     );
+    const goJob = jobSection(source, "go-ci");
+    const blockScalarDecoy = goJob
+      .replace(`      ${input}\n`, "")
+      .replace("    with:\n", `    decoy: |-\n      ${input}\n    with:\n`);
+    assert.throws(() => assertReusableCaller(source.replace(goJob, blockScalarDecoy)));
   }
 });
 
