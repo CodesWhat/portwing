@@ -207,16 +207,16 @@ require_text "website/src/components/get-started.tsx" "apt install ./portwing_" 
 require_text "scripts/ci/go-release-check.sh" "bash scripts/package-release-config-test.sh" "CI release adapter must enforce the package release contract"
 
 required_ci_contexts=(
-	"Build & Test"
-	"Lint"
-	"Govulncheck"
-	"Workflow Security"
-	"Commit Message"
-	"GoReleaser Config"
+	"Go CI / Build & Test"
+	"Go CI / Lint"
+	"Go CI / Govulncheck"
+	"Go CI / Workflow Security"
+	"Go CI / Commit Message"
+	"Go CI / GoReleaser Config"
 )
 
 for context in "${required_ci_contexts[@]}"; do
-	require_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must require the stable plain context ${context}"
+	require_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must require the reusable context ${context}"
 done
 
 retired_ci_contexts=(
@@ -235,9 +235,21 @@ done
 
 # The X1 canary promoted; branch protection now requires only the reusable
 # "Go CI / ..." contexts, so the plain-name bridge jobs that mirrored them
-# were removed from the workflow. Reject their reintroduction.
-for context in "${required_ci_contexts[@]}"; do
+# were removed from the workflow, and the branch-protection IaC now targets
+# the reusable contexts directly. Reject reintroduction of the retired
+# plain-name contexts in both places.
+retired_x1_bridge_contexts=(
+	"Build & Test"
+	"Lint"
+	"Govulncheck"
+	"Workflow Security"
+	"Commit Message"
+	"GoReleaser Config"
+)
+
+for context in "${retired_x1_bridge_contexts[@]}"; do
 	reject_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "workflow must not reintroduce the retired X1 bridge context ${context}"
+	reject_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must not reintroduce the retired X1 bridge context ${context}"
 done
 
 if [ "$failures" -ne 0 ]; then
