@@ -34,7 +34,9 @@ const FUZZERS = [
   ["FuzzVerifyRequest", "./internal/auth/"],
 ];
 
-const BRIDGES = new Map([
+// The X1 canary promoted; branch protection now requires only the reusable
+// "Go CI / ..." contexts. These legacy bridge jobs must stay removed.
+const RETIRED_BRIDGES = new Map([
   ["legacy-build", "Build & Test"],
   ["legacy-lint", "Lint"],
   ["legacy-govulncheck", "Govulncheck"],
@@ -44,7 +46,6 @@ const BRIDGES = new Map([
 ]);
 
 const GO_PROXY_STORAGE_INPUTS = ["lint-allowed-endpoints", "goreleaser-allowed-endpoints"];
-const HARDEN_RUNNER = "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920";
 
 function jobSection(source, jobId) {
   const lines = source.split("\n");
@@ -182,24 +183,14 @@ function assertFixedScripts() {
   }
 }
 
-function assertTemporaryBridges(source) {
-  for (const [jobId, checkName] of BRIDGES) {
-    const bridge = jobSection(source, jobId);
-    assert.ok(bridge, `missing temporary ${checkName} bridge`);
-    assert.ok(bridge.includes(`name: "${checkName}"`), `${jobId} has the wrong check name`);
-    assert.match(bridge, /^ {4}needs: go-ci$/mu);
-    assert.match(bridge, /^ {4}if: \$\{\{ always\(\) \}\}$/mu);
-    assert.match(
-      bridge,
-      /^ {8}env:\n {10}GO_CI_RESULT: \$\{\{ needs\.go-ci\.result \}\}\n {8}run: test "\$\{GO_CI_RESULT\}" = "success"$/mu,
+function assertBridgesAbsent(source) {
+  for (const [jobId, checkName] of RETIRED_BRIDGES) {
+    assert.equal(jobSection(source, jobId), "", `${jobId} bridge job must stay removed`);
+    assert.doesNotMatch(
+      source,
+      new RegExp(`name:\\s*"${checkName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}"`, "u"),
+      `workflow must not report the retired "${checkName}" context`,
     );
-    assert.doesNotMatch(bridge, /^ {8}run:.*\$\{\{/mu);
-    const hardenRunnerUses = bridge.split("\n").filter((line) => {
-      const withoutComment = line.trim().split(/\s+#/u, 1)[0];
-      return withoutComment === `uses: ${HARDEN_RUNNER}`;
-    });
-    assert.equal(hardenRunnerUses.length, 1, `${jobId} must pin one harden-runner step`);
-    assert.match(bridge, /^ {10}egress-policy: block$/mu);
   }
 }
 
@@ -253,11 +244,11 @@ test("coverage documentation runs the same fixed adapter as CI", () => {
   );
 });
 
-test("temporary bridges keep every legacy protected context fail-closed", () => {
-  assertTemporaryBridges(fs.readFileSync(WORKFLOW, "utf8"));
+test("retired X1 bridge jobs must not be reintroduced", () => {
+  assertBridgesAbsent(fs.readFileSync(WORKFLOW, "utf8"));
 });
 
-test("the contract rejects a moving reusable ref and a fail-open bridge", () => {
+test("the contract rejects a moving reusable ref and a reintroduced bridge", () => {
   const source = fs.readFileSync(WORKFLOW, "utf8");
   assert.throws(() => assertReusableCaller(source.replaceAll(SHARED_SHA, "main")));
   const go = jobSection(source, "go-ci");
@@ -269,30 +260,16 @@ test("the contract rejects a moving reusable ref and a fail-open bridge", () => 
       ),
     );
   }
-  assert.throws(() =>
-    assertTemporaryBridges(
-      source.replace(
-        `test "\${GO_CI_RESULT}" = "success"`,
-        `test "\${GO_CI_RESULT}" != "cancelled"`,
-      ),
-    ),
-  );
-  const legacyBuild = jobSection(source, "legacy-build");
+  const reintroducedBridge = [
+    "  legacy-build:",
+    '    name: "Build & Test"',
+    "    needs: go-ci",
+    "    runs-on: ubuntu-24.04",
+    "",
+    "",
+  ].join("\n");
   assert.throws(
-    () =>
-      assertTemporaryBridges(
-        source.replace(legacyBuild, legacyBuild.replace(HARDEN_RUNNER, "example")),
-      ),
-    /legacy-build must pin one harden-runner step/u,
-  );
-  assert.throws(
-    () =>
-      assertTemporaryBridges(
-        source.replace(
-          legacyBuild,
-          legacyBuild.replace(`uses: ${HARDEN_RUNNER}`, `# ${HARDEN_RUNNER}`),
-        ),
-      ),
-    /legacy-build must pin one harden-runner step/u,
+    () => assertBridgesAbsent(source.replace("  codeql:", `${reintroducedBridge}  codeql:`)),
+    /legacy-build bridge job must stay removed/u,
   );
 });
