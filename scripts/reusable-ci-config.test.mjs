@@ -86,6 +86,11 @@ function assertReusableCaller(source) {
   ]) {
     assert.ok(go.includes(input), `go-ci is missing ${input}`);
   }
+  assert.match(
+    go,
+    /^ {6}security-events: write$/mu,
+    "go-ci must grant the nested CodeQL job's statically validated permission",
+  );
   assert.doesNotMatch(go, /run-codeql:\s*true/u);
   assert.ok(jobSection(source, "codeql"), "CodeQL must remain local to preserve its category");
   assert.ok(jobSection(source, "dependency-review"), "dependency review must remain local");
