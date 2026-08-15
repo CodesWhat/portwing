@@ -45,6 +45,10 @@ coverage_file="${artifact_directory}/coverage.out"
 go test -race -covermode=atomic -coverprofile="${coverage_file}" ${packages[@]+"${packages[@]}"}
 
 COVERAGE_MIN="${COVERAGE_MIN:-96}"
+if [[ ! ${COVERAGE_MIN} =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+	echo "COVERAGE_MIN must be a non-negative decimal percentage" >&2
+	exit 2
+fi
 total="$(go tool cover -func="${coverage_file}" | awk '/^total:/ { print $3 }' | tr -d '%')"
 echo "Total statement coverage: ${total}% (floor ${COVERAGE_MIN}%)"
 awk -v total="${total}" -v minimum="${COVERAGE_MIN}" 'BEGIN { exit (total + 0 >= minimum + 0) ? 0 : 1 }' || {

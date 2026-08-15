@@ -26,6 +26,9 @@ list)
   esac
   ;;
 test)
+  if [ "\${MOCK_GO_TEST_SUCCESS:-}" = "1" ]; then
+    exit 0
+  fi
   count=0
   if [ -f "\${MOCK_GO_STATE:-}" ]; then count="$(cat "\${MOCK_GO_STATE}")"; fi
   count=$((count + 1))
@@ -67,6 +70,37 @@ test("Go test adapter preserves go list failures and rejects an empty package se
   assert.equal(empty.status, 1);
   assert.match(empty.stderr, /go list returned no testable packages/u);
   assert.doesNotMatch(empty.stderr, /unbound variable/u);
+});
+
+test("Go test adapter rejects a nonnumeric coverage floor", (t) => {
+  const { root, bin } = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  for (const minimum of ["disabled", "-1", "96%"]) {
+    const result = run("go-test.sh", root, bin, {
+      COVERAGE_MIN: minimum,
+      GO_LIST_FIXTURE: "success",
+      MOCK_GO_TEST_SUCCESS: "1",
+    });
+    assert.equal(result.status, 2, minimum);
+    assert.match(result.stderr, /COVERAGE_MIN must be a non-negative decimal percentage/u);
+  }
+
+  const decimal = run("go-test.sh", root, bin, {
+    COVERAGE_MIN: "96.5",
+    GO_LIST_FIXTURE: "success",
+    MOCK_GO_TEST_SUCCESS: "1",
+  });
+  assert.equal(decimal.status, 0);
+  assert.match(decimal.stdout, /floor 96[.]5%/u);
+
+  const unmet = run("go-test.sh", root, bin, {
+    COVERAGE_MIN: "101",
+    GO_LIST_FIXTURE: "success",
+    MOCK_GO_TEST_SUCCESS: "1",
+  });
+  assert.equal(unmet.status, 1);
+  assert.match(unmet.stderr, /coverage 100[.]0% is below the 101% floor/u);
 });
 
 test("Go fuzz adapter preserves the log and corpus from both bounded attempts", (t) => {

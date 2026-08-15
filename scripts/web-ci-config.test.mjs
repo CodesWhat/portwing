@@ -23,14 +23,31 @@ function jobSection(source, jobId) {
   return lines.slice(start, end).join("\n");
 }
 
+function mappingSection(source, mappingName) {
+  const lines = source.split("\n");
+  const start = lines.indexOf(`    ${mappingName}:`);
+  if (start === -1) return "";
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^ {4}[a-z][a-z0-9-]*:/u.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
 function assertRootWebLane(source) {
   assert.equal((source.match(/^ {2}node-ci:\s*$/gm) ?? []).length, 1);
   assert.equal((source.match(/^ {2}web:\s*$/gm) ?? []).length, 0);
   const nodeJob = jobSection(source, "node-ci");
   assert.ok(nodeJob, "missing node-ci reusable caller");
-  assert.match(nodeJob, /test-check-name: Web Contract/);
-  assert.match(nodeJob, /run-test: true/);
-  assert.match(nodeJob, /node-version: 24/);
+  const nodeWith = mappingSection(nodeJob, "with");
+  assert.ok(nodeWith, "node-ci is missing its with mapping");
+  const nodeWithLines = new Set(nodeWith.split("\n"));
+  assert.ok(nodeWithLines.has("      test-check-name: Web Contract"));
+  assert.ok(nodeWithLines.has("      run-test: true"));
+  assert.ok(nodeWithLines.has("      node-version: 24"));
 }
 
 test("CI has one fail-closed root web lane", () => {
@@ -48,6 +65,20 @@ test("root web inputs cannot be satisfied by an unrelated job", () => {
   mutated +=
     "\n  decoy-node-inputs:\n    test-check-name: Web Contract\n    run-test: true\n    node-version: 24\n";
   assert.throws(() => assertRootWebLane(mutated));
+});
+
+test("root web inputs must be exact YAML lines", () => {
+  for (const input of ["test-check-name: Web Contract", "run-test: true", "node-version: 24"]) {
+    assert.throws(() => assertRootWebLane(workflow.replace(`      ${input}`, `      # ${input}`)));
+    assert.throws(() =>
+      assertRootWebLane(workflow.replace(`      ${input}`, `      decoy-${input}`)),
+    );
+    const nodeJob = jobSection(workflow, "node-ci");
+    const blockScalarDecoy = nodeJob
+      .replace(`      ${input}\n`, "")
+      .replace("    with:\n", `    decoy: |-\n      ${input}\n    with:\n`);
+    assert.throws(() => assertRootWebLane(workflow.replace(nodeJob, blockScalarDecoy)));
+  }
 });
 
 test("pre-push mirrors the root web lane", () => {
