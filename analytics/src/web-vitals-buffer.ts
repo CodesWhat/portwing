@@ -19,54 +19,32 @@ type CanonicalizePath = (path: string) => {
 const defaultSchedule: Schedule = (callback, delayMs) => setTimeout(callback, delayMs);
 const defaultCancel: Cancel = (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>);
 
-export function createWebVitalsBuffer(
+export function createWebVitalsReporter(
+  initialPath: string,
   emit: (event: AnalyticsEvent) => void,
   buildEvent: BuildEvent,
   canonicalizePath: CanonicalizePath,
   schedule: Schedule = defaultSchedule,
   cancel: Cancel = defaultCancel,
 ) {
-  let path: string | null = null;
-  let routeKey: string | null = null;
-  let metrics: Partial<Record<WebVitalName, number>> = {};
+  const path = canonicalizePath(initialPath).normalizedPath;
+  const metrics: Partial<Record<WebVitalName, number>> = {};
   let timer: unknown;
   let sent = false;
-  const emittedPaths = new Set<string>();
 
   const flush = () => {
-    if (sent || path === null) return;
+    if (sent) return;
     sent = true;
     if (timer !== undefined) {
       cancel(timer);
       timer = undefined;
     }
     const event = buildEvent(path, metrics);
-    if (event && routeKey !== null) {
-      emittedPaths.add(routeKey);
-      emit(event);
-    }
-  };
-
-  const reset = (nextPath: string) => {
-    const route = canonicalizePath(nextPath);
-    const nextRouteKey = `${route.surface}:${route.path}`;
-    if (path !== null && !sent) flush();
-    path = route.normalizedPath;
-    routeKey = nextRouteKey;
-    metrics = {};
-    timer = undefined;
-    sent = emittedPaths.has(nextRouteKey);
+    if (event) emit(event);
   };
 
   return {
-    begin(nextPath: string): void {
-      reset(nextPath);
-    },
-    record(nextPath: string, name: string, value: number): void {
-      const route = canonicalizePath(nextPath);
-      const nextRouteKey = `${route.surface}:${route.path}`;
-      if (emittedPaths.has(nextRouteKey)) return;
-      if (path === null || routeKey !== nextRouteKey) reset(nextPath);
+    record(name: string, value: number): void {
       if (sent || !WEB_VITAL_NAMES.has(name as WebVitalName)) return;
       if (!Number.isFinite(value) || value < 0) return;
 
