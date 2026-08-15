@@ -132,16 +132,24 @@ function normalizedPath(rawPath: string): string {
   return withoutQuery;
 }
 
-function canonicalRoute(rawPath: string): { path: string; surface: Surface } {
+export function canonicalizeAnalyticsRoute(rawPath: string): {
+  normalizedPath: string;
+  path: string;
+  surface: Surface;
+} {
   const normalized = normalizedPath(rawPath);
   const surface: Surface =
     normalized === "/docs" || normalized.startsWith("/docs/") ? "docs" : "marketing";
   const known = surface === "docs" ? DOCS_PATHS : MARKETING_PATHS;
-  return { path: known.has(normalized) ? normalized : "/_other", surface };
+  return {
+    normalizedPath: normalized,
+    path: known.has(normalized) ? normalized : "/_other",
+    surface,
+  };
 }
 
 function baseProperties(rawPath: string) {
-  const { path, surface } = canonicalRoute(rawPath);
+  const { path, surface } = canonicalizeAnalyticsRoute(rawPath);
   return {
     schema_version: SCHEMA_VERSION,
     site: SITE,

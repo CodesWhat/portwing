@@ -7,6 +7,7 @@ import {
   buildWebVitalsEvent,
   type CtaId,
   type CtaPlacement,
+  canonicalizeAnalyticsRoute,
   createPostHogOptions,
 } from "./contract";
 import { createWebVitalsBuffer } from "./web-vitals-buffer";
@@ -30,7 +31,11 @@ function capture(event: AnalyticsEvent | null): void {
   posthog.capture(event.event, event.properties);
 }
 
-const webVitalsBuffer = createWebVitalsBuffer(capture, buildWebVitalsEvent);
+const webVitalsBuffer = createWebVitalsBuffer(
+  capture,
+  buildWebVitalsEvent,
+  canonicalizeAnalyticsRoute,
+);
 
 export function capturePageview(path: string): void {
   webVitalsBuffer.begin(path);

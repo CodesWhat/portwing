@@ -10,6 +10,11 @@ type BuildEvent = (
   path: string,
   metrics: Readonly<Partial<Record<WebVitalName, number>>>,
 ) => AnalyticsEvent | null;
+type CanonicalizePath = (path: string) => {
+  normalizedPath: string;
+  path: string;
+  surface: string;
+};
 
 const defaultSchedule: Schedule = (callback, delayMs) => setTimeout(callback, delayMs);
 const defaultCancel: Cancel = (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>);
@@ -17,10 +22,12 @@ const defaultCancel: Cancel = (timer) => clearTimeout(timer as ReturnType<typeof
 export function createWebVitalsBuffer(
   emit: (event: AnalyticsEvent) => void,
   buildEvent: BuildEvent,
+  canonicalizePath: CanonicalizePath,
   schedule: Schedule = defaultSchedule,
   cancel: Cancel = defaultCancel,
 ) {
   let path: string | null = null;
+  let routeKey: string | null = null;
   let metrics: Partial<Record<WebVitalName, number>> = {};
   let timer: unknown;
   let sent = false;
@@ -34,18 +41,21 @@ export function createWebVitalsBuffer(
       timer = undefined;
     }
     const event = buildEvent(path, metrics);
-    if (event) {
-      emittedPaths.add(path);
+    if (event && routeKey !== null) {
+      emittedPaths.add(routeKey);
       emit(event);
     }
   };
 
   const reset = (nextPath: string) => {
+    const route = canonicalizePath(nextPath);
+    const nextRouteKey = `${route.surface}:${route.path}`;
     if (path !== null && !sent) flush();
-    path = nextPath;
+    path = route.normalizedPath;
+    routeKey = nextRouteKey;
     metrics = {};
     timer = undefined;
-    sent = emittedPaths.has(nextPath);
+    sent = emittedPaths.has(nextRouteKey);
   };
 
   return {
@@ -53,8 +63,10 @@ export function createWebVitalsBuffer(
       reset(nextPath);
     },
     record(nextPath: string, name: string, value: number): void {
-      if (emittedPaths.has(nextPath)) return;
-      if (path === null || path !== nextPath) reset(nextPath);
+      const route = canonicalizePath(nextPath);
+      const nextRouteKey = `${route.surface}:${route.path}`;
+      if (emittedPaths.has(nextRouteKey)) return;
+      if (path === null || routeKey !== nextRouteKey) reset(nextPath);
       if (sent || !WEB_VITAL_NAMES.has(name as WebVitalName)) return;
       if (!Number.isFinite(value) || value < 0) return;
 

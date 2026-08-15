@@ -5,6 +5,7 @@ import {
   buildCtaEvent,
   buildPageviewEvent,
   buildWebVitalsEvent,
+  canonicalizeAnalyticsRoute,
   createPostHogOptions,
   POSTHOG_PROXY_HOST,
   POSTHOG_UI_HOST,
@@ -259,6 +260,7 @@ type BufferedEvent = {
 type WebVitalsBufferFactory = (
   emit: (event: BufferedEvent) => void,
   buildEvent: typeof buildWebVitalsEvent,
+  canonicalizePath: typeof canonicalizeAnalyticsRoute,
   schedule: (callback: () => void, delayMs: number) => number,
   cancel: (timer: number) => void,
 ) => {
@@ -304,6 +306,7 @@ test("web vitals buffer emits one complete canonical envelope", async () => {
   const buffer = createWebVitalsBuffer(
     (event) => emitted.push(event),
     buildWebVitalsEvent,
+    canonicalizeAnalyticsRoute,
     timers.schedule,
     timers.cancel,
   );
@@ -332,6 +335,7 @@ test("web vitals buffer emits one complete canonical envelope", async () => {
   ]);
 
   buffer.record("/docs/security-model", "LCP", 999);
+  timers.fire();
   assert.equal(emitted.length, 1);
 });
 
@@ -342,6 +346,7 @@ test("web vitals buffer flushes one partial envelope and ignores late metrics", 
   const buffer = createWebVitalsBuffer(
     (event) => emitted.push(event),
     buildWebVitalsEvent,
+    canonicalizeAnalyticsRoute,
     timers.schedule,
     timers.cancel,
   );
@@ -381,6 +386,7 @@ test("web vitals buffer does not reopen an emitted route after navigation", asyn
   const buffer = createWebVitalsBuffer(
     (event) => emitted.push(event),
     buildWebVitalsEvent,
+    canonicalizeAnalyticsRoute,
     timers.schedule,
     timers.cancel,
   );
