@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKFLOW = path.join(ROOT, ".github", "workflows", "ci-verify.yml");
+const LEFTHOOK = path.join(ROOT, "lefthook.yml");
 const SHARED_SHA = "01bf40b06b110946f12a49b82e407d77c6480df7";
 
 const FIXED_SCRIPTS = new Map([
@@ -148,6 +149,12 @@ test("Portwing calls the reusable workflows at the frozen organization SHA", () 
 
 test("reusable jobs invoke fixed repository-owned scripts", () => {
   assertFixedScripts();
+});
+
+test("the local lint gate uses the same isolated fixed adapter", () => {
+  const lefthook = fs.readFileSync(LEFTHOOK, "utf8");
+  assert.match(lefthook, /^ {4}go-lint:\n {6}run: \.\/scripts\/ci\/go-lint\.sh$/mu);
+  assert.doesNotMatch(lefthook, /^ {6}run: golangci-lint run$/mu);
 });
 
 test("temporary bridges keep every legacy protected context fail-closed", () => {
