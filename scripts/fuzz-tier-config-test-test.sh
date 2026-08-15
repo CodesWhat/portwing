@@ -32,7 +32,7 @@ if (cd "${fixture}" && bash scripts/fuzz-tier-config-test.sh >/dev/null 2>&1); t
 fi
 
 cp lefthook.yml "${fixture}/lefthook.yml"
-sed 's|pkg: ./internal/auth/ }|pkg: X/internal/auth/ } # malformed|' \
+sed 's|"pkg":"./internal/auth/"|"pkg":"X/internal/auth/"|' \
 	.github/workflows/ci-verify.yml >"${fixture}/.github/workflows/ci-verify.yml"
 
 if (cd "${fixture}" && bash scripts/fuzz-tier-config-test.sh >/dev/null 2>&1); then

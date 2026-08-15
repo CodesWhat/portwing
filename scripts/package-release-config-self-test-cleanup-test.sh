@@ -10,6 +10,8 @@ wrapper_dir="${test_root}/bin"
 mkdir -p "${repo_fixture}" "${generated_fixtures}" "${wrapper_dir}"
 git archive HEAD | tar -x -C "${repo_fixture}"
 cp scripts/package-release-config-self-test-test.sh "${repo_fixture}/scripts/"
+mkdir -p "${repo_fixture}/scripts/ci"
+cp scripts/ci/go-release-check.sh "${repo_fixture}/scripts/ci/"
 
 real_mktemp="$(command -v mktemp)"
 # The wrapper expands these variables when it runs in the fixture process.
