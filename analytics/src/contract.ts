@@ -208,12 +208,32 @@ export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
   if (!envelope || typeof envelope.event !== "string" || !envelope.properties) return null;
   const rawPath = rawPathFromProperties(envelope.properties);
   const token = envelope.properties.token;
+  // PostHog's cookieless server-hash ingestion step computes the anonymous
+  // distinct id from day + team + $ip + $host + $raw_user_agent. It reads
+  // $raw_user_agent/$host straight off event.properties (not headers) and
+  // silently drops the event with a cookieless_missing_user_agent /
+  // cookieless_missing_host ingestion warning if either is absent
+  // (PostHog/posthog nodejs/src/ingestion/common/cookieless/cookieless-manager.ts,
+  // getProperties()/doBatchInner(), commit e87e55a). posthog-js attaches both
+  // to every envelope by default (PostHog/posthog-js
+  // packages/browser-common/src/utils/event-utils.ts, getEventProperties()),
+  // so they must survive the allowlist rebuild below. $ip is deliberately
+  // NOT forwarded here: posthog-js never sends it, and PostHog's capture
+  // service fills it in from the request's own connection IP when absent
+  // (nodejs/src/common/utils/event.ts, sanitizeEvent()) — a client-supplied
+  // $ip would only be able to make that worse, never better.
+  const rawUserAgent = envelope.properties.$raw_user_agent;
+  const host = envelope.properties.$host;
   if (
     typeof rawPath !== "string" ||
     typeof token !== "string" ||
     !PROJECT_TOKEN_PATTERN.test(token) ||
     envelope.properties.$cookieless_mode !== true ||
-    envelope.properties.$process_person_profile !== false
+    envelope.properties.$process_person_profile !== false ||
+    typeof rawUserAgent !== "string" ||
+    rawUserAgent === "" ||
+    typeof host !== "string" ||
+    host === ""
   ) {
     return null;
   }
@@ -247,6 +267,8 @@ export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
       token,
       $cookieless_mode: true,
       $process_person_profile: false,
+      $raw_user_agent: rawUserAgent,
+      $host: host,
     },
     uuid: envelope.uuid,
   };

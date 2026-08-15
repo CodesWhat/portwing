@@ -79,6 +79,18 @@ test("CTA events accept only real Portwing component combinations", () => {
   assert.equal(buildCtaEvent("/", "docs_root", "free-form" as never), null);
 });
 
+// posthog-js attaches these to every envelope by default (PostHog/posthog-js
+// packages/browser-common/src/utils/event-utils.ts, getEventProperties()).
+// before_send must forward them: PostHog's cookieless server-hash ingestion
+// step reads them straight off event.properties and drops the event with a
+// cookieless_missing_user_agent / cookieless_missing_host ingestion warning
+// if either is absent (PostHog/posthog nodejs/src/ingestion/common/cookieless/
+// cookieless-manager.ts, getProperties() + doBatchInner(), @e87e55a).
+const COOKIELESS_HASH_PROPERTIES = {
+  $raw_user_agent: "Mozilla/5.0 (Test Runner)",
+  $host: "portwing.codeswhat.com",
+};
+
 test("before_send reconstructs a strict event and property allowlist", () => {
   assert.deepEqual(
     sanitizeEvent({
@@ -86,6 +98,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
       uuid: "internal-posthog-id",
       properties: {
         ...BASE_PROPERTIES,
+        ...COOKIELESS_HASH_PROPERTIES,
         $current_url: "https://portwing.codeswhat.com/docs?token=secret#private",
         token: "phc_project-token",
         $cookieless_mode: true,
@@ -104,6 +117,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
         token: "phc_project-token",
         $cookieless_mode: true,
         $process_person_profile: false,
+        ...COOKIELESS_HASH_PROPERTIES,
       },
     },
   );
@@ -113,6 +127,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
       uuid: "internal-posthog-id",
       properties: {
         ...BASE_PROPERTIES,
+        ...COOKIELESS_HASH_PROPERTIES,
         surface: "marketing",
         path: "/?token=secret",
         token: "phc_project-token",
@@ -138,6 +153,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
         $process_person_profile: false,
         cta_id: "docs_root",
         placement: "hero",
+        ...COOKIELESS_HASH_PROPERTIES,
       },
     },
   );
@@ -147,6 +163,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
       uuid: "internal-posthog-id",
       properties: {
         ...BASE_PROPERTIES,
+        ...COOKIELESS_HASH_PROPERTIES,
         token: "phc_project-token",
         $cookieless_mode: true,
         $process_person_profile: false,
@@ -160,6 +177,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
       uuid: "internal-posthog-id",
       properties: {
         ...BASE_PROPERTIES,
+        ...COOKIELESS_HASH_PROPERTIES,
         surface: "marketing",
         path: "/",
         token: "phc_project-token",
@@ -182,12 +200,52 @@ test("before_send reconstructs a strict event and property allowlist", () => {
         uuid: "internal-posthog-id",
         properties: {
           ...BASE_PROPERTIES,
+          ...COOKIELESS_HASH_PROPERTIES,
           surface: "marketing",
           path: "/",
           ...privacyProperties,
         },
       }),
       null,
+    );
+  }
+});
+
+test("before_send requires and forwards the cookieless server-hash fields", () => {
+  const validProperties = {
+    ...BASE_PROPERTIES,
+    ...COOKIELESS_HASH_PROPERTIES,
+    surface: "marketing",
+    path: "/",
+    token: "phc_project-token",
+    $cookieless_mode: true,
+    $process_person_profile: false,
+  };
+
+  const result = sanitizeEvent({
+    event: "$pageview",
+    uuid: "internal-posthog-id",
+    properties: validProperties,
+  });
+  assert.ok(result);
+  assert.equal(result.properties.$raw_user_agent, COOKIELESS_HASH_PROPERTIES.$raw_user_agent);
+  assert.equal(result.properties.$host, COOKIELESS_HASH_PROPERTIES.$host);
+
+  // Regression guard: if before_send ever goes back to rebuilding properties
+  // from an allowlist that forgets these two keys, cookieless ingestion drops
+  // every event again with zero warning-free indication beyond
+  // cookieless_missing_user_agent / cookieless_missing_host.
+  for (const missingKey of Object.keys(COOKIELESS_HASH_PROPERTIES)) {
+    const withoutField = { ...validProperties };
+    delete withoutField[missingKey as keyof typeof withoutField];
+    assert.equal(
+      sanitizeEvent({
+        event: "$pageview",
+        uuid: "internal-posthog-id",
+        properties: withoutField,
+      }),
+      null,
+      `sanitizeEvent must drop events missing ${missingKey}`,
     );
   }
 });
@@ -200,6 +258,7 @@ test("before_send keeps one buffered Core Web Vitals envelope", () => {
       uuid: "internal-posthog-id",
       timestamp,
       properties: {
+        ...COOKIELESS_HASH_PROPERTIES,
         $current_url: "https://portwing.codeswhat.com/docs?secret=1#private",
         token: "phc_project-token",
         distinct_id: "$posthog_cookieless",
@@ -230,6 +289,7 @@ test("before_send keeps one buffered Core Web Vitals envelope", () => {
         $web_vitals_CLS_value: 0.01,
         $web_vitals_FCP_value: 123.4,
         $web_vitals_LCP_value: 456.7,
+        ...COOKIELESS_HASH_PROPERTIES,
       },
     },
   );
@@ -238,6 +298,7 @@ test("before_send keeps one buffered Core Web Vitals envelope", () => {
       event: "$web_vitals",
       uuid: "internal-posthog-id",
       properties: {
+        ...COOKIELESS_HASH_PROPERTIES,
         path: "/",
         token: "phc_project-token",
         $cookieless_mode: true,
