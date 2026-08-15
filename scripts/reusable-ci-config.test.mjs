@@ -15,7 +15,7 @@ const FIXED_SCRIPTS = new Map([
     "go-lint.sh",
     ["golangci-lint/v2/cmd/golangci-lint@v2.12.2", "GOLANGCI_LINT_CACHE", "mktemp -d"],
   ],
-  ["go-govulncheck.sh", ["golang.org/x/vuln/cmd/govulncheck@v1.2.0"]],
+  ["go-govulncheck.sh", ["golang.org/x/vuln/cmd/govulncheck@v1.7.0"]],
   ["commit-message.sh", ["validate-commit-range-test.sh", "validate-commit-range.sh"]],
   ["go-release-check.sh", ["goreleaser/goreleaser/v2@v2.17.1", "package-release-config-test.sh"]],
   ["go-qlty.sh", ["qlty-check-gate.sh all"]],
@@ -164,6 +164,7 @@ function assertFixedScripts() {
 }
 
 function assertTemporaryBridges(source) {
+  const hardenRunner = "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920";
   for (const [jobId, checkName] of BRIDGES) {
     const bridge = jobSection(source, jobId);
     assert.ok(bridge, `missing temporary ${checkName} bridge`);
@@ -171,6 +172,12 @@ function assertTemporaryBridges(source) {
     assert.match(bridge, /^ {4}needs: go-ci$/mu);
     assert.match(bridge, /^ {4}if: \$\{\{ always\(\) \}\}$/mu);
     assert.match(bridge, /test "\$\{\{ needs\.go-ci\.result \}\}" = "success"/u);
+    assert.equal(
+      (bridge.match(new RegExp(hardenRunner, "gu")) ?? []).length,
+      1,
+      `${jobId} must pin one harden-runner step`,
+    );
+    assert.match(bridge, /^ {10}egress-policy: block$/mu);
   }
 }
 
@@ -210,6 +217,12 @@ test("the contract rejects a moving reusable ref and a fail-open bridge", () => 
         `test "\${{ needs.go-ci.result }}" = "success"`,
         `test "\${{ needs.go-ci.result }}" != "cancelled"`,
       ),
+    ),
+  );
+  const legacyBuild = jobSection(source, "legacy-build");
+  assert.throws(() =>
+    assertTemporaryBridges(
+      source.replace(legacyBuild, legacyBuild.replace(hardenRunner, "example")),
     ),
   );
 });

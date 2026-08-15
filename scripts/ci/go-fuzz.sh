@@ -34,18 +34,23 @@ cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 workers=$((cores > 1 ? cores - 1 : 1))
 [ "${workers}" -le 4 ] || workers=4
 log="${artifact_directory}/fuzz.log"
+: >"${log}"
 
 run_fuzz() {
+	local fuzz_status
 	go test -run='^$' \
 		-fuzz="^${fuzzer}\$" \
 		-fuzztime=60s \
 		-timeout=5m \
 		-parallel="${workers}" \
-		"${package}" 2>&1 | tee "${log}"
-	return "${PIPESTATUS[0]}"
+		"${package}" 2>&1 | tee "${attempt_log}"
+	fuzz_status="${PIPESTATUS[0]}"
+	cat "${attempt_log}" >>"${log}"
+	return "${fuzz_status}"
 }
 
 for attempt in 1 2; do
+	attempt_log="${artifact_directory}/fuzz-attempt-${attempt}.log"
 	status=0
 	run_fuzz || status=$?
 	if [ "${status}" -eq 0 ]; then
@@ -54,13 +59,15 @@ for attempt in 1 2; do
 
 	corpus="${package%/}/testdata/fuzz/${fuzzer}"
 	if [ -d "${corpus}" ]; then
-		cp -R "${corpus}" "${artifact_directory}/corpus"
+		attempt_corpus="${artifact_directory}/corpus-attempt-${attempt}"
+		mkdir -p "${attempt_corpus}"
+		cp -R "${corpus}/." "${attempt_corpus}/"
 	fi
-	if grep -q "Failing input written to testdata" "${log}"; then
+	if grep -q "Failing input written to testdata" "${attempt_log}"; then
 		echo "${fuzzer} found a crashing input" >&2
 		exit "${status}"
 	fi
-	if ! grep -q "context deadline exceeded" "${log}"; then
+	if ! grep -q "context deadline exceeded" "${attempt_log}"; then
 		echo "${fuzzer} failed for a non-flake reason (exit ${status})" >&2
 		exit "${status}"
 	fi

@@ -27,13 +27,22 @@ fi
 go vet ./...
 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${artifact_directory}/portwing" ./cmd/portwing
 
+package_list="$(go list ./internal/... ./cmd/...)"
 packages=()
 while IFS= read -r package; do
+	[ -n "${package}" ] || continue
+	case "${package}" in
+	*/internal/banner/gen) continue ;;
+	esac
 	packages+=("${package}")
-done < <(go list ./internal/... ./cmd/... | grep -v '/internal/banner/gen')
+done <<<"${package_list}"
+if [ "${#packages[@]}" -eq 0 ]; then
+	echo "go list returned no testable packages" >&2
+	exit 1
+fi
 
 coverage_file="${artifact_directory}/coverage.out"
-go test -race -covermode=atomic -coverprofile="${coverage_file}" "${packages[@]}"
+go test -race -covermode=atomic -coverprofile="${coverage_file}" ${packages[@]+"${packages[@]}"}
 
 COVERAGE_MIN="${COVERAGE_MIN:-96}"
 total="$(go tool cover -func="${coverage_file}" | awk '/^total:/ { print $3 }' | tr -d '%')"

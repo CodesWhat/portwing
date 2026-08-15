@@ -156,6 +156,10 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
       - name: Mirror reusable Go result
         run: test "${{ needs.go-ci.result }}" = "success"
 
@@ -167,6 +171,10 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
       - name: Mirror reusable Go result
         run: test "${{ needs.go-ci.result }}" = "success"
 
@@ -178,6 +186,10 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
       - name: Mirror reusable Go result
         run: test "${{ needs.go-ci.result }}" = "success"
 
@@ -189,6 +201,10 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
       - name: Mirror reusable Go result
         run: test "${{ needs.go-ci.result }}" = "success"
 
@@ -200,6 +216,10 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
       - name: Mirror reusable Go result
         run: test "${{ needs.go-ci.result }}" = "success"
 
@@ -211,6 +231,10 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
       - name: Mirror reusable Go result
         run: test "${{ needs.go-ci.result }}" = "success"
 
