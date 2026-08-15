@@ -23,6 +23,12 @@ case "${package}" in
 	exit 2
 	;;
 esac
+case "/${package#./}/" in
+*/../*)
+	echo "invalid PKG" >&2
+	exit 2
+	;;
+esac
 
 repository_root="$(pwd -P)"
 artifact_directory="${repository_root}/artifacts/go-fuzz/${fuzzer}"

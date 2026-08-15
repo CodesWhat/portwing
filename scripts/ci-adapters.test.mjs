@@ -108,3 +108,17 @@ test("Go fuzz retry classifies only the current attempt output", (t) => {
   assert.equal(result.status, 43);
   assert.match(result.stderr, /failed for a non-flake reason \(exit 43\)/u);
 });
+
+test("Go fuzz adapter rejects package paths that escape the module", (t) => {
+  const { root, bin } = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  for (const packagePath of ["./../other-module", "./internal/../../other-module"]) {
+    const result = run("go-fuzz.sh", root, bin, {
+      FUZZER: "FuzzFixture",
+      PKG: packagePath,
+    });
+    assert.equal(result.status, 2, packagePath);
+    assert.match(result.stderr, /invalid PKG/u);
+  }
+});

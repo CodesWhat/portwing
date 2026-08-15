@@ -161,7 +161,9 @@ jobs:
         with:
           egress-policy: block
       - name: Mirror reusable Go result
-        run: test "${{ needs.go-ci.result }}" = "success"
+        env:
+          GO_CI_RESULT: ${{ needs.go-ci.result }}
+        run: test "${GO_CI_RESULT}" = "success"
 
   legacy-lint:
     name: "Lint"
@@ -176,7 +178,9 @@ jobs:
         with:
           egress-policy: block
       - name: Mirror reusable Go result
-        run: test "${{ needs.go-ci.result }}" = "success"
+        env:
+          GO_CI_RESULT: ${{ needs.go-ci.result }}
+        run: test "${GO_CI_RESULT}" = "success"
 
   legacy-govulncheck:
     name: "Govulncheck"
@@ -191,7 +195,9 @@ jobs:
         with:
           egress-policy: block
       - name: Mirror reusable Go result
-        run: test "${{ needs.go-ci.result }}" = "success"
+        env:
+          GO_CI_RESULT: ${{ needs.go-ci.result }}
+        run: test "${GO_CI_RESULT}" = "success"
 
   legacy-workflow-security:
     name: "Workflow Security"
@@ -206,7 +212,9 @@ jobs:
         with:
           egress-policy: block
       - name: Mirror reusable Go result
-        run: test "${{ needs.go-ci.result }}" = "success"
+        env:
+          GO_CI_RESULT: ${{ needs.go-ci.result }}
+        run: test "${GO_CI_RESULT}" = "success"
 
   legacy-commit-message:
     name: "Commit Message"
@@ -221,7 +229,9 @@ jobs:
         with:
           egress-policy: block
       - name: Mirror reusable Go result
-        run: test "${{ needs.go-ci.result }}" = "success"
+        env:
+          GO_CI_RESULT: ${{ needs.go-ci.result }}
+        run: test "${GO_CI_RESULT}" = "success"
 
   legacy-goreleaser:
     name: "GoReleaser Config"
@@ -236,7 +246,9 @@ jobs:
         with:
           egress-policy: block
       - name: Mirror reusable Go result
-        run: test "${{ needs.go-ci.result }}" = "success"
+        env:
+          GO_CI_RESULT: ${{ needs.go-ci.result }}
+        run: test "${GO_CI_RESULT}" = "success"
 
   codeql:
     name: "🔍 CodeQL Analysis"
