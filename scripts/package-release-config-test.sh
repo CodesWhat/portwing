@@ -204,7 +204,7 @@ require_text "RELEASING.md" "verify-native-packages" "maintainer release docs mu
 require_text "website/src/components/get-started.tsx" "codeswhat/tap/portwing" "the website must advertise the Homebrew cask"
 require_text "website/src/components/get-started.tsx" "apt install ./portwing_" "the website must advertise the deb package"
 
-require_text ".github/workflows/ci-verify.yml" "bash scripts/package-release-config-test.sh" "CI must enforce the package release contract"
+require_text "scripts/ci/go-release-check.sh" "bash scripts/package-release-config-test.sh" "CI release adapter must enforce the package release contract"
 
 required_ci_contexts=(
 	"Build & Test"

@@ -6,8 +6,29 @@ trap 'rm -rf "${fixture}"' EXIT
 
 git archive HEAD | tar -x -C "${fixture}"
 cp scripts/package-release-config-test.sh "${fixture}/scripts/"
+mkdir -p "${fixture}/scripts/ci"
+cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/"
 git -C "${fixture}" init -q
 git -C "${fixture}" add .
+
+if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
+	echo "FAIL: complete package release fixture must pass" >&2
+	exit 1
+fi
+
+sed '/bash scripts\/package-release-config-test.sh/d' \
+	"${fixture}/scripts/ci/go-release-check.sh" >"${fixture}/scripts/ci/go-release-check.sh.tmp"
+mv "${fixture}/scripts/ci/go-release-check.sh.tmp" "${fixture}/scripts/ci/go-release-check.sh"
+set +e
+adapter_output="$(cd "${fixture}" && bash scripts/package-release-config-test.sh 2>&1)"
+adapter_status=$?
+set -e
+if [ "${adapter_status}" -eq 0 ] || ! grep -Fq \
+	"FAIL: CI release adapter must enforce the package release contract" <<<"${adapter_output}"; then
+	echo "FAIL: package release contract must reject a disconnected CI adapter" >&2
+	exit 1
+fi
+cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/"
 
 release_version="$(
 	grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md |

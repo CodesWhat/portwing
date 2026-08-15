@@ -30,15 +30,25 @@ lefthook_fuzz_entries="$(
 	' lefthook.yml
 )"
 
+caller_fuzz_inventory="$(
+	awk '
+		$0 == "      fuzzers-json: >-" {
+			getline
+			print
+		}
+	' .github/workflows/ci-verify.yml
+)"
+
 for spec in "${fuzzers[@]}"; do
 	fuzzer="${spec%%|*}"
 	pkg="${spec#*|}"
 	fuzzer_regex="$(escape_ere "${fuzzer}")"
 	pkg_regex="$(escape_ere "${pkg}")"
 	workflow_mapping="^[[:space:]]*-[[:space:]]*\\{[[:space:]]*name:[[:space:]]*${fuzzer_regex}[[:space:]]*,[[:space:]]*pkg:[[:space:]]*${pkg_regex}[[:space:]]*\\}[[:space:]]*$"
+	caller_mapping="{\"name\":\"${fuzzer}\",\"pkg\":\"${pkg}\"}"
 	lefthook_entry="^[[:space:]]*\"${fuzzer_regex}[[:space:]]+${pkg_regex}\"([[:space:]]+\\\\|;[[:space:]]*do)[[:space:]]*$"
 
-	grep -Eq "${workflow_mapping}" .github/workflows/ci-verify.yml ||
+	grep -Fq "${caller_mapping}" <<<"${caller_fuzz_inventory}" ||
 		fail "ci-verify.yml must run ${fuzzer} in ${pkg}"
 	grep -Eq "${lefthook_entry}" <<<"${lefthook_fuzz_entries}" ||
 		fail "lefthook.yml must run ${fuzzer} in ${pkg}"
