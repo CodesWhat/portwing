@@ -3,17 +3,26 @@
   "private": true,
   "workspaces": [
     "website",
-    "docs"
+    "docs",
+    "analytics"
   ],
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "test:web": "node --test analytics/src/contract.test.ts scripts/*.test.mjs && npm --workspace website run test:headers",
+    "budget:web": "node scripts/page-weight-budget.mjs",
+    "lighthouse:marketing": "node scripts/lighthouse-budget.mjs lighthouse/marketing.cjs",
+    "lighthouse:docs": "node scripts/lighthouse-budget.mjs lighthouse/docs.cjs",
+    "lighthouse": "npm run lighthouse:marketing && npm run lighthouse:docs",
+    "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run build && npm run budget:web && npm run lighthouse"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
+    "chrome-launcher": "1.2.1",
+    "lighthouse": "13.4.1",
     "turbo": "2.10.8"
   },
   "overrides": {
@@ -22,6 +31,6 @@
   },
   "packageManager": "npm@12.0.2",
   "engines": {
-    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+    "node": ">=24.0.0"
   }
 }
