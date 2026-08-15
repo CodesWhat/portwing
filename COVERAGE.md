@@ -150,12 +150,10 @@ fragility for 3 statements.
 
 ## How Coverage Is Measured
 
-The reusable `Go CI / Build & Test` job calls `scripts/ci/go-test.sh`, which
-runs:
+The reusable `Go CI / Build & Test` job calls:
 
 ```sh
-go test -race -covermode=atomic -coverprofile=artifacts/go-test/coverage.out \
-    $(go list ./internal/... ./cmd/... | grep -v '/internal/banner/gen')
+./scripts/ci/go-test.sh
 ```
 
 `internal/banner/gen` is excluded because it contains only generated constants

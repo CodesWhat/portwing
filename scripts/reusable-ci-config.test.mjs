@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKFLOW = path.join(ROOT, ".github", "workflows", "ci-verify.yml");
 const LEFTHOOK = path.join(ROOT, "lefthook.yml");
+const COVERAGE = path.join(ROOT, "COVERAGE.md");
 const SHARED_SHA = "01bf40b06b110946f12a49b82e407d77c6480df7";
 
 const FIXED_SCRIPTS = new Map([
@@ -43,6 +44,7 @@ const BRIDGES = new Map([
 ]);
 
 const GO_PROXY_STORAGE_INPUTS = ["lint-allowed-endpoints", "goreleaser-allowed-endpoints"];
+const HARDEN_RUNNER = "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920";
 
 function jobSection(source, jobId) {
   const lines = source.split("\n");
@@ -164,21 +166,29 @@ function assertFixedScripts() {
 }
 
 function assertTemporaryBridges(source) {
-  const hardenRunner = "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920";
   for (const [jobId, checkName] of BRIDGES) {
     const bridge = jobSection(source, jobId);
     assert.ok(bridge, `missing temporary ${checkName} bridge`);
     assert.ok(bridge.includes(`name: "${checkName}"`), `${jobId} has the wrong check name`);
     assert.match(bridge, /^ {4}needs: go-ci$/mu);
     assert.match(bridge, /^ {4}if: \$\{\{ always\(\) \}\}$/mu);
-    assert.match(bridge, /test "\$\{\{ needs\.go-ci\.result \}\}" = "success"/u);
-    assert.equal(
-      (bridge.match(new RegExp(hardenRunner, "gu")) ?? []).length,
-      1,
-      `${jobId} must pin one harden-runner step`,
+    assert.match(
+      bridge,
+      /^ {8}env:\n {10}GO_CI_RESULT: \$\{\{ needs\.go-ci\.result \}\}\n {8}run: test "\$\{GO_CI_RESULT\}" = "success"$/mu,
     );
+    assert.doesNotMatch(bridge, /^ {8}run:.*\$\{\{/mu);
+    const hardenRunnerUses = bridge.split("\n").filter((line) => {
+      const withoutComment = line.trim().split(/\s+#/u, 1)[0];
+      return withoutComment === `uses: ${HARDEN_RUNNER}`;
+    });
+    assert.equal(hardenRunnerUses.length, 1, `${jobId} must pin one harden-runner step`);
     assert.match(bridge, /^ {10}egress-policy: block$/mu);
   }
+}
+
+function assertCoverageDocumentation(source) {
+  assert.match(source, /```sh\n\.\/scripts\/ci\/go-test\.sh\n```/u);
+  assert.doesNotMatch(source, /^[ \t]*(?:[$>] )?go[ \t]+test[ \t]+-race(?:[ \t]|$)/mu);
 }
 
 test("Portwing calls the reusable workflows at the frozen organization SHA", () => {
@@ -193,6 +203,14 @@ test("the local lint gate uses the same isolated fixed adapter", () => {
   const lefthook = fs.readFileSync(LEFTHOOK, "utf8");
   assert.match(lefthook, /^ {4}go-lint:\n {6}run: \.\/scripts\/ci\/go-lint\.sh$/mu);
   assert.doesNotMatch(lefthook, /^ {6}run: golangci-lint run$/mu);
+});
+
+test("coverage documentation runs the same fixed adapter as CI", () => {
+  const coverage = fs.readFileSync(COVERAGE, "utf8");
+  assertCoverageDocumentation(coverage);
+  assert.throws(() =>
+    assertCoverageDocumentation(`${coverage}\n\`\`\`bash\n  $ go test -race ./...\n\`\`\`\n`),
+  );
 });
 
 test("temporary bridges keep every legacy protected context fail-closed", () => {
@@ -214,15 +232,27 @@ test("the contract rejects a moving reusable ref and a fail-open bridge", () => 
   assert.throws(() =>
     assertTemporaryBridges(
       source.replace(
-        `test "\${{ needs.go-ci.result }}" = "success"`,
-        `test "\${{ needs.go-ci.result }}" != "cancelled"`,
+        `test "\${GO_CI_RESULT}" = "success"`,
+        `test "\${GO_CI_RESULT}" != "cancelled"`,
       ),
     ),
   );
   const legacyBuild = jobSection(source, "legacy-build");
-  assert.throws(() =>
-    assertTemporaryBridges(
-      source.replace(legacyBuild, legacyBuild.replace(hardenRunner, "example")),
-    ),
+  assert.throws(
+    () =>
+      assertTemporaryBridges(
+        source.replace(legacyBuild, legacyBuild.replace(HARDEN_RUNNER, "example")),
+      ),
+    /legacy-build must pin one harden-runner step/u,
+  );
+  assert.throws(
+    () =>
+      assertTemporaryBridges(
+        source.replace(
+          legacyBuild,
+          legacyBuild.replace(`uses: ${HARDEN_RUNNER}`, `# ${HARDEN_RUNNER}`),
+        ),
+      ),
+    /legacy-build must pin one harden-runner step/u,
   );
 });
