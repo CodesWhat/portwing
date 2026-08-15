@@ -216,7 +216,6 @@ required_ci_contexts=(
 )
 
 for context in "${required_ci_contexts[@]}"; do
-	require_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "required CI context must use the stable plain name ${context}"
 	require_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must require the stable plain context ${context}"
 done
 
@@ -232,6 +231,13 @@ retired_ci_contexts=(
 for context in "${retired_ci_contexts[@]}"; do
 	reject_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "workflow must not report the retired CI context ${context}"
 	reject_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must not require the retired CI context ${context}"
+done
+
+# The X1 canary promoted; branch protection now requires only the reusable
+# "Go CI / ..." contexts, so the plain-name bridge jobs that mirrored them
+# were removed from the workflow. Reject their reintroduction.
+for context in "${required_ci_contexts[@]}"; do
+	reject_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "workflow must not reintroduce the retired X1 bridge context ${context}"
 done
 
 if [ "$failures" -ne 0 ]; then
