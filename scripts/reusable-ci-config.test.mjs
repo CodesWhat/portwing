@@ -42,6 +42,11 @@ const BRIDGES = new Map([
   ["legacy-goreleaser", "GoReleaser Config"],
 ]);
 
+const GO_PROXY_STORAGE_INPUTS = [
+  "lint-allowed-endpoints",
+  "goreleaser-allowed-endpoints",
+];
+
 function jobSection(source, jobId) {
   const lines = source.split("\n");
   const start = lines.indexOf(`  ${jobId}:`);
@@ -49,6 +54,20 @@ function jobSection(source, jobId) {
   let end = lines.length;
   for (let index = start + 1; index < lines.length; index += 1) {
     if (/^ {2}[a-z][a-z0-9-]*:$/u.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+function inputBlock(source, inputName) {
+  const lines = source.split("\n");
+  const start = lines.indexOf(`      ${inputName}: >-`);
+  if (start === -1) return "";
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^ {6}[a-z][a-z0-9-]*:/u.test(lines[index])) {
       end = index;
       break;
     }
@@ -74,6 +93,16 @@ function assertReusableCaller(source) {
     /CodesWhat\/\.github\/\.github\/workflows\/[^\s@]+@(?![0-9a-f]{40}\b)/u,
   );
   assert.doesNotMatch(source, /secrets:\s*inherit/u);
+
+  for (const inputName of GO_PROXY_STORAGE_INPUTS) {
+    const endpoints = inputBlock(go, inputName);
+    assert.ok(endpoints, `go-ci is missing ${inputName}`);
+    assert.match(
+      endpoints,
+      /^ {8}storage[.]googleapis[.]com:443$/mu,
+      `${inputName} must permit the Go module proxy's storage redirect`,
+    );
+  }
 
   for (const input of [
     "test-check-name: Build & Test",
@@ -169,6 +198,15 @@ test("temporary bridges keep every legacy protected context fail-closed", () => 
 test("the contract rejects a moving reusable ref and a fail-open bridge", () => {
   const source = fs.readFileSync(WORKFLOW, "utf8");
   assert.throws(() => assertReusableCaller(source.replaceAll(SHARED_SHA, "main")));
+  const go = jobSection(source, "go-ci");
+  for (const inputName of GO_PROXY_STORAGE_INPUTS) {
+    const endpoints = inputBlock(go, inputName);
+    assert.throws(() =>
+      assertReusableCaller(
+        source.replace(endpoints, endpoints.replace("        storage.googleapis.com:443\n", "")),
+      ),
+    );
+  }
   assert.throws(() =>
     assertTemporaryBridges(
       source.replace(

@@ -59,6 +59,7 @@ jobs:
         go.dev:443
         proxy.golang.org:443
         release-assets.githubusercontent.com:443
+        storage.googleapis.com:443
         sum.golang.org:443
         tmaproduction.blob.core.windows.net:443
       govulncheck-egress-policy: block
@@ -87,6 +88,7 @@ jobs:
         go.dev:443
         proxy.golang.org:443
         release-assets.githubusercontent.com:443
+        storage.googleapis.com:443
         sum.golang.org:443
         tmaproduction.blob.core.windows.net:443
       qlty-egress-policy: block
