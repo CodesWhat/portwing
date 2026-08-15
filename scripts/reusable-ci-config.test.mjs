@@ -172,7 +172,10 @@ function assertTemporaryBridges(source) {
     assert.ok(bridge.includes(`name: "${checkName}"`), `${jobId} has the wrong check name`);
     assert.match(bridge, /^ {4}needs: go-ci$/mu);
     assert.match(bridge, /^ {4}if: \$\{\{ always\(\) \}\}$/mu);
-    assert.match(bridge, /^ {8}env:\n {10}GO_CI_RESULT: \$\{\{ needs\.go-ci\.result \}\}\n {8}run: test "\$\{GO_CI_RESULT\}" = "success"$/mu);
+    assert.match(
+      bridge,
+      /^ {8}env:\n {10}GO_CI_RESULT: \$\{\{ needs\.go-ci\.result \}\}\n {8}run: test "\$\{GO_CI_RESULT\}" = "success"$/mu,
+    );
     assert.doesNotMatch(bridge, /^ {8}run:.*\$\{\{/mu);
     assert.equal(
       bridge.split(HARDEN_RUNNER).length - 1,
@@ -228,10 +231,11 @@ test("the contract rejects a moving reusable ref and a fail-open bridge", () => 
     ),
   );
   const legacyBuild = jobSection(source, "legacy-build");
-  assert.throws(() =>
-    assertTemporaryBridges(
-      source.replace(legacyBuild, legacyBuild.replace(HARDEN_RUNNER, "example")),
-    ),
+  assert.throws(
+    () =>
+      assertTemporaryBridges(
+        source.replace(legacyBuild, legacyBuild.replace(HARDEN_RUNNER, "example")),
+      ),
     /legacy-build must pin one harden-runner step/u,
   );
 });
