@@ -10,7 +10,7 @@ import {
   canonicalizeAnalyticsRoute,
   createPostHogOptions,
 } from "./contract";
-import { createWebVitalsBuffer } from "./web-vitals-buffer";
+import { createWebVitalsReporter as createBufferedWebVitalsReporter } from "./web-vitals-buffer";
 
 let initialized = false;
 
@@ -31,19 +31,18 @@ function capture(event: AnalyticsEvent | null): void {
   posthog.capture(event.event, event.properties);
 }
 
-const webVitalsBuffer = createWebVitalsBuffer(
-  capture,
-  buildWebVitalsEvent,
-  canonicalizeAnalyticsRoute,
-);
-
 export function capturePageview(path: string): void {
-  webVitalsBuffer.begin(path);
   capture(buildPageviewEvent(path));
 }
 
-export function captureWebVital(path: string, name: string, value: number): void {
-  webVitalsBuffer.record(path, name, value);
+export function createWebVitalsReporter(path: string): (name: string, value: number) => void {
+  const reporter = createBufferedWebVitalsReporter(
+    path,
+    capture,
+    buildWebVitalsEvent,
+    canonicalizeAnalyticsRoute,
+  );
+  return reporter.record;
 }
 
 export function captureCta(path: string, ctaId: CtaId, placement: CtaPlacement): void {

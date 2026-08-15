@@ -29,7 +29,8 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
   assert.doesNotMatch(sources, /@vercel\/analytics|SpeedInsights|\.identify\s*\(/);
   const analyticsClient = read("analytics/src/client.ts");
   assert.match(analyticsClient, /posthog-js\/dist\/module\.slim"/);
-  assert.match(analyticsClient, /createWebVitalsBuffer|captureWebVital/);
+  assert.match(analyticsClient, /createWebVitalsReporter/);
+  assert.doesNotMatch(analyticsClient, /webVitalsBuffer\.begin|captureWebVital/);
   assert.doesNotMatch(analyticsClient, /WebVitalsAutocapture|extension-bundles/);
 
   const extensionBundleBytes = fs.statSync(
@@ -45,9 +46,9 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
     assert.match(runtime, /capturePageview\(pathname\)/);
     assert.match(runtime, /useReportWebVitals\(reportWebVital\)/);
     assert.match(runtime, /useCallback<Parameters<typeof useReportWebVitals>\[0\]>/);
-    assert.match(runtime, /const webVitalsPath = useRef\(pathname\)\.current/);
-    assert.match(runtime, /captureWebVital\(webVitalsPath, name, value\)/);
-    assert.match(runtime, /\[webVitalsPath\]/);
+    assert.match(runtime, /createWebVitalsReporter\(pathname\)/);
+    assert.match(runtime, /webVitalsReporter\.current\?\.\(name, value\)/);
+    assert.match(runtime, /\},\s*\[\],\s*\)/);
     assert.doesNotMatch(runtime, /pathnameRef|\.current = pathname/);
     assert.match(runtime, /useEffect\(\(\) => \{\s*capturePageview\(pathname\)/);
   }
