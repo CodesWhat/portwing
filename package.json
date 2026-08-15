@@ -17,7 +17,7 @@
     "lighthouse:marketing": "node scripts/lighthouse-budget.mjs lighthouse/marketing.cjs",
     "lighthouse:docs": "node scripts/lighthouse-budget.mjs lighthouse/docs.cjs",
     "lighthouse": "npm run lighthouse:marketing && npm run lighthouse:docs",
-    "check:web": "npm run test:web && npm run lint && npm run build && npm run budget:web && npm run lighthouse"
+    "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run build && npm run budget:web && npm run lighthouse"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
@@ -31,6 +31,6 @@
   },
   "packageManager": "npm@12.0.2",
   "engines": {
-    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+    "node": ">=24.0.0"
   }
 }

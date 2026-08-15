@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { measurePage, verifyPageBudgets } from "./page-weight-budget.mjs";
+import {
+  measurePage,
+  verifyPageBudgets,
+  verifyProductionPageBudgets,
+} from "./page-weight-budget.mjs";
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-page-weight-"));
@@ -67,6 +71,45 @@ test("page measurement ignores local navigation links", () => {
   }
 });
 
+test("page measurement resolves root-relative assets below the configured mount", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-mounted-page-weight-"));
+  try {
+    const docsRoot = path.join(root, "docs-out");
+    const deploymentRoot = path.join(root, "website-out");
+    fs.mkdirSync(path.join(docsRoot, "assets"), { recursive: true });
+    fs.mkdirSync(path.join(docsRoot, "other"), { recursive: true });
+    fs.mkdirSync(deploymentRoot, { recursive: true });
+    const html = '<script src="/docs/assets/app.js"></script><img src="/portwing.png">';
+    fs.writeFileSync(path.join(docsRoot, "index.html"), html);
+    fs.writeFileSync(path.join(docsRoot, "assets", "app.js"), "12345");
+    fs.writeFileSync(path.join(deploymentRoot, "portwing.png"), "logo");
+    assert.deepEqual(
+      measurePage(docsRoot, "index.html", {
+        mountPath: "/docs",
+        rootOutputRoot: deploymentRoot,
+      }),
+      {
+        totalBytes: html.length + 9,
+        scriptBytes: 5,
+        assetCount: 3,
+      },
+    );
+
+    fs.writeFileSync(path.join(docsRoot, "index.html"), '<script src="/other/app.js"></script>');
+    fs.writeFileSync(path.join(docsRoot, "other", "app.js"), "coincidental-docs-file");
+    assert.throws(
+      () =>
+        measurePage(docsRoot, "index.html", {
+          mountPath: "/docs",
+          rootOutputRoot: deploymentRoot,
+        }),
+      /missing local asset/,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("page budgets fail closed for missing routes and oversized scripts", () => {
   const root = fixture();
   try {
@@ -77,6 +120,29 @@ test("page budgets fail closed for missing routes and oversized scripts", () => 
     assert.throws(
       () => verifyPageBudgets(root, [{ route: "index.html", totalBytes: 1_000, scriptBytes: 4 }]),
       /script budget exceeded/,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("production budgets measure each site's own output root", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-production-page-weight-"));
+  try {
+    const marketing = path.join(root, "website", "out");
+    const docs = path.join(root, "docs", "out");
+    fs.mkdirSync(marketing, { recursive: true });
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(marketing, "index.html"), "marketing");
+    fs.writeFileSync(path.join(docs, "index.html"), "docs");
+
+    const results = verifyProductionPageBudgets(root);
+    assert.deepEqual(
+      results.map(({ site, route, totalBytes }) => ({ site, route, totalBytes })),
+      [
+        { site: "marketing", route: "index.html", totalBytes: 9 },
+        { site: "docs", route: "index.html", totalBytes: 4 },
+      ],
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

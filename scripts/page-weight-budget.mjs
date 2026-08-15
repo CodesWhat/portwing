@@ -10,6 +10,7 @@ const BUDGETS = [
   {
     site: "marketing",
     route: "index.html",
+    mountPath: "/",
     baselineTotalBytes: 4_513_931,
     baselineScriptBytes: 801_221,
     totalBytes: 4_655_000,
@@ -17,7 +18,8 @@ const BUDGETS = [
   },
   {
     site: "docs",
-    route: "docs/index.html",
+    route: "index.html",
+    mountPath: "/docs",
     baselineTotalBytes: 2_342_852,
     baselineScriptBytes: 958_516,
     totalBytes: 2_475_000,
@@ -87,7 +89,23 @@ function cssUrls(css) {
   return resources;
 }
 
-function resolveLocalAsset(outputRoot, sourceFile, rawUrl) {
+function normalizedMountPath(mountPath) {
+  if (typeof mountPath !== "string" || !mountPath.startsWith("/")) {
+    throw new Error(`invalid mount path: ${mountPath}`);
+  }
+  const normalized = mountPath.length > 1 ? mountPath.replace(/\/+$/u, "") : mountPath;
+  if (normalized.split("/").some((segment) => segment === "." || segment === "..")) {
+    throw new Error(`invalid mount path: ${mountPath}`);
+  }
+  return normalized;
+}
+
+function insideRoot(candidate, root) {
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+}
+
+function resolveLocalAsset(outputRoot, sourceFile, rawUrl, options) {
+  const { mountPath, rootOutputRoot } = options;
   const source = rawUrl.split(/[?#]/u, 1)[0];
   if (!source || source.startsWith("//") || /^[a-z][a-z\d+.-]*:/iu.test(source)) return null;
   let decoded;
@@ -98,17 +116,33 @@ function resolveLocalAsset(outputRoot, sourceFile, rawUrl) {
       `invalid local asset URL in ${path.relative(outputRoot, sourceFile)}: ${rawUrl}`,
     );
   }
-  const candidate = decoded.startsWith("/")
-    ? path.resolve(outputRoot, `.${decoded}`)
+  let mountedSource = decoded;
+  let assetRoot = outputRoot;
+  if (decoded.startsWith("/")) {
+    const normalizedMount = normalizedMountPath(mountPath);
+    if (normalizedMount !== "/") {
+      if (decoded === normalizedMount || decoded.startsWith(`${normalizedMount}/`)) {
+        mountedSource = decoded.slice(normalizedMount.length) || "/";
+      } else {
+        assetRoot = rootOutputRoot;
+      }
+    }
+  }
+  const candidate = mountedSource.startsWith("/")
+    ? path.resolve(assetRoot, `.${mountedSource}`)
     : path.resolve(path.dirname(sourceFile), decoded);
-  const root = path.resolve(outputRoot);
-  if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) {
-    throw new Error(`local asset escapes output root: ${rawUrl}`);
+  const allowedRoots = [path.resolve(outputRoot), path.resolve(rootOutputRoot)];
+  if (!allowedRoots.some((root) => insideRoot(candidate, root))) {
+    throw new Error(`local asset escapes output roots: ${rawUrl}`);
   }
   return candidate;
 }
 
-export function measurePage(outputRoot, route) {
+export function measurePage(
+  outputRoot,
+  route,
+  { mountPath = "/", rootOutputRoot = outputRoot } = {},
+) {
   const htmlPath = path.join(outputRoot, route);
   if (!fs.existsSync(htmlPath)) throw new Error(`missing page: ${route}`);
   const files = new Set([htmlPath]);
@@ -119,7 +153,10 @@ export function measurePage(outputRoot, route) {
   }
   while (pending.length > 0) {
     const { sourceFile, url } = pending.pop();
-    const assetPath = resolveLocalAsset(outputRoot, sourceFile, url);
+    const assetPath = resolveLocalAsset(outputRoot, sourceFile, url, {
+      mountPath,
+      rootOutputRoot,
+    });
     if (!assetPath || files.has(assetPath)) continue;
     if (!fs.existsSync(assetPath) || !fs.statSync(assetPath).isFile()) {
       throw new Error(`missing local asset for ${route}: ${url}`);
@@ -142,9 +179,12 @@ export function measurePage(outputRoot, route) {
   return { totalBytes, scriptBytes, assetCount: files.size };
 }
 
-export function verifyPageBudgets(outputRoot, budgets = BUDGETS) {
+export function verifyPageBudgets(outputRoot, budgets = BUDGETS, options = {}) {
   return budgets.map((budget) => {
-    const result = measurePage(outputRoot, budget.route);
+    const result = measurePage(outputRoot, budget.route, {
+      ...options,
+      mountPath: budget.mountPath,
+    });
     if (result.scriptBytes > budget.scriptBytes) {
       throw new Error(
         `${budget.site ?? budget.route} script budget exceeded: ${result.scriptBytes} > ${budget.scriptBytes}`,
@@ -159,8 +199,22 @@ export function verifyPageBudgets(outputRoot, budgets = BUDGETS) {
   });
 }
 
+export function verifyProductionPageBudgets(root = ROOT) {
+  return [
+    ...verifyPageBudgets(
+      path.join(root, "website", "out"),
+      BUDGETS.filter((budget) => budget.site === "marketing"),
+    ),
+    ...verifyPageBudgets(
+      path.join(root, "docs", "out"),
+      BUDGETS.filter((budget) => budget.site === "docs"),
+      { rootOutputRoot: path.join(root, "website", "out") },
+    ),
+  ];
+}
+
 function main() {
-  const results = verifyPageBudgets(path.join(ROOT, "website", "out"));
+  const results = verifyProductionPageBudgets();
   for (const result of results) {
     process.stdout.write(
       `${result.site}: ${result.totalBytes}/${result.totalBytes > result.baselineTotalBytes ? "+" : ""}${result.baselineTotalBytes} total bytes, ${result.scriptBytes}/${result.scriptBytes > result.baselineScriptBytes ? "+" : ""}${result.baselineScriptBytes} script bytes, ${result.assetCount} assets\n`,
