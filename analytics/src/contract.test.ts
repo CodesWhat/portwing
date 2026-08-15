@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildCtaEvent,
   buildPageviewEvent,
+  buildWebVitalsEvent,
   createPostHogOptions,
   POSTHOG_PROXY_HOST,
   POSTHOG_UI_HOST,
@@ -250,6 +251,161 @@ test("before_send keeps one buffered Core Web Vitals envelope", () => {
   );
 });
 
+type BufferedEvent = {
+  event: "$web_vitals";
+  properties: Record<string, unknown>;
+};
+
+type WebVitalsBufferFactory = (
+  emit: (event: BufferedEvent) => void,
+  buildEvent: typeof buildWebVitalsEvent,
+  schedule: (callback: () => void, delayMs: number) => number,
+  cancel: (timer: number) => void,
+) => {
+  begin: (path: string) => void;
+  record: (path: string, name: string, value: number) => void;
+};
+
+async function loadWebVitalsBufferFactory(): Promise<WebVitalsBufferFactory> {
+  const module = await import("./web-vitals-buffer.ts").catch(() => ({}));
+  const factory = "createWebVitalsBuffer" in module ? module.createWebVitalsBuffer : undefined;
+  assert.equal(typeof factory, "function", "createWebVitalsBuffer must exist");
+  return factory as WebVitalsBufferFactory;
+}
+
+function fakeTimers() {
+  let nextTimer = 1;
+  const pending = new Map<number, () => void>();
+  const delays: number[] = [];
+  return {
+    cancel(timer: number) {
+      pending.delete(timer);
+    },
+    delays,
+    fire() {
+      const callbacks = [...pending.values()];
+      pending.clear();
+      for (const callback of callbacks) callback();
+    },
+    pending,
+    schedule(callback: () => void, delayMs: number) {
+      const timer = nextTimer++;
+      delays.push(delayMs);
+      pending.set(timer, callback);
+      return timer;
+    },
+  };
+}
+
+test("web vitals buffer emits one complete canonical envelope", async () => {
+  const createWebVitalsBuffer = await loadWebVitalsBufferFactory();
+  const timers = fakeTimers();
+  const emitted: BufferedEvent[] = [];
+  const buffer = createWebVitalsBuffer(
+    (event) => emitted.push(event),
+    buildWebVitalsEvent,
+    timers.schedule,
+    timers.cancel,
+  );
+
+  buffer.begin("/docs/security-model?customer=secret#private");
+  buffer.record("/docs/security-model?customer=secret#private", "CLS", 0.01);
+  buffer.record("/docs/security-model?customer=secret#private", "FCP", 123.4);
+  buffer.record("/docs/security-model?customer=secret#private", "INP", 81.25);
+  buffer.record("/docs/security-model?customer=secret#private", "LCP", 456.7);
+
+  assert.deepEqual(timers.delays, [5_000]);
+  assert.equal(timers.pending.size, 0);
+  assert.deepEqual(emitted, [
+    {
+      event: "$web_vitals",
+      properties: {
+        ...BASE_PROPERTIES,
+        surface: "docs",
+        path: "/docs/security-model",
+        $web_vitals_CLS_value: 0.01,
+        $web_vitals_FCP_value: 123.4,
+        $web_vitals_INP_value: 81.25,
+        $web_vitals_LCP_value: 456.7,
+      },
+    },
+  ]);
+
+  buffer.record("/docs/security-model", "LCP", 999);
+  assert.equal(emitted.length, 1);
+});
+
+test("web vitals buffer flushes one partial envelope and ignores late metrics", async () => {
+  const createWebVitalsBuffer = await loadWebVitalsBufferFactory();
+  const timers = fakeTimers();
+  const emitted: BufferedEvent[] = [];
+  const buffer = createWebVitalsBuffer(
+    (event) => emitted.push(event),
+    buildWebVitalsEvent,
+    timers.schedule,
+    timers.cancel,
+  );
+
+  buffer.begin("/?customer=secret#private");
+  buffer.record("/?customer=secret#private", "TTFB", 8);
+  buffer.record("/?customer=secret#private", "CLS", -1);
+  buffer.record("/?customer=secret#private", "FCP", Number.NaN);
+  assert.equal(timers.pending.size, 0);
+
+  buffer.record("/?customer=secret#private", "CLS", 0.02);
+  buffer.record("/?customer=secret#private", "LCP", 321);
+  assert.deepEqual(timers.delays, [5_000]);
+  timers.fire();
+
+  assert.deepEqual(emitted, [
+    {
+      event: "$web_vitals",
+      properties: {
+        ...BASE_PROPERTIES,
+        surface: "marketing",
+        path: "/",
+        $web_vitals_CLS_value: 0.02,
+        $web_vitals_LCP_value: 321,
+      },
+    },
+  ]);
+  buffer.record("/", "FCP", 111);
+  buffer.record("/", "INP", 42);
+  assert.equal(emitted.length, 1);
+});
+
+test("web vitals buffer does not reopen an emitted route after navigation", async () => {
+  const createWebVitalsBuffer = await loadWebVitalsBufferFactory();
+  const timers = fakeTimers();
+  const emitted: BufferedEvent[] = [];
+  const buffer = createWebVitalsBuffer(
+    (event) => emitted.push(event),
+    buildWebVitalsEvent,
+    timers.schedule,
+    timers.cancel,
+  );
+
+  buffer.begin("/docs/security-model");
+  buffer.record("/docs/security-model", "CLS", 0.03);
+  buffer.begin("/compare");
+
+  assert.deepEqual(emitted, [
+    {
+      event: "$web_vitals",
+      properties: {
+        ...BASE_PROPERTIES,
+        surface: "docs",
+        path: "/docs/security-model",
+        $web_vitals_CLS_value: 0.03,
+      },
+    },
+  ]);
+
+  buffer.record("/docs/security-model", "LCP", 600);
+  timers.fire();
+  assert.equal(emitted.length, 1);
+});
+
 test("PostHog initializes only with the exact production proxy contract", () => {
   assert.equal(createPostHogOptions(undefined, undefined, undefined), null);
   assert.equal(createPostHogOptions("phc_project", POSTHOG_PROXY_HOST, undefined), null);
@@ -293,12 +449,7 @@ test("PostHog initializes only with the exact production proxy contract", () => 
       disable_scroll_properties: true,
       mask_all_element_attributes: true,
       mask_all_text: true,
-      capture_performance: {
-        network_timing: false,
-        web_vitals: true,
-        web_vitals_allowed_metrics: ["CLS", "FCP", "INP", "LCP"],
-        web_vitals_attribution: false,
-      },
+      capture_performance: false,
       before_send: undefined,
     },
   );

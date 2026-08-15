@@ -40,6 +40,7 @@ const DOCS_PATHS = new Set([
 ]);
 
 export type Surface = "marketing" | "docs";
+export type WebVitalName = "CLS" | "FCP" | "INP" | "LCP";
 export type CtaId =
   | "install_quick"
   | "install_secure"
@@ -92,12 +93,7 @@ export type PostHogOptions = {
   disable_scroll_properties: true;
   mask_all_element_attributes: true;
   mask_all_text: true;
-  capture_performance: {
-    network_timing: false;
-    web_vitals: true;
-    web_vitals_allowed_metrics: ["CLS", "FCP", "INP", "LCP"];
-    web_vitals_attribution: false;
-  };
+  capture_performance: false;
   before_send: BeforeSendFn;
 };
 
@@ -124,6 +120,8 @@ const WEB_VITAL_KEYS = [
   "$web_vitals_INP_value",
   "$web_vitals_LCP_value",
 ] as const;
+
+const WEB_VITAL_NAMES: readonly WebVitalName[] = ["CLS", "FCP", "INP", "LCP"];
 
 function normalizedPath(rawPath: string): string {
   const withoutQuery = rawPath.split(/[?#]/u, 1)[0] || "/";
@@ -172,6 +170,22 @@ export function buildCtaEvent(
   };
 }
 
+export function buildWebVitalsEvent(
+  rawPath: string,
+  metrics: Readonly<Partial<Record<WebVitalName, number>>>,
+): AnalyticsEvent | null {
+  const properties: EventProperties = baseProperties(rawPath);
+  let metricCount = 0;
+  for (const name of WEB_VITAL_NAMES) {
+    const value = metrics[name];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      properties[`$web_vitals_${name}_value`] = value;
+      metricCount += 1;
+    }
+  }
+  return metricCount === 0 ? null : { event: "$web_vitals", properties };
+}
+
 function rawPathFromProperties(properties: EventProperties): string | undefined {
   if (typeof properties.path === "string") return properties.path;
   if (typeof properties.$current_url !== "string") return undefined;
@@ -205,17 +219,14 @@ export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
     if (typeof ctaId !== "string" || typeof placement !== "string") return null;
     sanitized = buildCtaEvent(rawPath, ctaId as CtaId, placement as CtaPlacement);
   } else if (envelope.event === "$web_vitals") {
-    const properties: EventProperties = baseProperties(rawPath);
-    let metricCount = 0;
-    for (const key of WEB_VITAL_KEYS) {
+    const metrics: Partial<Record<WebVitalName, number>> = {};
+    for (const [index, key] of WEB_VITAL_KEYS.entries()) {
       const value = envelope.properties[key];
-      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-        properties[key] = value;
-        metricCount += 1;
+      if (typeof value === "number") {
+        metrics[WEB_VITAL_NAMES[index]] = value;
       }
     }
-    if (metricCount === 0) return null;
-    sanitized = { event: "$web_vitals", properties };
+    sanitized = buildWebVitalsEvent(rawPath, metrics);
   } else {
     return null;
   }
@@ -280,12 +291,7 @@ export function createPostHogOptions(
     disable_scroll_properties: true,
     mask_all_element_attributes: true,
     mask_all_text: true,
-    capture_performance: {
-      network_timing: false,
-      web_vitals: true,
-      web_vitals_allowed_metrics: ["CLS", "FCP", "INP", "LCP"],
-      web_vitals_attribution: false,
-    },
+    capture_performance: false,
     before_send: sanitizeEvent,
   };
 }
