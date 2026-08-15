@@ -74,18 +74,37 @@ test("page measurement ignores local navigation links", () => {
 test("page measurement resolves root-relative assets below the configured mount", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-mounted-page-weight-"));
   try {
-    fs.mkdirSync(path.join(root, "assets"), { recursive: true });
-    const html = '<script src="/docs/assets/app.js"></script>';
-    fs.writeFileSync(path.join(root, "index.html"), html);
-    fs.writeFileSync(path.join(root, "assets", "app.js"), "12345");
-    assert.deepEqual(measurePage(root, "index.html", "/docs"), {
-      totalBytes: html.length + 5,
-      scriptBytes: 5,
-      assetCount: 2,
-    });
+    const docsRoot = path.join(root, "docs-out");
+    const deploymentRoot = path.join(root, "website-out");
+    fs.mkdirSync(path.join(docsRoot, "assets"), { recursive: true });
+    fs.mkdirSync(path.join(docsRoot, "other"), { recursive: true });
+    fs.mkdirSync(deploymentRoot, { recursive: true });
+    const html = '<script src="/docs/assets/app.js"></script><img src="/portwing.png">';
+    fs.writeFileSync(path.join(docsRoot, "index.html"), html);
+    fs.writeFileSync(path.join(docsRoot, "assets", "app.js"), "12345");
+    fs.writeFileSync(path.join(deploymentRoot, "portwing.png"), "logo");
+    assert.deepEqual(
+      measurePage(docsRoot, "index.html", {
+        mountPath: "/docs",
+        rootOutputRoot: deploymentRoot,
+      }),
+      {
+        totalBytes: html.length + 9,
+        scriptBytes: 5,
+        assetCount: 3,
+      },
+    );
 
-    fs.writeFileSync(path.join(root, "index.html"), '<script src="/other/app.js"></script>');
-    assert.throws(() => measurePage(root, "index.html", "/docs"), /missing local asset/);
+    fs.writeFileSync(path.join(docsRoot, "index.html"), '<script src="/other/app.js"></script>');
+    fs.writeFileSync(path.join(docsRoot, "other", "app.js"), "coincidental-docs-file");
+    assert.throws(
+      () =>
+        measurePage(docsRoot, "index.html", {
+          mountPath: "/docs",
+          rootOutputRoot: deploymentRoot,
+        }),
+      /missing local asset/,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
