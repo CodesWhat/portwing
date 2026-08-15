@@ -42,10 +42,7 @@ const BRIDGES = new Map([
   ["legacy-goreleaser", "GoReleaser Config"],
 ]);
 
-const GO_PROXY_STORAGE_INPUTS = [
-  "lint-allowed-endpoints",
-  "goreleaser-allowed-endpoints",
-];
+const GO_PROXY_STORAGE_INPUTS = ["lint-allowed-endpoints", "goreleaser-allowed-endpoints"];
 
 function jobSection(source, jobId) {
   const lines = source.split("\n");
