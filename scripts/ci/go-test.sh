@@ -45,7 +45,7 @@ coverage_file="${artifact_directory}/coverage.out"
 go test -race -covermode=atomic -coverprofile="${coverage_file}" ${packages[@]+"${packages[@]}"}
 
 COVERAGE_MIN="${COVERAGE_MIN:-96}"
-if [[ ! "${COVERAGE_MIN}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+if [[ ! ${COVERAGE_MIN} =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 	echo "COVERAGE_MIN must be a non-negative decimal percentage" >&2
 	exit 2
 fi
