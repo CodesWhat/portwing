@@ -23,11 +23,6 @@ const quality: Badge[] = [
     alt: "OpenSSF Scorecard",
   },
   {
-    href: "https://goreportcard.com/report/github.com/codeswhat/portwing",
-    src: "https://goreportcard.com/badge/github.com/codeswhat/portwing",
-    alt: "Go Report Card",
-  },
-  {
     href: "https://pkg.go.dev/github.com/codeswhat/portwing",
     src: "https://pkg.go.dev/badge/github.com/codeswhat/portwing.svg",
     alt: "Go Reference",
