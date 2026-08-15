@@ -28,9 +28,10 @@ function assertRootWebLane(source) {
   assert.equal((source.match(/^ {2}web:\s*$/gm) ?? []).length, 0);
   const nodeJob = jobSection(source, "node-ci");
   assert.ok(nodeJob, "missing node-ci reusable caller");
-  assert.match(nodeJob, /test-check-name: Web Contract/);
-  assert.match(nodeJob, /run-test: true/);
-  assert.match(nodeJob, /node-version: 24/);
+  const nodeJobLines = new Set(nodeJob.split("\n"));
+  assert.ok(nodeJobLines.has("      test-check-name: Web Contract"));
+  assert.ok(nodeJobLines.has("      run-test: true"));
+  assert.ok(nodeJobLines.has("      node-version: 24"));
 }
 
 test("CI has one fail-closed root web lane", () => {
@@ -48,6 +49,15 @@ test("root web inputs cannot be satisfied by an unrelated job", () => {
   mutated +=
     "\n  decoy-node-inputs:\n    test-check-name: Web Contract\n    run-test: true\n    node-version: 24\n";
   assert.throws(() => assertRootWebLane(mutated));
+});
+
+test("root web inputs must be exact YAML lines", () => {
+  for (const input of ["test-check-name: Web Contract", "run-test: true", "node-version: 24"]) {
+    assert.throws(() => assertRootWebLane(workflow.replace(`      ${input}`, `      # ${input}`)));
+    assert.throws(() =>
+      assertRootWebLane(workflow.replace(`      ${input}`, `      decoy-${input}`)),
+    );
+  }
 });
 
 test("pre-push mirrors the root web lane", () => {

@@ -77,6 +77,7 @@ function inputBlock(source, inputName) {
 function assertReusableCaller(source) {
   const go = jobSection(source, "go-ci");
   const node = jobSection(source, "node-ci");
+  const goLines = new Set(go.split("\n"));
   assert.ok(go, "missing go-ci reusable caller");
   assert.ok(node, "missing node-ci reusable caller");
   assert.match(
@@ -112,7 +113,7 @@ function assertReusableCaller(source) {
     `run-goreleaser: \${{ github.event_name != 'schedule' }}`,
     `run-qlty: \${{ github.event_name != 'schedule' }}`,
   ]) {
-    assert.ok(go.includes(input), `go-ci is missing ${input}`);
+    assert.ok(goLines.has(`      ${input}`), `go-ci is missing ${input}`);
   }
   assert.match(
     go,
@@ -193,6 +194,24 @@ function assertCoverageDocumentation(source) {
 
 test("Portwing calls the reusable workflows at the frozen organization SHA", () => {
   assertReusableCaller(fs.readFileSync(WORKFLOW, "utf8"));
+});
+
+test("required Go workflow inputs must be exact YAML lines", () => {
+  const source = fs.readFileSync(WORKFLOW, "utf8");
+  for (const input of [
+    "test-check-name: Build & Test",
+    "lint-check-name: Lint",
+    "run-govulncheck: true",
+    "run-workflow-security: true",
+    "run-commit-message: true",
+    `run-goreleaser: \${{ github.event_name != 'schedule' }}`,
+    `run-qlty: \${{ github.event_name != 'schedule' }}`,
+  ]) {
+    assert.throws(() => assertReusableCaller(source.replace(`      ${input}`, `      # ${input}`)));
+    assert.throws(() =>
+      assertReusableCaller(source.replace(`      ${input}`, `      decoy-${input}`)),
+    );
+  }
 });
 
 test("reusable jobs invoke fixed repository-owned scripts", () => {
