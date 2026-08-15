@@ -45,9 +45,11 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
     assert.match(runtime, /capturePageview\(pathname\)/);
     assert.match(runtime, /useReportWebVitals\(reportWebVital\)/);
     assert.match(runtime, /useCallback<Parameters<typeof useReportWebVitals>\[0\]>/);
-    assert.match(runtime, /useRef\(pathname\)/);
-    assert.match(runtime, /captureWebVital\(pathnameRef\.current, name, value\)/);
-    assert.match(runtime, /pathnameRef\.current = pathname;\s*capturePageview\(pathname\)/);
+    assert.match(runtime, /const webVitalsPath = useRef\(pathname\)\.current/);
+    assert.match(runtime, /captureWebVital\(webVitalsPath, name, value\)/);
+    assert.match(runtime, /\[webVitalsPath\]/);
+    assert.doesNotMatch(runtime, /pathnameRef|\.current = pathname/);
+    assert.match(runtime, /useEffect\(\(\) => \{\s*capturePageview\(pathname\)/);
   }
 
   assert.doesNotMatch(read("analytics/src/contract.ts"), /metric_name|metric_value/);

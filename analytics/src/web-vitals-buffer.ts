@@ -24,6 +24,7 @@ export function createWebVitalsBuffer(
   let metrics: Partial<Record<WebVitalName, number>> = {};
   let timer: unknown;
   let sent = false;
+  const emittedPaths = new Set<string>();
 
   const flush = () => {
     if (sent || path === null) return;
@@ -33,7 +34,10 @@ export function createWebVitalsBuffer(
       timer = undefined;
     }
     const event = buildEvent(path, metrics);
-    if (event) emit(event);
+    if (event) {
+      emittedPaths.add(path);
+      emit(event);
+    }
   };
 
   const reset = (nextPath: string) => {
@@ -41,7 +45,7 @@ export function createWebVitalsBuffer(
     path = nextPath;
     metrics = {};
     timer = undefined;
-    sent = false;
+    sent = emittedPaths.has(nextPath);
   };
 
   return {
@@ -49,6 +53,7 @@ export function createWebVitalsBuffer(
       reset(nextPath);
     },
     record(nextPath: string, name: string, value: number): void {
+      if (emittedPaths.has(nextPath)) return;
       if (path === null || path !== nextPath) reset(nextPath);
       if (sent || !WEB_VITAL_NAMES.has(name as WebVitalName)) return;
       if (!Number.isFinite(value) || value < 0) return;

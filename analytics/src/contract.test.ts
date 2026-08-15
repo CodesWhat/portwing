@@ -374,6 +374,38 @@ test("web vitals buffer flushes one partial envelope and ignores late metrics", 
   assert.equal(emitted.length, 1);
 });
 
+test("web vitals buffer does not reopen an emitted route after navigation", async () => {
+  const createWebVitalsBuffer = await loadWebVitalsBufferFactory();
+  const timers = fakeTimers();
+  const emitted: BufferedEvent[] = [];
+  const buffer = createWebVitalsBuffer(
+    (event) => emitted.push(event),
+    buildWebVitalsEvent,
+    timers.schedule,
+    timers.cancel,
+  );
+
+  buffer.begin("/docs/security-model");
+  buffer.record("/docs/security-model", "CLS", 0.03);
+  buffer.begin("/compare");
+
+  assert.deepEqual(emitted, [
+    {
+      event: "$web_vitals",
+      properties: {
+        ...BASE_PROPERTIES,
+        surface: "docs",
+        path: "/docs/security-model",
+        $web_vitals_CLS_value: 0.03,
+      },
+    },
+  ]);
+
+  buffer.record("/docs/security-model", "LCP", 600);
+  timers.fire();
+  assert.equal(emitted.length, 1);
+});
+
 test("PostHog initializes only with the exact production proxy contract", () => {
   assert.equal(createPostHogOptions(undefined, undefined, undefined), null);
   assert.equal(createPostHogOptions("phc_project", POSTHOG_PROXY_HOST, undefined), null);

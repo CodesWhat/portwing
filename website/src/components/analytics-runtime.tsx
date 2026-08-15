@@ -7,18 +7,17 @@ import { useCallback, useEffect, useRef } from "react";
 
 export function AnalyticsRuntime() {
   const pathname = usePathname();
-  const pathnameRef = useRef(pathname);
+  const webVitalsPath = useRef(pathname).current;
 
   useEffect(() => {
-    pathnameRef.current = pathname;
     capturePageview(pathname);
   }, [pathname]);
 
   const reportWebVital = useCallback<Parameters<typeof useReportWebVitals>[0]>(
     ({ name, value }) => {
-      captureWebVital(pathnameRef.current, name, value);
+      captureWebVital(webVitalsPath, name, value);
     },
-    [],
+    [webVitalsPath],
   );
   useReportWebVitals(reportWebVital);
 
