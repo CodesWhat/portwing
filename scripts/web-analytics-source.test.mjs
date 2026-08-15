@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -30,73 +29,25 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
   assert.doesNotMatch(sources, /@vercel\/analytics|SpeedInsights|\.identify\s*\(/);
   const analyticsClient = read("analytics/src/client.ts");
   assert.match(analyticsClient, /posthog-js\/dist\/module\.slim"/);
-  assert.doesNotMatch(analyticsClient, /no-external|captureWebVital|buildWebVitalsEvent/);
+  assert.match(analyticsClient, /createWebVitalsBuffer|captureWebVital/);
+  assert.doesNotMatch(analyticsClient, /WebVitalsAutocapture|extension-bundles/);
 
-  const loaderProbe = execFileSync(
-    process.execPath,
-    [
-      "-e",
-      [
-        "global.window=global;",
-        'const posthog=require("posthog-js/dist/module.slim").default;',
-        "let request;",
-        "global.__PosthogExtensions__.loadExternalDependency(",
-        "{version:posthog.version,config:{disable_external_dependency_loading:false},",
-        "requestRouter:{endpointFor:(type,path)=>(request={type,path,url:'https://e.codeswhat.com'+path}).url}},",
-        '"web-vitals",()=>{});',
-        "process.stdout.write(JSON.stringify({",
-        "loader:typeof global.__PosthogExtensions__?.loadExternalDependency,request}));",
-      ].join(""),
-    ],
-    { cwd: path.join(ROOT, "analytics"), encoding: "utf8" },
-  );
-  assert.deepEqual(JSON.parse(loaderProbe), {
-    loader: "function",
-    request: {
-      type: "assets",
-      path: "/static/web-vitals.js?v=1.417.0",
-      url: "https://e.codeswhat.com/static/web-vitals.js?v=1.417.0",
-    },
-  });
-
-  const bufferedCapture = execFileSync(
-    process.execPath,
-    [
-      "-e",
-      [
-        'const {WebVitalsAutocapture}=require("posthog-js/lib/src/extensions/web-vitals/index.js");',
-        "const captures=[];",
-        "const vitals=new WebVitalsAutocapture({",
-        "config:{capture_performance:{web_vitals:true,",
-        'web_vitals_allowed_metrics:["CLS","FCP","INP","LCP"],',
-        "web_vitals_attribution:false},disable_capture_url_hashes:true},",
-        "persistence:{props:{}},capture:(event,properties)=>captures.push({event,properties})});",
-        'for(const [name,value] of [["CLS",0.01],["FCP",123],["INP",45],["LCP",456]])',
-        'vitals._addToBuffer({name,value,navigationURL:"https://portwing.codeswhat.com/docs",navigationId:1});',
-        "process.stdout.write(JSON.stringify(captures));",
-      ].join(""),
-    ],
-    { cwd: ROOT, encoding: "utf8" },
-  );
-  const captures = JSON.parse(bufferedCapture);
-  assert.equal(captures.length, 1);
-  assert.equal(captures[0].event, "$web_vitals");
-  assert.deepEqual(
-    Object.keys(captures[0].properties).filter((key) => key.endsWith("_value")),
-    [
-      "$web_vitals_CLS_value",
-      "$web_vitals_FCP_value",
-      "$web_vitals_INP_value",
-      "$web_vitals_LCP_value",
-    ],
-  );
+  const extensionBundleBytes = fs.statSync(
+    path.join(ROOT, "node_modules", "posthog-js", "dist", "extension-bundles.js"),
+  ).size;
+  assert.equal(extensionBundleBytes, 138_263);
+  assert.ok(extensionBundleBytes > 850_000 - 784_278);
 
   for (const app of ["website", "docs"]) {
     assert.match(read(`${app}/src/instrumentation-client.ts`), /initializeAnalytics/);
     assert.match(read(`${app}/src/app/layout.tsx`), /<AnalyticsRuntime\s*\/>/);
     const runtime = read(`${app}/src/components/analytics-runtime.tsx`);
     assert.match(runtime, /capturePageview\(pathname\)/);
-    assert.doesNotMatch(runtime, /useReportWebVitals|captureWebVital|useCallback|useRef/);
+    assert.match(runtime, /useReportWebVitals\(reportWebVital\)/);
+    assert.match(runtime, /useCallback<Parameters<typeof useReportWebVitals>\[0\]>/);
+    assert.match(runtime, /useRef\(pathname\)/);
+    assert.match(runtime, /captureWebVital\(pathnameRef\.current, name, value\)/);
+    assert.match(runtime, /pathnameRef\.current = pathname;\s*capturePageview\(pathname\)/);
   }
 
   assert.doesNotMatch(read("analytics/src/contract.ts"), /metric_name|metric_value/);
