@@ -71,13 +71,40 @@ test("CTA events accept only real Portwing component combinations", () => {
       placement: "header",
     },
   });
-  assert.equal(buildCtaEvent("/", "docs_security", "hero"), null);
+  assert.equal(buildCtaEvent("/", "docs_security" as never, "hero"), null);
   assert.equal(buildCtaEvent("/", "install_secure", "header"), null);
   assert.equal(buildCtaEvent("/", "free-form" as never, "hero"), null);
   assert.equal(buildCtaEvent("/", "docs_root", "free-form" as never), null);
 });
 
 test("before_send reconstructs a strict event and property allowlist", () => {
+  assert.deepEqual(
+    sanitizeEvent({
+      event: "$pageview",
+      uuid: "internal-posthog-id",
+      properties: {
+        ...BASE_PROPERTIES,
+        $current_url: "https://portwing.codeswhat.com/docs?token=secret#private",
+        token: "phc_project-token",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+        $referrer: "https://search.example/private",
+        title: "customer private title",
+      },
+    }),
+    {
+      event: "$pageview",
+      uuid: "internal-posthog-id",
+      properties: {
+        ...BASE_PROPERTIES,
+        surface: "docs",
+        path: "/docs",
+        token: "phc_project-token",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+      },
+    },
+  );
   assert.deepEqual(
     sanitizeEvent({
       event: "cta activated",
@@ -115,6 +142,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
   assert.equal(
     sanitizeEvent({
       event: "unknown",
+      uuid: "internal-posthog-id",
       properties: {
         ...BASE_PROPERTIES,
         token: "phc_project-token",
@@ -127,6 +155,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
   assert.equal(
     sanitizeEvent({
       event: "cta activated",
+      uuid: "internal-posthog-id",
       properties: {
         ...BASE_PROPERTIES,
         surface: "marketing",
@@ -205,6 +234,7 @@ test("before_send keeps one buffered Core Web Vitals envelope", () => {
   assert.equal(
     sanitizeEvent({
       event: "$web_vitals",
+      uuid: "internal-posthog-id",
       properties: {
         path: "/",
         token: "phc_project-token",
