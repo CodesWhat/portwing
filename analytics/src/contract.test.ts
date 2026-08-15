@@ -335,6 +335,7 @@ test("web vitals buffer emits one complete canonical envelope", async () => {
   ]);
 
   buffer.record("/docs/security-model", "LCP", 999);
+  buffer.record("/docs/security-model/", "LCP", 999);
   timers.fire();
   assert.equal(emitted.length, 1);
 });
