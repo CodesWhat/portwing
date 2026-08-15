@@ -10,6 +10,8 @@ new_fixture() {
 	git archive HEAD | tar -x -C "${fixture}" || return
 	cp scripts/package-release-config-test-test.sh "${fixture}/scripts/" || return
 	cp scripts/package-release-config-test.sh "${fixture}/scripts/" || return
+	mkdir -p "${fixture}/scripts/ci" || return
+	cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/" || return
 	git -C "${fixture}" init -q || return
 	git -C "${fixture}" config user.email "contract-test@codeswhat.com" || return
 	git -C "${fixture}" config user.name "Contract Test" || return

@@ -22,341 +22,226 @@ permissions:
   contents: read
 
 jobs:
-  web:
-    name: "Web Contract"
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            fonts.googleapis.com:443
-            fonts.gstatic.com:443
-            github.com:443
-            registry.npmjs.org:443
-            release-assets.githubusercontent.com:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Verify web contract
-        run: npm run check:web
-
-  build:
-    name: "Build & Test"
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # OIDC for the Qlty coverage upload: id-token mints the token, contents is
-    # for checkout. No coverage secret to store or rotate.
+  go-ci:
+    name: "Go CI"
     permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            dl.google.com:443
-            github.com:443
-            go.dev:443
-            o4506826106929152.ingest.us.sentry.io:443
-            proxy.golang.org:443
-            qlty-releases.s3.amazonaws.com:443
-            qlty.sh:443
-            release-assets.githubusercontent.com:443
-            s3.us-east-1.amazonaws.com:443
-            tmaproduction.blob.core.windows.net:443
-            tuf-repo-cdn.sigstore.dev:443
-            tuf-repo.github.com:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Verify dependencies
-        run: go mod verify
-
-      - name: Format check
-        run: |
-          FILES=$(gofmt -l .)
-          if [ -n "$FILES" ]; then
-            echo "::error::gofmt differences found — run 'gofmt -w .' and commit:"
-            echo "$FILES"
-            exit 1
-          fi
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Build
-        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o portwing ./cmd/portwing
-
-      - name: Test
-        # Coverage measures PRODUCT code only: internal/* + cmd/*. The three tool
-        # mains — benchmarks/cmd/loadgen, benchmarks/cmd/mockdocker, and the
-        # internal/banner/gen art generator — are dev/build tooling, not shipped
-        # code, so they're excluded from the coverprofile (and the floor below).
-        # `go vet ./...` above still compiles them, so they can't silently rot.
-        run: |
-          mapfile -t PKGS < <(go list ./internal/... ./cmd/... | grep -v '/internal/banner/gen')
-          go test -race -covermode=atomic -coverprofile=coverage.out "${PKGS[@]}"
-
-      - name: Publish coverage to Qlty
-        # Org-wide coverage consolidated on Qlty Cloud (replaces Codecov).
-        # OIDC auth — no token to store or rotate. Skipped on fork PRs, which
-        # GitHub does not grant id-token:write. Advisory: continue-on-error so a
-        # publish hiccup never blocks CI; the coverage gate below is enforcement.
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        continue-on-error: true
-        uses: qltysh/qlty-action/coverage@08a0a862c159eae9b9003081da6663d96efef637  # v2.3.0
-        with:
-          oidc: true
-          files: coverage.out
-          format: coverprofile
-
-      - name: Coverage gate
-        # Vendor-free floor: fails when the weighted statement total (product
-        # packages only — see the Test step) drops below COVERAGE_MIN. Residual
-        # uncovered code is structurally unreachable: os.Exit in main, crypto/rand
-        # failure, json.Marshal on safe primitive-only types, WebSocket
-        # SetWriteDeadline errors, filepath.Abs failures (only reachable if
-        # os.Getwd fails), and compile-time GOOS=windows branches. See COVERAGE.md.
-        #
-        # The margin here is thin, not the ~1.5% an earlier version of this
-        # comment claimed. Measured 96.3% on 2026-08-04 against a floor of 96, and
-        # linux CI reads ~0.1 below a darwin dev box, so three or four new
-        # uncovered statements are enough to turn this red. That is the intent —
-        # new error paths get tests — but do not read a passing run as slack.
-        # go.mod is at the repo root; no path rewrite needed.
-        env:
-          COVERAGE_MIN: "96"
-        run: |
-          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')
-          echo "Total statement coverage: ${total}% (floor ${COVERAGE_MIN}%)"
-          awk -v t="$total" -v m="$COVERAGE_MIN" 'BEGIN { exit (t+0 >= m+0) ? 0 : 1 }' || {
-            echo "::error::coverage ${total}% is below the ${COVERAGE_MIN}% floor"
-            exit 1
-          }
-
-  lint:
-    name: "Lint"
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            dl.google.com:443
-            github.com:443
-            go.dev:443
-            proxy.golang.org:443
-            raw.githubusercontent.com:443
-            release-assets.githubusercontent.com:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9.3.0
-        with:
-          version: v2.12.2
-
-  vuln:
-    name: "Govulncheck"
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          egress-policy: block
-          # sum.golang.org: `go install <tool>@<version>` fetches a module
-          # outside the repo's go.sum, so GOSUMDB verification goes online.
-          allowed-endpoints: >
-            api.github.com:443
-            dl.google.com:443
-            github.com:443
-            go.dev:443
-            proxy.golang.org:443
-            release-assets.githubusercontent.com:443
-            sum.golang.org:443
-            vuln.go.dev:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.2.0
-
-      - name: Run govulncheck
-        run: govulncheck ./...
-
-  zizmor:
-    name: "Workflow Security"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
       actions: read
+      contents: read
+      security-events: write
+    uses: CodesWhat/.github/.github/workflows/go-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7
+    with:
+      go-version-file: go.mod
+      go-cache-dependency-path: go.sum
+      test-check-name: Build & Test
+      lint-check-name: Lint
+      fuzzers-json: >-
+        ${{ (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && '[{"name":"FuzzParsePHC","pkg":"./internal/server/"},{"name":"FuzzParseTrustedProxies","pkg":"./internal/server/"},{"name":"FuzzParseImageRef","pkg":"./internal/adapter/"},{"name":"FuzzParseLabels","pkg":"./internal/adapter/drydock/"},{"name":"FuzzMCPHandler","pkg":"./internal/mcp/"},{"name":"FuzzEnvelope","pkg":"./internal/protocol/"},{"name":"FuzzVerifyRequest","pkg":"./internal/auth/"}]' || '[]' }}
+      run-govulncheck: true
+      run-qlty: ${{ github.event_name != 'schedule' }}
+      run-goreleaser: ${{ github.event_name != 'schedule' }}
+      run-workflow-security: true
+      run-commit-message: true
+      test-egress-policy: block
+      test-allowed-endpoints: >-
+        api.github.com:443
+        dl.google.com:443
+        github.com:443
+        go.dev:443
+        proxy.golang.org:443
+        release-assets.githubusercontent.com:443
+        sum.golang.org:443
+        tmaproduction.blob.core.windows.net:443
+      lint-egress-policy: block
+      lint-allowed-endpoints: >-
+        api.github.com:443
+        dl.google.com:443
+        github.com:443
+        go.dev:443
+        proxy.golang.org:443
+        release-assets.githubusercontent.com:443
+        storage.googleapis.com:443
+        sum.golang.org:443
+        tmaproduction.blob.core.windows.net:443
+      govulncheck-egress-policy: block
+      govulncheck-allowed-endpoints: >-
+        api.github.com:443
+        dl.google.com:443
+        github.com:443
+        go.dev:443
+        proxy.golang.org:443
+        release-assets.githubusercontent.com:443
+        sum.golang.org:443
+        tmaproduction.blob.core.windows.net:443
+        vuln.go.dev:443
+      workflow-security-egress-policy: block
+      workflow-security-allowed-endpoints: >-
+        ghcr.io:443
+        github.com:443
+        pkg-containers.githubusercontent.com:443
+      commit-message-egress-policy: block
+      commit-message-allowed-endpoints: github.com:443
+      goreleaser-egress-policy: block
+      goreleaser-allowed-endpoints: >-
+        api.github.com:443
+        dl.google.com:443
+        github.com:443
+        go.dev:443
+        proxy.golang.org:443
+        release-assets.githubusercontent.com:443
+        storage.googleapis.com:443
+        sum.golang.org:443
+        tmaproduction.blob.core.windows.net:443
+      qlty-egress-policy: block
+      qlty-allowed-endpoints: >-
+        api.github.com:443
+        api.osv.dev:443
+        api.segment.io:443
+        api0.prismacloud.io:443
+        check.trivy.dev:443
+        dl.google.com:443
+        files.pythonhosted.org:443
+        github-proxy.qlty.sh:443
+        github.com:443
+        go.dev:443
+        mirror.gcr.io:443
+        nodejs.org:443
+        objects.githubusercontent.com:443
+        proxy.golang.org:443
+        pypi.org:443
+        qlty-releases.s3.amazonaws.com:443
+        radarlint-releases.s3.amazonaws.com:443
+        registry.npmjs.org:443
+        release-assets.githubusercontent.com:443
+        sum.golang.org:443
+        tmaproduction.blob.core.windows.net:443
+        tuf-repo-cdn.sigstore.dev:443
+        tuf-repo.github.com:443
+      fuzz-egress-policy: block
+      fuzz-allowed-endpoints: >-
+        api.github.com:443
+        dl.google.com:443
+        github.com:443
+        go.dev:443
+        proxy.golang.org:443
+        release-assets.githubusercontent.com:443
+        tmaproduction.blob.core.windows.net:443
 
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            ghcr.io:443
-            github.com:443
-            pkg-containers.githubusercontent.com:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run zizmor
-        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054  # v0.6.2
-        with:
-          token: ${{ github.token }}
-          online-audits: false
-          advanced-security: false
-
-  commit-message:
-    name: "Commit Message"
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            github.com:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Validate commit messages
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          bash scripts/validate-commit-range-test.sh
-          bash scripts/validate-commit-range.sh "origin/${BASE_REF}"
-
-  goreleaser-check:
-    name: "GoReleaser Config"
+  node-ci:
+    name: "Node CI"
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    permissions:
+      contents: read
+    uses: CodesWhat/.github/.github/workflows/node-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7
+    with:
+      node-version: 24
+      lockfile-path: package-lock.json
+      test-check-name: Web Contract
+      run-test: true
+      test-egress-policy: block
+      test-allowed-endpoints: >-
+        api.github.com:443
+        fonts.googleapis.com:443
+        fonts.gstatic.com:443
+        github.com:443
+        registry.npmjs.org:443
+        release-assets.githubusercontent.com:443
 
+  # Temporary X1 bridges. Remove these after main protection requires the
+  # observed reusable-workflow contexts instead of the legacy local names.
+  legacy-build:
+    name: "Build & Test"
+    needs: go-ci
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
         with:
           egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            dl.google.com:443
-            github.com:443
-            go.dev:443
-            goreleaser.com:443
-            release-assets.githubusercontent.com:443
+      - name: Mirror reusable Go result
+        run: test "${{ needs.go-ci.result }}" = "success"
 
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+  legacy-lint:
+    name: "Lint"
+    needs: go-ci
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
         with:
-          persist-credentials: false
+          egress-policy: block
+      - name: Mirror reusable Go result
+        run: test "${{ needs.go-ci.result }}" = "success"
 
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+  legacy-govulncheck:
+    name: "Govulncheck"
+    needs: go-ci
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
         with:
-          go-version-file: go.mod
-          # This job only runs `goreleaser check` (no build), and a restored
-          # module cache in an artifact-adjacent job is a cache-poisoning
-          # surface (zizmor cache-poisoning).
-          cache: false
+          egress-policy: block
+      - name: Mirror reusable Go result
+        run: test "${{ needs.go-ci.result }}" = "success"
 
-      - name: Run GoReleaser check
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+  legacy-workflow-security:
+    name: "Workflow Security"
+    needs: go-ci
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
         with:
-          distribution: goreleaser
-          # Pin to the v2 major line (matches release.yml) so the config check
-          # runs the same GoReleaser major that ships releases, and to clear the
-          # action's "using 'latest' as default version" advisory.
-          version: "~> v2"
-          args: check
+          egress-policy: block
+      - name: Mirror reusable Go result
+        run: test "${{ needs.go-ci.result }}" = "success"
 
-      - name: Verify package release contract
-        run: |
-          bash scripts/package-release-config-self-test-test.sh
-          bash scripts/package-release-config-self-test-cleanup-test.sh
-          bash scripts/package-release-config-test-test.sh
-          bash scripts/package-release-config-test.sh
-          bash scripts/setup-go-egress-config-test-test.sh
-          bash scripts/setup-go-egress-config-test.sh
+  legacy-commit-message:
+    name: "Commit Message"
+    needs: go-ci
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
+      - name: Mirror reusable Go result
+        run: test "${{ needs.go-ci.result }}" = "success"
 
-      - name: Verify pre-push contract
-        run: |
-          bash scripts/pre-push-config-test-test.sh
-          bash scripts/pre-push-config-test.sh
-          bash scripts/fuzz-tier-config-test-test.sh
-          bash scripts/fuzz-tier-config-test.sh
-          bash scripts/codeql-trigger-config-test-test.sh
-          bash scripts/codeql-trigger-config-test.sh
-
-      - name: Verify Drydock compatibility script failure handling
-        run: bash scripts/drydock-compat-script-test.sh
+  legacy-goreleaser:
+    name: "GoReleaser Config"
+    needs: go-ci
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
+      - name: Mirror reusable Go result
+        run: test "${{ needs.go-ci.result }}" = "success"
 
   codeql:
     name: "🔍 CodeQL Analysis"
-    # CodeQL SARIF upload requires GitHub Advanced Security (GHAS), which is not
-    # available on free private repos. Skip unless the repo is public.
+    # Keep this job local: the explicit category preserves the default-branch
+    # code-scanning identity while the organization workflow is canaried.
     if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -401,14 +286,10 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
         with:
-          # Keep the default-branch SARIF identity stable across workflow renames.
           category: .github/workflows/ci.yml:codeql
 
   dependency-review:
     name: "📦 Dependency Review"
-    # Runs on public-repo PRs and gates the merge. Requires the Dependency
-    # Graph feature, which is enabled on this repo
-    # (Settings → Advanced Security → Dependency graph).
     if: github.event.repository.visibility == 'public' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -420,8 +301,6 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
         with:
           egress-policy: block
-          # api.deps.dev + api.securityscorecards.dev: dependency-review-action
-          # enriches the diff with deps.dev metadata and OpenSSF Scorecard data.
           allowed-endpoints: >
             api.deps.dev:443
             api.github.com:443
@@ -435,171 +314,3 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
-
-  go-fuzz:
-    # Tier 1 — per-PR smoke-level fuzzing. Each fuzzer gets a fixed 60 s
-    # coverage budget in its own matrix job. Deep-coverage tier lives in
-    # quality-fuzz-nightly.yml where each fuzzer gets 5 minutes.
-    name: "🔀 Go Fuzz (${{ matrix.fuzzer.name }})"
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    strategy:
-      fail-fast: false
-      matrix:
-        fuzzer:
-          - { name: FuzzParsePHC,           pkg: ./internal/server/ }
-          - { name: FuzzParseTrustedProxies, pkg: ./internal/server/ }
-          - { name: FuzzParseImageRef,       pkg: ./internal/adapter/ }
-          - { name: FuzzParseLabels,         pkg: ./internal/adapter/drydock/ }
-          - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
-          - { name: FuzzEnvelope,           pkg: ./internal/protocol/ }
-          - { name: FuzzVerifyRequest,      pkg: ./internal/auth/ }
-
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          # One allowlist shared by all 7 matrix variants (harden-runner config
-          # is per-step, not per-matrix-value).
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            dl.google.com:443
-            github.com:443
-            go.dev:443
-            proxy.golang.org:443
-            release-assets.githubusercontent.com:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Fuzz ${{ matrix.fuzzer.name }}
-        env:
-          FUZZER: ${{ matrix.fuzzer.name }}
-          PKG: ${{ matrix.fuzzer.pkg }}
-          FUZZTIME: 60s
-          TEST_TIMEOUT: 5m
-        run: |
-          LOG="${RUNNER_TEMP}/fuzz-${FUZZER}.log"
-
-          # Primary fix: cap workers below the core count so the fuzzing
-          # coordinator always keeps a core. This PREVENTS the starvation that
-          # surfaces as a spurious "context deadline exceeded" (the hook does
-          # the same); the retry below is only a backstop. max(1, min(4, cores-1)).
-          cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
-          workers=$(( cores > 1 ? cores - 1 : 1 ))
-          [ "${workers}" -gt 4 ] && workers=4
-
-          run_fuzz() {
-            go test -run='^$' \
-              -fuzz="^${FUZZER}\$" \
-              -fuzztime="${FUZZTIME}" \
-              -timeout="${TEST_TIMEOUT}" \
-              -parallel="${workers}" \
-              "${PKG}" 2>&1 | tee "${LOG}"
-            return "${PIPESTATUS[0]}"
-          }
-
-          # Backstop: retry once on the residual known boundary race (a worker
-          # still mid-input when -fuzztime expires). This trusts Go's internal
-          # "context deadline exceeded" text as the flake signal — a genuinely
-          # slow input that only *sometimes* exceeds -timeout would also match,
-          # but handlers are verified sub-10ms and a persistently slow input
-          # still fails BOTH attempts. A real crash ("Failing input written to
-          # testdata") is never retried; any other failure exits immediately.
-          # If Go rewords this message the gate fails closed (hard failure),
-          # which is the safe direction. Mirrors quality-fuzz-nightly.yml.
-          for attempt in 1 2; do
-            rc=0
-            run_fuzz || rc=$?
-            [ "${rc}" -eq 0 ] && exit 0
-
-            if grep -q "Failing input written to testdata" "${LOG}"; then
-              echo "::error::${FUZZER} found a crashing input — commit it to the seed corpus and fix the regression."
-              exit "${rc}"
-            fi
-
-            if ! grep -q "context deadline exceeded" "${LOG}"; then
-              echo "::error::${FUZZER} failed for a non-flake reason (exit ${rc})."
-              exit "${rc}"
-            fi
-
-            echo "::warning::${FUZZER}: known -fuzztime boundary flake on attempt ${attempt}/2."
-          done
-
-          echo "::error::${FUZZER} hit the boundary flake on both attempts."
-          exit 1
-
-      - name: Upload fuzz corpus on failure
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: fuzz-corpus-${{ matrix.fuzzer.name }}-${{ github.run_id }}
-          path: "**/testdata/fuzz/${{ matrix.fuzzer.name }}/"
-          retention-days: 30
-          if-no-files-found: ignore
-
-  qlty:
-    name: "🔍 Qlty Check"
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          # Broadest list in CI: qlty fetches per-language plugin toolchains
-          # (Go, Node, Python) and vuln databases at runtime. All observed
-          # across 3 audited runs; trimming means a plugin fails closed.
-          #
-          # objects.githubusercontent.com is the older of GitHub's two
-          # release-asset CDNs. release-assets.githubusercontent.com alone
-          # isn't enough: python-build-standalone's assets still redirect to
-          # the objects host, and a blocked redirect surfaces as a truncated
-          # download ("Unexpected EOF") rather than a refused connection, so
-          # it reads as flake. See #94.
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            api.osv.dev:443
-            api.segment.io:443
-            api0.prismacloud.io:443
-            check.trivy.dev:443
-            dl.google.com:443
-            files.pythonhosted.org:443
-            github-proxy.qlty.sh:443
-            github.com:443
-            go.dev:443
-            mirror.gcr.io:443
-            nodejs.org:443
-            objects.githubusercontent.com:443
-            proxy.golang.org:443
-            pypi.org:443
-            qlty-releases.s3.amazonaws.com:443
-            radarlint-releases.s3.amazonaws.com:443
-            registry.npmjs.org:443
-            release-assets.githubusercontent.com:443
-            sum.golang.org:443
-            tmaproduction.blob.core.windows.net:443
-            tuf-repo-cdn.sigstore.dev:443
-            tuf-repo.github.com:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Qlty
-        uses: qltysh/qlty-action/install@08a0a862c159eae9b9003081da6663d96efef637  # v2.3.0
-
-      - name: Qlty check (all plugins, enforced)
-        run: ./scripts/qlty-check-gate.sh all

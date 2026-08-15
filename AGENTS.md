@@ -61,4 +61,4 @@ go test -run='^$' -fuzz='^FuzzMCPHandler$' -fuzztime=5s ./internal/mcp/
 
 ## CI map
 
-`ci-verify.yml` (lint, test -race, fuzz smoke, build matrix, zizmor, actionlint) on every push/PR · `quality-fuzz-nightly.yml` (5m per fuzzer) · `quality-integration.yml` (real dockerd) · `quality-mutation-monthly.yml` (Gremlins) · `security-vuln-weekly.yml` (govulncheck, grype, gosec) · `security-scorecard.yml` (OpenSSF) · `release-cut.yml` → `release.yml` (GoReleaser + cosign + provenance; see RELEASING.md).
+`ci-verify.yml` calls the organization Go and Node workflows by a full commit SHA; fixed commands live in `scripts/ci/`, while Portwing keeps its fuzz inventory, CodeQL category, and dependency review locally. It runs lint, test -race, the coverage floor, fuzz smoke, web builds, workflow security, and release-config checks on every applicable push/PR. `quality-fuzz-nightly.yml` (5m per fuzzer) · `quality-integration.yml` (real dockerd) · `quality-mutation-monthly.yml` (Gremlins) · `security-grype.yml` (govulncheck, Grype, gosec) · `security-scorecard.yml` (OpenSSF) · `release-cut.yml` → `release.yml` (GoReleaser + cosign + provenance; see RELEASING.md).

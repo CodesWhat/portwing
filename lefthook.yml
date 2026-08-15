@@ -4,7 +4,7 @@
 # Pre-push pipeline (piped = sequential, fail-fast):
 #   1. Clean-tree check (no stray artifacts before push)
 #   2. GoReleaser snapshot dry-run (full release pipeline, skip publish)
-#   3. golangci-lint
+#   3. Pinned golangci-lint through the isolated CI adapter
 #   4. Qlty full-repository check
 #   5. go test -race
 #   6. govulncheck (reachable CVEs in deps + stdlib)
@@ -62,11 +62,9 @@ pre-push:
       timeout: 3m
 
     go-lint:
-      run: golangci-lint run
-      skip:
-        - run: '! command -v golangci-lint >/dev/null 2>&1'
+      run: ./scripts/ci/go-lint.sh
       priority: 2
-      timeout: 2m
+      timeout: 4m
 
     qlty:
       run: ./scripts/qlty-check-gate.sh all
