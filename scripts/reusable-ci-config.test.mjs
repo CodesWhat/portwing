@@ -264,7 +264,6 @@ test("the contract rejects a moving reusable ref and a reintroduced bridge", () 
     "  legacy-build:",
     '    name: "Build & Test"',
     "    needs: go-ci",
-    "    if: ${{ always() }}",
     "    runs-on: ubuntu-24.04",
     "",
     "",
