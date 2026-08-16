@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README Star History section now includes a live [Warpchart](https://warpchart.dev/r/CodesWhat/portwing) growth chart alongside the existing chart.
+
 ## [v0.9.4] - 2026-08-12
 
 ### Fixed

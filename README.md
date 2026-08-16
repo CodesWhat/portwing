@@ -1007,6 +1007,14 @@ Exec tunnel events:
   </a>
 </div>
 
+Growth over time, via [Warpchart](https://warpchart.dev/r/CodesWhat/portwing):
+
+<div align="center">
+  <a href="https://warpchart.dev/r/CodesWhat/portwing">
+    <img alt="CodesWhat/portwing star history · Warpchart" src="https://warpchart.dev/api/chart?repo=CodesWhat%2Fportwing" />
+  </a>
+</div>
+
 ## Community
 
 Questions, feedback, and early support: [CodesWhat Discord](https://discord.gg/mWHCPJRzSx)
