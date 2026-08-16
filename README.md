@@ -18,7 +18,7 @@
 >
 > ### 🚧 Pre-1.0 software — APIs may still change
 >
-> Portwing is pre-`v1.0.0` (currently `v0.9.4`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> Portwing is pre-`v1.0.0` (currently `v0.9.5`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
@@ -78,7 +78,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.9.4 is the current release.** It keeps the v0.9.0 controller-owned watcher/update, Edge audit export, and exec/sockguard error improvements, and the v0.9.2 security fixes: `X-Real-IP` is validated before it can key the auth rate limiter, the Compose env-file lookup is contained by `os.Root`, and the edge exec resize log is sanitized. The two patch releases since then hardened CI (Conventional Commits migration, dependency updates, and fixing exit-code masking in the benchmark/soak/mutation jobs) rather than changing product behavior. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.5 is the current release.** It keeps the v0.9.0 controller-owned watcher/update, Edge audit export, and exec/sockguard error improvements, and the v0.9.2 security fixes: `X-Real-IP` is validated before it can key the auth rate limiter, the Compose env-file lookup is contained by `os.Root`, and the edge exec resize log is sanitized. v0.9.5 rebuilds the binaries and container image with Go 1.26.6, clearing the eight high-severity stdlib advisories that had accumulated against the previous release's Go 1.26.5 build, and fixes the public sites' analytics (cookieless ingestion envelope, buffered Web Vitals) without changing agent behavior. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
@@ -141,10 +141,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.9.4_linux_amd64.deb
+sudo apt install ./portwing_0.9.5_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.9.4_linux_amd64.rpm
+sudo rpm --install ./portwing_0.9.5_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -317,7 +317,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-For v0.4.0 and later — including v0.9.4, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+For v0.4.0 and later — including v0.9.5, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 - **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
 - **v0.2.0** — the security & observability release. Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`. Also shipped in v0.2.0:
@@ -866,7 +866,7 @@ verified without managing signing keys.
 ### Verify the checksums file
 
 ```bash
-VERSION=0.9.4
+VERSION=0.9.5
 
 cosign verify-blob \
   --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
@@ -878,7 +878,7 @@ cosign verify-blob \
 ### Verify the container image
 
 ```bash
-VERSION=0.9.4
+VERSION=0.9.5
 
 cosign verify \
   --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
@@ -889,7 +889,7 @@ cosign verify \
 ### SBOM
 
 Each binary archive has a matching CycloneDX release asset, for example
-`portwing_0.9.4_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
+`portwing_0.9.5_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
 cosign bundle; verify the signed `checksums.txt`, then verify the SBOM's digest
 against that manifest. Public releases also give every checksummed asset its
 own GitHub build-provenance attestation. The container image carries a separate
