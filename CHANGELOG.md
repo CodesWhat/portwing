@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.5] - 2026-08-16
+
 ### Added
 
 - **Privacy-first PostHog telemetry on the public sites.** The marketing and
@@ -39,6 +41,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the ignore re-scoped to x/crypto v0.54.0. The GO-2026-5841
   `klauspost/compress` entry was dropped as dead config: the binary now
   embeds v1.19.1, past the advisory's v1.18.7 fix line.
+- **OpenSSL OCSP client leak suppressed pending a Wolfi fix.** CVE-2026-54876
+  (libcrypto3/libssl3 3.6.3-r3) is a memory leak in OpenSSL's opt-in TLS
+  client OCSP response checking. Nothing in the image can enable it — the Go
+  binaries don't link libssl, and busybox/wget contain no OCSP code — and no
+  fixed Wolfi package exists yet. The ignore is version-scoped so the
+  eventual Wolfi openssl bump forces re-review, with a hard review date of
+  2026-09-15.
+
+### Security
+
+- **Rebuilt with Go 1.26.6.** The v0.9.4 image was built with Go 1.26.5,
+  whose stdlib has since accumulated eight high-severity advisories
+  (GO-2026-5026, -5942, -5972, -6088 through -6091, -6218), all fixed in
+  1.26.6. This release's binaries and image embed the patched toolchain.
 
 ## [v0.9.4] - 2026-08-12
 
