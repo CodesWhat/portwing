@@ -23,10 +23,12 @@ impractical test infrastructure:
   compiled or executed in CI
 
 The **enforced floor is 96%** (set in `scripts/ci/go-test.sh` as
-`COVERAGE_MIN`). Achieved total as of 2026-06: **97.5%**. The floor is set
-~1.5% below the achieved total so CI never fails on coverage noise — the org
-standard for the Go repos (drydock stays at 100% because TypeScript supports
-line-level `istanbul-ignore`; Go has no equivalent).
+`COVERAGE_MIN`). Achieved total as of 2026-08: **96.4%**. The floor was
+originally set ~1.5% below the achieved total so CI never fails on coverage
+noise — the org standard for the Go repos (drydock stays at 100% because
+TypeScript supports line-level `istanbul-ignore`; Go has no equivalent).
+The headroom has since narrowed to 0.4%; new production code should land
+with tests, or the floor becomes the first thing a refactor trips over.
 
 ## Residual Uncovered Blocks
 
