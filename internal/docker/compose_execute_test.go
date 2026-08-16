@@ -188,7 +188,7 @@ func TestExecute_MergesStdoutAndStderr(t *testing.T) {
 		t.Fatal("Execute: expected Success=false")
 	}
 	if resp.Output == "" {
-		t.Fatal("Execute: expected merged output, got empty")
+		t.Fatalf("Execute: expected merged output, got empty (Success=%v, Error=%q)", resp.Success, resp.Error)
 	}
 }
 
