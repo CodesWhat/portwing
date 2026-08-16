@@ -5,8 +5,9 @@
 ignore:
   # GO-2026-5932 affects only golang.org/x/crypto/openpgp. Portwing imports
   # x/crypto/argon2 only (confirmed by source-mode govulncheck), and Docker
-  # Compose v5.3.1's build dependency graph does not contain openpgp. There is
-  # no fixed x/crypto version because the advisory deprecates that package.
+  # Compose v5.4.0's shipped binary does not link openpgp (confirmed by
+  # scripts/verify-scanner-exclusions.sh against the extracted binary). There
+  # is no fixed x/crypto version because the advisory deprecates that package.
   - vulnerability: GO-2026-5932
     reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.54.0."
     package:
@@ -22,17 +23,10 @@ ignore:
       type: go-module
       location: "**/usr/bin/portwing"
   - vulnerability: GO-2026-5932
-    reason: "Docker Compose v5.3.1 does not link openpgp; scripts/verify-scanner-exclusions.sh inspects the shipped binary. Review when Wolfi changes x/crypto from v0.53.0."
+    reason: "Docker Compose v5.4.0 does not link openpgp; scripts/verify-scanner-exclusions.sh inspects the shipped binary. Review when Wolfi changes x/crypto from v0.54.0."
     package:
       name: golang.org/x/crypto
-      version: v0.53.0
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-  - vulnerability: GO-2026-5841
-    reason: "Docker Compose v5.3.1 does not link the affected compress/s2 package; scripts/verify-scanner-exclusions.sh inspects the shipped binary. Review when klauspost/compress changes from v1.18.6."
-    package:
-      name: github.com/klauspost/compress
-      version: v1.18.6
+      version: v0.54.0
       type: go-module
       location: "**/usr/bin/docker-compose"
 
@@ -56,6 +50,14 @@ ignore:
   # still vendored, and none of these advisories have a fix on that legacy
   # import path — only the github.com/moby/moby/v2 rewrite is patched, which
   # is Wolfi's call, not portwing's.
+  #
+  # 2026-08-16 audit (code-scanning alert 191): the v5.4.0 compose binary
+  # embeds x/crypto v0.54.0, so the GO-2026-5932 ignore above was re-scoped
+  # from v0.53.0 after re-confirming openpgp is not linked
+  # (scripts/verify-scanner-exclusions.sh against the extracted binary). The
+  # GO-2026-5841 klauspost/compress entry was dropped as dead config: v5.4.0
+  # embeds v1.19.1, past the v1.18.7 fix line, so the advisory no longer
+  # matches at all.
   - vulnerability: GHSA-pxq6-2prw-chj9
     reason: "Embedded in Wolfi docker-compose binary (docker/docker v28.5.2+incompatible, legacy import path); no fix exists on that path, only the moby/moby/v2 rewrite (2.0.0-beta.8) is patched. Review by 2026-11-15."
     package:
