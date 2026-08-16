@@ -7,9 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Privacy-first PostHog telemetry on the public sites.** The marketing and
+  docs sites capture versioned pageview, CTA, and Core Web Vitals events
+  through a shared cookieless PostHog client behind the CodesWhat proxy — no
+  cookies, no persistence, autocapture off, and a CSP restricted to match.
+  Vercel Analytics is removed. A new root web CI lane gates the sites with
+  contract, build, page-weight, and five-run Lighthouse checks.
+
+### Fixed
+
+- **Cookieless analytics events were dropped at ingestion.** Envelopes left
+  the browser well-formed, but PostHog's cookieless mode requires envelope
+  fields the client wasn't carrying, so the project ingested zero events.
+  The client now sends the fields ingestion requires.
+- **Web Vitals events never reached PostHog.** The pinned `posthog-js` slim
+  build doesn't construct `webVitalsAutocapture`, so `$web_vitals` was never
+  emitted. A Portwing-side buffer built on Next.js `useReportWebVitals` now
+  emits at most one complete or five-second partial envelope per page load,
+  keyed by the same canonical route identity as the emitted events, with the
+  reporter scoped to the initial page load so SPA navigations stay independent.
+
 ### Changed
 
 - README Star History section now includes a live [Warpchart](https://warpchart.dev/r/CodesWhat/portwing) growth chart alongside the existing chart.
+- **Grype suppressions re-scoped after the Wolfi docker-compose bump.**
+  Wolfi's docker-compose moved to v5.4.0, un-matching the version-pinned
+  GO-2026-5932 ignore for the bundled binary (code-scanning alert 191). The
+  shipped binary was re-audited — `x/crypto/openpgp` is still not linked —
+  and the ignore re-scoped to x/crypto v0.54.0. The GO-2026-5841
+  `klauspost/compress` entry was dropped as dead config: the binary now
+  embeds v1.19.1, past the advisory's v1.18.7 fix line.
 
 ## [v0.9.4] - 2026-08-12
 
