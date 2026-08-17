@@ -46,7 +46,7 @@ concurrency:
 jobs:
   soak:
     name: "⏱️ Soak (portwing RSS + thread drift)"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Allow 30 minutes for build + warmup + post-run reporting on top of the
     # 4-hour soak; well under the 6-hour github-hosted ceiling.
     timeout-minutes: 270

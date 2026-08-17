@@ -19,7 +19,11 @@ Questions or help? Open an [issue](https://github.com/CodesWhat/portwing/issues)
    go mod download
    ```
 
-4. **Create a branch** from `main`. Portwing uses a trunk-based flow: both bug fixes and features branch from and merge back into `main` (there is no long-lived `dev/*` branch).
+4. **Create a branch** from the active integration branch (currently
+   `dev/v0.9`). Portwing uses an integration-branch flow: bug fixes and
+   features branch from and merge back into the current `dev/*` branch,
+   which is promoted to `main` immediately before each release cut —
+   `main` itself only ever advances by those promotions.
 
 ## Development loop
 
@@ -99,7 +103,9 @@ Multi-change commits: lead type on first line, bulleted sub-changes in body. Ref
 
 ## Pull request guidelines
 
-- Target `main` for all PRs (bug fixes and features alike).
+- Target the active integration branch (currently `dev/v0.9`) for all PRs,
+  bug fixes and features alike. Never target `main` directly; it advances
+  only through release promotions.
 - Keep PRs focused — one feature or fix per PR.
 - Include tests for non-trivial changes.
 - Update `CHANGELOG.md` under `[Unreleased]` for user-visible changes.
