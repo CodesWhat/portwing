@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Go coverage now uploads to Codecov via OIDC.** A new `📊 Coverage:
+  Codecov Upload` job in `ci-verify.yml` downloads the `coverage.out`
+  produced by the `Build & Test` lane and uploads it tokenlessly, per the
+  org's Codecov-as-coverage-cloud standard. Non-gating (`fail_ci_if_error:
+  false`, `continue-on-error: true`) — the vendor-free coverage floor in
+  `scripts/ci/go-test.sh` remains the real gate. Replaces the Codecov
+  wiring removed in #35 when this repo briefly moved coverage to Qlty
+  Cloud.
+
 ### Security
 
 - **Dedicated gitleaks secrets gate in CI.** A new `🔑 Security: Secrets`
