@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **README migrated to the codified org README shape.** Header stack
+  reordered to logo / h1 / grabber / three-row badge wall / thick rule,
+  with the badge wall regrouped into identity (version, platforms,
+  license), quality/security (CI, OpenSSF Scorecard, OpenSSF Best
+  Practices, qlty maintainability, Codecov coverage, nightly fuzz), and
+  release-critical warnings placed after the rule. Adds the qlty
+  maintainability badge and swaps the coverage badge to Codecov ahead of
+  its upload rollout. Drops decorative emoji from every heading, the
+  Contents list, and the Features table's leading icon column, and
+  consolidates the previously split Community sections into one with a
+  single Issues/Discussions/Discord routing sentence.
 - CI runners are pinned to `ubuntu-24.04` instead of `ubuntu-latest`
   across all workflows, Renovate now targets the `dev/v0.9` integration
   branch instead of `main`, and CONTRIBUTING.md describes the actual
