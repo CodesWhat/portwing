@@ -195,7 +195,7 @@ jobs:
     # Keep this job local: the explicit category preserves the default-branch
     # code-scanning identity while the organization workflow is canaried.
     if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       actions: read
@@ -243,7 +243,7 @@ jobs:
   dependency-review:
     name: "📦 Dependency Review"
     if: github.event.repository.visibility == 'public' && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
