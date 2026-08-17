@@ -328,7 +328,7 @@ For v0.4.0 and later — including v0.9.5, the current release — see [CHANGELO
   - **Structured audit logging** — `AUDIT_LOG` env var records auth events, Compose operations, and exec sessions as JSON lines.
   - **Generic REST adapter** — headless REST + SSE management API for standalone mode without a Drydock platform connection (`ADAPTER=generic`).
 - **v0.1.0** — initial release: transparent Docker API proxy, Edge mode WebSocket tunnel, Drydock adapter, SSE event stream, token auth, rate limiting, multi-arch image.
-- **Cross-cutting: CI & supply-chain hardening** (v0.2.0 onward, deepened through v0.5.0) — SHA-pinned actions, five Go fuzz targets (60s CI / 5m nightly), integration suite against a real Docker daemon, weekly vulnerability scans (govulncheck/grype/gosec), monthly mutation testing, OpenSSF Scorecard, CodeQL, cosign keyless signing, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA provenance on every release.
+- **Cross-cutting: CI & supply-chain hardening** (v0.2.0 onward, deepened through v0.5.0) — SHA-pinned actions, five Go fuzz targets (60s CI / 5m nightly), integration suite against a real Docker daemon, weekly vulnerability scans (govulncheck/grype/gosec), monthly mutation testing, OpenSSF Scorecard, CodeQL, cosign keyless signing, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA Build L2 provenance on every release.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
@@ -352,7 +352,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 | ⚡ | **Interactive Exec** | Terminal sessions via WebSocket or HTTP hijack with 100 concurrent session cap. |
 | 🗂️ | **Docker Compose** | Full lifecycle management with security hardening — path traversal protection, env var denylist, service name injection prevention. |
 | 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
-| ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA provenance on every release. Verifiable without managing signing keys. |
+| ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA Build L2 provenance on every release. Verifiable without managing signing keys. |
 | 🛡️ | **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
 | 🪶 | **Minimal Footprint** | Static Go binary, ~47 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
 | 🔌 | **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
