@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Label-gated Greptile second-opinion review.** A new `Greptile second
+  opinion` workflow calls the organization's reusable
+  `greptile-summon.yml` whenever a PR is labeled `second-opinion`,
+  passing the PR number and head SHA. `greptile.json` keeps Greptile
+  pinned to `skipReview: AUTOMATIC` so it never reviews on its own —
+  this is purely an on-demand tiebreaker alongside CodeRabbit's
+  automatic review.
+
 ### Security
 
 - **Dedicated gitleaks secrets gate in CI.** A new `🔑 Security: Secrets`
