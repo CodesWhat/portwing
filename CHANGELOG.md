@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   qlty trufflehog plugin. The four historical findings it surfaces are
   documented placeholders (docs examples and the marketing site's
   fabricated demo key), ignored by fingerprint.
+- **Secrets gate now resists self-tampering on PRs.** A PR could previously
+  edit `scripts/scan-secrets.sh`, `.gitleaks.toml`, or `.gitleaksignore` in
+  the same change that introduces a secret, blinding the scan of its own
+  diff. On `pull_request` events the `🔑 Security: Secrets` job now restores
+  those three files from the base ref before scanning, so a PR under test
+  can't alter the gate that checks it; legitimate scanner/policy changes
+  take effect after merge. Closes the self-tamper window CodeRabbit flagged
+  on #144.
 - **Scheduled ZAP baseline scan for the public sites.** A new weekly
   `🕷️ Security: ZAP Baseline` workflow runs a passive-only OWASP ZAP
   baseline scan against portwing.codeswhat.com — the appropriate DAST
