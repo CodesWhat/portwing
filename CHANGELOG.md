@@ -37,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unqualified "SLSA provenance," matching what the release pipeline
   actually attests.
 
+### Removed
+
+- **Deprecated trivy qlty plugin.** Trivy is deprecated org-wide in favor
+  of Grype (already the vuln-scanning tool in CI); the `trivy` plugin
+  block and every `trivy:*` triage entry are gone from `.qlty/qlty.toml`.
+  The DS*/KSV* misconfig rules it triaged were already flagged and
+  triaged in parallel by checkov's `CKV_DOCKER_*`/`CKV_K8S_*` rules
+  (checkov was already enabled and covers the same Dockerfile and
+  Kubernetes example manifest surfaces), so those triage entries now
+  reference checkov alone. trufflehog is unaffected.
+
 ### Changed
 
 - CI runners are pinned to `ubuntu-24.04` instead of `ubuntu-latest`
