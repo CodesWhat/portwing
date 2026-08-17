@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   qlty trufflehog plugin. The four historical findings it surfaces are
   documented placeholders (docs examples and the marketing site's
   fabricated demo key), ignored by fingerprint.
+- **Scheduled ZAP baseline scan for the public sites.** A new weekly
+  `🕷️ Security: ZAP Baseline` workflow runs a passive-only OWASP ZAP
+  baseline scan against portwing.codeswhat.com — the appropriate DAST
+  tier for a static, no-auth, no-cookie marketing/docs export, not a PR
+  gate. `.zap/rules.tsv` documents and ignores ten dry-run findings
+  (cache-control advisories, the deliberate `style-src unsafe-inline`,
+  fabricated demo/example data flagged as private-IP disclosure, and
+  same-origin SRI/COEP advisories that don't apply to this site), each
+  with an evidence-backed justification.
+- **Supply-chain claims qualified as SLSA Build L2.** README.md and
+  SECURITY.md now say "SLSA Build L2 provenance" instead of the
+  unqualified "SLSA provenance," matching what the release pipeline
+  actually attests.
 
 ### Changed
 
