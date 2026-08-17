@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Re-scoped the two CVE-2026-54876 grype suppressions from openssl 3.6.3-r3
+  to 3.6.3-r4 after the v0.9.5 image picked up Wolfi's rebuild. The version
+  pin fired as designed; the re-review confirmed r4 carries no secfix for
+  this CVE and the no-OCSP-consumer rationale still holds.
+
 ## [v0.9.5] - 2026-08-16
 
 ### Added
