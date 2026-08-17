@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pinned to `skipReview: AUTOMATIC` so it never reviews on its own —
   this is purely an on-demand tiebreaker alongside CodeRabbit's
   automatic review.
+- **Go coverage now uploads to Codecov via OIDC.** A new `📊 Coverage:
+  Codecov Upload` job in `ci-verify.yml` downloads the `coverage.out`
+  produced by the `Build & Test` lane and uploads it tokenlessly, per the
+  org's Codecov-as-coverage-cloud standard. Non-gating (`fail_ci_if_error:
+  false`, `continue-on-error: true`) — the vendor-free coverage floor in
+  `scripts/ci/go-test.sh` remains the real gate. Replaces the Codecov
+  wiring removed in #35 when this repo briefly moved coverage to Qlty
+  Cloud.
 
 ### Security
 
@@ -46,6 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SECURITY.md now say "SLSA Build L2 provenance" instead of the
   unqualified "SLSA provenance," matching what the release pipeline
   actually attests.
+
+### Removed
+
+- **Deprecated trivy qlty plugin.** Trivy is deprecated org-wide in favor
+  of Grype (already the vuln-scanning tool in CI); the `trivy` plugin
+  block and every `trivy:*` triage entry are gone from `.qlty/qlty.toml`.
+  The DS*/KSV* misconfig rules it triaged were already flagged and
+  triaged in parallel by checkov's `CKV_DOCKER_*`/`CKV_K8S_*` rules
+  (checkov was already enabled and covers the same Dockerfile and
+  Kubernetes example manifest surfaces), so those triage entries now
+  reference checkov alone. trufflehog is unaffected.
 
 ### Changed
 
