@@ -243,6 +243,20 @@ jobs:
               "${package}"
           done
 
+      # release.yml's "Attest checksummed release assets" step already attests
+      # every entry in dist/checksums.txt (archives, native packages, and
+      # per-archive SBOMs) via actions/attest-build-provenance. This closes the
+      # loop by checking the attestation on the downloaded artifact, the same
+      # way verify-published already checks the container manifest's.
+      - name: Verify native package build provenance attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for package in packages/*.deb packages/*.rpm; do
+            gh attestation verify "${package}" --repo CodesWhat/portwing
+          done
+
       - name: Verify deb package install
         run: |
           docker run --rm \
