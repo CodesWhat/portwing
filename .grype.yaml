@@ -93,3 +93,28 @@ ignore:
       version: v28.5.2+incompatible
       type: go-module
       location: "**/usr/bin/docker-compose"
+
+  # CVE-2026-54876 is a memory leak in OpenSSL's TLS *client* OCSP response
+  # checking — a feature the application must opt into. Nothing in this image
+  # can enable it: portwing, docker-cli, and docker-compose are static Go
+  # binaries (Go crypto, no libssl linkage), and libssl's only consumers are
+  # busybox and wget, whose binaries contain no OCSP code at all (verified by
+  # string inspection of the shipped wget). The image's sole TLS-client use is
+  # the HEALTHCHECK wget against portwing's own localhost listener. No fixed
+  # package exists to bump to: upstream OpenSSL has only fix commits, Wolfi's
+  # secdb declares no fixed version, and grype matches these via NVD CPE
+  # fallback, so even the 3.6.3-r4 rebuild would still match. Version-scoped
+  # so a Wolfi openssl bump forces re-review. Review by 2026-09-15 or when
+  # Wolfi publishes an openssl secfix for this CVE, whichever is sooner.
+  - vulnerability: CVE-2026-54876
+    reason: "Opt-in OCSP-checking TLS client leak; no libssl consumer in the image implements OCSP checking and no fixed Wolfi package exists yet. Review by 2026-09-15."
+    package:
+      name: libcrypto3
+      version: 3.6.3-r3
+      type: apk
+  - vulnerability: CVE-2026-54876
+    reason: "Opt-in OCSP-checking TLS client leak; no libssl consumer in the image implements OCSP checking and no fixed Wolfi package exists yet. Review by 2026-09-15."
+    package:
+      name: libssl3
+      version: 3.6.3-r3
+      type: apk
