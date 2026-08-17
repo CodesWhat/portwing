@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Dedicated gitleaks secrets gate in CI.** A new `🔑 Security: Secrets`
+  job scans the full Git history and the tracked working tree with a
+  SHA-pinned gitleaks binary on every push and PR, independent of the
+  qlty trufflehog plugin. The four historical findings it surfaces are
+  documented placeholders (docs examples and the marketing site's
+  fabricated demo key), ignored by fingerprint.
+
 ### Changed
 
+- CI runners are pinned to `ubuntu-24.04` instead of `ubuntu-latest`
+  across all workflows, Renovate now targets the `dev/v0.9` integration
+  branch instead of `main`, and CONTRIBUTING.md describes the actual
+  integration-branch flow (it previously claimed a trunk-based flow
+  targeting `main`).
 - Re-scoped the two CVE-2026-54876 grype suppressions from openssl 3.6.3-r3
   to 3.6.3-r4 after the v0.9.5 image picked up Wolfi's rebuild. The version
   pin fired as designed; the re-review confirmed r4 carries no secfix for
