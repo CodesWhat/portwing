@@ -1,0 +1,4 @@
+title = "Portwing Gitleaks configuration"
+
+[extend]
+useDefault = true
