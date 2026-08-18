@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wiring removed in #35 when this repo briefly moved coverage to Qlty
   Cloud.
 
+### Fixed
+
+- **README badges point at the default branch again.** The CI and Codecov
+  badges were repointed at `dev/v0.9` during PR #151 review; the CI badge
+  now tracks `?branch=main` like the other workflow badges, and the Codecov
+  badge drops the branch qualifier entirely so it renders correctly once the
+  branch is retired.
+
 ### Security
 
 - **Dedicated gitleaks secrets gate in CI.** A new `🔑 Security: Secrets`
