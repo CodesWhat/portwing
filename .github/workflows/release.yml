@@ -188,7 +188,8 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           gh attestation verify "oci://ghcr.io/codeswhat/portwing:${VERSION}" \
-            --repo CodesWhat/portwing
+            --repo CodesWhat/portwing \
+            --signer-workflow CodesWhat/portwing/.github/workflows/release.yml
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -249,12 +250,15 @@ jobs:
       # loop by checking the attestation on the downloaded artifact, the same
       # way verify-published already checks the container manifest's.
       - name: Verify native package build provenance attestation
+        if: github.event.repository.visibility == 'public'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           for package in packages/*.deb packages/*.rpm; do
-            gh attestation verify "${package}" --repo CodesWhat/portwing
+            gh attestation verify "${package}" \
+              --repo CodesWhat/portwing \
+              --signer-workflow CodesWhat/portwing/.github/workflows/release.yml
           done
 
       - name: Verify deb package install
