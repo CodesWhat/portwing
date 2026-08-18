@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now tracks `?branch=main` like the other workflow badges, and the Codecov
   badge drops the branch qualifier entirely so it renders correctly once the
   branch is retired.
+- **Codecov upload was blocked by the egress policy.** The `📊 Coverage:
+  Codecov Upload` job's harden-runner allow-list was missing
+  `ingest.codecov.io`, the host the Codecov CLI actually uploads to;
+  `continue-on-error` masked the failure so the job reported green while
+  zero uploads reached Codecov.
 
 ### Security
 
