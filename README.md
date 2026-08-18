@@ -17,11 +17,11 @@
   <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white" alt="Multi-arch"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-C9A227" alt="License AGPL-3.0"></a>
   <br>
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml/badge.svg?branch=dev%2Fv0.9" alt="CI"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/portwing"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/portwing?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
   <a href="https://www.bestpractices.dev/projects/14029"><img src="https://www.bestpractices.dev/projects/14029/badge" alt="OpenSSF Best Practices"></a>
   <a href="https://qlty.sh/gh/CodesWhat/projects/portwing"><img src="https://qlty.sh/badges/0c146428-4c10-46d3-8b6e-0622a7b07720/maintainability.svg" alt="Maintainability"></a>
-  <a href="https://codecov.io/gh/CodesWhat/portwing"><img src="https://codecov.io/gh/CodesWhat/portwing/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://codecov.io/gh/CodesWhat/portwing"><img src="https://codecov.io/gh/CodesWhat/portwing/branch/dev%2Fv0.9/graph/badge.svg" alt="Coverage"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
 </p>
 
@@ -47,6 +47,7 @@
 - [Verify a Release](#verify-a-release)
 - [Security](#security)
 - [Audit Logging](#audit-logging)
+- [Documentation](#documentation)
 - [Star History](#star-history)
 - [Built With](#built-with)
 - [Community & Support](#community--support)
@@ -169,7 +170,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:latest
+    image: ghcr.io/codeswhat/portwing:0.9.5
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -222,7 +223,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:latest
+    image: ghcr.io/codeswhat/portwing:0.9.5
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -263,7 +264,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:latest
+  ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -350,7 +351,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:latest
+  ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 </details>
@@ -385,7 +386,7 @@ docker run -d --name portwing \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:latest
+  ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 **Key rotation (zero-downtime):**
@@ -460,7 +461,7 @@ docker run -d \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:latest
+  ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 ### Endpoints
@@ -791,7 +792,7 @@ documented,” not guessed as absent.
 ```bash
 # Generate a strong token
 TOKEN=$(openssl rand -hex 32)
-docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:latest
+docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 ### File-based token (production)
@@ -802,7 +803,7 @@ printf '%s' "$TOKEN" > /run/secrets/portwing-token
 chown 65532:65532 /run/secrets/portwing-token && chmod 0400 /run/secrets/portwing-token
 docker run -e TOKEN_FILE=/run/secrets/portwing-token \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
-  ... ghcr.io/codeswhat/portwing:latest
+  ... ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 ### Hash-at-rest with TOKEN_HASH
@@ -816,7 +817,7 @@ HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
 # $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 
 # Use the hash instead of the plaintext
-docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:latest
+docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 Or write the hash to a file and use `TOKEN_HASH_FILE`:
@@ -1012,7 +1013,7 @@ Growth over time, via [Warpchart](https://warpchart.dev/r/CodesWhat/portwing):
 
 ### Community & Support
 
-Bugs and concrete feature requests go to [GitHub Issues](https://github.com/CodesWhat/portwing/issues); open-ended questions, ideas, and design discussion go to [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions); real-time chat and early support are on the [CodesWhat Discord](https://discord.gg/mWHCPJRzSx).
+Non-security bugs and concrete feature requests go to [GitHub Issues](https://github.com/CodesWhat/portwing/issues); open-ended questions, ideas, and design discussion go to [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions); real-time chat and early support are on the [CodesWhat Discord](https://discord.gg/mWHCPJRzSx). **Vulnerabilities must not be filed as public issues** — see [SECURITY.md](SECURITY.md) for private disclosure.
 
 Issues, ideas, and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md), and use [SECURITY.md](SECURITY.md) for private vulnerability disclosure.
 
