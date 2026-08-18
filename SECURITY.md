@@ -31,7 +31,7 @@ We appreciate responsible disclosure and will credit reporters in the release no
 
 - The Go agent — authentication (token, Argon2id `TOKEN_HASH`, Ed25519 per-request signatures), rate limiting, the Docker API proxy, the drydock and generic adapters, the edge-mode WebSocket tunnel, the enrollment endpoint, compose stack handling, the audit log, the MCP server, the health/metrics endpoints, and config parsing.
 - The published container image at `ghcr.io/codeswhat/portwing:<tag>`, including its OCI SBOM attestation, build provenance, and cosign signatures.
-- Any compiled binary distributed via a GitHub release tagged `v0.x.x` or later.
+- Any compiled binary or native `deb`/`rpm` package distributed via a GitHub release tagged `v0.x.x` or later, including its per-archive CycloneDX SBOM, cosign signature, and SLSA Build L2 provenance attestation (`gh attestation verify <asset> --repo CodesWhat/portwing`).
 
 ### Out of scope
 

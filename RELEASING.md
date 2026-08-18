@@ -63,6 +63,18 @@ read/write on this repo). Tags pushed with the default `GITHUB_TOKEN` do not
 trigger downstream workflows, so without the PAT the tag would never fire
 `release.yml`.
 
+**The pushed tag is a plain annotated tag, not GPG/SSH-signed.** That's a
+deliberate choice, not a gap: GitHub's `required_signatures` rule can't verify
+a tag object minted by Actions without bolting on real key management, and the
+Cosign artifact chain below — identity-pinned to `release.yml@refs/tags/<tag>`
+and verified in-workflow — is already the signature of record for everything
+the tag points at. A tag-protection ruleset on `refs/tags/v*` (deletion,
+update, and non-fast-forward blocked, no bypass actors, deliberately no
+`required_signatures`) enforces this at the platform level; see
+CodesWhat/drydock#759 for the house rationale this repo follows. That ruleset
+is a repo-settings change, not a workflow change, so it lands separately from
+this file.
+
 The release job also requires **`HOMEBREW_TAP_TOKEN`**, a fine-grained token
 with Contents read/write access to `CodesWhat/homebrew-tap`. The default
 `GITHUB_TOKEN` cannot publish to a different repository. Prerelease tags render

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Label-gated Greptile second-opinion review.** A new `Greptile second
+  opinion` workflow calls the organization's reusable
+  `greptile-summon.yml` whenever a PR is labeled `second-opinion`,
+  passing the PR number and head SHA. `greptile.json` keeps Greptile
+  pinned to `skipReview: AUTOMATIC` so it never reviews on its own —
+  this is purely an on-demand tiebreaker alongside CodeRabbit's
+  automatic review.
+- **Go coverage now uploads to Codecov via OIDC.** A new `📊 Coverage:
+  Codecov Upload` job in `ci-verify.yml` downloads the `coverage.out`
+  produced by the `Build & Test` lane and uploads it tokenlessly, per the
+  org's Codecov-as-coverage-cloud standard. Non-gating (`fail_ci_if_error:
+  false`, `continue-on-error: true`) — the vendor-free coverage floor in
+  `scripts/ci/go-test.sh` remains the real gate. Replaces the Codecov
+  wiring removed in #35 when this repo briefly moved coverage to Qlty
+  Cloud.
+
 ### Security
 
 - **Dedicated gitleaks secrets gate in CI.** A new `🔑 Security: Secrets`
@@ -36,6 +54,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SECURITY.md now say "SLSA Build L2 provenance" instead of the
   unqualified "SLSA provenance," matching what the release pipeline
   actually attests.
+- **Native package release verification now checks build-provenance
+  attestation.** `release.yml`'s `verify-native-packages` job runs
+  `gh attestation verify` against every downloaded `.deb`/`.rpm`
+  alongside the existing cosign signature check, closing the loop on the
+  SLSA Build L2 attestation the pipeline already produces via
+  `actions/attest-build-provenance` (`subject-checksums:
+  dist/checksums.txt`) for every GoReleaser binary, native package, and
+  per-archive SBOM. SECURITY.md's scope section now documents that
+  coverage explicitly, matching what RELEASING.md already described.
+- **Documented the signed-release-tags decision.** RELEASING.md now
+  explains why `release-cut.yml`'s pushed tag stays a plain annotated
+  tag rather than GPG/SSH-signed: GitHub can't verify an Actions-minted
+  tag signature without real key management, and the Cosign artifact
+  chain identity-pinned to `release.yml` is already the signature of
+  record. Matches the house decision landed in CodesWhat/drydock#759. A
+  `refs/tags/v*` protection ruleset (deletion/update/non-fast-forward,
+  no `required_signatures`) lands separately as an org-side settings
+  change.
+
+### Removed
+
+- **Deprecated trivy qlty plugin.** Trivy is deprecated org-wide in favor
+  of Grype (already the vuln-scanning tool in CI); the `trivy` plugin
+  block and every `trivy:*` triage entry are gone from `.qlty/qlty.toml`.
+  The DS*/KSV* misconfig rules it triaged were already flagged and
+  triaged in parallel by checkov's `CKV_DOCKER_*`/`CKV_K8S_*` rules
+  (checkov was already enabled and covers the same Dockerfile and
+  Kubernetes example manifest surfaces), so those triage entries now
+  reference checkov alone. trufflehog is unaffected.
 
 ### Changed
 
