@@ -17,11 +17,11 @@
   <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white" alt="Multi-arch"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-C9A227" alt="License AGPL-3.0"></a>
   <br>
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml/badge.svg?branch=dev%2Fv0.9" alt="CI"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/portwing"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/portwing?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
   <a href="https://www.bestpractices.dev/projects/14029"><img src="https://www.bestpractices.dev/projects/14029/badge" alt="OpenSSF Best Practices"></a>
   <a href="https://qlty.sh/gh/CodesWhat/projects/portwing"><img src="https://qlty.sh/badges/0c146428-4c10-46d3-8b6e-0622a7b07720/maintainability.svg" alt="Maintainability"></a>
-  <a href="https://codecov.io/gh/CodesWhat/portwing"><img src="https://codecov.io/gh/CodesWhat/portwing/branch/dev%2Fv0.9/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://codecov.io/gh/CodesWhat/portwing"><img src="https://codecov.io/gh/CodesWhat/portwing/graph/badge.svg" alt="Coverage"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
 </p>
 
