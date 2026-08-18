@@ -50,6 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fabricated demo/example data flagged as private-IP disclosure, and
   same-origin SRI/COEP advisories that don't apply to this site), each
   with an evidence-backed justification.
+- **ZAP baseline scan now fails closed on untriaged findings.** Dropped
+  `cmd_options: '-I'` from `security-zap-baseline.yml`. With `-I` set,
+  any finding not already in `.zap/rules.tsv` defaulted to `WARN`, and
+  `-I` suppressed `WARN` from failing the job — so a brand-new finding
+  would report green every week instead of failing for a human to
+  triage and either fix or add to the rules file with a justification,
+  the way the existing ten entries were handled. The ten already-vetted
+  rules stay `IGNORE` and don't fail; only unlisted/new findings do.
 - **Supply-chain claims qualified as SLSA Build L2.** README.md and
   SECURITY.md now say "SLSA Build L2 provenance" instead of the
   unqualified "SLSA provenance," matching what the release pipeline
