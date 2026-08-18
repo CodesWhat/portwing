@@ -10,70 +10,47 @@
 
 **Security-first remote Docker agent — control your containers from anywhere, safely.**
 
-<img src="https://img.shields.io/badge/status-PRE--1.0-FF6B00?style=for-the-badge&labelColor=000000" alt="Status: Pre-1.0" height="34">
-
 </div>
-
-> [!WARNING]
->
-> ### 🚧 Pre-1.0 software — APIs may still change
->
-> Portwing is pre-`v1.0.0` (currently `v0.9.5`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <p align="center">
   <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/v/release/CodesWhat/portwing?include_prereleases&label=release" alt="Release"></a>
-  <a href="https://github.com/CodesWhat/portwing/pkgs/container/portwing"><img src="https://img.shields.io/badge/GHCR-image-2ea44f?logo=github&logoColor=white" alt="GHCR"></a>
-  <br>
   <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64%20%7C%20arm%2Fv7-informational?logo=linux&logoColor=white" alt="Multi-arch"></a>
-  <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/image%20size-~47%20MB-informational?logo=docker&logoColor=white" alt="Image size"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-C9A227" alt="License AGPL-3.0"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/CodesWhat/portwing/stargazers"><img src="https://img.shields.io/github/stars/CodesWhat/portwing?style=flat" alt="Stars"></a>
-  <a href="https://github.com/CodesWhat/portwing/forks"><img src="https://img.shields.io/github/forks/CodesWhat/portwing?style=flat" alt="Forks"></a>
-  <a href="https://github.com/CodesWhat/portwing/issues"><img src="https://img.shields.io/github/issues/CodesWhat/portwing?style=flat" alt="Issues"></a>
-  <a href="https://github.com/CodesWhat/portwing/commits/main"><img src="https://img.shields.io/github/last-commit/CodesWhat/portwing?style=flat" alt="Last commit"></a>
-  <a href="https://github.com/CodesWhat/portwing/commits/main"><img src="https://img.shields.io/github/commit-activity/m/CodesWhat/portwing?style=flat" alt="Commit activity"></a>
   <br>
-  <a href="https://github.com/CodesWhat/portwing"><img src="https://img.shields.io/github/repo-size/CodesWhat/portwing?style=flat" alt="Repo size"></a>
-  <img src="https://komarev.com/ghpvc/?username=CodesWhat-portwing&label=repo+views&style=flat" alt="Repo views">
-</p>
-
-<p align="center">
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/security-grype.yml/badge.svg?branch=main" alt="Vulnerability Scan"></a>
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
-  <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-integration.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-integration.yml/badge.svg?branch=main" alt="Integration Tests"></a>
-  <br>
-  <a href="https://pkg.go.dev/github.com/codeswhat/portwing"><img src="https://pkg.go.dev/badge/github.com/codeswhat/portwing.svg" alt="Go Reference"></a>
-  <a href="https://qlty.sh/gh/CodesWhat/projects/portwing"><img src="https://qlty.sh/badges/0c146428-4c10-46d3-8b6e-0622a7b07720/coverage.svg" alt="Coverage"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/ci-verify.yml/badge.svg?branch=dev%2Fv0.9" alt="CI"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/portwing"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/portwing?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
   <a href="https://www.bestpractices.dev/projects/14029"><img src="https://www.bestpractices.dev/projects/14029/badge" alt="OpenSSF Best Practices"></a>
+  <a href="https://qlty.sh/gh/CodesWhat/projects/portwing"><img src="https://qlty.sh/badges/0c146428-4c10-46d3-8b6e-0622a7b07720/maintainability.svg" alt="Maintainability"></a>
+  <a href="https://codecov.io/gh/CodesWhat/portwing"><img src="https://codecov.io/gh/CodesWhat/portwing/branch/dev%2Fv0.9/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
 </p>
 
 <hr>
 
-<h2 align="center">📑 Contents</h2>
+> [!WARNING]
+> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.5`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
-- [🚀 Quick Start](#quick-start)
-- [📦 Native Packages](#native-packages)
-- [🆕 Recent Updates](#recent-updates)
-- [✨ Features](#features)
-- [🔐 Authentication](#authentication)
-- [🔌 Connection Modes](#connection-modes)
-- [🖥️ Standalone Mode](#standalone-generic-mode)
-- [⚙️ Configuration](#configuration)
-- [📡 API Reference](#api-reference)
-- [📐 Stability Policy](#stability-policy)
-- [🧭 Competitive Landscape](#competitive-landscape)
-- [🔑 Token Security](#token-security)
-- [✅ Verify a Release](#verify-a-release)
-- [🛡️ Security](#security)
-- [📋 Audit Logging](#audit-logging)
-- [⭐ Star History](#star-history)
-- [🛠️ Built With](#built-with)
-- [🤝 Community & Support](#community--support)
+<h2 align="center">Contents</h2>
+
+- [Quick Start](#quick-start)
+- [Native Packages](#native-packages)
+- [Recent Updates](#recent-updates)
+- [Features](#features)
+- [Authentication](#authentication)
+- [Connection Modes](#connection-modes)
+- [Standalone Mode](#standalone-generic-mode)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Stability Policy](#stability-policy)
+- [Competitive Landscape](#competitive-landscape)
+- [Token Security](#token-security)
+- [Verify a Release](#verify-a-release)
+- [Security](#security)
+- [Audit Logging](#audit-logging)
+- [Documentation](#documentation)
+- [Star History](#star-history)
+- [Built With](#built-with)
+- [Community & Support](#community--support)
 
 <hr>
 
@@ -108,7 +85,7 @@ flowchart LR
 
 > The Drydock controller connects **inbound** to each standard-mode Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). Each agent reaches the Docker Engine only through a sockguard socket filter. In production-supported **edge mode**, the agent instead dials Drydock over the stable `portwing/1.0` WebSocket tunnel, so no inbound control port needs publishing. Full v0.9 watcher/update integration requires Drydock `v1.6.0-rc.11+`. Keep the separate unauthenticated operations listener private — see [Connection Modes](#connection-modes).
 
-<h2 align="center" id="quick-start">🚀 Quick Start</h2>
+<h2 align="center" id="quick-start">Quick Start</h2>
 
 ### Recommended deployment (hardened)
 
@@ -131,7 +108,7 @@ curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/s
 docker compose -f docker-compose.with-sockguard.yml up -d
 ```
 
-<h2 align="center" id="native-packages">📦 Native Packages</h2>
+<h2 align="center" id="native-packages">Native Packages</h2>
 
 Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 `rpm` packages for `amd64`, `arm64`, and `armv7`.
@@ -193,7 +170,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:latest
+    image: ghcr.io/codeswhat/portwing:0.9.5
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -246,7 +223,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:latest
+    image: ghcr.io/codeswhat/portwing:0.9.5
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -287,7 +264,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:latest
+  ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -312,7 +289,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 
 <hr>
 
-<h2 align="center" id="recent-updates">🆕 Recent Updates</h2>
+<h2 align="center" id="recent-updates">Recent Updates</h2>
 
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
@@ -336,30 +313,30 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 <hr>
 
-<h2 align="center" id="features">✨ Features</h2>
+<h2 align="center" id="features">Features</h2>
 
-| | Feature | Description |
-|---|---|---|
-| 🔄 | **Connection Modes** | Standard mode lets Drydock connect inbound over HTTP/SSE. Production-supported edge mode lets the agent dial outbound over the stable `portwing/1.0` WebSocket tunnel for NAT/firewalled hosts; full v0.9 watcher/update support requires Drydock `v1.6.0-rc.11+`. |
-| 🐳 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
-| 🔑 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
-| 🔐 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
-| 🤖 | **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
-| 📦 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting. Portwing marks watcher execution as controller-owned so compatible Drydock runs native watcher/update calls through the Standard or Edge Docker proxy. |
-| 📈 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_portwing/metrics`. Zero external dependencies. |
-| 📋 | **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Recent records are retained in memory by default; file/stdout/stderr persistence is opt-in. |
-| 🖥️ | **Host Metrics** | CPU, memory, disk, network, and uptime collection. |
-| ⚡ | **Interactive Exec** | Terminal sessions via WebSocket or HTTP hijack with 100 concurrent session cap. |
-| 🗂️ | **Docker Compose** | Full lifecycle management with security hardening — path traversal protection, env var denylist, service name injection prevention. |
-| 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
-| ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA Build L2 provenance on every release. Verifiable without managing signing keys. |
-| 🛡️ | **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
-| 🪶 | **Minimal Footprint** | Static Go binary, ~47 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
-| 🔌 | **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
+| Feature | Description |
+|---|---|
+| **Connection Modes** | Standard mode lets Drydock connect inbound over HTTP/SSE. Production-supported edge mode lets the agent dial outbound over the stable `portwing/1.0` WebSocket tunnel for NAT/firewalled hosts; full v0.9 watcher/update support requires Drydock `v1.6.0-rc.11+`. |
+| **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
+| **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
+| **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
+| **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
+| **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting. Portwing marks watcher execution as controller-owned so compatible Drydock runs native watcher/update calls through the Standard or Edge Docker proxy. |
+| **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_portwing/metrics`. Zero external dependencies. |
+| **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Recent records are retained in memory by default; file/stdout/stderr persistence is opt-in. |
+| **Host Metrics** | CPU, memory, disk, network, and uptime collection. |
+| **Interactive Exec** | Terminal sessions via WebSocket or HTTP hijack with 100 concurrent session cap. |
+| **Docker Compose** | Full lifecycle management with security hardening — path traversal protection, env var denylist, service name injection prevention. |
+| **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
+| **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA Build L2 provenance on every release. Verifiable without managing signing keys. |
+| **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
+| **Minimal Footprint** | Static Go binary, ~47 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
+| **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
 
 <hr>
 
-<h2 align="center" id="authentication">🔐 Authentication</h2>
+<h2 align="center" id="authentication">Authentication</h2>
 
 <details>
 <summary><strong>Token Authentication (quickstart)</strong></summary>
@@ -374,7 +351,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:latest
+  ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 </details>
@@ -409,7 +386,7 @@ docker run -d --name portwing \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:latest
+  ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 **Key rotation (zero-downtime):**
@@ -433,7 +410,7 @@ signatures are accepted only on query-free requests.
 
 <hr>
 
-<h2 align="center" id="connection-modes">🔌 Connection Modes</h2>
+<h2 align="center" id="connection-modes">Connection Modes</h2>
 
 <details>
 <summary><strong>Standard Mode and Edge Mode</strong></summary>
@@ -467,7 +444,7 @@ Otherwise                                →  Standard Mode (inbound HTTP server
 
 <hr>
 
-<h2 align="center" id="standalone-generic-mode">🖥️ Standalone (Generic) Mode</h2>
+<h2 align="center" id="standalone-generic-mode">Standalone (Generic) Mode</h2>
 
 <details>
 <summary><strong>Run without a Drydock platform connection</strong></summary>
@@ -484,7 +461,7 @@ docker run -d \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:latest
+  ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 ### Endpoints
@@ -541,7 +518,7 @@ the connection alive through proxies.
 
 <hr>
 
-<h2 align="center" id="configuration">⚙️ Configuration</h2>
+<h2 align="center" id="configuration">Configuration</h2>
 
 <details>
 <summary><strong>Environment variable reference</strong></summary>
@@ -623,7 +600,7 @@ Portwing talks to the Docker daemon over the Unix socket only — there is no `D
 
 <hr>
 
-<h2 align="center" id="api-reference">📡 API Reference</h2>
+<h2 align="center" id="api-reference">API Reference</h2>
 
 <details>
 <summary><strong>Health, agent, MCP, Drydock-compatible, and proxy endpoints</strong></summary>
@@ -776,7 +753,7 @@ scrape_configs:
 
 <hr>
 
-<h2 align="center" id="stability-policy">📐 Stability Policy</h2>
+<h2 align="center" id="stability-policy">Stability Policy</h2>
 
 Portwing `v0.9.x` publishes the compatibility contract that becomes binding at
 `v1.0.0`. It defines semantic-versioning guarantees for the HTTP/OpenAPI
@@ -790,7 +767,7 @@ sockguard versions tested together.
 
 <hr>
 
-<h2 align="center" id="competitive-landscape">🧭 Competitive Landscape</h2>
+<h2 align="center" id="competitive-landscape">Competitive Landscape</h2>
 
 The versioned [competitive landscape](COMPETITIVE-LANDSCAPE.md) compares
 Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, Docker's
@@ -801,7 +778,7 @@ documented,” not guessed as absent.
 
 <hr>
 
-<h2 align="center" id="token-security">🔑 Token Security</h2>
+<h2 align="center" id="token-security">Token Security</h2>
 
 <details>
 <summary><strong>Plaintext, file-based, and hash-at-rest token options</strong></summary>
@@ -815,7 +792,7 @@ documented,” not guessed as absent.
 ```bash
 # Generate a strong token
 TOKEN=$(openssl rand -hex 32)
-docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:latest
+docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 ### File-based token (production)
@@ -826,7 +803,7 @@ printf '%s' "$TOKEN" > /run/secrets/portwing-token
 chown 65532:65532 /run/secrets/portwing-token && chmod 0400 /run/secrets/portwing-token
 docker run -e TOKEN_FILE=/run/secrets/portwing-token \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
-  ... ghcr.io/codeswhat/portwing:latest
+  ... ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 ### Hash-at-rest with TOKEN_HASH
@@ -840,7 +817,7 @@ HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
 # $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 
 # Use the hash instead of the plaintext
-docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:latest
+docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:0.9.5
 ```
 
 Or write the hash to a file and use `TOKEN_HASH_FILE`:
@@ -854,7 +831,7 @@ docker run -e TOKEN_HASH_FILE=/run/secrets/portwing-token-hash ...
 
 <hr>
 
-<h2 align="center" id="verify-a-release">✅ Verify a Release</h2>
+<h2 align="center" id="verify-a-release">Verify a Release</h2>
 
 <details>
 <summary><strong>Cosign verification for checksums and container images</strong></summary>
@@ -899,7 +876,7 @@ OCI SBOM attestation.
 
 <hr>
 
-<h2 align="center" id="security">🛡️ Security</h2>
+<h2 align="center" id="security">Security</h2>
 
 <details>
 <summary><strong>Security model summary</strong></summary>
@@ -916,7 +893,7 @@ See [docs/security-model.md](docs/security-model.md) for the full citable spec a
 
 <hr>
 
-<h2 align="center" id="audit-logging">📋 Audit Logging</h2>
+<h2 align="center" id="audit-logging">Audit Logging</h2>
 
 <details>
 <summary><strong>Structured JSON audit trail for every security-relevant action</strong></summary>
@@ -976,7 +953,7 @@ Exec tunnel events:
 
 <hr>
 
-<h2 align="center" id="documentation">📖 Documentation</h2>
+<h2 align="center" id="documentation">Documentation</h2>
 
 | Resource | Link |
 | --- | --- |
@@ -1015,12 +992,6 @@ Growth over time, via [Warpchart](https://warpchart.dev/r/CodesWhat/portwing):
   </a>
 </div>
 
-## Community
-
-Questions, feedback, and early support: [CodesWhat Discord](https://discord.gg/mWHCPJRzSx)
-
-Please file concrete bugs and feature requests in [GitHub Issues](https://github.com/CodesWhat/portwing/issues) so they do not get lost in chat.
-
 ---
 
 <div align="center">
@@ -1042,7 +1013,9 @@ Please file concrete bugs and feature requests in [GitHub Issues](https://github
 
 ### Community & Support
 
-Issues, ideas, and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), use [SECURITY.md](SECURITY.md) for private vulnerability disclosure, and use [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions) for design questions.
+Non-security bugs and concrete feature requests go to [GitHub Issues](https://github.com/CodesWhat/portwing/issues); open-ended questions, ideas, and design discussion go to [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions); real-time chat and early support are on the [CodesWhat Discord](https://discord.gg/mWHCPJRzSx). **Vulnerabilities must not be filed as public issues** — see [SECURITY.md](SECURITY.md) for private disclosure.
+
+Issues, ideas, and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md), and use [SECURITY.md](SECURITY.md) for private vulnerability disclosure.
 
 Every release image is cosign-signed via GitHub Actions OIDC. Before running a Portwing image in production, verify it with the canonical invocation in the [Verify a Release](#verify-a-release) section above.
 
