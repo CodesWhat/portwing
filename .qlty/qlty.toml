@@ -97,25 +97,10 @@ version = "0.9.0"
 name = "shfmt"
 
 [[plugin]]
-name = "trivy"
-drivers = [
-  "config",
-]
-version = "0.69.3"
-
-[[plugin]]
 name = "trufflehog"
 
 [[plugin]]
 name = "yamllint"
-
-# Stage 3 is a scratch-based image (FROM scratch). No USER directive is present
-# because the agent runs as root by default to reach the Docker socket; privilege
-# drop to UID 65532 is documented as a deploy-time step in SECURITY.md and the
-# examples/. This matches drydock's identical posture.
-[[triage]]
-match.rules = ["trivy:DS002", "trivy:DS-0002"]
-set.ignored = true
 
 # markdownlint table style is low-signal for this repository's docs format
 [[triage]]
@@ -145,21 +130,17 @@ match.rules = ["hadolint:DL3018"]
 set.ignored = true
 
 # Dockerfile.release line 46 uses 'FROM rootfs-' which is a local multi-stage
-# alias (defined in the same file), not a remote registry image. Checkov/trivy
-# misidentify local stage references as untagged registry images.
+# alias (defined in the same file), not a remote registry image. Checkov
+# misidentifies local stage references as untagged registry images.
 [[triage]]
-match.rules = ["checkov:CKV_DOCKER_7", "trivy:DS-0001"]
+match.rules = ["checkov:CKV_DOCKER_7"]
 set.ignored = true
 
 # Kubernetes example manifests intentionally expose the Docker socket because
 # that is the core function of a Docker-agent (Portwing must read Docker events
 # on the host). The security posture is documented in SECURITY.md.
 [[triage]]
-match.rules = [
-  "checkov:CKV_K8S_27",
-  "trivy:KSV-0006",
-  "trivy:KSV-0023",
-]
+match.rules = ["checkov:CKV_K8S_27"]
 set.ignored = true
 
 # Example manifests use 'latest' tag as a convenience for first-run setup.
@@ -168,8 +149,6 @@ set.ignored = true
 match.rules = [
   "checkov:CKV_K8S_14",
   "checkov:CKV_K8S_43",
-  "trivy:KSV-0013",
-  "trivy:KSV-0125",
   "hadolint:DL3006",
 ]
 set.ignored = true
