@@ -54,6 +54,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SECURITY.md now say "SLSA Build L2 provenance" instead of the
   unqualified "SLSA provenance," matching what the release pipeline
   actually attests.
+- **Native package release verification now checks build-provenance
+  attestation.** `release.yml`'s `verify-native-packages` job runs
+  `gh attestation verify` against every downloaded `.deb`/`.rpm`
+  alongside the existing cosign signature check, closing the loop on the
+  SLSA Build L2 attestation the pipeline already produces via
+  `actions/attest-build-provenance` (`subject-checksums:
+  dist/checksums.txt`) for every GoReleaser binary, native package, and
+  per-archive SBOM. SECURITY.md's scope section now documents that
+  coverage explicitly, matching what RELEASING.md already described.
+- **Documented the signed-release-tags decision.** RELEASING.md now
+  explains why `release-cut.yml`'s pushed tag stays a plain annotated
+  tag rather than GPG/SSH-signed: GitHub can't verify an Actions-minted
+  tag signature without real key management, and the Cosign artifact
+  chain identity-pinned to `release.yml` is already the signature of
+  record. Matches the house decision landed in CodesWhat/drydock#759. A
+  `refs/tags/v*` protection ruleset (deletion/update/non-fast-forward,
+  no `required_signatures`) lands separately as an org-side settings
+  change.
 
 ### Removed
 
