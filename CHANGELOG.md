@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Label-gated Greptile second-opinion review.** A new `Greptile second
+  opinion` workflow calls the organization's reusable
+  `greptile-summon.yml` whenever a PR is labeled `second-opinion`,
+  passing the PR number and head SHA. `greptile.json` keeps Greptile
+  pinned to `skipReview: AUTOMATIC` so it never reviews on its own —
+  this is purely an on-demand tiebreaker alongside CodeRabbit's
+  automatic review.
+- **Go coverage now uploads to Codecov via OIDC.** A new `📊 Coverage:
+  Codecov Upload` job in `ci-verify.yml` downloads the `coverage.out`
+  produced by the `Build & Test` lane and uploads it tokenlessly, per the
+  org's Codecov-as-coverage-cloud standard. Non-gating (`fail_ci_if_error:
+  false`, `continue-on-error: true`) — the vendor-free coverage floor in
+  `scripts/ci/go-test.sh` remains the real gate. Replaces the Codecov
+  wiring removed in #35 when this repo briefly moved coverage to Qlty
+  Cloud.
+
 ### Security
 
 - **Dedicated gitleaks secrets gate in CI.** A new `🔑 Security: Secrets`
@@ -15,9 +33,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   qlty trufflehog plugin. The four historical findings it surfaces are
   documented placeholders (docs examples and the marketing site's
   fabricated demo key), ignored by fingerprint.
+- **Secrets gate now resists self-tampering on PRs.** A PR could previously
+  edit `scripts/scan-secrets.sh`, `.gitleaks.toml`, or `.gitleaksignore` in
+  the same change that introduces a secret, blinding the scan of its own
+  diff. On `pull_request` events the `🔑 Security: Secrets` job now restores
+  those three files from the base ref before scanning, so a PR under test
+  can't alter the gate that checks it; legitimate scanner/policy changes
+  take effect after merge. Closes the self-tamper window CodeRabbit flagged
+  on #144.
+- **Scheduled ZAP baseline scan for the public sites.** A new weekly
+  `🕷️ Security: ZAP Baseline` workflow runs a passive-only OWASP ZAP
+  baseline scan against portwing.codeswhat.com — the appropriate DAST
+  tier for a static, no-auth, no-cookie marketing/docs export, not a PR
+  gate. `.zap/rules.tsv` documents and ignores ten dry-run findings
+  (cache-control advisories, the deliberate `style-src unsafe-inline`,
+  fabricated demo/example data flagged as private-IP disclosure, and
+  same-origin SRI/COEP advisories that don't apply to this site), each
+  with an evidence-backed justification.
+- **ZAP baseline scan now fails closed on untriaged findings.** Dropped
+  `cmd_options: '-I'` from `security-zap-baseline.yml`. With `-I` set,
+  any finding not already in `.zap/rules.tsv` defaulted to `WARN`, and
+  `-I` suppressed `WARN` from failing the job — so a brand-new finding
+  would report green every week instead of failing for a human to
+  triage and either fix or add to the rules file with a justification,
+  the way the existing ten entries were handled. The ten already-vetted
+  rules stay `IGNORE` and don't fail; only unlisted/new findings do.
+- **Supply-chain claims qualified as SLSA Build L2.** README.md and
+  SECURITY.md now say "SLSA Build L2 provenance" instead of the
+  unqualified "SLSA provenance," matching what the release pipeline
+  actually attests.
+- **Native package release verification now checks build-provenance
+  attestation.** `release.yml`'s `verify-native-packages` job runs
+  `gh attestation verify` against every downloaded `.deb`/`.rpm`
+  alongside the existing cosign signature check, closing the loop on the
+  SLSA Build L2 attestation the pipeline already produces via
+  `actions/attest-build-provenance` (`subject-checksums:
+  dist/checksums.txt`) for every GoReleaser binary, native package, and
+  per-archive SBOM. SECURITY.md's scope section now documents that
+  coverage explicitly, matching what RELEASING.md already described.
+- **Documented the signed-release-tags decision.** RELEASING.md now
+  explains why `release-cut.yml`'s pushed tag stays a plain annotated
+  tag rather than GPG/SSH-signed: GitHub can't verify an Actions-minted
+  tag signature without real key management, and the Cosign artifact
+  chain identity-pinned to `release.yml` is already the signature of
+  record. Matches the house decision landed in CodesWhat/drydock#759. A
+  `refs/tags/v*` protection ruleset (deletion/update/non-fast-forward,
+  no `required_signatures`) lands separately as an org-side settings
+  change.
+
+### Removed
+
+- **Deprecated trivy qlty plugin.** Trivy is deprecated org-wide in favor
+  of Grype (already the vuln-scanning tool in CI); the `trivy` plugin
+  block and every `trivy:*` triage entry are gone from `.qlty/qlty.toml`.
+  The DS*/KSV* misconfig rules it triaged were already flagged and
+  triaged in parallel by checkov's `CKV_DOCKER_*`/`CKV_K8S_*` rules
+  (checkov was already enabled and covers the same Dockerfile and
+  Kubernetes example manifest surfaces), so those triage entries now
+  reference checkov alone. trufflehog is unaffected.
 
 ### Changed
 
+- **README migrated to the codified org README shape.** Header stack
+  reordered to logo / h1 / grabber / three-row badge wall / thick rule,
+  with the badge wall regrouped into identity (version, platforms,
+  license), quality/security (CI, OpenSSF Scorecard, OpenSSF Best
+  Practices, qlty maintainability, Codecov coverage, nightly fuzz), and
+  release-critical warnings placed after the rule. Adds the qlty
+  maintainability badge and swaps the coverage badge to Codecov ahead of
+  its upload rollout. Drops decorative emoji from every heading, the
+  Contents list, and the Features table's leading icon column, and
+  consolidates the previously split Community sections into one with a
+  single Issues/Discussions/Discord routing sentence.
 - CI runners are pinned to `ubuntu-24.04` instead of `ubuntu-latest`
   across all workflows, Renovate now targets the `dev/v0.9` integration
   branch instead of `main`, and CONTRIBUTING.md describes the actual
@@ -148,6 +235,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer reports `google/uuid`, `gorilla/websocket`,
   `class-variance-authority`, or `clsx` as abandoned; they are stable by
   design, not unmaintained.
+- **Versioned competitive landscape.** Added a primary-source comparison of
+  Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, Docker-native access,
+  socket proxies, and adjacent agents. Corrected stale Komodo authentication
+  and edge-mode claims, added Arcane to the website, separated agent features
+  from Drydock controller responsibilities, and recorded pre-v1 gates,
+  candidate work, and explicit security non-goals.
 
 ### Security
 
@@ -172,15 +265,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ResizeExec` failure path logged `execID` and the error without
   `applog.Sanitize`, the only such call in `internal/edge/tunnel.go`. Closes the
   `go/log-injection` scanning alert.
-
-### Documentation
-
-- **Versioned competitive landscape.** Added a primary-source comparison of
-  Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, Docker-native access,
-  socket proxies, and adjacent agents. Corrected stale Komodo authentication
-  and edge-mode claims, added Arcane to the website, separated agent features
-  from Drydock controller responsibilities, and recorded pre-v1 gates,
-  candidate work, and explicit security non-goals.
 
 ## [v0.9.1] - 2026-08-01
 
@@ -246,15 +330,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/drydock-compat-check.sh` now preserves the configured token for its
   expected-404 and SSE probes instead of accidentally sending an empty value.
 
-### Tests
+### Changed
 
 - **Drydock live compatibility gate expanded to 35 checks.** The live suite
   now asserts the exact `transport=docker-api`, `execution=controller`, and
   `events=portwing` watcher markers plus empty trigger discovery, alongside the
   authenticated 404/SSE coverage.
-
-### Documentation
-
 - **Release and verification surfaces aligned.** Current-version examples now
   target v0.9.0, the compatibility matrix separates wire compatibility from
   the Drydock feature minimum, release verification documents the actual
@@ -303,9 +384,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   container restart loops.
 - **Drydock wire objects track the current controller schema.** Drydock adapter responses and events now serialize nested registry, tag, digest, update-kind, and runtime-detail objects without changing the generic REST adapter's simpler public model.
 - **Edge mode is production supported.** Project docs, the documentation site, and getportwing-codeswhat.vercel.app now describe the stable `portwing/1.0` contract and Drydock 1.6's default-on endpoint; Drydock 1.5 still requires `DD_EXPERIMENTAL_PORTWING=true`.
-
-### Tests
-
 - **Real fleet evidence.** An eight-agent, 45-second local gate completed 48 concurrent exec sessions, recovered from two reconnect storms and a forced slow-consumer reconnect, and stayed within its 128 MiB aggregate agent-RSS and 64 MiB controller-heap growth budgets.
 
 ## [v0.7.1] - 2026-07-28
@@ -333,7 +411,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Dead `DOCKER_HOST` config surface**: the top-level `DOCKER_HOST` environment variable and the corresponding `Config.DockerHost` field never had a consumer — Portwing only ever dials the Docker daemon over the Unix socket (`DOCKER_SOCKET`). Documentation is now unix-socket-only; the unrelated `DOCKER_HOST` entry in the Compose child-process env var denylist (which blocks a stack from redirecting the daemon a compose operation targets) is unchanged.
 
-### Documentation
+### Changed
 
 - **Edge-mode setup examples fixed.** The README and Watchtower-migration edge-mode compose snippets showed a token-only credential, which fails to start — `PRIVATE_KEY_FILE` has been mandatory for edge mode since v0.5.0 (config load errors when `DRYDOCK_URL` is set without it). Both now generate and mount an Ed25519 key, and the incorrect "falls back to Standard mode" claim is removed (a missing key in edge mode is a fatal startup error, not a fallback).
 - **Docs and website synced to v0.6.0.** Refreshed stale v0.5.x/alpha version badges, `cosign` verification examples, the marketing-site hero version and roadmap, and the "Hardened Runtime" copy (which still described the pre-0.6.0 root-by-default behavior). Corrected the `SECURITY.md` signed-request body cap (1 MB, not 64 MB) and its supported-versions table, and pointed the `security-model.md` control list at the docs site's fuller, independently numbered set.
@@ -341,9 +419,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OpenAPI spec completeness.** `api/openapi.yaml` now documents the `GET /_portwing/audit` and `POST /_portwing/mcp` agent endpoints, the `GET /api/watchers/{type}/{name}` and `GET /api/log/entries` Drydock-compat routes, the `dd:watcher-snapshot` SSE event, the `timestamps` log query parameter, the `404`/`409` responses on `DELETE /api/containers/{id}`, and the previously-missing `digest`/`link`/`timestamp` container-result fields. The `info.version` and example version strings were bumped to 0.6.0.
 - **Docs-site drift corrected.** Fixed the `GET /_portwing/audit` response example (`ts` key, no `level`/`msg`), the `portwing_auth_failures_total` reason-label values (`bad_token`/`no_credentials`/… rather than `bad-token`/`missing-token`), the generic-adapter capabilities list, the audit `key_id` sample format, the "core fields" audit table, and remaining stale `0.1.0`/`0.3.0` example version strings across the audit-logging, observability, standalone-mode, and api-reference pages.
 - **Process docs corrected.** `CONTRIBUTING.md` now describes the actual trunk-based flow (all PRs branch from and target `main`; there is no `dev/*` branch), `RELEASING.md` no longer claims a `BREAKING CHANGE` footer triggers a major bump (the release-cut workflow only reads commit subjects), `Dockerfile.armv7`'s header comment points at the real unified `Dockerfile.release`, and `SPEC.md`'s container-image package list is split into its accurate Wolfi and Alpine variants.
-
-### Tests
-
 - **`FuzzEnvelope` added to every fuzz tier.** The wire-envelope fuzzer (`internal/protocol`), which exercises the `portwing/1.0` parser on the untrusted edge-WebSocket input path, existed but was wired into none of the coverage tiers. It now runs in the `ci-verify.yml` smoke tier, the nightly and monthly deep-fuzz matrices, and the lefthook pre-push hook, and is listed in the CONTRIBUTING local-fuzz instructions.
 
 ## [0.6.0] - 2026-07-10

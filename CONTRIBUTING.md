@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing! Whether it is a bug fix, new feature, documentation improvement, or something else — all contributions are welcome.
 
-Questions or help? Open an [issue](https://github.com/CodesWhat/portwing/issues).
+Questions, ideas, or help? Use [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions) or the [CodesWhat Discord](https://discord.gg/mWHCPJRzSx). GitHub Issues are for bugs and concrete feature requests — see [SECURITY.md](SECURITY.md) instead for reporting a vulnerability.
 
 ## Getting started
 
