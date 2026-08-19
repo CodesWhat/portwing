@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Retired the dead star-history.com chart from the README.** The embed
+  had been returning an SVG that renders "GitHub restricted access to
+  star data" — HTTP 200, so nothing flagged it — and it sat directly
+  above the working Warpchart block, which stays. Confirmed dead rather
+  than assumed: the endpoint returns byte-identical 60,125-byte responses
+  for different repositories, so it serves one generic error card to
+  everyone. The website copy of this embed was removed separately in
+  #160, where it was also leaking visitor IPs to a third party.
+
 ### Fixed
 
 - **Native package attestation verification was blocked by its own egress
