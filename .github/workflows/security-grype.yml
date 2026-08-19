@@ -1,28 +1,24 @@
-name: "🛡️ Security: Grype & Govulncheck"
+name: "Security: Grype & Govulncheck"
 run-name: >-
   ${{
-    github.event_name == 'schedule' && '🛡️ Security: Grype & Govulncheck — Weekly run' ||
-    github.event_name == 'pull_request' && format('🛡️ Security: Grype & Govulncheck — PR #{0}', github.event.pull_request.number) ||
-    format('🛡️ Security: Grype & Govulncheck — Manual by {0}', github.actor)
+    github.event_name == 'schedule' && 'Security: Grype & Govulncheck — Weekly run' ||
+    github.event_name == 'pull_request' && format('Security: Grype & Govulncheck — PR #{0}', github.event.pull_request.number) ||
+    format('Security: Grype & Govulncheck — Manual by {0}', github.actor)
   }}
 
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, 'dev/*']
-    # Dependency / source / build changes are what move the security
-    # surface — scope PR runs to those so doc-only PRs stay fast.
-    paths:
-      - '**/*.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'package.json'
-      - 'package-lock.json'
-      - '**/package.json'
-      - 'Dockerfile*'
-      - '.grype.yaml'
-      - '.github/workflows/security-grype.yml'
-      - 'scripts/verify-scanner-exclusions.sh'
+    branches: [main, 'dev/**']
+    # Deliberately NOT path-filtered. "Security: Gosec SAST" and
+    # "Security: Grype Dependency Scan (Go + npm)" are required contexts on
+    # main, and a required check that only reports on some PR shapes blocks
+    # every PR that does not match the filter — GitHub waits forever for a
+    # status that will never arrive. The old filter scoped runs to Go/dep/
+    # build paths, so a docs-only or website-only PR produced no run at all.
+    # If these jobs ever get slow enough that doc-only PRs suffer, gate the
+    # expensive STEPS on a path check inside the job, never the workflow
+    # trigger, so the check still reports.
   schedule:
     - cron: '15 7 * * 1'  # Weekly on Monday at 07:15 UTC
 
@@ -38,7 +34,7 @@ concurrency:
 
 jobs:
   govulncheck:
-    name: "🔍 Security: Govulncheck"
+    name: "Security: Govulncheck"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -89,7 +85,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   grype-image:
-    name: "🐳 Security: Grype Container Scan"
+    name: "Security: Grype Container Scan"
     # Image build is the heavy step; keep it on scheduled/manual runs.
     # PRs get fast, accurate dependency coverage from grype-deps +
     # govulncheck without paying for a Docker build on every push.
@@ -181,7 +177,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   grype-deps:
-    name: "📦 Security: Grype Dependency Scan (Go + npm)"
+    name: "Security: Grype Dependency Scan (Go + npm)"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -240,7 +236,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   gosec:
-    name: "🔐 Security: Gosec SAST"
+    name: "Security: Gosec SAST"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

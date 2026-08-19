@@ -1,9 +1,9 @@
-name: "✅ CI"
+name: "CI"
 run-name: >-
   ${{
-    github.event_name == 'schedule' && '✅ CI — Weekly schedule' ||
-    github.event_name == 'pull_request' && format('✅ CI — PR #{0}', github.event.pull_request.number) ||
-    format('✅ CI — {0}', github.ref_name)
+    github.event_name == 'schedule' && 'CI — Weekly schedule' ||
+    github.event_name == 'pull_request' && format('CI — PR #{0}', github.event.pull_request.number) ||
+    format('CI — {0}', github.ref_name)
   }}
 
 on:
@@ -147,7 +147,7 @@ jobs:
         release-assets.githubusercontent.com:443
 
   codecov:
-    name: "📊 Coverage: Codecov Upload"
+    name: "Coverage: Codecov Upload"
     needs: go-ci
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
@@ -201,7 +201,7 @@ jobs:
         continue-on-error: true
 
   secrets:
-    name: "🔑 Security: Secrets"
+    name: "Security: Secrets"
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -257,7 +257,7 @@ jobs:
         run: scripts/scan-secrets.sh
 
   codeql:
-    name: "🔍 CodeQL Analysis"
+    name: "CodeQL Analysis"
     # Keep this job local: the explicit category preserves the default-branch
     # code-scanning identity while the organization workflow is canaried.
     if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
@@ -307,7 +307,7 @@ jobs:
           category: .github/workflows/ci.yml:codeql
 
   dependency-review:
-    name: "📦 Dependency Review"
+    name: "Dependency Review"
     if: github.event.repository.visibility == 'public' && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10

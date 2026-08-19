@@ -47,11 +47,51 @@
 
 ---
 
+## Required checks and the promotion order
+
+`main` requires 12 check contexts, declared in
+`scripts/apply-branch-protection.sh`. Seven are `Go CI / ...`, produced by
+the caller job's name in `ci-verify.yml` plus a job name inside the upstream
+reusable workflow. The other five are this repo's own jobs:
+`Security: Secrets`, `Dependency Review`, `CodeQL Analysis`,
+`Security: Gosec SAST`, and
+`Security: Grype Dependency Scan (Go + npm)`.
+
+Two rules keep this from wedging the repo:
+
+**A required check must report on every PR shape.** A path-filtered workflow
+produces no check run at all on a PR it doesn't match, and GitHub waits
+forever for a status that never arrives. That's why `security-grype.yml`
+has no `paths:` filter on its `pull_request` trigger. To make those jobs
+cheaper, gate the expensive steps inside the job, never the workflow
+trigger. A job that always skips (`Security: Grype Container Scan` carries
+`if: github.event_name != 'pull_request'`) must never be required, because
+a skipped check is not a passing one.
+
+**Renaming a job renames its check-run context**, so a rename and the
+ruleset update have to be sequenced. The promotion PR cannot merge before
+the PATCH, because GitHub reads workflow files from the head branch: the PR
+posts only the new names while the ruleset still demands the old ones, which
+sit at "Expected" forever. So the order is:
+
+1. Confirm the promotion PR is green on all the *new* context names.
+2. Confirm no other PR targets `main`
+   (`gh pr list --base main --state open`). This is the load-bearing check.
+   Any such PR still runs the old workflow files from its own head branch
+   and keeps posting the old names, so flipping the ruleset wedges it.
+   Rebase or close it first.
+3. `bash scripts/apply-branch-protection.sh`
+4. Merge the promotion PR immediately, so the window where `main` requires
+   names nothing on `main` yet produces stays as short as possible.
+
+Read the effective ruleset back afterward rather than trusting the PATCH's
+200. The script prints it.
+
 ## Cutting the tag
 
 **Preferred path: use the `release-cut` workflow.**
 
-Go to **Actions → 🏷️ Release: Cut** → **Run workflow** on `main`. The workflow:
+Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 
 - Polls until `ci-verify.yml` has a successful run on HEAD
 - Computes the next semver from Conventional Commit history (`feat` = minor, anything else = patch, `!` in the commit subject = major; a `BREAKING CHANGE` footer alone does not trigger a major bump today). Tolerates a legacy leading emoji from pre-migration history, so old commits still compute correctly.
@@ -117,4 +157,4 @@ Do not delete the bad release or the tag — that breaks `go install` version pi
 
 1. Revert the offending commit on `main`: `git revert <sha>`
 2. Tag a patch release following the normal process
-3. Edit the bad release on GitHub: prepend a warning to the release notes and link to the patched version (e.g. _"⚠️ This release contains a known issue — upgrade to v<patch>."_)
+3. Edit the bad release on GitHub: prepend a warning to the release notes and link to the patched version (e.g. *"⚠️ This release contains a known issue — upgrade to v<patch>."*)
