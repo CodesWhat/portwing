@@ -63,7 +63,6 @@ test("the finite CTA source map covers actual tracked component calls", () => {
     "website/src/components/footer.tsx",
     "website/src/components/get-started.tsx",
     "website/src/components/site-header.tsx",
-    "website/src/components/star-history.tsx",
     "docs/src/components/footer.tsx",
     "docs/src/components/site-header.tsx",
   ].map(read);
