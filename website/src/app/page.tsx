@@ -11,7 +11,6 @@ import { MarketingShell } from "@/components/marketing-shell";
 import { PortwingMascot } from "@/components/portwing-mascot";
 import { Roadmap } from "@/components/roadmap";
 import { SectionHeading } from "@/components/section-heading";
-import { StarHistory } from "@/components/star-history";
 import { Badge } from "@/components/ui/badge";
 import { BASE_URL, GITHUB_RELEASES_URL, GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 import { faqItems } from "./data/faq";
@@ -177,11 +176,6 @@ export default function Home() {
         {/* ── Roadmap ───────────────────────────────────────────────────────────── */}
         <div className="reveal" suppressHydrationWarning>
           <Roadmap />
-        </div>
-
-        {/* ── Star History ──────────────────────────────────────────────────────── */}
-        <div className="reveal" suppressHydrationWarning>
-          <StarHistory />
         </div>
 
         {/* ── Compare ───────────────────────────────────────────────────────────── */}
