@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **Dropped the third-party star-history.com embed from the marketing
-  site.** The marketing site embedded a third-party star-history.com
-  image, which made every visitor's browser contact that service
-  directly; removed it.
-
 ## [v0.9.6] - 2026-08-19
 
 ### Added
@@ -46,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ingest.codecov.io`, the host the Codecov CLI actually uploads to;
   `continue-on-error` masked the failure so the job reported green while
   zero uploads reached Codecov.
+- **Dropped the third-party star-history.com embed from the marketing
+  site.** Every visitor's browser made a direct request to
+  api.star-history.com, leaking their IP to a third party and
+  contradicting the cookieless-analytics posture. The chart is removed
+  rather than replaced; star-history.com had also broken upstream after
+  GitHub restricted stargazer API access.
 
 ### Security
 
