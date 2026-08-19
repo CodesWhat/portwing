@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Lighthouse budgets re-recorded against the current sites.** The old
+  baselines described pages carrying ~1 MB of oversized images and the
+  ceilings were loose enough to hide it. The docs site sat under its limit
+  the entire time it was a megabyte overweight, so it never went red.
+  Marketing ceiling 2,180,000 to 1,656,000 and docs 2,630,000 to
+  1,545,000, each keeping the ~7% margin over baseline the budgets always
+  used. Each recorded value is now the worst case across both environments
+  the gate runs in, which is what let the old numbers drift: marketing
+  total byte weight measures ~144 KB higher on a local checkout than on a
+  GitHub runner, and both performance scores measure lower on the runner.
+  The old baseline recorded only the runner, so the local pre-push hook
+  was failing on a budget CI reported as green. `performanceMin` rises to
+  0.66 (marketing) and 0.65 (docs), tracking the recorded baseline within
+  0.05 and carrying more headroom than the previous 0.67/0.64 pair.
+
 ### Fixed
 
 - **Both sites were shipping logos an order of magnitude larger than they
