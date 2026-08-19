@@ -47,6 +47,36 @@
 
 ---
 
+## Required checks and the promotion order
+
+`main` requires 12 check contexts, declared in
+`scripts/apply-branch-protection.sh`. Seven are `Go CI / ...`, produced by
+the caller job's name in `ci-verify.yml` plus a job name inside the upstream
+reusable workflow. The other five are this repo's own jobs:
+`Security: Secrets`, `Dependency Review`, `CodeQL Analysis`,
+`Security: Gosec SAST`, and
+`Security: Grype Dependency Scan (Go + npm)`.
+
+Two rules keep this from wedging the repo:
+
+**A required check must report on every PR shape.** A path-filtered workflow
+produces no check run at all on a PR it doesn't match, and GitHub waits
+forever for a status that never arrives. That's why `security-grype.yml`
+has no `paths:` filter on its `pull_request` trigger. To make those jobs
+cheaper, gate the expensive steps inside the job, never the workflow
+trigger. A job that always skips (`Security: Grype Container Scan` carries
+`if: github.event_name != 'pull_request'`) must never be required, because
+a skipped check is not a passing one.
+
+**Renaming a job renames its check-run context**, so a rename and the
+ruleset update have to be sequenced. Land the rename on `main` first, then
+PATCH the ruleset, then merge. Flipping the ruleset to new names before the
+rename reaches `main` wedges every other open PR targeting `main`: those
+still run the old workflow files from their own head branch and keep
+posting the old context names, which the ruleset no longer accepts. Check
+`gh pr list --base main --state open` before applying, and after applying
+read the effective ruleset back rather than trusting the PATCH's 200.
+
 ## Cutting the tag
 
 **Preferred path: use the `release-cut` workflow.**
