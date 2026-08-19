@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Both sites were shipping logos an order of magnitude larger than they
+  render.** `portwing.png` was 1102x1102 (616 KB) against a 200px maximum
+  render, and `codeswhat-logo.png` was 830x835 (364 KB) against a 26px
+  footer coin; each was tracked twice, once per site. This matters here
+  in a way it wouldn't elsewhere: `next.config` sets `output: "export"`
+  with `images: { unoptimized: true }`, so `next/image` never resizes and
+  the source file size IS the delivered size. Downscaled to 400px and
+  128px. Lighthouse median total byte weight: marketing 1,927,134 to
+  1,548,014, docs to 1,444,340 against a 2,466,239 baseline — the docs
+  site had been carrying the same ~980 KB while sitting just under its
+  own ceiling. The `baseline` figures in `lighthouse/*.cjs` are now well
+  above actual and worth re-recording.
+
 - **Marketing site was 1.9 MB over its own page-weight budget.** The
   ecosystem section's `sockguard-logo.png` and `drydock-logo.png` shipped
   at 1023x1023 (1.5 MB) and 1041x694 (472 KB) while rendering at 128x128.
