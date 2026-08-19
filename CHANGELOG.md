@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dropped the third-party star-history.com embed from the marketing
+  site.** The marketing site embedded a third-party star-history.com
+  image, which made every visitor's browser contact that service
+  directly; removed it.
+
 ## [v0.9.6] - 2026-08-19
 
 ### Added

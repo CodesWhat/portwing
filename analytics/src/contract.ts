@@ -51,13 +51,7 @@ export type CtaId =
   | "github_org"
   | "github_repository"
   | "community_discord";
-export type CtaPlacement =
-  | "header"
-  | "hero"
-  | "comparison"
-  | "get_started"
-  | "footer"
-  | "star_history";
+export type CtaPlacement = "header" | "hero" | "comparison" | "get_started" | "footer";
 
 type EventProperties = Record<string, unknown>;
 
@@ -110,7 +104,6 @@ const CTA_COMBINATIONS = new Set<string>([
   "github_repository:header",
   "github_repository:hero",
   "github_repository:footer",
-  "github_repository:star_history",
   "community_discord:footer",
 ]);
 
