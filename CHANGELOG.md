@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Native package attestation verification was blocked by its own egress
+  policy.** The `✅ Verify Native Packages` job's harden-runner allow-list
+  was missing `tmaproduction.blob.core.windows.net`, the Azure blob host
+  `gh attestation verify` fetches provenance bundles from, so the step
+  failed with a connection refused on the v0.9.6 cut. The sibling
+  `✅ Verify Published` job already allowed that host; the two lists now
+  agree. The published artifacts were never affected — v0.9.6's packages
+  verify cleanly against the same attestation off-runner.
+
 ## [v0.9.6] - 2026-08-19
 
 ### Added
