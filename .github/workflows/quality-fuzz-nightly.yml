@@ -1,8 +1,8 @@
-name: "🔀 Quality: Deep Fuzz"
+name: "Quality: Deep Fuzz"
 run-name: >-
   ${{
-    github.event_name == 'schedule' && '🔀 Quality: Deep Fuzz — Nightly' ||
-    format('🔀 Quality: Deep Fuzz — Manual by {0}', github.actor)
+    github.event_name == 'schedule' && 'Quality: Deep Fuzz — Nightly' ||
+    format('Quality: Deep Fuzz — Manual by {0}', github.actor)
   }}
 
 # Tier 2 fuzz strategy. Tier 1 lives in `ci-verify.yml go-fuzz` and gives every
@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   deep-fuzz:
-    name: "🔀 Fuzz ${{ matrix.fuzzer.name }}"
+    name: "Fuzz ${{ matrix.fuzzer.name }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 75
 
