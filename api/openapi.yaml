@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Portwing Agent API
-  version: 0.9.5
+  version: 0.9.6
   description: |
     Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
