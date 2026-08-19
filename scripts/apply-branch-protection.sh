@@ -13,7 +13,15 @@
 # and are not flaky. Deliberately excluded:
 #   - "🐋 Integration (real dockerd)" — path-filtered; would hang pending.
 #   - "🔀 Go Fuzz (...)"            — subject to the coordinator-starvation flake.
-#   - "📦 Dependency Review"        — informational (org Dependency Graph is off).
+#   - "Node CI / Web Contract"      — page-weight flake seen during #152.
+#   - security-grype.yml's jobs     — the workflow is path-filtered, so it
+#     produces no check runs at all on a docs-only PR; requiring them would
+#     leave every such PR pending forever. De-path-filtering that workflow is
+#     the prerequisite, not a ruleset change.
+#
+# This list MUST match the live ruleset. The script updates the ruleset in
+# place, so a stale list here silently REMOVES required checks the next time
+# anyone runs it. Verified against ruleset 17620625 on 2026-08-19.
 #
 # Modifying repo security settings is intentionally NOT automated by the agent —
 # this script is the one human-applied step. Idempotent: creates the ruleset if
@@ -59,7 +67,11 @@ RULESET="$(
           { "context": "Go CI / Govulncheck",       "integration_id": 15368 },
           { "context": "Go CI / Workflow Security", "integration_id": 15368 },
           { "context": "Go CI / Commit Message",    "integration_id": 15368 },
-          { "context": "Go CI / GoReleaser Config", "integration_id": 15368 }
+          { "context": "Go CI / GoReleaser Config", "integration_id": 15368 },
+          { "context": "Go CI / Qlty Check",        "integration_id": 15368 },
+          { "context": "🔑 Security: Secrets",      "integration_id": 15368 },
+          { "context": "📦 Dependency Review",      "integration_id": 15368 },
+          { "context": "🔍 CodeQL Analysis",        "integration_id": 15368 }
         ]
       }
     },

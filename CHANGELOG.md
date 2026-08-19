@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Native package attestation verification was blocked by its own egress
+  policy.** The `✅ Verify Native Packages` job's harden-runner allow-list
+  was missing `tmaproduction.blob.core.windows.net`, the Azure blob host
+  `gh attestation verify` fetches provenance bundles from, so the step
+  failed with a connection refused on the v0.9.6 cut. The sibling
+  `✅ Verify Published` job already allowed that host; the two lists now
+  agree. The published artifacts were never affected — v0.9.6's packages
+  verify cleanly against the same attestation off-runner.
+- **Checked-in branch protection no longer under-declares the required
+  checks.** `scripts/apply-branch-protection.sh` still listed the six
+  original required contexts while the live ruleset had grown to ten.
+  Because the script updates the ruleset in place, running it would have
+  silently dropped `Go CI / Qlty Check`, `🔑 Security: Secrets`,
+  `📦 Dependency Review`, and `🔍 CodeQL Analysis` — a script named "apply
+  branch protection" that weakened it. The list now mirrors the live
+  ruleset, and the header documents that a stale list removes checks.
+
 ## [v0.9.6] - 2026-08-19
 
 ### Added
