@@ -1,5 +1,5 @@
-name: "🏷️ Release: Cut"
-run-name: "🏷️ Release: Cut — manual by ${{ github.actor }}"
+name: "Release: Cut"
+run-name: "Release: Cut — manual by ${{ github.actor }}"
 
 # Requires RELEASE_PAT secret (fine-grained PAT, Contents: RW on this repo).
 # GITHUB_TOKEN-pushed tags do not trigger downstream workflows under
@@ -27,7 +27,7 @@ env:
 
 jobs:
   cut:
-    name: "🏷️ Release: Cut Tag"
+    name: "Release: Cut Tag"
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -208,7 +208,7 @@ jobs:
           RELEASE_TAG: ${{ steps.next.outputs.release_tag }}
         run: |
           {
-            echo "### 🏷️ Release Cut Summary"
+            echo "### Release Cut Summary"
             echo "- Target SHA: \`${TARGET_SHA}\`"
             echo "- Bump level: \`${RELEASE_LEVEL}\`"
             echo "- Next version: \`${NEXT_VERSION}\`"

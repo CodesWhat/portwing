@@ -213,6 +213,12 @@ required_ci_contexts=(
 	"Go CI / Workflow Security"
 	"Go CI / Commit Message"
 	"Go CI / GoReleaser Config"
+	"Go CI / Qlty Check"
+	"Security: Secrets"
+	"Dependency Review"
+	"CodeQL Analysis"
+	"Security: Gosec SAST"
+	"Security: Grype Dependency Scan (Go + npm)"
 )
 
 for context in "${required_ci_contexts[@]}"; do
@@ -251,6 +257,50 @@ for context in "${retired_x1_bridge_contexts[@]}"; do
 	reject_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "workflow must not reintroduce the retired X1 bridge context ${context}"
 	reject_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must not reintroduce the retired X1 bridge context ${context}"
 done
+
+# The emoji-prefixed job names retired when CI converged on the house
+# no-emoji standard. Renaming a job renames its check-run context, so
+# reintroducing one of these silently stops producing a context the ruleset
+# still requires, and every PR hangs waiting for a status that never arrives.
+retired_emoji_ci_contexts=(
+	"🔑 Security: Secrets"
+	"📦 Dependency Review"
+	"🔍 CodeQL Analysis"
+	"🔐 Security: Gosec SAST"
+	"📦 Security: Grype Dependency Scan (Go + npm)"
+)
+
+for context in "${retired_emoji_ci_contexts[@]}"; do
+	reject_text ".github/workflows/ci-verify.yml" "name: \"${context}\"" "workflow must not report the retired emoji CI context ${context}"
+	reject_text ".github/workflows/security-grype.yml" "name: \"${context}\"" "workflow must not report the retired emoji CI context ${context}"
+	reject_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must not require the retired emoji CI context ${context}"
+done
+
+# The house standard is no emoji anywhere in CI, not just in the job names
+# that happen to be required contexts. Enforced over the whole workflow
+# directory so run-name blocks and step output cannot drift back. perl rather
+# than `grep -P`, which BSD grep does not reliably provide.
+emoji_in_workflows="$(
+	perl -CSD -ne 'print "$ARGV:$.\n" if /\p{Extended_Pictographic}/' .github/workflows/*.yml
+)"
+if [ -n "$emoji_in_workflows" ]; then
+	echo "FAIL: CI workflows must not contain emoji (house standard). Offending lines:" >&2
+	echo "$emoji_in_workflows" >&2
+	failures=$((failures + 1))
+fi
+
+# The two security-grype.yml jobs above are required contexts, so that
+# workflow must fire on every PR. A `paths:` filter under its pull_request
+# trigger produces no check run at all on a PR it does not match, which wedges
+# that PR forever. Gate expensive steps inside the job instead.
+grype_pr_paths="$(
+	perl -0777 -ne 'print "path-filtered" if /^  pull_request:.*?^    paths:/ms' \
+		.github/workflows/security-grype.yml
+)"
+if [ -n "$grype_pr_paths" ]; then
+	echo "FAIL: security-grype.yml must not path-filter its pull_request trigger; its jobs are required contexts" >&2
+	failures=$((failures + 1))
+fi
 
 if [ "$failures" -ne 0 ]; then
 	echo "${failures} package release contract check(s) failed" >&2

@@ -11,13 +11,22 @@
 #
 # Required status checks are limited to the CI jobs that run on EVERY PR to main
 # and are not flaky. Deliberately excluded:
-#   - "🐋 Integration (real dockerd)" — path-filtered; would hang pending.
-#   - "🔀 Go Fuzz (...)"            — subject to the coordinator-starvation flake.
-#   - "Node CI / Web Contract"      — page-weight flake seen during #152.
-#   - security-grype.yml's jobs     — the workflow is path-filtered, so it
-#     produces no check runs at all on a docs-only PR; requiring them would
-#     leave every such PR pending forever. De-path-filtering that workflow is
-#     the prerequisite, not a ruleset change.
+#   - "Integration (real dockerd)"      — path-filtered; would hang pending.
+#   - "Fuzz (...)"                      — coordinator-starvation flake.
+#   - "Node CI / Web Contract"          — page-weight flake seen during #152.
+#   - "Security: Grype Container Scan"  — carries `if: github.event_name !=
+#     'pull_request'`, so it ALWAYS skips on a PR. Requiring it would wedge
+#     every PR permanently; a skipped check is not a passing one.
+#   - "Security: Govulncheck"           — duplicates the required
+#     "Go CI / Govulncheck" (different tool versions, v1.2.0 here vs v1.7.0
+#     upstream). Requiring both gates the same property twice.
+#
+# The two security-grype.yml jobs that ARE required below only became safe to
+# require once that workflow lost its `paths:` filter. A required check must
+# report on every PR shape; a path-filtered workflow produces no check run at
+# all on a PR it does not match, and GitHub waits forever for a status that
+# never arrives. If those jobs need to get cheaper, gate the expensive STEPS
+# inside the job, never the workflow trigger.
 #
 # This list MUST match the live ruleset. The script updates the ruleset in
 # place, so a stale list here silently REMOVES required checks the next time
@@ -69,9 +78,11 @@ RULESET="$(
           { "context": "Go CI / Commit Message",    "integration_id": 15368 },
           { "context": "Go CI / GoReleaser Config", "integration_id": 15368 },
           { "context": "Go CI / Qlty Check",        "integration_id": 15368 },
-          { "context": "🔑 Security: Secrets",      "integration_id": 15368 },
-          { "context": "📦 Dependency Review",      "integration_id": 15368 },
-          { "context": "🔍 CodeQL Analysis",        "integration_id": 15368 }
+          { "context": "Security: Secrets",         "integration_id": 15368 },
+          { "context": "Dependency Review",         "integration_id": 15368 },
+          { "context": "CodeQL Analysis",           "integration_id": 15368 },
+          { "context": "Security: Gosec SAST",      "integration_id": 15368 },
+          { "context": "Security: Grype Dependency Scan (Go + npm)", "integration_id": 15368 }
         ]
       }
     },

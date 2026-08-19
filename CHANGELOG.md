@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI job names converged off emoji.** All 57 emoji occurrences across the
+  12 workflow files are gone, per the house no-emoji-in-CI standard:
+  workflow names, job names, `run-name:` expressions, and one step's
+  summary output. Renaming a job renames its check-run context, so three
+  required contexts change with it (`🔑 Security: Secrets`,
+  `📦 Dependency Review`, `🔍 CodeQL Analysis` lose their prefixes). The
+  seven `Go CI / ...` contexts are untouched: that prefix comes from the
+  caller job's own name, already emoji-free since #101, and five of the
+  seven suffixes are defined in the upstream reusable workflow and are not
+  this repo's to rename. `scripts/package-release-config-test.sh` now
+  rejects reintroduction of the retired emoji names and fails on any emoji
+  anywhere under `.github/workflows/`, so this stays converged instead of
+  drifting back.
+
+### Security
+
+- **gosec and Grype dependency scanning now gate pull requests.**
+  `Security: Gosec SAST` and `Security: Grype Dependency Scan (Go + npm)`
+  become required contexts on `main`, taking the ruleset from 10 required
+  checks to 12. This required removing the `paths:` filter from
+  `security-grype.yml`'s `pull_request` trigger: a path-filtered workflow
+  produces no check run at all on a PR it does not match, so requiring one
+  of its jobs would leave every docs-only PR waiting forever on a status
+  that never arrives. The container scan stays excluded on purpose since
+  it carries `if: github.event_name != 'pull_request'` and always skips on
+  PRs, and `Security: Govulncheck` stays excluded as a duplicate of the
+  already-required `Go CI / Govulncheck`. The trigger's branch filter also
+  moves from `dev/*` to `dev/**` to match `ci-verify.yml`, so a nested dev
+  branch cannot run one gate without the other.
+
 - **Lighthouse budgets re-recorded against the current sites.** The old
   baselines described pages carrying ~1 MB of oversized images and the
   ceilings were loose enough to hide it. The docs site sat under its limit

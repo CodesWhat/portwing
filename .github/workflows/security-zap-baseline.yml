@@ -4,7 +4,7 @@
 # tier — an active scan would find nothing an active application wouldn't
 # already need, and testssl is N/A (Vercel terminates TLS; Portwing owns no
 # certificate or listener to test). Scheduled-advisory tier, not a PR gate.
-name: "🕷️ Security: ZAP Baseline"
+name: "Security: ZAP Baseline"
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   zap-baseline:
-    name: "🕷️ Security: ZAP Baseline"
+    name: "Security: ZAP Baseline"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

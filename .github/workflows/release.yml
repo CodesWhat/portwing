@@ -1,4 +1,4 @@
-name: "🚀 Release"
+name: "Release"
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   release:
-    name: "🚀 GoReleaser + Cosign"
+    name: "GoReleaser + Cosign"
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -141,7 +141,7 @@ jobs:
           create-storage-record: false
 
   verify-published:
-    name: "✅ Verify Published"
+    name: "Verify Published"
     needs: release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -194,7 +194,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   verify-native-packages:
-    name: "✅ Verify Native Packages"
+    name: "Verify Native Packages"
     needs: release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -288,7 +288,7 @@ jobs:
             '
 
   verify-homebrew:
-    name: "✅ Verify Homebrew"
+    name: "Verify Homebrew"
     needs: release
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: macos-26
