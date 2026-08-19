@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Marketing site was 1.9 MB over its own page-weight budget.** The
+  ecosystem section's `sockguard-logo.png` and `drydock-logo.png` shipped
+  at 1023x1023 (1.5 MB) and 1041x694 (472 KB) while rendering at 128x128.
+  Both are now 256px, matching the `sockguard-logo-dark.png` variant
+  already sitting beside them in the same component. Lighthouse median
+  total byte weight drops from 2,556,783 to 1,927,134 against a 2,180,000
+  ceiling — back under the 2,039,127 baseline, not just under the limit.
+  The overage was failing the `web` lefthook pre-push lane, so it blocked
+  every local push regardless of what the change touched.
+
 ### Removed
 
 - **Retired the dead star-history.com chart from the README.** The embed
