@@ -978,12 +978,6 @@ Exec tunnel events:
 
 <a id="star-history"></a>
 
-<div align="center">
-  <a href="https://star-history.com/#CodesWhat/portwing&Date">
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=CodesWhat/portwing&type=Date" />
-  </a>
-</div>
-
 Growth over time, via [Warpchart](https://warpchart.dev/r/CodesWhat/portwing):
 
 <div align="center">
