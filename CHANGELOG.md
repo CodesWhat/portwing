@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.6] - 2026-08-19
+
 ### Added
 
 - **Label-gated Greptile second-opinion review.** A new `Greptile second

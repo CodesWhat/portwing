@@ -107,12 +107,13 @@ ignore:
   # so a Wolfi openssl bump forces re-review. Review by 2026-09-15 or when
   # Wolfi publishes an openssl secfix for this CVE, whichever is sooner.
   #
-  # 2026-08-17 re-review: the v0.9.5 image picked up Wolfi's 3.6.3-r4
-  # rebuild and the version pin fired as designed. r4 is a rebuild, not a
-  # secfix — Wolfi's secdb still declares no fixed version for this CVE and
-  # the CPE fallback matched r4 exactly as predicted above. Re-verified the
-  # shipped wget contains zero OCSP references; rationale unchanged, entries
-  # re-scoped to 3.6.3-r4. Review deadline unchanged (2026-09-15).
+  # 2026-08-17 re-review: the release image at the time picked up Wolfi's
+  # 3.6.3-r4 rebuild and the version pin fired as designed. r4 is a
+  # rebuild, not a secfix — Wolfi's secdb still declares no fixed version
+  # for this CVE and the CPE fallback matched r4 exactly as predicted
+  # above. Re-verified the shipped wget contains zero OCSP references;
+  # rationale unchanged, entries re-scoped to 3.6.3-r4. Review deadline
+  # unchanged (2026-09-15).
   - vulnerability: CVE-2026-54876
     reason: "Opt-in OCSP-checking TLS client leak; no libssl consumer in the image implements OCSP checking and no fixed Wolfi package exists yet. Review by 2026-09-15."
     package:
