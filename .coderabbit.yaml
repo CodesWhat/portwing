@@ -34,12 +34,15 @@ reviews:
   assess_linked_issues: true
   related_issues: true
   related_prs: true
-  suggested_labels: false
-  # `labeling_instructions` below is inert without this: with auto-apply off
-  # CodeRabbit evaluates the rule and then does nothing with the result, so
-  # `second-opinion` only ever gets applied by hand and the Greptile caller
-  # never fires on its own. Suggestions stay off — the label gets applied or
-  # it doesn't, no narration in the review body.
+  # Both flags are load-bearing for `labeling_instructions` below, and this is
+  # the combination that has been observed to work (sockguard, careerrat).
+  # `auto_apply_labels` applies *suggested* labels, so turning suggestions off
+  # silently disables auto-apply and leaves the instructions block evaluating
+  # into nothing — the label then only ever gets applied by hand and the
+  # Greptile caller never fires on its own. drydock currently runs
+  # `suggested_labels: false` with `auto_apply_labels: true`, which is that
+  # dead combination; don't copy it here.
+  suggested_labels: true
   auto_apply_labels: true
   labeling_instructions:
     - label: "second-opinion"

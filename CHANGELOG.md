@@ -26,9 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the label only ever got applied by hand and the caller never fired
   unprompted. Adding the instructions alone would have been inert:
   `auto_apply_labels` was `false`, which makes CodeRabbit evaluate the rule
-  and discard the result. Both are set now, matching drydock.
-  `suggested_labels` stays `false` — the label gets applied or it doesn't,
-  with no narration in the review body.
+  and discard the result. `suggested_labels` is on too, because auto-apply
+  applies *suggested* labels — leaving suggestions off silently disables it
+  and reproduces the same dead config one layer down. That's the
+  combination sockguard and careerrat were verified on; drydock's
+  `false`/`true` pair is the dead one.
 
 - **README picked up the social-proof badge row and moved Documentation
   up.** `readme-shape.md` specifies a three-row badge wall; the repo had
