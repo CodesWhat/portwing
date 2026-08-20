@@ -249,6 +249,23 @@ if [ "${actual_grype_gates}" != "${expected_grype_gates}" ]; then
 	failures=$((failures + 1))
 fi
 
+# The star-history chart is a committed artifact, not a third-party embed.
+# Both retired services are rejected by name because both were, at some
+# point, the prescribed answer: star-history.com until it stopped rendering
+# for our repos, and warpchart.dev for three days after that. A future sweep
+# working from a stale registry read would happily reinstate either one, and
+# the failure mode is quiet — a live route serves a plausible card at HTTP
+# 200 whether or not it has data, so nothing goes visibly red. A committed
+# SVG fails loudly instead: stale is readable, missing is a broken image.
+# Rejecting the hostnames also keeps visitor IPs off a third party, which is
+# what the cookieless analytics posture requires.
+reject_text "README.md" "star-history.com" \
+	"the README must not embed a third-party star-history chart; the chart is committed at docs/assets/star-history.svg"
+reject_text "README.md" "warpchart.dev" \
+	"the README must not embed a third-party star-history chart; warpchart.dev was the prescribed replacement for three days and is retired org-wide"
+require_file "docs/assets/star-history.svg" \
+	"the committed star-history chart must exist; the README references it by relative path and a missing file renders as a broken image"
+
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
 require_file "NOTICE" "project identity and copyright must live outside the standard license text"
 require_first_line "LICENSE" "                    GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must begin with the canonical AGPL-3.0 text"
