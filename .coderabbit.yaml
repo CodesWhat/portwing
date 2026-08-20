@@ -34,8 +34,26 @@ reviews:
   assess_linked_issues: true
   related_issues: true
   related_prs: true
-  suggested_labels: false
-  auto_apply_labels: false
+  # Both flags are load-bearing for `labeling_instructions` below, and this is
+  # the combination that has been observed to work (sockguard, careerrat).
+  # `auto_apply_labels` applies *suggested* labels, so turning suggestions off
+  # silently disables auto-apply and leaves the instructions block evaluating
+  # into nothing — the label then only ever gets applied by hand and the
+  # Greptile caller never fires on its own. drydock currently runs
+  # `suggested_labels: false` with `auto_apply_labels: true`, which is that
+  # dead combination; don't copy it here.
+  suggested_labels: true
+  auto_apply_labels: true
+  labeling_instructions:
+    - label: "second-opinion"
+      instructions: |
+        Apply when the diff is security-sensitive (auth, the Docker proxy
+        and socket path, release or security workflows, the branch-protection
+        and suppression config), is a large refactor, or when your own
+        findings conflict with the author's stated intent and a tiebreaker
+        reviewer is warranted. The label summons Greptile as an independent
+        second opinion via .github/workflows/greptile.yml — apply it
+        deliberately, not on every PR.
   suggested_reviewers: false
   auto_assign_reviewers: false
   enable_prompt_for_ai_agents: true
@@ -45,6 +63,13 @@ reviews:
     enabled: true
     auto_incremental_review: true
     drafts: false
+    # Without this, CodeRabbit auto-reviews ONLY PRs targeting the default
+    # branch. Under the strict release flow every feature PR targets the
+    # active dev branch and only the promotion PR targets main, so leaving
+    # it unset means the code is reviewed once, in aggregate, after it has
+    # already landed. The values are regexes, not globs.
+    base_branches:
+      - "dev/.*"
     ignore_title_keywords:
       - "WIP"
       - "DO NOT MERGE"
