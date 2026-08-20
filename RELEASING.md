@@ -137,9 +137,27 @@ git push origin v<version>
 
 1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; publishes the stable Homebrew cask; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
 2. **Attestations** — SLSA Build L2 provenance for every checksummed release asset (archives, native packages, and per-archive SBOMs) and for the container manifest (`gh attestation verify <asset> --repo CodesWhat/portwing`)
-3. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.
-4. **verify-native-packages** — verifies every package's Sigstore bundle, installs the `amd64` deb and rpm in digest-pinned clean distribution containers, checks the systemd unit, and runs `portwing version`.
-5. **verify-homebrew** — on stable tags, installs the published cask on macOS, runs `portwing version`, and uninstalls it.
+3. **grype-published-image** — scans the pushed manifest by digest with Grype, once per published platform (`linux/amd64`, `linux/arm64`, `linux/arm/v7`), using `.grype.yaml` for suppressions. This is the only scan that sees what users actually pull: `security-grype.yml`'s container scan builds its own image from the root `Dockerfile` and resolves to a single architecture. Unlike `verify-published` this job is **not** gated on repository visibility; only its SARIF upload is, so the gate keeps working if the repo ever goes private.
+
+   The gate is per platform, and the matrix's `gate:` field is the single source of truth:
+
+   | Platform | Gate |
+   |---|---|
+   | `linux/amd64` | fails the release on HIGH and above |
+   | `linux/arm64` | fails the release on HIGH and above |
+   | `linux/arm/v7` | **report-only** — does not fail the release |
+
+   Every leg uploads SARIF to the Security tab, but only while the repo is
+   public: code scanning uploads need GHAS, which free private repos don't
+   have. So on a private repo the `arm/v7` findings exist only in that job's
+   log, which is the one case where report-only is close to invisible.
+
+   **The `arm/v7` exception, and when it ends.** Wolfi publishes no armv7 repo, so `Dockerfile.release` builds that leg from `alpine:3.24` using Alpine's prebuilt `docker-cli` and `docker-cli-compose` instead of Wolfi's `docker-compose`. Those packages are compiled with Go 1.26.3 and carry ~29 Critical/High stdlib advisories that are all fixed in Go 1.26.6. Portwing's own `go.mod` pins `toolchain go1.26.6` and portwing's binary carries **zero** findings on all three platforms — the vulnerable toolchain is Alpine's, not this repo's, and no Alpine branch ships a `go >= 1.26.6`-built docker package yet (edge is on 1.26.5, one patch short). `musl` additionally carries CVE-2026-40200 with no fix anywhere.
+
+   Suppressing those to force the leg green would hide real, fixable CVEs behind an entry nobody would revisit, so the gap is left visible instead. **Flip `gate: none` to `gate: high` in the matrix once Alpine ships those packages**, then delete this paragraph. Do not quietly drop `linux/arm/v7` from the matrix to quiet the job — `scripts/package-release-config-test.sh` asserts all three platforms and their exact gate values, so changing one is a deliberate edit to that list, this table, and the matrix comment together.
+4. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.
+5. **verify-native-packages** — verifies every package's Sigstore bundle, installs the `amd64` deb and rpm in digest-pinned clean distribution containers, checks the systemd unit, and runs `portwing version`.
+6. **verify-homebrew** — on stable tags, installs the published cask on macOS, runs `portwing version`, and uninstalls it.
 
 **Verify the release:**
 
