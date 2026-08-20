@@ -1,0 +1,20 @@
+name: "portwing CodeQL config"
+
+# Scope for the single multi-language CodeQL job in ci-verify.yml. There is
+# deliberately no `paths:` allowlist: the job scans the whole checkout either
+# way, so narrowing to the two site workspaces would leave analytics/src and
+# the root scripts/*.mjs uncovered for no saving.
+#
+# JavaScript/TypeScript extraction runs untraced (no npm install, no build)
+# alongside the traced Go build the job already performs. None of the paths
+# below exist in a clean checkout today, since they are all gitignored and
+# nothing installs or builds them before this job runs. They are listed as
+# defense in depth, in particular website/public, which is where the docs
+# static export lands and can hold generated, minified JS chunks.
+paths-ignore:
+  - "**/node_modules"
+  - "**/.next"
+  - "**/.turbo"
+  - "**/.source"
+  - "**/out"
+  - "website/public/**"

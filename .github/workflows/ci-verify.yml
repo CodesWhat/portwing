@@ -301,8 +301,18 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
         with:
-          languages: actions, go
+          # One non-matrix job on purpose. A matrix appends the leg value to
+          # the check-run name even with a single entry (drydock requires
+          # "SAST: CodeQL (javascript-typescript)" for exactly this reason), so
+          # a matrix here would post "CodeQL Analysis (go)" and never the bare
+          # "CodeQL Analysis" this repo's ruleset requires, wedging every PR.
+          # javascript-typescript extracts untraced alongside the traced Go
+          # build below, with no npm install and no extra egress: the CodeQL
+          # bundle ships every extractor. build-mode is deliberately unset --
+          # codeql-action only accepts it for single-language jobs.
+          languages: actions, go, javascript-typescript
           queries: security-and-quality
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
