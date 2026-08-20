@@ -59,7 +59,7 @@ the capability. It is intentionally different from a definitive “no.”
 | Agent-level audit trail | Structured API, authentication, enrollment, Compose, and exec records; cursor-based export | Controller activity logs are a Business feature | Controller stores a full audit trail | Controller activities and security audit events | Debug request logs; no structured audit export documented |
 | Agent Prometheus endpoint | Yes | No agent scrape endpoint documented | Host metrics and alerts, but no agent scrape endpoint documented | Metrics in the controller; no agent scrape endpoint documented | Host metrics forwarded to Dockhand; no scrape endpoint documented |
 | Read-only MCP server | Yes | Not documented | Not documented | Not documented | Not documented |
-| Verifiable release artifacts | Cosign signatures, CycloneDX SBOM, and SLSA provenance | Not evaluated | Not evaluated | Cosign-verifiable artifacts and images | Checksummed releases; no equivalent set documented |
+| Verifiable release artifacts | Cosign signatures, CycloneDX SBOM, and SLSA Build L2 provenance | Not evaluated | Not evaluated | Cosign-verifiable artifacts and images | Checksummed releases; no equivalent set documented |
 | Controller-managed agent upgrades | Not shipped; immutable packages/images are upgraded by the operator | Yes, including Edge fleet policies | Auto-update facilities exist; an agent rollout contract was not established in this review | Manager can upgrade agents | Manual deployment update |
 
 ## What the review changes

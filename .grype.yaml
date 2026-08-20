@@ -126,3 +126,47 @@ ignore:
       name: libssl3
       version: 3.6.3-r4
       type: apk
+
+  # CVE-2026-14456 is a DoS in OpenSSL's QUIC *server* role: an unauthenticated
+  # peer flooding Initial packets at a Listener SSL object makes it queue
+  # unbounded per-channel state. Read the advisory text directly rather than
+  # inferring from the CVSS score — the vector is entirely server-side QUIC.
+  # Nothing in this image is a QUIC server. Re-verified per-binary with
+  # `objdump -p` on the extracted images rather than reasoning from the
+  # Dockerfile: docker, docker-compose, and busybox link only libc (musl on the
+  # armv7 leg), so wget is the sole libssl.so.3/libcrypto.so.3 consumer, and the
+  # shipped wget has no QUIC support at all (no quic/http3 strings). Its only
+  # invocation is Dockerfile.release's HEALTHCHECK against portwing's own
+  # loopback listener.
+  #
+  # No fixed package exists to bump to on either base: grype reports fix state
+  # "unknown", Wolfi's secdb has no secfix past 3.6.3-r4, and Alpine ships
+  # 3.5.7-r0 on both 3.24 and edge while the upstream fix line is 3.5.8/3.6.4.
+  # Entries are version-scoped per base so either distro shipping a fix forces
+  # re-review. Review by 2026-09-15, alongside the CVE-2026-54876 entries.
+  - vulnerability: CVE-2026-14456
+    reason: "QUIC-server DoS; wget is the image's only libssl/libcrypto consumer (objdump-verified) and has no QUIC support. No fixed Wolfi package exists yet. Review by 2026-09-15."
+    package:
+      name: libcrypto3
+      version: 3.6.3-r4
+      type: apk
+  - vulnerability: CVE-2026-14456
+    reason: "QUIC-server DoS; wget is the image's only libssl/libcrypto consumer (objdump-verified) and has no QUIC support. No fixed Wolfi package exists yet. Review by 2026-09-15."
+    package:
+      name: libssl3
+      version: 3.6.3-r4
+      type: apk
+  # armv7 leg: Alpine ships older OpenSSL than Wolfi, so the same CVE matches a
+  # different version and needs its own scoped entry.
+  - vulnerability: CVE-2026-14456
+    reason: "armv7 (Alpine) leg of the same QUIC-server DoS; wget is again the only libssl/libcrypto consumer, objdump-verified on the armv7 binaries. No fixed Alpine package on 3.24 or edge. Review by 2026-09-15."
+    package:
+      name: libcrypto3
+      version: 3.5.7-r0
+      type: apk
+  - vulnerability: CVE-2026-14456
+    reason: "armv7 (Alpine) leg of the same QUIC-server DoS; wget is again the only libssl/libcrypto consumer, objdump-verified on the armv7 binaries. No fixed Alpine package on 3.24 or edge. Review by 2026-09-15."
+    package:
+      name: libssl3
+      version: 3.5.7-r0
+      type: apk

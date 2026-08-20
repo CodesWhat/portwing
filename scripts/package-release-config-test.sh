@@ -175,6 +175,80 @@ require_text ".github/workflows/release.yml" "fedora:42@sha256:" "the rpm smoke 
 require_text ".github/workflows/release.yml" 'release.yml@refs/tags/${GITHUB_REF_NAME}' "release verification must bind the signer identity to the exact release tag"
 reject_text ".github/workflows/release.yml" "certificate-identity-regexp" "release verification must not accept an unanchored signer identity"
 
+# The published image is the only artifact users actually pull, and until this
+# job existed nothing scanned it: security-grype.yml's container scan builds its
+# own image from the root Dockerfile and never sees the real manifest. Each
+# assertion below guards a specific way this gate could be quietly weakened
+# back into decoration.
+require_text ".github/workflows/release.yml" "Run Grype against the published image" \
+	"the release must scan the actual published image, not a locally rebuilt approximation"
+require_text ".github/workflows/release.yml" "registry:ghcr.io/codeswhat/portwing@" \
+	"the published-image scan must target an immutable digest, not a mutable tag"
+# The gate map below is only meaningful if an unrecognized value is rejected. A
+# `case` that fell through to no `--fail-on` would silently un-gate any leg
+# whose gate got typo'd.
+require_text ".github/workflows/release.yml" "Unknown gate" \
+	"the published-image scan must fail on an unrecognized gate value, not default to report-only"
+
+# Assert against the grype command ITSELF, not the file. A file-wide grep for
+# "--fail-on high" is satisfied by the `case` branch that builds the array, and
+# a grep for the platform flag is satisfied by a comment — so both passed while
+# the invocation had been stripped of the flags entirely. Deleting
+# ${fail_on[@]+"${fail_on[@]}"} from the command left amd64 and arm64 scanning
+# with no gate at all and this test still exiting 0 (measured, not assumed).
+#
+# Extract the invocation by following the line continuations, then require each
+# flag inside it. An empty extraction fails every assertion below, so renaming
+# or restructuring the command cannot silently un-assert it.
+grype_invocation="$(awk '
+	/grype "registry:/ { collecting = 1 }
+	collecting { print; if ($0 !~ /\\[[:space:]]*$/) exit }
+' .github/workflows/release.yml)"
+
+require_in_grype_command() {
+	local text="$1"
+	local description="$2"
+
+	if ! printf '%s\n' "${grype_invocation}" | grep -Fq -- "$text"; then
+		echo "FAIL: ${description} (the grype invocation in .github/workflows/release.yml must contain: ${text})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_in_grype_command "registry:ghcr.io/codeswhat/portwing@" \
+	"the published-image scan must target an immutable digest, not a mutable tag"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+require_in_grype_command '--platform "${PLATFORM}"' \
+	"the published-image scan must select the matrix platform, not the runner's native arch; without this the matrix stays intact while every leg scans the runner's own arch"
+require_in_grype_command "--config .grype.yaml" \
+	"the published-image scan must use the repo's reviewed suppression policy, not grype defaults"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+require_in_grype_command '${fail_on[@]+"${fail_on[@]}"}' \
+	"the per-platform gate must actually reach the grype command; the gate map is decoration if the flags never get passed"
+# The per-platform gate is the actual security posture, so assert the whole map
+# rather than the substring "--fail-on high" — that string survives intact even
+# if every leg is flipped to report-only.
+#
+# Wolfi has no armv7, so that leg is built from Alpine and carries a different
+# (worse) package set than amd64/arm64; it is report-only on purpose, and
+# RELEASING.md records why and when it flips. It is also the leg most likely to
+# be dropped to make the gate quiet, which is why it is asserted by name here.
+# Changing any of these three values is a security decision that has to update
+# this list, RELEASING.md, and the matrix comment together.
+expected_grype_gates="linux/amd64=high
+linux/arm64=high
+linux/arm/v7=none"
+actual_grype_gates="$(awk '
+	$0 == "  grype-published-image:" { injob = 1; next }
+	injob && /^  [^ ]/ { injob = 0 }
+	injob && $1 == "-" && $2 == "platform:" { platform = $3; next }
+	injob && $1 == "gate:" { print platform "=" $2 }
+' .github/workflows/release.yml)"
+if [ "${actual_grype_gates}" != "${expected_grype_gates}" ]; then
+	echo "FAIL: the published-image scan's per-platform gates changed (expected '${expected_grype_gates//$'\n'/, }', got '${actual_grype_gates//$'\n'/, }')" >&2
+	failures=$((failures + 1))
+fi
+
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
 require_file "NOTICE" "project identity and copyright must live outside the standard license text"
 require_first_line "LICENSE" "                    GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must begin with the canonical AGPL-3.0 text"
@@ -275,6 +349,43 @@ for context in "${retired_emoji_ci_contexts[@]}"; do
 	reject_text ".github/workflows/security-grype.yml" "name: \"${context}\"" "workflow must not report the retired emoji CI context ${context}"
 	reject_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must not require the retired emoji CI context ${context}"
 done
+
+# govulncheck has exactly one gate: the required "Go CI / Govulncheck"
+# context, which runs it at v1.7.0 via scripts/ci/go-govulncheck.sh. A second
+# copy used to live in security-grype.yml pinned to v1.2.0 - an older tool on
+# a non-required check, gating the same property twice. Reject its return.
+reject_text ".github/workflows/security-grype.yml" "golang.org/x/vuln/cmd/govulncheck" \
+	"security-grype.yml must not reintroduce a duplicate govulncheck gate (Go CI / Govulncheck is the required one)"
+
+# The source-level half of the scanner-exclusion check must stay on a job that
+# actually runs on pull requests. grype-image also calls the script, but with
+# path arguments and under `if: github.event_name != 'pull_request'`, so it
+# always skips on PRs. When the duplicate govulncheck job was retired this
+# check moved to grype-deps; if it ever leaves, PRs silently stop verifying
+# that the scoped Grype suppressions are not actually imported.
+require_text ".github/workflows/security-grype.yml" "./scripts/verify-scanner-exclusions.sh" \
+	"security-grype.yml must run the source-level scanner-exclusion check"
+grype_deps_exclusion="$(
+	perl -0777 -ne 'print "ok" if /^  grype-deps:.*?verify-scanner-exclusions\.sh/ms' \
+		.github/workflows/security-grype.yml
+)"
+if [ -z "$grype_deps_exclusion" ]; then
+	echo "FAIL: the scanner-exclusion check must live in the grype-deps job, which runs on pull requests" >&2
+	failures=$((failures + 1))
+fi
+
+# gosec runs with -no-fail on purpose (it has no severity cutoff and would
+# otherwise fail on LOW-severity heuristics like G104). That makes the explicit
+# severity-gate step the only thing standing between the required
+# "Security: Gosec SAST" context and a permanent green. Delete the step while
+# leaving -no-fail and the check silently becomes report-only, which is worse
+# than not requiring it at all, because the ruleset still claims it gates.
+require_text ".github/workflows/security-grype.yml" "args: -no-fail -fmt sarif -out gosec-results.sarif ./..." \
+	"gosec must keep -no-fail; the severity-gate step decides the outcome, not gosec's own exit code"
+require_text ".github/workflows/security-grype.yml" "Gate on gosec HIGH/MEDIUM findings" \
+	"security-grype.yml must keep the explicit gosec severity gate; -no-fail alone makes the required check a no-op"
+require_text ".github/workflows/security-grype.yml" 'select(.level == "error")' \
+	"the gosec gate must filter SARIF results on level==\"error\" (gosec's MEDIUM/HIGH), not merely check the file exists"
 
 # The house standard is no emoji anywhere in CI, not just in the job names
 # that happen to be required contexts. Enforced over the whole workflow

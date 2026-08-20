@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CodeRabbit reviews PRs into the dev branch again.** `.coderabbit.yaml`
+  set no `reviews.auto_review.base_branches`, which makes CodeRabbit
+  auto-review only PRs targeting the default branch. Under the strict
+  release flow every feature PR targets the active dev branch and only the
+  promotion PR targets `main`, so each PR posted "Review skipped: reviews
+  are disabled for this base branch" and the code was reviewed once, in
+  aggregate, after it had already landed. drydock's config has carried the
+  setting all along; this brings portwing to the same shape. The values are
+  regexes rather than globs, so `dev/.*` covers nested dev branches the way
+  `dev/**` does in the workflow triggers.
+
+- **The Greptile second-opinion caller can fire on its own now.**
+  `.github/workflows/greptile.yml` triggers on the `second-opinion` label,
+  but `.coderabbit.yaml` had no `labeling_instructions` entry for it, so
+  the label only ever got applied by hand and the caller never fired
+  unprompted. Adding the instructions alone would have been inert:
+  `auto_apply_labels` was `false`, which makes CodeRabbit evaluate the rule
+  and discard the result. `suggested_labels` is on too, because auto-apply
+  applies *suggested* labels — leaving suggestions off silently disables it
+  and reproduces the same dead config one layer down. That's the
+  combination sockguard and careerrat were verified on; drydock's
+  `false`/`true` pair is the dead one.
+
+- **README picked up the social-proof badge row and moved Documentation
+  up.** `readme-shape.md` specifies a three-row badge wall; the repo had
+  identity and quality/security but no third row. Release downloads, the
+  GHCR image, and Sponsor fill it — no Awesome-list or localization badge,
+  because this repo is in neither, and no discussions badge, because it
+  renders "0 total". Documentation moves to the second slot with the
+  ordering the shape gives, and gains rows for the two live site surfaces.
+
+- **The skipped Node lint and build checks report real names.** The
+  `node-ci` call left `lint-check-name` and `build-check-name` unset, and
+  GitHub does not evaluate an expression in a job's name when that job
+  skips, so the two reported as the literal `Node CI /
+  inputs.lint-check-name` and `Node CI / inputs.build-check-name`.
+  `run-lint` and `run-build` stay off: `Node CI / Web Contract` already
+  runs `npm run check:web`, which covers both, and enabling them would
+  gate the same property twice. Neither name is a required context. The
+  two org reusable-workflow pins also gained the trailing version comment
+  every other `uses:` in the repo carries.
+
 - **CI job names converged off emoji.** All 57 emoji occurrences across the
   12 workflow files are gone, per the house no-emoji-in-CI standard:
   workflow names, job names, `run-name:` expressions, and one step's
@@ -24,6 +66,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drifting back.
 
 ### Security
+
+- **Nothing scanned the image users actually pull.** `security-grype.yml`'s
+  container scan builds its own image from the root `Dockerfile` — a
+  Wolfi-only from-source build, resolved to the runner's single
+  architecture — so the multi-arch manifest `release.yml` pushes to GHCR
+  went out unscanned. A new `grype-published-image` job scans the pushed
+  manifest by digest, once per published platform. It uses
+  `grype registry:...@sha256:...` with an explicit `--platform` rather than
+  `anchore/scan-action`, which exposes no platform input and silently
+  resolves only the runner's native arch out of a multi-arch manifest,
+  leaving the other legs unscanned while reporting green. The digest
+  resolution fails closed rather than falling back to the mutable tag, and
+  the job is deliberately **not** gated on repository visibility — only its
+  SARIF upload is, so the gate keeps working if the repo ever goes private.
+  Against the real v0.9.6 manifest this found 2 HIGH on amd64/arm64 and 59
+  findings including 1 CRITICAL on armv7, none of which any existing scan
+  could see. Portwing's own binary carries zero findings on all three
+  platforms.
+
+- **`linux/arm/v7` is scanned report-only, and that is a recorded
+  exception.** Wolfi publishes no armv7 repo, so `Dockerfile.release`
+  builds that leg from `alpine:3.24` with Alpine's prebuilt `docker-cli`
+  and `docker-cli-compose` in place of Wolfi's `docker-compose`. Those are
+  compiled with Go 1.26.3 and carry ~29 Critical/High stdlib advisories,
+  every one of them fixed in Go 1.26.6 — which portwing's own `go.mod`
+  already pins. No Alpine branch ships a `go >= 1.26.6`-built docker
+  package yet (edge is on 1.26.5, one patch short), and `musl` carries
+  CVE-2026-40200 with no fix anywhere. Suppressing all of that to force the
+  leg green would hide real, fixable CVEs behind entries nobody would
+  revisit, so the gap is left visible instead: amd64 and arm64 fail the
+  release on HIGH and above, armv7 uploads SARIF without failing.
+  RELEASING.md names the upstream blocker and the flip condition, and
+  `scripts/package-release-config-test.sh` asserts all three platforms and
+  their exact gate values, so the leg cannot be quietly dropped or
+  un-gated. An unknown `gate:` value fails the job rather than defaulting
+  to report-only.
+
+- **The release pipeline no longer pipes an unverified script to a shell.**
+  The published-image scan installed Grype with
+  `curl https://get.anchore.io/grype | sh -s -- -v ...`. That `-v` verifies
+  the release archive, but the script carrying it is fetched over a mutable
+  URL and executes before any of that verification runs, so the check sits
+  inside code an attacker would already control. Replaced with a fetch of
+  the pinned release assets, a `cosign verify-blob` against Grype's release
+  signer, and a checksum check, all ahead of anything executing. The signer
+  identity is exact rather than a regexp — read off v0.110.0's own
+  certificate SAN and confirmed to reject a near-miss identity — and
+  `get.anchore.io` came out of the job's egress allow-list along with the
+  pipe, and `rekor.sigstore.dev` went in: `cosign verify-blob` against a
+  detached certificate and signature looks the entry up in the transparency
+  log before reporting success, so without that endpoint the whole release
+  would have died under `egress-policy: block`. The sibling jobs in the same
+  workflow already allowed it; this one was the odd one out. The binary is
+  installed with `sudo` because `/usr/local/bin` is root-owned on
+  GitHub-hosted runners. The job also logs in to GHCR now: the image is
+  public today, so the anonymous path works, but a private repo means a
+  private package, and the job exists precisely to keep scanning in that
+  case.
+
+- **CVE-2026-14456 suppressed across all three legs.** The OpenSSL QUIC
+  *server* DoS matches `libcrypto3`/`libssl3` on every published platform.
+  Nothing in the image is a QUIC server: `objdump -p` on the extracted
+  per-platform binaries shows `docker`, `docker-compose`, and `busybox`
+  link only libc, making `wget` the sole libssl consumer, and the shipped
+  `wget` has no QUIC support at all. Its only invocation is the
+  `HEALTHCHECK` against portwing's own loopback listener. Grype reports fix
+  state "unknown" on both bases, so there is nothing to bump to. Four
+  entries, version-scoped per base (Wolfi 3.6.3-r4, Alpine 3.5.7-r0) so
+  either distro shipping a fix forces re-review. Review by 2026-09-15
+  alongside the CVE-2026-54876 entries.
+
+- **CodeQL now scans JavaScript and TypeScript.** The job analyzed only
+  `actions` and `go`, leaving 89 tracked `.ts`/`.tsx`/`.mjs` files across
+  `website/`, `docs/`, `analytics/`, and `scripts/` with no SAST coverage
+  at all. `javascript-typescript` joins the existing job's `languages:`
+  rather than arriving as a matrix leg or a second job: a matrix appends
+  the leg value to the check-run name even when it has a single entry, so
+  it would post `CodeQL Analysis (go)` and never the bare `CodeQL
+  Analysis` the ruleset requires, blocking every PR on a status that can
+  no longer arrive. Job name, trigger, and category are unchanged, so the
+  required context is untouched. A new
+  `.github/codeql/codeql-config.yml` excludes generated directories and
+  deliberately sets no `paths:` allowlist, so `analytics/src` and the root
+  `scripts/*.mjs` are covered too.
+
+- **The gosec required check actually gates now.** `Security: Gosec SAST`
+  was a required context running with `-no-fail` and no other pass/fail
+  logic, so it could never report failure — the ruleset claimed a gate
+  that did not exist. gosec has no severity cutoff of its own, so simply
+  dropping `-no-fail` would also gate on LOW-severity heuristics; `G104`
+  (unhandled errors) alone was 15 of this repo's 40 historical findings.
+  `-no-fail` therefore stays, paired with an explicit gate on SARIF
+  `level == "error"`, which is where gosec maps its own MEDIUM and HIGH
+  (`getSarifLevel` in `report/sarif/formatter.go`); LOW maps to
+  `"warning"` and stays advisory. The gate is ordered after the SARIF
+  upload so findings still reach the Security tab on a failing run, and
+  fails closed on a missing, empty, or unparseable SARIF rather than
+  passing silently. No PRs are wedged by this: gosec currently reports
+  zero findings, confirmed against the last five code-scanning uploads,
+  the full alert history, and a local run of the pinned v2.28.0.
 
 - **gosec and Grype dependency scanning now gate pull requests.**
   `Security: Gosec SAST` and `Security: Grype Dependency Scan (Go + npm)`
@@ -66,8 +208,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   128px. Lighthouse median total byte weight: marketing 1,927,134 to
   1,548,014, docs to 1,444,340 against a 2,466,239 baseline — the docs
   site had been carrying the same ~980 KB while sitting just under its
-  own ceiling. The `baseline` figures in `lighthouse/*.cjs` are now well
-  above actual and worth re-recording.
+  own ceiling. The `baseline` figures in `lighthouse/*.cjs` were left
+  describing the heavier pages and are re-recorded above.
 
 - **Marketing site was 1.9 MB over its own page-weight budget.** The
   ecosystem section's `sockguard-logo.png` and `drydock-logo.png` shipped
@@ -79,7 +221,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The overage was failing the `web` lefthook pre-push lane, so it blocked
   every local push regardless of what the change touched.
 
+- **Native package attestation verification was blocked by its own egress
+  policy.** The `Verify Native Packages` job's harden-runner allow-list
+  was missing `tmaproduction.blob.core.windows.net`, the Azure blob host
+  `gh attestation verify` fetches provenance bundles from, so the step
+  failed with a connection refused on the v0.9.6 cut. The sibling
+  `Verify Published` job already allowed that host; the two lists now
+  agree. The published artifacts were never affected — v0.9.6's packages
+  verify cleanly against the same attestation off-runner.
+- **Checked-in branch protection no longer under-declares the required
+  checks.** `scripts/apply-branch-protection.sh` still listed the six
+  original required contexts while the live ruleset had grown to ten.
+  Because the script updates the ruleset in place, running it would have
+  silently dropped `Go CI / Qlty Check`, `Security: Secrets`,
+  `Dependency Review`, and `CodeQL Analysis` — a script named "apply
+  branch protection" that weakened it. The list now mirrors the live
+  ruleset, and the header documents that a stale list removes checks.
+
 ### Removed
+
+- **Retired the duplicate govulncheck job from `security-grype.yml`.** It
+  gated nothing that `Go CI / Govulncheck` did not already gate as a
+  required context, and it pinned its own copy of the tool. Removing it
+  would have quietly dropped the only pull-request run of
+  `scripts/verify-scanner-exclusions.sh`, because the other caller lives
+  in the container-scan job, which always skips on PRs. The source-level
+  check therefore moved into `grype-deps`, which does run on PRs, with a
+  `setup-go` step and the two extra egress hosts that needs.
+  `scripts/package-release-config-test.sh` now asserts the check lives
+  specifically in `grype-deps`, not merely somewhere in the file.
+
+- **Dropped `check.trivy.dev` from the qlty job's egress allow-list.** The
+  trivy plugin was retired in favour of Grype and `.qlty/qlty.toml`
+  enables no trivy plugin, so the entry was a leftover hole in an
+  otherwise tight block-mode list.
 
 - **Retired the dead star-history.com chart from the README.** The embed
   had been returning an SVG that renders "GitHub restricted access to
@@ -89,25 +264,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for different repositories, so it serves one generic error card to
   everyone. The website copy of this embed was removed separately in
   #160, where it was also leaking visitor IPs to a third party.
-
-### Fixed
-
-- **Native package attestation verification was blocked by its own egress
-  policy.** The `✅ Verify Native Packages` job's harden-runner allow-list
-  was missing `tmaproduction.blob.core.windows.net`, the Azure blob host
-  `gh attestation verify` fetches provenance bundles from, so the step
-  failed with a connection refused on the v0.9.6 cut. The sibling
-  `✅ Verify Published` job already allowed that host; the two lists now
-  agree. The published artifacts were never affected — v0.9.6's packages
-  verify cleanly against the same attestation off-runner.
-- **Checked-in branch protection no longer under-declares the required
-  checks.** `scripts/apply-branch-protection.sh` still listed the six
-  original required contexts while the live ruleset had grown to ten.
-  Because the script updates the ruleset in place, running it would have
-  silently dropped `Go CI / Qlty Check`, `🔑 Security: Secrets`,
-  `📦 Dependency Review`, and `🔍 CodeQL Analysis` — a script named "apply
-  branch protection" that weakened it. The list now mirrors the live
-  ruleset, and the header documents that a stale list removes checks.
 
 ## [v0.9.6] - 2026-08-19
 

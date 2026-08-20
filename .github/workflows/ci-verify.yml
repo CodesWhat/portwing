@@ -28,7 +28,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: CodesWhat/.github/.github/workflows/go-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7
+    uses: CodesWhat/.github/.github/workflows/go-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7  # main, 2026-08-15
     with:
       go-version-file: go.mod
       go-cache-dependency-path: go.sum
@@ -97,7 +97,6 @@ jobs:
         api.osv.dev:443
         api.segment.io:443
         api0.prismacloud.io:443
-        check.trivy.dev:443
         dl.google.com:443
         files.pythonhosted.org:443
         github-proxy.qlty.sh:443
@@ -131,12 +130,28 @@ jobs:
     if: github.event_name != 'schedule'
     permissions:
       contents: read
-    uses: CodesWhat/.github/.github/workflows/node-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7
+    uses: CodesWhat/.github/.github/workflows/node-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7  # main, 2026-08-15
     with:
       node-version: 24
       lockfile-path: package-lock.json
       test-check-name: Web Contract
       run-test: true
+      # run-lint and run-build stay off on purpose: "Web Contract" already
+      # runs `npm run check:web`, which covers lint and build. Turning them on
+      # would gate the same property twice.
+      #
+      # The names are set so they are right if those jobs are ever enabled.
+      # They do NOT fix the cosmetic reporting: node-ci.yml declares both jobs
+      # as `name: ${{ inputs.*-check-name }}` under `if: inputs.run-*`, and
+      # GitHub does not evaluate an expression in a job's name when the job
+      # skips. Passing the input explicitly changes nothing — measured on
+      # PR #175, where the checks still reported as the literal
+      # "Node CI / inputs.lint-check-name" with these very lines in place, and
+      # upstream already defaults them to "Node Lint"/"Node Build" anyway.
+      # Fixing it properly means a literal `name:` upstream in node-ci.yml.
+      # Neither name is a required context, so nothing is gated on it.
+      lint-check-name: Web Lint
+      build-check-name: Web Build
       test-egress-policy: block
       test-allowed-endpoints: >-
         api.github.com:443
@@ -290,8 +305,18 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
         with:
-          languages: actions, go
+          # One non-matrix job on purpose. A matrix appends the leg value to
+          # the check-run name even with a single entry (drydock requires
+          # "SAST: CodeQL (javascript-typescript)" for exactly this reason), so
+          # a matrix here would post "CodeQL Analysis (go)" and never the bare
+          # "CodeQL Analysis" this repo's ruleset requires, wedging every PR.
+          # javascript-typescript extracts untraced alongside the traced Go
+          # build below, with no npm install and no extra egress: the CodeQL
+          # bundle ships every extractor. build-mode is deliberately unset --
+          # codeql-action only accepts it for single-language jobs.
+          languages: actions, go, javascript-typescript
           queries: security-and-quality
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
