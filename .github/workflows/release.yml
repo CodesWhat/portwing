@@ -12,6 +12,12 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Kept equal to the grype that anchore/scan-action@v7.4.0 installs in
+  # security-grype.yml, so the release scan and the PR/scheduled scans cannot
+  # disagree about the same image. Bump both together.
+  GRYPE_VERSION: "0.110.0"
+
 jobs:
   release:
     name: "GoReleaser + Cosign"
@@ -139,6 +145,138 @@ jobs:
           # artifact-metadata storage record always errors "no artifacts found".
           # The attestation is pushed to the registry and gh-verifiable regardless.
           create-storage-record: false
+
+  grype-published-image:
+    name: "Security: Grype Published Image"
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    # Deliberately NOT gated on repository visibility. verify-published carries
+    # that gate because Sigstore public-ledger verification is impossible on a
+    # private repo; vulnerability scanning has no such dependency. Only the
+    # SARIF upload below needs public visibility, so gating the whole job would
+    # silently switch OFF the vulnerability gate the moment the repo went
+    # private, which is the failure this job exists to prevent.
+    strategy:
+      fail-fast: false
+      matrix:
+        # All three published platforms. security-grype.yml's grype-image job
+        # scans an image it builds itself from the root Dockerfile, which is a
+        # Wolfi-only from-source build resolved to the runner's own
+        # architecture. That is not what ships. This job scans the actual
+        # pushed manifest, per platform.
+        #
+        # arm/v7 is the one that matters most and the one most tempting to
+        # drop: Wolfi publishes no armv7 repo, so Dockerfile.release builds
+        # that leg from Alpine with docker-cli-compose instead of Wolfi's
+        # docker-compose, and those packages embed materially older Go
+        # modules. Never remove this leg to quiet the gate without re-scanning
+        # and showing it is actually clean.
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
+          # ghcr.io + pkg-containers from verify-published (same image pull);
+          # get.anchore.io/grype.anchore.io/storage.googleapis.com from the
+          # security-grype.yml jobs (same installer and vulnerability DB);
+          # tuf-repo* from verify-published, for the cosign signature check on
+          # the grype release checksums.
+          allowed-endpoints: >
+            api.github.com:443
+            get.anchore.io:443
+            ghcr.io:443
+            github.com:443
+            grype.anchore.io:443
+            pkg-containers.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            storage.googleapis.com:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+
+      - name: Install Grype
+        # Version-pinned to match what anchore/scan-action@v7.4.0 installs in
+        # security-grype.yml, so both scanners agree; `-v` makes the installer
+        # cosign-verify the release checksum signature, which the action does
+        # not do. Bump this and the scan-action pin together.
+        run: |
+          curl -sSfL https://get.anchore.io/grype \
+            | sh -s -- -v -b /usr/local/bin v${{ env.GRYPE_VERSION }}
+          grype version
+
+      - name: Resolve container manifest digest
+        id: manifest-digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          DIGEST="$(docker buildx imagetools inspect "ghcr.io/codeswhat/portwing:${VERSION}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          if [ -z "${DIGEST}" ]; then
+            echo "::error::Could not resolve a manifest digest for ghcr.io/codeswhat/portwing:${VERSION}; refusing to scan an unpinned tag."
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Grype against the published image
+        id: grype
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          DIGEST: ${{ steps.manifest-digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          slug="$(printf '%s' "${PLATFORM}" | tr '/' '-')"
+          echo "sarif=grype-published-${slug}.sarif" >> "$GITHUB_OUTPUT"
+          echo "category=grype-published-${slug}" >> "$GITHUB_OUTPUT"
+          # `registry:` reads the platform-specific manifest straight from the
+          # registry API. Neither anchore/scan-action nor `docker pull` is used
+          # here: the action exposes no platform input, so it silently resolves
+          # only the runner's native arch out of a multi-arch manifest and
+          # leaves the other legs unscanned.
+          grype "registry:ghcr.io/codeswhat/portwing@${DIGEST}" \
+            --platform "${PLATFORM}" \
+            --config .grype.yaml \
+            --fail-on high \
+            -o sarif --file "grype-published-${slug}.sarif"
+
+      - name: Upload Grype SARIF to code scanning
+        # Code scanning uploads require GHAS, not available on free private
+        # repos. Only the reporting is conditional; the gate above always runs.
+        if: always() && github.event.repository.visibility == 'public'
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+          category: ${{ steps.grype.outputs.category }}
+
+      - name: Summarize
+        if: always()
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          DIGEST: ${{ steps.manifest-digest.outputs.digest }}
+        run: |
+          {
+            echo "### Grype Published Image (${PLATFORM})"
+            echo "- Scanned the pushed manifest at ${DIGEST}"
+            echo "- Suppressions from .grype.yaml; gate is HIGH and above"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   verify-published:
     name: "Verify Published"

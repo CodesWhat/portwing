@@ -175,6 +175,25 @@ require_text ".github/workflows/release.yml" "fedora:42@sha256:" "the rpm smoke 
 require_text ".github/workflows/release.yml" 'release.yml@refs/tags/${GITHUB_REF_NAME}' "release verification must bind the signer identity to the exact release tag"
 reject_text ".github/workflows/release.yml" "certificate-identity-regexp" "release verification must not accept an unanchored signer identity"
 
+# The published image is the only artifact users actually pull, and until this
+# job existed nothing scanned it: security-grype.yml's container scan builds its
+# own image from the root Dockerfile and never sees the real manifest. Each
+# assertion below guards a specific way this gate could be quietly weakened
+# back into decoration.
+require_text ".github/workflows/release.yml" "Run Grype against the published image" \
+	"the release must scan the actual published image, not a locally rebuilt approximation"
+require_text ".github/workflows/release.yml" "registry:ghcr.io/codeswhat/portwing@" \
+	"the published-image scan must target an immutable digest, not a mutable tag"
+require_text ".github/workflows/release.yml" "--fail-on high" \
+	"the published-image scan must gate the release, not merely report"
+require_text ".github/workflows/release.yml" "--config .grype.yaml" \
+	"the published-image scan must use the repo's reviewed suppression policy, not grype defaults"
+# Wolfi has no armv7, so this leg is built from Alpine and carries a different
+# (worse) package set than amd64/arm64. It is the leg most likely to be dropped
+# to make the gate quiet, which is exactly why it is asserted by name.
+require_text ".github/workflows/release.yml" "linux/arm/v7" \
+	"the published-image scan must cover the Alpine-based arm/v7 leg, not just amd64 and arm64"
+
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
 require_file "NOTICE" "project identity and copyright must live outside the standard license text"
 require_first_line "LICENSE" "                    GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must begin with the canonical AGPL-3.0 text"
