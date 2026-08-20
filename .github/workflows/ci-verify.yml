@@ -28,7 +28,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: CodesWhat/.github/.github/workflows/go-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7
+    uses: CodesWhat/.github/.github/workflows/go-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7  # main, 2026-08-15
     with:
       go-version-file: go.mod
       go-cache-dependency-path: go.sum
@@ -131,12 +131,23 @@ jobs:
     if: github.event_name != 'schedule'
     permissions:
       contents: read
-    uses: CodesWhat/.github/.github/workflows/node-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7
+    uses: CodesWhat/.github/.github/workflows/node-ci.yml@01bf40b06b110946f12a49b82e407d77c6480df7  # main, 2026-08-15
     with:
       node-version: 24
       lockfile-path: package-lock.json
       test-check-name: Web Contract
       run-test: true
+      # run-lint and run-build stay off on purpose: "Web Contract" already
+      # runs `npm run check:web`, which covers lint and build. Turning them on
+      # would gate the same property twice.
+      #
+      # The names are set anyway. node-ci.yml declares those jobs as
+      # `name: ${{ inputs.*-check-name }}` under `if: inputs.run-*`, and when
+      # they skip GitHub reports the check run as the literal, unevaluated
+      # "Node CI / inputs.lint-check-name". Neither name is a required context,
+      # so this is cosmetic either way.
+      lint-check-name: Web Lint (covered by Web Contract)
+      build-check-name: Web Build (covered by Web Contract)
       test-egress-policy: block
       test-allowed-endpoints: >-
         api.github.com:443
