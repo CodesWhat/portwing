@@ -91,9 +91,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identity is exact rather than a regexp — read off v0.110.0's own
   certificate SAN and confirmed to reject a near-miss identity — and
   `get.anchore.io` came out of the job's egress allow-list along with the
-  pipe. The job also logs in to GHCR now: the image is public today, so the
-  anonymous path works, but a private repo means a private package, and the
-  job exists precisely to keep scanning in that case.
+  pipe, and `rekor.sigstore.dev` went in: `cosign verify-blob` against a
+  detached certificate and signature looks the entry up in the transparency
+  log before reporting success, so without that endpoint the whole release
+  would have died under `egress-policy: block`. The sibling jobs in the same
+  workflow already allowed it; this one was the odd one out. The binary is
+  installed with `sudo` because `/usr/local/bin` is root-owned on
+  GitHub-hosted runners. The job also logs in to GHCR now: the image is
+  public today, so the anonymous path works, but a private repo means a
+  private package, and the job exists precisely to keep scanning in that
+  case.
 
 - **CVE-2026-14456 suppressed across all three legs.** The OpenSSL QUIC
   *server* DoS matches `libcrypto3`/`libssl3` on every published platform.

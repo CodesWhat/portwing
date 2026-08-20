@@ -184,21 +184,47 @@ require_text ".github/workflows/release.yml" "Run Grype against the published im
 	"the release must scan the actual published image, not a locally rebuilt approximation"
 require_text ".github/workflows/release.yml" "registry:ghcr.io/codeswhat/portwing@" \
 	"the published-image scan must target an immutable digest, not a mutable tag"
-require_text ".github/workflows/release.yml" "--fail-on high" \
-	"the published-image scan must be able to gate the release, not merely report"
-require_text ".github/workflows/release.yml" "--config .grype.yaml" \
-	"the published-image scan must use the repo's reviewed suppression policy, not grype defaults"
-# Without this the matrix can stay intact while every leg scans the runner's
-# own architecture — three green legs, one arch actually examined, which is the
-# exact failure mode that made anchore/scan-action unusable here.
-# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-require_text ".github/workflows/release.yml" '--platform "${PLATFORM}"' \
-	"the published-image scan must select the matrix platform, not the runner's native arch"
 # The gate map below is only meaningful if an unrecognized value is rejected. A
 # `case` that fell through to no `--fail-on` would silently un-gate any leg
 # whose gate got typo'd.
 require_text ".github/workflows/release.yml" "Unknown gate" \
 	"the published-image scan must fail on an unrecognized gate value, not default to report-only"
+
+# Assert against the grype command ITSELF, not the file. A file-wide grep for
+# "--fail-on high" is satisfied by the `case` branch that builds the array, and
+# a grep for the platform flag is satisfied by a comment — so both passed while
+# the invocation had been stripped of the flags entirely. Deleting
+# ${fail_on[@]+"${fail_on[@]}"} from the command left amd64 and arm64 scanning
+# with no gate at all and this test still exiting 0 (measured, not assumed).
+#
+# Extract the invocation by following the line continuations, then require each
+# flag inside it. An empty extraction fails every assertion below, so renaming
+# or restructuring the command cannot silently un-assert it.
+grype_invocation="$(awk '
+	/grype "registry:/ { collecting = 1 }
+	collecting { print; if ($0 !~ /\\[[:space:]]*$/) exit }
+' .github/workflows/release.yml)"
+
+require_in_grype_command() {
+	local text="$1"
+	local description="$2"
+
+	if ! printf '%s\n' "${grype_invocation}" | grep -Fq -- "$text"; then
+		echo "FAIL: ${description} (the grype invocation in .github/workflows/release.yml must contain: ${text})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_in_grype_command "registry:ghcr.io/codeswhat/portwing@" \
+	"the published-image scan must target an immutable digest, not a mutable tag"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+require_in_grype_command '--platform "${PLATFORM}"' \
+	"the published-image scan must select the matrix platform, not the runner's native arch; without this the matrix stays intact while every leg scans the runner's own arch"
+require_in_grype_command "--config .grype.yaml" \
+	"the published-image scan must use the repo's reviewed suppression policy, not grype defaults"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+require_in_grype_command '${fail_on[@]+"${fail_on[@]}"}' \
+	"the per-platform gate must actually reach the grype command; the gate map is decoration if the flags never get passed"
 # The per-platform gate is the actual security posture, so assert the whole map
 # rather than the substring "--fail-on high" — that string survives intact even
 # if every leg is flipped to report-only.

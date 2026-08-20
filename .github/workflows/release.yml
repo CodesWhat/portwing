@@ -203,9 +203,19 @@ jobs:
           # grype.anchore.io/storage.googleapis.com for the vulnerability DB,
           # same as the security-grype.yml jobs; github.com +
           # release-assets.githubusercontent.com for the pinned grype release
-          # assets; tuf-repo* from verify-published, for the cosign signature
-          # check on the grype release checksums. get.anchore.io is absent on
-          # purpose — the install step no longer pipes that script to a shell.
+          # assets; tuf-repo* for the cosign trust root. get.anchore.io is
+          # absent on purpose — the install step no longer pipes that script
+          # to a shell.
+          #
+          # rekor.sigstore.dev is REQUIRED, not optional. `cosign verify-blob`
+          # with a detached --certificate/--signature pair (rather than an
+          # offline --bundle) looks the entry up in the transparency log before
+          # it will report success. Verified by pointing --rekor-url at a dead
+          # host: cosign fails with `searching log query: Post .../api/v1/log/
+          # entries/retrieve`. Without this endpoint the install step dies under
+          # egress-policy: block and every leg stops before scanning anything.
+          # The sibling jobs in this file already allow it; this one was the
+          # odd one out.
           allowed-endpoints: >
             api.github.com:443
             ghcr.io:443
@@ -213,6 +223,7 @@ jobs:
             grype.anchore.io:443
             pkg-containers.githubusercontent.com:443
             raw.githubusercontent.com:443
+            rekor.sigstore.dev:443
             release-assets.githubusercontent.com:443
             storage.googleapis.com:443
             tuf-repo-cdn.sigstore.dev:443
@@ -280,7 +291,12 @@ jobs:
           sha256sum -c archive.sha256
 
           tar -xzf "${archive}" grype
-          install -m 0755 grype /usr/local/bin/grype
+          # sudo, because /usr/local/bin is root-owned on GitHub-hosted
+          # runners. A period of runner-user ownership made the unprivileged
+          # write appear to work (actions/runner-images#14477) and it is being
+          # restored to root, so the unprivileged form would start failing
+          # under us. Passwordless sudo is documented on these runners.
+          sudo install -m 0755 grype /usr/local/bin/grype
           cd - >/dev/null
           rm -rf "${workdir}"
           grype version
