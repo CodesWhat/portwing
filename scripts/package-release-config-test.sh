@@ -276,6 +276,43 @@ for context in "${retired_emoji_ci_contexts[@]}"; do
 	reject_text "scripts/apply-branch-protection.sh" "\"context\": \"${context}\"" "branch protection must not require the retired emoji CI context ${context}"
 done
 
+# govulncheck has exactly one gate: the required "Go CI / Govulncheck"
+# context, which runs it at v1.7.0 via scripts/ci/go-govulncheck.sh. A second
+# copy used to live in security-grype.yml pinned to v1.2.0 - an older tool on
+# a non-required check, gating the same property twice. Reject its return.
+reject_text ".github/workflows/security-grype.yml" "golang.org/x/vuln/cmd/govulncheck" \
+	"security-grype.yml must not reintroduce a duplicate govulncheck gate (Go CI / Govulncheck is the required one)"
+
+# The source-level half of the scanner-exclusion check must stay on a job that
+# actually runs on pull requests. grype-image also calls the script, but with
+# path arguments and under `if: github.event_name != 'pull_request'`, so it
+# always skips on PRs. When the duplicate govulncheck job was retired this
+# check moved to grype-deps; if it ever leaves, PRs silently stop verifying
+# that the scoped Grype suppressions are not actually imported.
+require_text ".github/workflows/security-grype.yml" "./scripts/verify-scanner-exclusions.sh" \
+	"security-grype.yml must run the source-level scanner-exclusion check"
+grype_deps_exclusion="$(
+	perl -0777 -ne 'print "ok" if /^  grype-deps:.*?verify-scanner-exclusions\.sh/ms' \
+		.github/workflows/security-grype.yml
+)"
+if [ -z "$grype_deps_exclusion" ]; then
+	echo "FAIL: the scanner-exclusion check must live in the grype-deps job, which runs on pull requests" >&2
+	failures=$((failures + 1))
+fi
+
+# gosec runs with -no-fail on purpose (it has no severity cutoff and would
+# otherwise fail on LOW-severity heuristics like G104). That makes the explicit
+# severity-gate step the only thing standing between the required
+# "Security: Gosec SAST" context and a permanent green. Delete the step while
+# leaving -no-fail and the check silently becomes report-only, which is worse
+# than not requiring it at all, because the ruleset still claims it gates.
+require_text ".github/workflows/security-grype.yml" "args: -no-fail -fmt sarif -out gosec-results.sarif ./..." \
+	"gosec must keep -no-fail; the severity-gate step decides the outcome, not gosec's own exit code"
+require_text ".github/workflows/security-grype.yml" "Gate on gosec HIGH/MEDIUM findings" \
+	"security-grype.yml must keep the explicit gosec severity gate; -no-fail alone makes the required check a no-op"
+require_text ".github/workflows/security-grype.yml" 'select(.level == "error")' \
+	"the gosec gate must filter SARIF results on level==\"error\" (gosec's MEDIUM/HIGH), not merely check the file exists"
+
 # The house standard is no emoji anywhere in CI, not just in the job names
 # that happen to be required contexts. Enforced over the whole workflow
 # directory so run-name blocks and step output cannot drift back. perl rather

@@ -3,6 +3,9 @@ contact_links:
   - name: Report a security vulnerability
     url: https://github.com/CodesWhat/portwing/security/advisories/new
     about: Please report security vulnerabilities privately via GitHub Security Advisories — do NOT open a public issue.
+  - name: Feature Request
+    url: https://github.com/CodesWhat/portwing/discussions/categories/ideas
+    about: Propose an idea or enhancement in Discussions. Concrete, scoped feature requests can go straight to Issues.
   - name: Question / Help
-    url: https://github.com/CodesWhat/portwing/issues
-    about: Ask a question about configuration, setup, or usage by opening an issue.
+    url: https://github.com/CodesWhat/portwing/discussions/categories/q-a
+    about: Ask about configuration, setup, or usage in Discussions Q&A.

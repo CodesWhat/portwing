@@ -23,6 +23,10 @@
   <a href="https://qlty.sh/gh/CodesWhat/projects/portwing"><img src="https://qlty.sh/badges/0c146428-4c10-46d3-8b6e-0622a7b07720/maintainability.svg" alt="Maintainability"></a>
   <a href="https://codecov.io/gh/CodesWhat/portwing"><img src="https://codecov.io/gh/CodesWhat/portwing/graph/badge.svg" alt="Coverage"></a>
   <a href="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml"><img src="https://github.com/CodesWhat/portwing/actions/workflows/quality-fuzz-nightly.yml/badge.svg?branch=main" alt="Nightly fuzz"></a>
+  <br>
+  <a href="https://github.com/CodesWhat/portwing/releases"><img src="https://img.shields.io/github/downloads/CodesWhat/portwing/total?logo=github&logoColor=white&label=downloads" alt="Release downloads"></a>
+  <a href="https://github.com/orgs/CodesWhat/packages/container/package/portwing"><img src="https://img.shields.io/badge/GHCR-portwing-2ea44f?logo=github&logoColor=white" alt="GHCR image"></a>
+  <a href="https://github.com/sponsors/CodesWhat"><img src="https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor"></a>
 </p>
 
 <hr>
@@ -32,6 +36,7 @@
 
 <h2 align="center">Contents</h2>
 
+- [Documentation](#documentation)
 - [Quick Start](#quick-start)
 - [Native Packages](#native-packages)
 - [Recent Updates](#recent-updates)
@@ -47,7 +52,6 @@
 - [Verify a Release](#verify-a-release)
 - [Security](#security)
 - [Audit Logging](#audit-logging)
-- [Documentation](#documentation)
 - [Star History](#star-history)
 - [Built With](#built-with)
 - [Community & Support](#community--support)
@@ -84,6 +88,31 @@ flowchart LR
 ```
 
 > The Drydock controller connects **inbound** to each standard-mode Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). Each agent reaches the Docker Engine only through a sockguard socket filter. In production-supported **edge mode**, the agent instead dials Drydock over the stable `portwing/1.0` WebSocket tunnel, so no inbound control port needs publishing. Full v0.9 watcher/update integration requires Drydock `v1.6.0-rc.11+`. Keep the separate unauthenticated operations listener private — see [Connection Modes](#connection-modes).
+
+<h2 align="center" id="documentation">Documentation</h2>
+
+| Resource | Link |
+| --- | --- |
+| Website | [portwing.codeswhat.com](https://portwing.codeswhat.com) |
+| Docs | [portwing.codeswhat.com/docs](https://portwing.codeswhat.com/docs) |
+| Competitive Landscape | [`COMPETITIVE-LANDSCAPE.md`](COMPETITIVE-LANDSCAPE.md) |
+| Security Model | [`docs/security-model.md`](docs/security-model.md) |
+| Ed25519 Auth Design | [`docs/design/ed25519-auth.md`](docs/design/ed25519-auth.md) |
+| Watchtower Migration | [`docs/migrating-from-watchtower.md`](docs/migrating-from-watchtower.md) |
+| Drydock Integration | [`docs/drydock-integration.md`](docs/drydock-integration.md) |
+| OpenAPI Spec | [`api/openapi.yaml`](api/openapi.yaml) |
+| Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
+| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Code of Conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
+| Governance | [`GOVERNANCE.md`](GOVERNANCE.md) |
+| Security Assurance | [`SECURITY-ASSURANCE.md`](SECURITY-ASSURANCE.md) |
+| Security Policy | [`SECURITY.md`](SECURITY.md) |
+| Releasing | [`RELEASING.md`](RELEASING.md) |
+| Examples | [`examples/`](examples/) |
+| Issues | [GitHub Issues](https://github.com/CodesWhat/portwing/issues) |
+| Discussions | [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions) |
+
+<hr>
 
 <h2 align="center" id="quick-start">Quick Start</h2>
 
@@ -950,29 +979,6 @@ Exec tunnel events:
 ```
 
 </details>
-
-<hr>
-
-<h2 align="center" id="documentation">Documentation</h2>
-
-| Resource | Link |
-| --- | --- |
-| Competitive Landscape | [`COMPETITIVE-LANDSCAPE.md`](COMPETITIVE-LANDSCAPE.md) |
-| Security Model | [`docs/security-model.md`](docs/security-model.md) |
-| Ed25519 Auth Design | [`docs/design/ed25519-auth.md`](docs/design/ed25519-auth.md) |
-| Watchtower Migration | [`docs/migrating-from-watchtower.md`](docs/migrating-from-watchtower.md) |
-| Drydock Integration | [`docs/drydock-integration.md`](docs/drydock-integration.md) |
-| OpenAPI Spec | [`api/openapi.yaml`](api/openapi.yaml) |
-| Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
-| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Code of Conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
-| Governance | [`GOVERNANCE.md`](GOVERNANCE.md) |
-| Security Assurance | [`SECURITY-ASSURANCE.md`](SECURITY-ASSURANCE.md) |
-| Security Policy | [`SECURITY.md`](SECURITY.md) |
-| Releasing | [`RELEASING.md`](RELEASING.md) |
-| Examples | [`examples/`](examples/) |
-| Issues | [GitHub Issues](https://github.com/CodesWhat/portwing/issues) |
-| Discussions | [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions) |
 
 <hr>
 
