@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **README picked up the social-proof badge row and moved Documentation
+  up.** `readme-shape.md` specifies a three-row badge wall; the repo had
+  identity and quality/security but no third row. Release downloads, the
+  GHCR image, and Sponsor fill it — no Awesome-list or localization badge,
+  because this repo is in neither, and no discussions badge, because it
+  renders "0 total". Documentation moves to the second slot with the
+  ordering the shape gives, and gains rows for the two live site surfaces.
+
+- **The skipped Node lint and build checks report real names.** The
+  `node-ci` call left `lint-check-name` and `build-check-name` unset, and
+  GitHub does not evaluate an expression in a job's name when that job
+  skips, so the two reported as the literal `Node CI /
+  inputs.lint-check-name` and `Node CI / inputs.build-check-name`.
+  `run-lint` and `run-build` stay off: `Node CI / Web Contract` already
+  runs `npm run check:web`, which covers both, and enabling them would
+  gate the same property twice. Neither name is a required context. The
+  two org reusable-workflow pins also gained the trailing version comment
+  every other `uses:` in the repo carries.
+
 - **CI job names converged off emoji.** All 57 emoji occurrences across the
   12 workflow files are gone, per the house no-emoji-in-CI standard:
   workflow names, job names, `run-name:` expressions, and one step's
@@ -24,6 +43,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drifting back.
 
 ### Security
+
+- **CodeQL now scans JavaScript and TypeScript.** The job analyzed only
+  `actions` and `go`, leaving 89 tracked `.ts`/`.tsx`/`.mjs` files across
+  `website/`, `docs/`, `analytics/`, and `scripts/` with no SAST coverage
+  at all. `javascript-typescript` joins the existing job's `languages:`
+  rather than arriving as a matrix leg or a second job: a matrix appends
+  the leg value to the check-run name even when it has a single entry, so
+  it would post `CodeQL Analysis (go)` and never the bare `CodeQL
+  Analysis` the ruleset requires, blocking every PR on a status that can
+  no longer arrive. Job name, trigger, and category are unchanged, so the
+  required context is untouched. A new
+  `.github/codeql/codeql-config.yml` excludes generated directories and
+  deliberately sets no `paths:` allowlist, so `analytics/src` and the root
+  `scripts/*.mjs` are covered too.
+
+- **The gosec required check actually gates now.** `Security: Gosec SAST`
+  was a required context running with `-no-fail` and no other pass/fail
+  logic, so it could never report failure — the ruleset claimed a gate
+  that did not exist. gosec has no severity cutoff of its own, so simply
+  dropping `-no-fail` would also gate on LOW-severity heuristics; `G104`
+  (unhandled errors) alone was 15 of this repo's 40 historical findings.
+  `-no-fail` therefore stays, paired with an explicit gate on SARIF
+  `level == "error"`, which is where gosec maps its own MEDIUM and HIGH
+  (`getSarifLevel` in `report/sarif/formatter.go`); LOW maps to
+  `"warning"` and stays advisory. The gate is ordered after the SARIF
+  upload so findings still reach the Security tab on a failing run, and
+  fails closed on a missing, empty, or unparseable SARIF rather than
+  passing silently. No PRs are wedged by this: gosec currently reports
+  zero findings, confirmed against the last five code-scanning uploads,
+  the full alert history, and a local run of the pinned v2.28.0.
 
 - **gosec and Grype dependency scanning now gate pull requests.**
   `Security: Gosec SAST` and `Security: Grype Dependency Scan (Go + npm)`
@@ -97,6 +146,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ruleset, and the header documents that a stale list removes checks.
 
 ### Removed
+
+- **Retired the duplicate govulncheck job from `security-grype.yml`.** It
+  gated nothing that `Go CI / Govulncheck` did not already gate as a
+  required context, and it pinned its own copy of the tool. Removing it
+  would have quietly dropped the only pull-request run of
+  `scripts/verify-scanner-exclusions.sh`, because the other caller lives
+  in the container-scan job, which always skips on PRs. The source-level
+  check therefore moved into `grype-deps`, which does run on PRs, with a
+  `setup-go` step and the two extra egress hosts that needs.
+  `scripts/package-release-config-test.sh` now asserts the check lives
+  specifically in `grype-deps`, not merely somewhere in the file.
+
+- **Dropped `check.trivy.dev` from the qlty job's egress allow-list.** The
+  trivy plugin was retired in favour of Grype and `.qlty/qlty.toml`
+  enables no trivy plugin, so the entry was a leftover hole in an
+  otherwise tight block-mode list.
 
 - **Retired the dead star-history.com chart from the README.** The embed
   had been returning an SVG that renders "GitHub restricted access to
