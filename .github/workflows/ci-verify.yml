@@ -97,7 +97,6 @@ jobs:
         api.osv.dev:443
         api.segment.io:443
         api0.prismacloud.io:443
-        check.trivy.dev:443
         dl.google.com:443
         files.pythonhosted.org:443
         github-proxy.qlty.sh:443
