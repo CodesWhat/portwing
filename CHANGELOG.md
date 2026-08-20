@@ -44,6 +44,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Nothing scanned the image users actually pull.** `security-grype.yml`'s
+  container scan builds its own image from the root `Dockerfile` — a
+  Wolfi-only from-source build, resolved to the runner's single
+  architecture — so the multi-arch manifest `release.yml` pushes to GHCR
+  went out unscanned. A new `grype-published-image` job scans the pushed
+  manifest by digest, once per published platform. It uses
+  `grype registry:...@sha256:...` with an explicit `--platform` rather than
+  `anchore/scan-action`, which exposes no platform input and silently
+  resolves only the runner's native arch out of a multi-arch manifest,
+  leaving the other legs unscanned while reporting green. The digest
+  resolution fails closed rather than falling back to the mutable tag, and
+  the job is deliberately **not** gated on repository visibility — only its
+  SARIF upload is, so the gate keeps working if the repo ever goes private.
+  Against the real v0.9.6 manifest this found 2 HIGH on amd64/arm64 and 59
+  findings including 1 CRITICAL on armv7, none of which any existing scan
+  could see. Portwing's own binary carries zero findings on all three
+  platforms.
+
+- **`linux/arm/v7` is scanned report-only, and that is a recorded
+  exception.** Wolfi publishes no armv7 repo, so `Dockerfile.release`
+  builds that leg from `alpine:3.24` with Alpine's prebuilt `docker-cli`
+  and `docker-cli-compose` in place of Wolfi's `docker-compose`. Those are
+  compiled with Go 1.26.3 and carry ~29 Critical/High stdlib advisories,
+  every one of them fixed in Go 1.26.6 — which portwing's own `go.mod`
+  already pins. No Alpine branch ships a `go >= 1.26.6`-built docker
+  package yet (edge is on 1.26.5, one patch short), and `musl` carries
+  CVE-2026-40200 with no fix anywhere. Suppressing all of that to force the
+  leg green would hide real, fixable CVEs behind entries nobody would
+  revisit, so the gap is left visible instead: amd64 and arm64 fail the
+  release on HIGH and above, armv7 uploads SARIF without failing.
+  RELEASING.md names the upstream blocker and the flip condition, and
+  `scripts/package-release-config-test.sh` asserts all three platforms and
+  their exact gate values, so the leg cannot be quietly dropped or
+  un-gated. An unknown `gate:` value fails the job rather than defaulting
+  to report-only.
+
+- **CVE-2026-14456 suppressed across all three legs.** The OpenSSL QUIC
+  *server* DoS matches `libcrypto3`/`libssl3` on every published platform.
+  Nothing in the image is a QUIC server: `objdump -p` on the extracted
+  per-platform binaries shows `docker`, `docker-compose`, and `busybox`
+  link only libc, making `wget` the sole libssl consumer, and the shipped
+  `wget` has no QUIC support at all. Its only invocation is the
+  `HEALTHCHECK` against portwing's own loopback listener. Grype reports fix
+  state "unknown" on both bases, so there is nothing to bump to. Four
+  entries, version-scoped per base (Wolfi 3.6.3-r4, Alpine 3.5.7-r0) so
+  either distro shipping a fix forces re-review. Review by 2026-09-15
+  alongside the CVE-2026-54876 entries.
+
 - **CodeQL now scans JavaScript and TypeScript.** The job analyzed only
   `actions` and `go`, leaving 89 tracked `.ts`/`.tsx`/`.mjs` files across
   `website/`, `docs/`, `analytics/`, and `scripts/` with no SAST coverage

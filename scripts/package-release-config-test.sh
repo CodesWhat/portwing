@@ -185,14 +185,32 @@ require_text ".github/workflows/release.yml" "Run Grype against the published im
 require_text ".github/workflows/release.yml" "registry:ghcr.io/codeswhat/portwing@" \
 	"the published-image scan must target an immutable digest, not a mutable tag"
 require_text ".github/workflows/release.yml" "--fail-on high" \
-	"the published-image scan must gate the release, not merely report"
+	"the published-image scan must be able to gate the release, not merely report"
 require_text ".github/workflows/release.yml" "--config .grype.yaml" \
 	"the published-image scan must use the repo's reviewed suppression policy, not grype defaults"
-# Wolfi has no armv7, so this leg is built from Alpine and carries a different
-# (worse) package set than amd64/arm64. It is the leg most likely to be dropped
-# to make the gate quiet, which is exactly why it is asserted by name.
-require_text ".github/workflows/release.yml" "linux/arm/v7" \
-	"the published-image scan must cover the Alpine-based arm/v7 leg, not just amd64 and arm64"
+# The per-platform gate is the actual security posture, so assert the whole map
+# rather than the substring "--fail-on high" — that string survives intact even
+# if every leg is flipped to report-only.
+#
+# Wolfi has no armv7, so that leg is built from Alpine and carries a different
+# (worse) package set than amd64/arm64; it is report-only on purpose, and
+# RELEASING.md records why and when it flips. It is also the leg most likely to
+# be dropped to make the gate quiet, which is why it is asserted by name here.
+# Changing any of these three values is a security decision that has to update
+# this list, RELEASING.md, and the matrix comment together.
+expected_grype_gates="linux/amd64=high
+linux/arm64=high
+linux/arm/v7=none"
+actual_grype_gates="$(awk '
+	$0 == "  grype-published-image:" { injob = 1; next }
+	injob && /^  [^ ]/ { injob = 0 }
+	injob && $1 == "-" && $2 == "platform:" { platform = $3; next }
+	injob && $1 == "gate:" { print platform "=" $2 }
+' .github/workflows/release.yml)"
+if [ "${actual_grype_gates}" != "${expected_grype_gates}" ]; then
+	echo "FAIL: the published-image scan's per-platform gates changed (expected '${expected_grype_gates//$'\n'/, }', got '${actual_grype_gates//$'\n'/, }')" >&2
+	failures=$((failures + 1))
+fi
 
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
 require_file "NOTICE" "project identity and copyright must live outside the standard license text"

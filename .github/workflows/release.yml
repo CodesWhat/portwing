@@ -170,16 +170,30 @@ jobs:
         # architecture. That is not what ships. This job scans the actual
         # pushed manifest, per platform.
         #
-        # arm/v7 is the one that matters most and the one most tempting to
-        # drop: Wolfi publishes no armv7 repo, so Dockerfile.release builds
-        # that leg from Alpine with docker-cli-compose instead of Wolfi's
-        # docker-compose, and those packages embed materially older Go
-        # modules. Never remove this leg to quiet the gate without re-scanning
-        # and showing it is actually clean.
-        platform:
-          - linux/amd64
-          - linux/arm64
-          - linux/arm/v7
+        # `gate: high` fails the release on HIGH and above. `gate: none`
+        # reports to the Security tab without failing.
+        #
+        # arm/v7 is report-only, and that is a stated exception rather than a
+        # default. Wolfi publishes no armv7 repo, so Dockerfile.release builds
+        # that leg from Alpine using its prebuilt docker-cli/docker-cli-compose,
+        # which are themselves compiled with Go 1.26.3. Every stdlib advisory
+        # they carry is fixed in Go 1.26.6, and portwing's own go.mod already
+        # pins toolchain go1.26.6 — the vulnerable toolchain is Alpine's, not
+        # this repo's, and no Alpine branch ships a go>=1.26.6-built package
+        # yet (edge is on 1.26.5, one patch short). portwing's own binary
+        # carries zero findings on all three platforms.
+        #
+        # Suppressing those to force the leg green would hide real, fixable
+        # CVEs, so the gap is left visible instead. Flip armv7 to `high` once
+        # Alpine ships those packages. Do NOT quietly drop the leg from this
+        # matrix; the contract test asserts linux/arm/v7 by name.
+        include:
+          - platform: linux/amd64
+            gate: high
+          - platform: linux/arm64
+            gate: high
+          - platform: linux/arm/v7
+            gate: none
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
@@ -241,11 +255,24 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
           DIGEST: ${{ steps.manifest-digest.outputs.digest }}
+          GATE: ${{ matrix.gate }}
         run: |
           set -euo pipefail
           slug="$(printf '%s' "${PLATFORM}" | tr '/' '-')"
           echo "sarif=grype-published-${slug}.sarif" >> "$GITHUB_OUTPUT"
           echo "category=grype-published-${slug}" >> "$GITHUB_OUTPUT"
+
+          # Fail closed on a matrix entry that forgot its gate, rather than
+          # defaulting to report-only and silently un-gating a leg.
+          case "${GATE}" in
+            high) fail_on=(--fail-on high) ;;
+            none) fail_on=() ;;
+            *)
+              echo "::error::Unknown gate '${GATE}' for ${PLATFORM}; expected 'high' or 'none'."
+              exit 1
+              ;;
+          esac
+
           # `registry:` reads the platform-specific manifest straight from the
           # registry API. Neither anchore/scan-action nor `docker pull` is used
           # here: the action exposes no platform input, so it silently resolves
@@ -254,8 +281,12 @@ jobs:
           grype "registry:ghcr.io/codeswhat/portwing@${DIGEST}" \
             --platform "${PLATFORM}" \
             --config .grype.yaml \
-            --fail-on high \
+            ${fail_on[@]+"${fail_on[@]}"} \
             -o sarif --file "grype-published-${slug}.sarif"
+
+          if [ "${GATE}" = "none" ]; then
+            echo "::warning::${PLATFORM} is scanned report-only; findings do not fail the release. See RELEASING.md for why and when this flips to gating."
+          fi
 
       - name: Upload Grype SARIF to code scanning
         # Code scanning uploads require GHAS, not available on free private
@@ -271,11 +302,18 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
           DIGEST: ${{ steps.manifest-digest.outputs.digest }}
+          GATE: ${{ matrix.gate }}
         run: |
+          if [ "${GATE}" = "none" ]; then
+            gate_line="- Gate: **report-only** (findings do not fail the release; see RELEASING.md)"
+          else
+            gate_line="- Gate: fails on ${GATE} and above"
+          fi
           {
             echo "### Grype Published Image (${PLATFORM})"
             echo "- Scanned the pushed manifest at ${DIGEST}"
-            echo "- Suppressions from .grype.yaml; gate is HIGH and above"
+            echo "- Suppressions from .grype.yaml"
+            echo "${gate_line}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   verify-published:
