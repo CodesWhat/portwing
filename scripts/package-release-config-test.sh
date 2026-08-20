@@ -300,6 +300,19 @@ if [ -z "$grype_deps_exclusion" ]; then
 	failures=$((failures + 1))
 fi
 
+# gosec runs with -no-fail on purpose (it has no severity cutoff and would
+# otherwise fail on LOW-severity heuristics like G104). That makes the explicit
+# severity-gate step the only thing standing between the required
+# "Security: Gosec SAST" context and a permanent green. Delete the step while
+# leaving -no-fail and the check silently becomes report-only, which is worse
+# than not requiring it at all, because the ruleset still claims it gates.
+require_text ".github/workflows/security-grype.yml" "args: -no-fail -fmt sarif -out gosec-results.sarif ./..." \
+	"gosec must keep -no-fail; the severity-gate step decides the outcome, not gosec's own exit code"
+require_text ".github/workflows/security-grype.yml" "Gate on gosec HIGH/MEDIUM findings" \
+	"security-grype.yml must keep the explicit gosec severity gate; -no-fail alone makes the required check a no-op"
+require_text ".github/workflows/security-grype.yml" 'select(.level == "error")' \
+	"the gosec gate must filter SARIF results on level==\"error\" (gosec's MEDIUM/HIGH), not merely check the file exists"
+
 # The house standard is no emoji anywhere in CI, not just in the job names
 # that happen to be required contexts. Enforced over the whole workflow
 # directory so run-name blocks and step output cannot drift back. perl rather

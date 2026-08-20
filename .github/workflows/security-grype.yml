@@ -228,11 +228,14 @@ jobs:
       - name: Run Gosec
         uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3  # v2.28.0
         with:
-          # Report-only: gosec is heuristic (e.g. G115 int->uint conversions in
-          # the benchmark helpers) and feeds findings to the Security tab via the
-          # SARIF upload below. Build gating is handled by CodeQL (ruleset-enforced),
-          # Grype, and govulncheck, so -no-fail keeps gosec from failing the run
-          # on advisory-level findings while still surfacing them for triage.
+          # -no-fail keeps gosec itself from deciding the job's outcome. gosec
+          # has no native severity cutoff (unlike severity-cutoff: high on the
+          # Grype steps above) — left to itself it fails on ANY finding at any
+          # severity, including LOW heuristic rules like G104 (unhandled
+          # errors), historically this repo's most common gosec finding by far.
+          # The "Gate on gosec HIGH/MEDIUM findings" step below is the real
+          # gate and decides pass/fail explicitly. Findings reach the Security
+          # tab via the upload below either way.
           args: -no-fail -fmt sarif -out gosec-results.sarif ./...
 
       - name: Upload Gosec SARIF
@@ -241,6 +244,41 @@ jobs:
         with:
           sarif_file: gosec-results.sarif
           category: gosec
+
+      - name: Gate on gosec HIGH/MEDIUM findings
+        # Ordered after the SARIF upload so findings still reach the Security
+        # tab on the runs where this step fails the job. gosec maps its own LOW
+        # severity to SARIF level "warning" and MEDIUM/HIGH to "error"
+        # (getSarifLevel in report/sarif/formatter.go), so filtering on
+        # level == "error" gates MEDIUM+HIGH without treating LOW-severity
+        # noise as blocking. Fails closed: a missing or unparseable SARIF is a
+        # failure, not a silent pass, because "Security: Gosec SAST" is a
+        # required context and a no-op gate is worse than no gate.
+        if: always()
+        run: |
+          set -euo pipefail
+          sarif_file="gosec-results.sarif"
+
+          if [ ! -s "${sarif_file}" ]; then
+            echo "::error::${sarif_file} is missing or empty; failing closed rather than passing the gosec gate silently."
+            exit 1
+          fi
+
+          if ! jq empty "${sarif_file}" >/dev/null 2>&1; then
+            echo "::error::${sarif_file} is not valid JSON; failing closed rather than passing the gosec gate silently."
+            exit 1
+          fi
+
+          gating_count="$(jq '[.runs[0].results[]? | select(.level == "error")] | length' "${sarif_file}")"
+          echo "gosec MEDIUM/HIGH findings (SARIF level=error): ${gating_count}"
+
+          if [ "${gating_count}" -gt 0 ]; then
+            jq -r '.runs[0].results[]? | select(.level == "error")
+              | "  " + .ruleId + " " + (.locations[0].physicalLocation.artifactLocation.uri // "?")
+                + ":" + ((.locations[0].physicalLocation.region.startLine // 0) | tostring)' "${sarif_file}"
+            echo "::error::gosec found ${gating_count} MEDIUM/HIGH issue(s). See the Security tab (category: gosec), or suppress a false positive with a justified #nosec comment."
+            exit 1
+          fi
 
   # NOTE: testssl job omitted. Portwing does not operate a TLS listener of its own
   # (TLS is handled by a reverse proxy in front). Re-add if Portwing gains direct
