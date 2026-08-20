@@ -35,7 +35,22 @@ reviews:
   related_issues: true
   related_prs: true
   suggested_labels: false
-  auto_apply_labels: false
+  # `labeling_instructions` below is inert without this: with auto-apply off
+  # CodeRabbit evaluates the rule and then does nothing with the result, so
+  # `second-opinion` only ever gets applied by hand and the Greptile caller
+  # never fires on its own. Suggestions stay off — the label gets applied or
+  # it doesn't, no narration in the review body.
+  auto_apply_labels: true
+  labeling_instructions:
+    - label: "second-opinion"
+      instructions: |
+        Apply when the diff is security-sensitive (auth, the Docker proxy
+        and socket path, release or security workflows, the branch-protection
+        and suppression config), is a large refactor, or when your own
+        findings conflict with the author's stated intent and a tiebreaker
+        reviewer is warranted. The label summons Greptile as an independent
+        second opinion via .github/workflows/greptile.yml — apply it
+        deliberately, not on every PR.
   suggested_reviewers: false
   auto_assign_reviewers: false
   enable_prompt_for_ai_agents: true

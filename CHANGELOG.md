@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regexes rather than globs, so `dev/.*` covers nested dev branches the way
   `dev/**` does in the workflow triggers.
 
+- **The Greptile second-opinion caller can fire on its own now.**
+  `.github/workflows/greptile.yml` triggers on the `second-opinion` label,
+  but `.coderabbit.yaml` had no `labeling_instructions` entry for it, so
+  the label only ever got applied by hand and the caller never fired
+  unprompted. Adding the instructions alone would have been inert:
+  `auto_apply_labels` was `false`, which makes CodeRabbit evaluate the rule
+  and discard the result. Both are set now, matching drydock.
+  `suggested_labels` stays `false` — the label gets applied or it doesn't,
+  with no narration in the review body.
+
 - **README picked up the social-proof badge row and moved Documentation
   up.** `readme-shape.md` specifies a three-row badge wall; the repo had
   identity and quality/security but no third row. Release downloads, the
