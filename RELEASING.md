@@ -145,7 +145,12 @@ git push origin v<version>
    |---|---|
    | `linux/amd64` | fails the release on HIGH and above |
    | `linux/arm64` | fails the release on HIGH and above |
-   | `linux/arm/v7` | **report-only** — SARIF to the Security tab, does not fail |
+   | `linux/arm/v7` | **report-only** — does not fail the release |
+
+   Every leg uploads SARIF to the Security tab, but only while the repo is
+   public: code scanning uploads need GHAS, which free private repos don't
+   have. So on a private repo the `arm/v7` findings exist only in that job's
+   log, which is the one case where report-only is close to invisible.
 
    **The `arm/v7` exception, and when it ends.** Wolfi publishes no armv7 repo, so `Dockerfile.release` builds that leg from `alpine:3.24` using Alpine's prebuilt `docker-cli` and `docker-cli-compose` instead of Wolfi's `docker-compose`. Those packages are compiled with Go 1.26.3 and carry ~29 Critical/High stdlib advisories that are all fixed in Go 1.26.6. Portwing's own `go.mod` pins `toolchain go1.26.6` and portwing's binary carries **zero** findings on all three platforms — the vulnerable toolchain is Alpine's, not this repo's, and no Alpine branch ships a `go >= 1.26.6`-built docker package yet (edge is on 1.26.5, one patch short). `musl` additionally carries CVE-2026-40200 with no fix anywhere.
 

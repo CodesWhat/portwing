@@ -188,6 +188,17 @@ require_text ".github/workflows/release.yml" "--fail-on high" \
 	"the published-image scan must be able to gate the release, not merely report"
 require_text ".github/workflows/release.yml" "--config .grype.yaml" \
 	"the published-image scan must use the repo's reviewed suppression policy, not grype defaults"
+# Without this the matrix can stay intact while every leg scans the runner's
+# own architecture — three green legs, one arch actually examined, which is the
+# exact failure mode that made anchore/scan-action unusable here.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+require_text ".github/workflows/release.yml" '--platform "${PLATFORM}"' \
+	"the published-image scan must select the matrix platform, not the runner's native arch"
+# The gate map below is only meaningful if an unrecognized value is rejected. A
+# `case` that fell through to no `--fail-on` would silently un-gate any leg
+# whose gate got typo'd.
+require_text ".github/workflows/release.yml" "Unknown gate" \
+	"the published-image scan must fail on an unrecognized gate value, not default to report-only"
 # The per-platform gate is the actual security posture, so assert the whole map
 # rather than the substring "--fail-on high" — that string survives intact even
 # if every leg is flipped to report-only.

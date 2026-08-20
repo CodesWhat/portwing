@@ -80,6 +80,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   un-gated. An unknown `gate:` value fails the job rather than defaulting
   to report-only.
 
+- **The release pipeline no longer pipes an unverified script to a shell.**
+  The published-image scan installed Grype with
+  `curl https://get.anchore.io/grype | sh -s -- -v ...`. That `-v` verifies
+  the release archive, but the script carrying it is fetched over a mutable
+  URL and executes before any of that verification runs, so the check sits
+  inside code an attacker would already control. Replaced with a fetch of
+  the pinned release assets, a `cosign verify-blob` against Grype's release
+  signer, and a checksum check, all ahead of anything executing. The signer
+  identity is exact rather than a regexp — read off v0.110.0's own
+  certificate SAN and confirmed to reject a near-miss identity — and
+  `get.anchore.io` came out of the job's egress allow-list along with the
+  pipe. The job also logs in to GHCR now: the image is public today, so the
+  anonymous path works, but a private repo means a private package, and the
+  job exists precisely to keep scanning in that case.
+
 - **CVE-2026-14456 suppressed across all three legs.** The OpenSSL QUIC
   *server* DoS matches `libcrypto3`/`libssl3` on every published platform.
   Nothing in the image is a QUIC server: `objdump -p` on the extracted
