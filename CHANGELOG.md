@@ -66,8 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   128px. Lighthouse median total byte weight: marketing 1,927,134 to
   1,548,014, docs to 1,444,340 against a 2,466,239 baseline — the docs
   site had been carrying the same ~980 KB while sitting just under its
-  own ceiling. The `baseline` figures in `lighthouse/*.cjs` are now well
-  above actual and worth re-recording.
+  own ceiling. The `baseline` figures in `lighthouse/*.cjs` were left
+  describing the heavier pages and are re-recorded above.
 
 - **Marketing site was 1.9 MB over its own page-weight budget.** The
   ecosystem section's `sockguard-logo.png` and `drydock-logo.png` shipped
@@ -79,6 +79,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The overage was failing the `web` lefthook pre-push lane, so it blocked
   every local push regardless of what the change touched.
 
+- **Native package attestation verification was blocked by its own egress
+  policy.** The `Verify Native Packages` job's harden-runner allow-list
+  was missing `tmaproduction.blob.core.windows.net`, the Azure blob host
+  `gh attestation verify` fetches provenance bundles from, so the step
+  failed with a connection refused on the v0.9.6 cut. The sibling
+  `Verify Published` job already allowed that host; the two lists now
+  agree. The published artifacts were never affected — v0.9.6's packages
+  verify cleanly against the same attestation off-runner.
+- **Checked-in branch protection no longer under-declares the required
+  checks.** `scripts/apply-branch-protection.sh` still listed the six
+  original required contexts while the live ruleset had grown to ten.
+  Because the script updates the ruleset in place, running it would have
+  silently dropped `Go CI / Qlty Check`, `Security: Secrets`,
+  `Dependency Review`, and `CodeQL Analysis` — a script named "apply
+  branch protection" that weakened it. The list now mirrors the live
+  ruleset, and the header documents that a stale list removes checks.
+
 ### Removed
 
 - **Retired the dead star-history.com chart from the README.** The embed
@@ -89,25 +106,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for different repositories, so it serves one generic error card to
   everyone. The website copy of this embed was removed separately in
   #160, where it was also leaking visitor IPs to a third party.
-
-### Fixed
-
-- **Native package attestation verification was blocked by its own egress
-  policy.** The `✅ Verify Native Packages` job's harden-runner allow-list
-  was missing `tmaproduction.blob.core.windows.net`, the Azure blob host
-  `gh attestation verify` fetches provenance bundles from, so the step
-  failed with a connection refused on the v0.9.6 cut. The sibling
-  `✅ Verify Published` job already allowed that host; the two lists now
-  agree. The published artifacts were never affected — v0.9.6's packages
-  verify cleanly against the same attestation off-runner.
-- **Checked-in branch protection no longer under-declares the required
-  checks.** `scripts/apply-branch-protection.sh` still listed the six
-  original required contexts while the live ruleset had grown to ten.
-  Because the script updates the ruleset in place, running it would have
-  silently dropped `Go CI / Qlty Check`, `🔑 Security: Secrets`,
-  `📦 Dependency Review`, and `🔍 CodeQL Analysis` — a script named "apply
-  branch protection" that weakened it. The list now mirrors the live
-  ruleset, and the header documents that a stale list removes checks.
 
 ## [v0.9.6] - 2026-08-19
 
