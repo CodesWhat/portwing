@@ -17,9 +17,10 @@
 #   - "Security: Grype Container Scan"  — carries `if: github.event_name !=
 #     'pull_request'`, so it ALWAYS skips on a PR. Requiring it would wedge
 #     every PR permanently; a skipped check is not a passing one.
-#   - "Security: Govulncheck"           — duplicates the required
-#     "Go CI / Govulncheck" (different tool versions, v1.2.0 here vs v1.7.0
-#     upstream). Requiring both gates the same property twice.
+#   (There is no longer a "Security: Govulncheck" job to exclude. It duplicated
+#   the required "Go CI / Govulncheck" at an older tool version, v1.2.0 against
+#   v1.7.0 upstream, so it was deleted rather than left excluded. govulncheck
+#   now has exactly one gate.)
 #
 # The two security-grype.yml jobs that ARE required below only became safe to
 # require once that workflow lost its `paths:` filter. A required check must

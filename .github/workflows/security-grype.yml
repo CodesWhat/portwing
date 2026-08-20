@@ -1,9 +1,9 @@
-name: "Security: Grype & Govulncheck"
+name: "Security: Grype & Gosec"
 run-name: >-
   ${{
-    github.event_name == 'schedule' && 'Security: Grype & Govulncheck — Weekly run' ||
-    github.event_name == 'pull_request' && format('Security: Grype & Govulncheck — PR #{0}', github.event.pull_request.number) ||
-    format('Security: Grype & Govulncheck — Manual by {0}', github.actor)
+    github.event_name == 'schedule' && 'Security: Grype & Gosec — Weekly run' ||
+    github.event_name == 'pull_request' && format('Security: Grype & Gosec — PR #{0}', github.event.pull_request.number) ||
+    format('Security: Grype & Gosec — Manual by {0}', github.actor)
   }}
 
 on:
@@ -25,70 +25,17 @@ on:
 permissions:
   contents: read
 
-env:
-  GOVULNCHECK_VERSION: v1.2.0
-
 concurrency:
   group: security-grype-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  govulncheck:
-    name: "Security: Govulncheck"
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            dl.google.com:443
-            github.com:443
-            go.dev:443
-            proxy.golang.org:443
-            release-assets.githubusercontent.com:443
-            sum.golang.org:443
-            vuln.go.dev:443
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          # Reads the exact `toolchain` directive from go.mod (setup-go honors
-          # toolchain over the `go` line), so the scan runs on the same pinned,
-          # patched toolchain the binary is built with — one source of truth.
-          go-version-file: go.mod
-
-      - name: Verify scoped scanner exclusions are not imported
-        run: ./scripts/verify-scanner-exclusions.sh
-
-      - name: Install govulncheck
-        run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
-
-      - name: Run govulncheck
-        run: govulncheck ./...
-
-      - name: Summarize
-        if: always()
-        run: |
-          {
-            echo "### Govulncheck"
-            echo "- Reachability-based scan of Go dependencies (call-graph aware)"
-            echo "- Tool version: ${GOVULNCHECK_VERSION}"
-            echo "- Database: Go Vulnerability Database (vuln.go.dev)"
-          } >> "$GITHUB_STEP_SUMMARY"
-
   grype-image:
     name: "Security: Grype Container Scan"
     # Image build is the heavy step; keep it on scheduled/manual runs.
-    # PRs get fast, accurate dependency coverage from grype-deps +
-    # govulncheck without paying for a Docker build on every push.
+    # PRs get fast, accurate dependency coverage from grype-deps here plus
+    # the required "Go CI / Govulncheck" context, without paying for a
+    # Docker build on every push.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -188,10 +135,14 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
         with:
           egress-policy: block
+          # dl.google.com and go.dev are for setup-go below, which the
+          # source-level exclusion check needs a toolchain for.
           allowed-endpoints: >
             api.github.com:443
+            dl.google.com:443
             get.anchore.io:443
             github.com:443
+            go.dev:443
             grype.anchore.io:443
             proxy.golang.org:443
             raw.githubusercontent.com:443
@@ -203,6 +154,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          # Reads the exact `toolchain` directive from go.mod (setup-go honors
+          # toolchain over the `go` line), so the check runs on the same pinned,
+          # patched toolchain the binary is built with — one source of truth.
+          go-version-file: go.mod
+
+      - name: Verify scoped scanner exclusions are not imported
+        # Lives here, not in grype-image, because grype-image carries
+        # `if: github.event_name != 'pull_request'` and always skips on PRs.
+        # This is the source-level half of the check (`go list -deps -test`);
+        # grype-image runs the binary-linkage half with path arguments. This
+        # job is the only PR-time home for it, and it moved here when the
+        # duplicate govulncheck job was retired.
+        run: ./scripts/verify-scanner-exclusions.sh
 
       - name: Run Grype across the repository (Go modules + npm lockfiles)
         # Scanning the repo root catalogs go.mod/go.sum and package-lock.json,
