@@ -140,13 +140,18 @@ jobs:
       # runs `npm run check:web`, which covers lint and build. Turning them on
       # would gate the same property twice.
       #
-      # The names are set anyway. node-ci.yml declares those jobs as
-      # `name: ${{ inputs.*-check-name }}` under `if: inputs.run-*`, and when
-      # they skip GitHub reports the check run as the literal, unevaluated
-      # "Node CI / inputs.lint-check-name". Neither name is a required context,
-      # so this is cosmetic either way.
-      lint-check-name: Web Lint (covered by Web Contract)
-      build-check-name: Web Build (covered by Web Contract)
+      # The names are set so they are right if those jobs are ever enabled.
+      # They do NOT fix the cosmetic reporting: node-ci.yml declares both jobs
+      # as `name: ${{ inputs.*-check-name }}` under `if: inputs.run-*`, and
+      # GitHub does not evaluate an expression in a job's name when the job
+      # skips. Passing the input explicitly changes nothing — measured on
+      # PR #175, where the checks still reported as the literal
+      # "Node CI / inputs.lint-check-name" with these very lines in place, and
+      # upstream already defaults them to "Node Lint"/"Node Build" anyway.
+      # Fixing it properly means a literal `name:` upstream in node-ci.yml.
+      # Neither name is a required context, so nothing is gated on it.
+      lint-check-name: Web Lint
+      build-check-name: Web Build
       test-egress-policy: block
       test-allowed-endpoints: >-
         api.github.com:443
