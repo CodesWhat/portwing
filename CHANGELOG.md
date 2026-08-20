@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CodeRabbit reviews PRs into the dev branch again.** `.coderabbit.yaml`
+  set no `reviews.auto_review.base_branches`, which makes CodeRabbit
+  auto-review only PRs targeting the default branch. Under the strict
+  release flow every feature PR targets the active dev branch and only the
+  promotion PR targets `main`, so each PR posted "Review skipped: reviews
+  are disabled for this base branch" and the code was reviewed once, in
+  aggregate, after it had already landed. drydock's config has carried the
+  setting all along; this brings portwing to the same shape. The values are
+  regexes rather than globs, so `dev/.*` covers nested dev branches the way
+  `dev/**` does in the workflow triggers.
+
 - **README picked up the social-proof badge row and moved Documentation
   up.** `readme-shape.md` specifies a three-row badge wall; the repo had
   identity and quality/security but no third row. Release downloads, the

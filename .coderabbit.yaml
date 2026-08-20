@@ -45,6 +45,13 @@ reviews:
     enabled: true
     auto_incremental_review: true
     drafts: false
+    # Without this, CodeRabbit auto-reviews ONLY PRs targeting the default
+    # branch. Under the strict release flow every feature PR targets the
+    # active dev branch and only the promotion PR targets main, so leaving
+    # it unset means the code is reviewed once, in aggregate, after it has
+    # already landed. The values are regexes, not globs.
+    base_branches:
+      - "dev/.*"
     ignore_title_keywords:
       - "WIP"
       - "DO NOT MERGE"
