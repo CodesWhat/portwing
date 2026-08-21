@@ -12,25 +12,32 @@ name: Star Chart
 # version" forbids for exactly this file. Tying it to releases means the chart
 # only ever moves when something ships.
 #
-# But NOT via `release: [published]`, even though the shared workflow documents
-# that trigger. GitHub suppresses workflow runs for events emitted by
-# GITHUB_TOKEN, and release.yml publishes the release with GoReleaser using
-# exactly that credential, so the event fires and starts nothing. Wired that way
-# this file would read as correct and silently never run, which is the failure
-# mode a committed chart exists to avoid. release.yml dispatches it explicitly
-# instead, in its starchart-refresh job, with RELEASE_PAT. Same reason
-# release-cut.yml pushes the v* tag with a PAT; see its line 5.
+# The trigger is the v* tag push, and picking it took two wrong answers first.
+# Both failed the same way: GitHub suppresses workflow runs for events emitted
+# by GITHUB_TOKEN.
 #
-# So workflow_dispatch is the only trigger here, and that is deliberate rather
-# than a gap. Do not add `release:` back without first checking which credential
-# publishes the release.
+#   `release: [published]`, which the shared workflow documents, is inert here.
+#   release.yml publishes via GoReleaser with GITHUB_TOKEN, so the event fires
+#   and starts nothing. It would read as correctly wired and silently never run.
 #
-# Tying it to a release does NOT mean the chart inside tag vN is as of vN. The
-# dispatch happens after the release is published and the refresh commits to the
-# dev branch below, so each chart ships with the FOLLOWING release. That is a
-# deliberate one-release lag: regenerating before the tag would mean committing
-# to the release branch mid-cut. The bound that matters is that the artifact
-# never changes underneath a tag that already points at it.
+#   Dispatching from release.yml with RELEASE_PAT fails at the other end:
+#   RELEASE_PAT carries Contents RW, and creating a workflow_dispatch needs
+#   Actions write, so the API returns 403. Dispatching with GITHUB_TOKEN instead
+#   would be worse than the 403, because that call returns success and creates
+#   no run at all.
+#
+# The tag push works and is already proven in this repo: release-cut.yml pushes
+# the v* tag with RELEASE_PAT precisely so downstream workflows fire, and
+# release.yml has always been triggered that way. Same event, same credential,
+# nothing new to grant. Do not move this back to `release:` or to a dispatch
+# without re-reading which credential creates the event.
+#
+# Firing at the tag does NOT mean the chart inside tag vN is as of vN. The
+# refresh commits to the dev branch below, not to the tagged revision, so each
+# chart ships with the FOLLOWING release. That is a deliberate one-release lag:
+# committing to the release branch mid-cut would be worse. The bound that
+# matters is that the artifact never changes underneath a tag already pointing
+# at it.
 #
 # `accent` is this repo's logo colour, #7230d2 from the pigeon neck band, and
 # the registry is ops standards/readme-shape.md. It is required upstream with
@@ -50,6 +57,9 @@ name: Star Chart
 # do not apply and there is nothing to add here.
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions: {}
@@ -58,7 +68,7 @@ jobs:
   starchart:
     permissions:
       contents: write
-    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@a66a777304d657a90161a8859dbc0dfa7d5020f7  # main, 2026-08-21
+    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@11004e42d7d19e86eb3b7777c467ec9522b784e1  # main, 2026-08-21
     with:
       branch: dev/v0.9
       accent: "#7230d2"
