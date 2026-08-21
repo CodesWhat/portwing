@@ -7,7 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.7] - 2026-08-21
+
+### Added
+
+- **A daily monitor asserts that `main` points at a release tag.** It calls the
+  organisation's reusable `main-is-released` workflow, which fails when `main`
+  is not exactly a tagged release, and reports how many commits past the newest
+  reachable tag it has drifted. The invariant is that `main` is the version
+  users actually run, so an untagged `main` head is itself the alarm: every
+  scanner that describes this project, Scorecard and CodeQL and Dependabot and
+  the README badges, reads the default branch and nothing else.
+
+  It is deliberately **not** a required status check. A promotion PR's merge
+  result is untagged by definition, so requiring it would make every promotion
+  fail a check it cannot pass and deadlock the merge. It is a monitor, not a
+  gate.
+
+  It fails today, and that is the point rather than a defect in the monitor:
+  `main` currently sits past `v0.9.6`. Clearing it is either a release cut or
+  moving the unshipped work back to a dev branch, and both are decisions about
+  what users see rather than something to quietly resolve.
+
+### Removed
+
+- **The local `CODE_OF_CONDUCT.md`, in favour of the organisation-wide one.**
+  The `.github` repository serves a Code of Conduct to every repository that
+  does not carry its own, so a local copy opts this repository out of that
+  permanently and nobody remembers to edit two files. Both documents named the
+  same reporting address, `security@codeswhat.com`, so nothing about where a
+  report goes changes; the organisation-wide document is the full Contributor
+  Covenant 2.1 with the enforcement ladder, where the local copy was a
+  fifteen-line summary. The README and `GOVERNANCE.md` now link to it directly
+  rather than by relative path, which would have 404'd once the file was gone.
+
 ### Changed
+
+- **The star-history chart refresh is dispatched from `release.yml` instead of
+  being triggered by the release event.** GitHub suppresses workflow runs for
+  events emitted by `GITHUB_TOKEN`, and GoReleaser publishes the release with
+  exactly that credential, so a `release: [published]` trigger on the chart
+  workflow fires and starts nothing. The workflow would have read as correctly
+  wired while silently never running, and the only symptom would have been a
+  chart that quietly stopped updating, which is the failure a committed
+  artifact was chosen to avoid in the first place. This repository already
+  documented the same hazard for tag pushes in `release-cut.yml`, which is why
+  the `v*` tag is pushed with `RELEASE_PAT`.
+
+  The refresh is now a `starchart-refresh` job in `release.yml`, gated on the
+  release job, dispatching the chart workflow with `RELEASE_PAT`. It needs no
+  new credential and fails in its own job rather than after the release has
+  already published. The release contract asserts both halves: that the
+  dispatch exists, and that the chart workflow has no `release:` trigger.
+
+- **The star-history chart ships as a light/dark pair, chosen by the README.**
+  The renderer upstream now draws the chart to the house shape and emits both
+  `docs/assets/star-history.svg` and `docs/assets/star-history-dark.svg` from
+  one fetch, and the README selects between them with a `<picture>` element.
+  A single self-theming SVG could not do this: a media query inside an SVG
+  loaded through `<img>` resolves against the reader's OS preference, not
+  GitHub's own theme toggle, so anyone reading GitHub in dark mode on a light
+  OS got a white card. `<picture>` follows the toggle. The `<img>` stays as the
+  fallback so raw file views and mirrors still render.
+
+  The refresh workflow is re-pinned to the paired renderer and now passes this
+  repository's accent colour, which upstream requires with no default so a
+  caller cannot silently inherit another repository's brand. Its trigger moves
+  from a weekly cron to a published release: a committed artifact refreshed on a
+  schedule mutates underneath a tag that already points at it. Because
+  `release: [published]` fires after the tag exists and the refresh commits to
+  the dev branch, each chart ships with the following release, which is a
+  one-release lag rather than a chart that is current as of its own tag.
+
+  The release contract grew checks for all of it, each one verified by mutation
+  rather than by reading it back. Two gaps turned up that way: a `<source>`
+  outside its `<picture>` is inert markup that satisfied every other check
+  while silently serving the light chart to everyone, and an external URL
+  inside a CSS `url()` is not preceded by `=`, so it slipped the
+  third-party-reference pattern entirely.
 
 - **`Release Contract` is declared as a required check on `main`.**
   `scripts/apply-branch-protection.sh` now lists it alongside the other
