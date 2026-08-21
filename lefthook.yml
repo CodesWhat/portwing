@@ -3,18 +3,19 @@
 #
 # Pre-push pipeline (piped = sequential, fail-fast):
 #   1. Clean-tree check (no stray artifacts before push)
-#   2. GoReleaser snapshot dry-run (full release pipeline, skip publish)
-#   3. Pinned golangci-lint through the isolated CI adapter
-#   4. Qlty full-repository check
-#   5. go test -race
-#   6. govulncheck (reachable CVEs in deps + stdlib)
-#   7. Go fuzz smoke (5 s per fuzzer, all 7 fuzzers) — tier 0 of the fuzz
+#   2. Package release contract (docs/config agreement, sub-second)
+#   3. GoReleaser snapshot dry-run (full release pipeline, skip publish)
+#   4. Pinned golangci-lint through the isolated CI adapter
+#   5. Qlty full-repository check
+#   6. go test -race
+#   7. govulncheck (reachable CVEs in deps + stdlib)
+#   8. Go fuzz smoke (5 s per fuzzer, all 7 fuzzers) — tier 0 of the fuzz
 #      strategy. Catches broken fuzz drivers and stale seed corpora before
 #      the push leaves the machine. Real coverage tiers live in
 #      .github/workflows/ci-verify.yml (60 s, every push/PR) and
 #      quality-fuzz-nightly.yml (5 m, daily).
-#   8. actionlint + zizmor (workflow correctness + security)
-#   9. Web analytics contract, lint, and production static build
+#   9. actionlint + zizmor (workflow correctness + security)
+#  10. Web analytics contract, lint, and production static build
 #
 # Tools that may not be installed locally (goreleaser, govulncheck,
 # actionlint, zizmor) are skipped when absent — CI still enforces them.
@@ -51,6 +52,18 @@ pre-push:
       priority: 0
       timeout: 10s
 
+    # The package release contract, run here as well as in release-cut.yml.
+    # release-cut.yml is the gate that matters, but it only runs when a tag is
+    # being cut, so a README or docs change that breaks the contract sat green
+    # from the PR that introduced it until someone tried to ship. This is pure
+    # grep and awk against files already on disk, so it costs well under a
+    # second and belongs ahead of the three-minute goreleaser run.
+    release-contract:
+      run: bash scripts/package-release-config-test.sh
+      fail_text: "Package release contract broken — see the FAIL lines above"
+      priority: 1
+      timeout: 30s
+
     # Full release dry-run — mirrors what release.yml runs in CI, minus
     # publish. Catches goreleaser config, build, archive, and dirty-tree
     # bugs locally before they surface in a tagged release.
@@ -58,17 +71,17 @@ pre-push:
       run: goreleaser release --snapshot --clean --skip=sign,docker,publish,sbom
       skip:
         - run: '! command -v goreleaser >/dev/null 2>&1'
-      priority: 1
+      priority: 2
       timeout: 3m
 
     go-lint:
       run: ./scripts/ci/go-lint.sh
-      priority: 2
+      priority: 3
       timeout: 4m
 
     qlty:
       run: ./scripts/qlty-check-gate.sh all
-      priority: 3
+      priority: 4
       timeout: 4m
 
     # -count=1 disables the test cache. Without it a cached pass can be served
@@ -77,14 +90,14 @@ pre-push:
     # cold cache; this keeps the local gate honest about what it checked.
     go-test:
       run: go test -race -count=1 ./...
-      priority: 4
+      priority: 5
       timeout: 5m
 
     govulncheck:
       run: govulncheck ./...
       skip:
         - run: '! command -v govulncheck >/dev/null 2>&1'
-      priority: 5
+      priority: 6
       timeout: 2m
 
     # Fuzz smoke — 5 s per fuzzer, all 7 in series. Keep a finite Go
@@ -133,7 +146,7 @@ pre-push:
           set -- $entry
           run_fuzz "$1" "$2"
         done
-      priority: 6
+      priority: 7
       timeout: 3m
 
     actionlint:
@@ -141,7 +154,7 @@ pre-push:
       run: actionlint
       skip:
         - run: '! command -v actionlint >/dev/null 2>&1'
-      priority: 7
+      priority: 8
       timeout: 30s
 
     zizmor:
@@ -149,10 +162,10 @@ pre-push:
       run: zizmor .github/workflows/
       skip:
         - run: '! command -v zizmor >/dev/null 2>&1'
-      priority: 8
+      priority: 9
       timeout: 30s
 
     web:
       run: npm run check:web
-      priority: 9
+      priority: 10
       timeout: 15m
