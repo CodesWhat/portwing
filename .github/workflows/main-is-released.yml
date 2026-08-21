@@ -1,0 +1,32 @@
+name: "Release: Main Is Released"
+
+# Watches the invariant behind "main is the released version, not the newest
+# work": every commit on main should be a tagged release, so an untagged main
+# HEAD is itself the alarm. Delegates the actual check to the org's reusable
+# workflow, which runs `git describe --exact-match --tags` against main.
+#
+# This is an invariant monitor, deliberately NOT a required status check. A
+# promotion PR merges dev/v0.9 into main and only gets tagged afterward, so
+# main is untagged for the whole window between that merge and the tag push.
+# Requiring this check would make every promotion fail its own required
+# check by definition and deadlock the merge. It runs on a schedule instead,
+# so drift shows up as a red run to notice and fix, not as a gate to clear.
+#
+# The schedule only fires once this file is on the DEFAULT branch, which is
+# how GitHub treats every cron regardless of which branch defines it. Landing
+# it on dev/v0.9 buys nothing on its own; it starts watching at the next
+# promotion. workflow_dispatch is here so it can be run against any ref before
+# then, which is also how it was verified.
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  released:
+    permissions:
+      contents: read
+    uses: CodesWhat/.github/.github/workflows/main-is-released.yml@a66a777304d657a90161a8859dbc0dfa7d5020f7  # main, 2026-08-21

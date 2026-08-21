@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A daily monitor asserts that `main` points at a release tag.** It calls the
+  organisation's reusable `main-is-released` workflow, which fails when `main`
+  is not exactly a tagged release, and reports how many commits past the newest
+  reachable tag it has drifted. The invariant is that `main` is the version
+  users actually run, so an untagged `main` head is itself the alarm: every
+  scanner that describes this project, Scorecard and CodeQL and Dependabot and
+  the README badges, reads the default branch and nothing else.
+
+  It is deliberately **not** a required status check. A promotion PR's merge
+  result is untagged by definition, so requiring it would make every promotion
+  fail a check it cannot pass and deadlock the merge. It is a monitor, not a
+  gate.
+
+  It fails today, and that is the point rather than a defect in the monitor:
+  `main` currently sits past `v0.9.6`. Clearing it is either a release cut or
+  moving the unshipped work back to a dev branch, and both are decisions about
+  what users see rather than something to quietly resolve.
+
 ### Changed
 
 - **The star-history chart ships as a light/dark pair, chosen by the README.**
