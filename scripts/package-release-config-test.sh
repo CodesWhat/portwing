@@ -37,6 +37,19 @@ require_first_line() {
 	fi
 }
 
+require_last_line() {
+	local file="$1"
+	local expected="$2"
+	local description="$3"
+	local actual
+
+	actual="$(tail -n 1 "$file")"
+	if [ "$actual" != "$expected" ]; then
+		echo "FAIL: ${description} (${file} last line must be: ${expected}, got: ${actual})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
 require_sha256() {
 	local file="$1"
 	local expected="$2"
@@ -282,10 +295,31 @@ require_file "docs/assets/star-history.svg" \
 
 # Rejecting the two retired hosts is only half the contract: it stays satisfied
 # if the chart is dropped from the README entirely, or repointed at some third
-# host nobody has thought to name yet. Pin the img tag to the committed path so
-# the only way to pass is to actually ship the local chart.
-if ! grep -Eq '<img[^>]*src="docs/assets/star-history\.svg"' README.md; then
-	echo "FAIL: the README must render the star-history chart from the committed SVG (README.md needs an <img> whose src is docs/assets/star-history.svg)" >&2
+# host nobody has thought to name yet. Extract the chart section and assert
+# inside it, the same way the grype invocation above is extracted — a file-wide
+# grep for the img tag would be satisfied by any other occurrence in the README,
+# and naming hosts one at a time only ever catches the ones already known.
+star_section="$(awk '
+	/<a id="star-history"><\/a>/ { collecting = 1 }
+	collecting { print; if ($0 == "---") exit }
+' README.md)"
+if [ -z "${star_section}" ]; then
+	echo 'FAIL: the README must keep the star-history section (no <a id="star-history"></a> anchor found in README.md)' >&2
+	failures=$((failures + 1))
+fi
+# The whitespace before src is load-bearing: "src=" as a bare substring is also
+# inside data-src, and <img data-src="docs/assets/star-history.svg"> renders
+# nothing while satisfying the naive pattern.
+if ! printf '%s\n' "${star_section}" | grep -Eq '<img([[:space:]][^>]*)?[[:space:]]src="docs/assets/star-history\.svg"'; then
+	echo "FAIL: the star-history section must render the committed SVG (it needs an <img> whose src attribute is docs/assets/star-history.svg)" >&2
+	failures=$((failures + 1))
+fi
+# Catches the next replacement service without having to know its name. This is
+# a regression guard, not an adversary control: it reads the markup literally,
+# so a deliberately entity-encoded host (warpchart&#46;dev) would slip past it.
+# Worth knowing, not worth an HTML decoder in shell.
+if printf '%s\n' "${star_section}" | grep -Eiq 'src="https?:'; then
+	echo "FAIL: the star-history section must not load an image from a third party (the chart is committed at docs/assets/star-history.svg)" >&2
 	failures=$((failures + 1))
 fi
 
@@ -295,7 +329,9 @@ fi
 # proves the file is both a closed SVG document and this repo's chart.
 require_text "docs/assets/star-history.svg" "<title>Star history for CodesWhat/portwing</title>" \
 	"the committed chart must be this repository's chart, not a placeholder or another repo's"
-require_text "docs/assets/star-history.svg" "</svg>" \
+require_text "docs/assets/star-history.svg" "<path" \
+	"the committed chart must actually plot the series; a titled but empty <svg> renders as blank space, not a broken image"
+require_last_line "docs/assets/star-history.svg" "</svg>" \
 	"the committed chart must be a complete SVG document; a truncated generator run renders as a broken image"
 
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
