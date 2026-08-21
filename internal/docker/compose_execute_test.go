@@ -162,9 +162,14 @@ func TestExecute_CommandSuccess(t *testing.T) {
 
 // TestExecute_MergesStdoutAndStderr exercises the branch where both stdout
 // and stderr are non-empty (output != "" when stderr is appended).
+//
+// Note: not parallel because it execs a script it just wrote. Any concurrent
+// fork in this process inherits the still-open write descriptor, and exec of a
+// file held open for writing fails with ETXTBSY (golang/go#22315). It failed
+// that way in CI on 2026-08-21 with "text file busy". The other tests here that
+// write a fake binary are already serial for their own reasons, so this was the
+// only one exposed.
 func TestExecute_MergesStdoutAndStderr(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "app"), 0o750); err != nil {
 		t.Fatal(err)

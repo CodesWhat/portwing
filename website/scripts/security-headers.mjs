@@ -20,8 +20,13 @@ const COMMON_HEADERS = [
 
 function inlineScriptHashes(html) {
   const hashes = new Set();
-  for (const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
-    if (/\ssrc=/.test(match[0])) continue;
+  // The end tag mirrors the start tag, and the whole thing is case-insensitive,
+  // because that is what an HTML parser accepts: `</script >`, `</script foo>`
+  // and `<SCRIPT>` all close or open a script element. Every form this misses
+  // gets no hash, and the CSP then blocks a script the page needs, so the
+  // failure is silent at build time and fatal in the browser.
+  for (const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi)) {
+    if (/\ssrc=/i.test(match[0])) continue;
     const digest = crypto.createHash("sha256").update(match[1]).digest("base64");
     hashes.add(`'sha256-${digest}'`);
   }

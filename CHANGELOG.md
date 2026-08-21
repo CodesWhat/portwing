@@ -5,7 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v0.9.8] - 2026-08-21
+
+### Fixed
+
+- **A test that raced its own script and failed a required gate.**
+  `TestExecute_MergesStdoutAndStderr` writes a shell script and then execs it,
+  while marked `t.Parallel()`. Any concurrent fork in the process inherits the
+  still-open write descriptor, and exec of a file held open for writing returns
+  `ETXTBSY` — `fork/exec .../compose-both.sh: text file busy`, which is what CI
+  reported. Dropping `t.Parallel()` closes it deterministically, because Go
+  resumes parallel tests only once the serial ones finish, so nothing else in
+  the package can fork while this test writes and execs. The four other tests
+  here that write a fake binary were already serial for their own reasons,
+  which is why this was the only one exposed. Not a retry and not a skip.
+
+- **The four open CodeQL alerts that extending the scan to JavaScript
+  surfaced.** Adding JS/TS coverage found them on 2026-08-20 and nothing acted
+  on them, which is the half of adding a scanner that actually matters. All
+  four were in build and test tooling; none were in the shipped agent.
+
+  The first attempt at all four moved them instead of fixing them. CodeQL closed
+  two and opened two fresh ones on the shifted lines, and the other two never
+  closed at all. An edit that keeps a rule quiet is not the same as one that
+  removes the defect, and only re-running the scan tells the two apart.
+
+  The one worth reading is `js/bad-tag-filter` in the website's CSP generator.
+  It collected inline-script hashes with a pattern that recognised only
+  `<script>...</script>` in lower case with an exact end tag. A browser also
+  accepts `<SCRIPT>`, `</script >` and `</script foo="bar">`, and every form the
+  scan missed got no hash, so the emitted CSP would block a script the page
+  needs: silent at build time and fatal in the browser. The end tag now mirrors
+  the start tag and the whole pattern is case-insensitive. Verified by behaviour
+  rather than by the alert clearing, with a test that hashes five tag forms and
+  that fails on each of the two earlier patterns.
+
+  Two `js/file-system-race` findings were a path check followed by a read of the
+  same path, in the page-weight gate and a CI config test. Both now open the
+  file once and take size, mode and contents from that one descriptor, so the
+  two lookups cannot land on different files. Measured before and after: the
+  page-weight totals are byte-identical.
+
+  The fourth was a test asserting that the CSP does not name Go Report Card.
+  Naming one host in a deny check only catches the host you thought of, and
+  writing that check as a substring or an unanchored regex is itself the bypass
+  pattern the scanner flags. It now asserts the CSP's entire external origin
+  list, which is the stronger claim and leaves the rule nothing to match.
+
+- **The star-chart refresh now fires on the `v*` tag push, which is the only
+  trigger that actually works.** v0.9.7 shipped it as an explicit dispatch from
+  `release.yml`, and that failed on the first real release with
+  `HTTP 403: Resource not accessible by personal access token`: `RELEASE_PAT`
+  carries Contents RW, and creating a workflow dispatch needs Actions write.
+
+  The two earlier attempts failed for different reasons, which is worth keeping
+  apart because only one of them can be fixed by granting something. A
+  `release: [published]` trigger is inert because GoReleaser publishes with
+  `GITHUB_TOKEN` and GitHub creates no workflow run for an event emitted with
+  that credential. The 403 is not that: creating a workflow dispatch is an
+  Actions API write, and `contents: write` does not imply `actions: write`.
+  `GITHUB_TOKEN` would have hit the same wall, because `workflow_dispatch` is
+  exempt from the suppression rule, as is `repository_dispatch`. That exemption
+  is not the same as "only those two ever run": a `GITHUB_TOKEN` `pull_request`
+  also creates a run, just an approval-gated one. The dispatch pair is what
+  fires unattended.
+
+  The tag push needed nothing new: `release-cut.yml` already pushes the `v*`
+  tag with `RELEASE_PAT` so that downstream workflows fire, which is how
+  `release.yml` has always been triggered. The `starchart-refresh` job is
+  removed from `release.yml` and the contract now asserts the working trigger is
+  present as well as the broken one being absent.
+
+### Changed
+
+- **Both reusable-workflow callers re-pinned to `11004e4`.** The organisation's
+  `starchart-refresh.yml` and `main-is-released.yml` moved together. Verified
+  before adopting: the `on:` and inputs surface of both is byte-identical to the
+  previous pin, so nothing in either caller changes but the SHA. The upstream
+  changes tighten `main-is-released` so that a tag named `snapshot` no longer
+  satisfies the invariant, and stop a promotion merge reporting drift for the
+  seconds between the merge and the tag push.
 
 ## [v0.9.7] - 2026-08-21
 
