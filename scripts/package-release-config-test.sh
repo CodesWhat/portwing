@@ -290,6 +290,25 @@ reject_text_ci "README.md" "star-history.com" \
 	"the README must not embed a third-party star-history chart; the chart is committed at docs/assets/star-history.svg"
 reject_text_ci "README.md" "warpchart.dev" \
 	"the README must not embed a third-party star-history chart; warpchart.dev was the prescribed replacement for three days and is retired org-wide"
+# The refresh has to actually be reachable, which is a separate question from the
+# chart being correct. GitHub suppresses workflow runs for events emitted by
+# GITHUB_TOKEN, and release.yml publishes the release with GoReleaser using that
+# credential, so a `release:` trigger on starchart.yml fires and starts nothing.
+# The workflow reads as correctly wired and never runs, and the only visible
+# symptom is a chart that quietly stops updating — which is the exact failure a
+# committed artifact was chosen to avoid. release-cut.yml documents the same
+# hazard for tag pushes at its line 5.
+#
+# Both halves are asserted because either alone is satisfiable by a broken
+# config: the dispatch can be deleted while the trigger stays absent, and the
+# trigger can be added back while the dispatch stays present.
+require_text ".github/workflows/release.yml" "gh workflow run starchart.yml" \
+	"release.yml must dispatch the star-chart refresh explicitly; the release event it publishes is emitted by GITHUB_TOKEN and starts no workflow"
+if grep -Eq '^[[:space:]]*release:[[:space:]]*$' .github/workflows/starchart.yml; then
+	echo "FAIL: starchart.yml must not use a release: trigger (GitHub suppresses runs for events emitted by GITHUB_TOKEN, and release.yml publishes with GITHUB_TOKEN, so it would read as wired and never run; release.yml dispatches it instead)" >&2
+	failures=$((failures + 1))
+fi
+
 require_file "docs/assets/star-history.svg" \
 	"the committed star-history chart must exist; the README references it by relative path and a missing file renders as a broken image"
 require_file "docs/assets/star-history-dark.svg" \
