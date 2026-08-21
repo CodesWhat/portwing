@@ -15,8 +15,13 @@ name: "Release: Main Is Released"
 # The schedule only fires once this file is on the DEFAULT branch, which is
 # how GitHub treats every cron regardless of which branch defines it. Landing
 # it on dev/v0.9 buys nothing on its own; it starts watching at the next
-# promotion. workflow_dispatch is here so it can be run against any ref before
-# then, which is also how it was verified.
+# promotion.
+#
+# workflow_dispatch does not get you around that. GitHub refuses to dispatch a
+# workflow that is absent from the default branch even when --ref names a
+# branch that has it, so this cannot be exercised end to end until it has been
+# promoted. Dispatch it once after the first promotion rather than assuming the
+# first scheduled run will be the proof.
 
 on:
   schedule:
