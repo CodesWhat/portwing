@@ -987,10 +987,15 @@ Exec tunnel events:
 Growth over time:
 
 <div align="center">
-  <img alt="CodesWhat/portwing star history" src="docs/assets/star-history.svg" width="800" />
+  <a href="https://github.com/CodesWhat/portwing/stargazers">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history-dark.svg" />
+      <img alt="Star history for CodesWhat/portwing" src="docs/assets/star-history.svg" width="900" />
+    </picture>
+  </a>
 </div>
 
-<sub>Generated from GitHub's own stargazer timestamps and committed to the repo, so rendering it costs no third-party request. Refreshed on a schedule; see `.github/workflows/starchart.yml`.</sub>
+<sub>Generated from GitHub's own stargazer timestamps and committed to the repo, so rendering it costs no third-party request. Refreshed at each release cut, so the chart in a released README is as of that release; see `.github/workflows/starchart.yml`.</sub>
 
 ---
 

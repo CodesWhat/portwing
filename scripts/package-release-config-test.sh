@@ -292,6 +292,8 @@ reject_text_ci "README.md" "warpchart.dev" \
 	"the README must not embed a third-party star-history chart; warpchart.dev was the prescribed replacement for three days and is retired org-wide"
 require_file "docs/assets/star-history.svg" \
 	"the committed star-history chart must exist; the README references it by relative path and a missing file renders as a broken image"
+require_file "docs/assets/star-history-dark.svg" \
+	"the dark-theme chart must exist; the README's <picture> names it and a missing srcset target renders as a broken image for every dark-mode reader"
 
 # Rejecting the two retired hosts is only half the contract: it stays satisfied
 # if the chart is dropped from the README entirely, or repointed at some third
@@ -314,6 +316,21 @@ if ! printf '%s\n' "${star_section}" | grep -Eq '<img([[:space:]][^>]*)?[[:space
 	echo "FAIL: the star-history section must render the committed SVG (it needs an <img> whose src attribute is docs/assets/star-history.svg)" >&2
 	failures=$((failures + 1))
 fi
+# The theme pair has to be selected by <picture>, never by a media query inside
+# a single self-theming SVG. A media query in an <img>-embedded SVG resolves
+# against the reader's OS preference, not GitHub's own theme toggle, so one
+# file shows a white card to anyone reading GitHub in dark mode on a light OS.
+# <picture> follows the toggle because GitHub sets color-scheme on the page.
+# That failure is invisible to whoever ships it, since it only appears in the
+# theme combination they are not using.
+if ! printf '%s\n' "${star_section}" | grep -Eq '<source([[:space:]][^>]*)?[[:space:]]media="\(prefers-color-scheme:[[:space:]]*dark\)"'; then
+	echo "FAIL: the star-history section must pick the chart by theme (it needs a <picture> with a <source media=\"(prefers-color-scheme: dark)\">, because a media query inside an <img>-embedded SVG follows the OS, not GitHub's theme toggle)" >&2
+	failures=$((failures + 1))
+fi
+if ! printf '%s\n' "${star_section}" | grep -Eq '<source([[:space:]][^>]*)?[[:space:]]srcset="docs/assets/star-history-dark\.svg"'; then
+	echo "FAIL: the star-history section's dark <source> must point at the committed dark chart (srcset must be docs/assets/star-history-dark.svg)" >&2
+	failures=$((failures + 1))
+fi
 # Catches the next replacement service without having to know its name. This is
 # a regression guard, not an adversary control: it reads the markup literally,
 # so a deliberately entity-encoded host (warpchart&#46;dev) would slip past it.
@@ -330,22 +347,52 @@ fi
 # forms (double, single, bare) and the optional scheme covers protocol-relative
 # //host references. Prose URLs in this section are unaffected: they have no
 # preceding `=`.
+#
+# One carve-out, and it is a distinction rather than an exception: the shape
+# wraps the chart in a link to the stargazers page, so an <a href> to an
+# external host is expected here. A link is navigation the reader chooses, not
+# a resource the browser fetches on render, so it leaks no visitor IP and is
+# not what this check is about. Neutralising href only on <a> open tags keeps
+# every other element in scope, so <use href>, <object data> and data-src are
+# still caught, and so is a style="background:url(//host)" on the anchor
+# itself. Exempting the stargazers URL by name instead would have been an
+# allow-list of one, which is the enumeration mistake described above.
 external_src_pattern="=[[:space:]]*[\"']?(https?:)?//"
-if printf '%s\n' "${star_section}" | grep -Eiq "${external_src_pattern}"; then
+scrubbed_section="$(printf '%s\n' "${star_section}" |
+	sed -E 's@<a[[:space:]]([^>]*[[:space:]])?href="[^"]*"@<a \1href="#"@g')"
+if printf '%s\n' "${scrubbed_section}" | grep -Eiq "${external_src_pattern}"; then
 	echo "FAIL: the star-history section must not load an image from a third party (the chart is committed at docs/assets/star-history.svg)" >&2
 	failures=$((failures + 1))
 fi
 
-# And existence is not content: the refresh workflow commits this file back on a
-# schedule, so a generator that fails halfway can leave a truncated or
+# And existence is not content: the refresh workflow commits these files back at
+# every release cut, so a generator that fails halfway can leave a truncated or
 # wrong-repo SVG in place. The title carries the repo slug, so requiring it
-# proves the file is both a closed SVG document and this repo's chart.
-require_text "docs/assets/star-history.svg" "<title>Star history for CodesWhat/portwing</title>" \
-	"the committed chart must be this repository's chart, not a placeholder or another repo's"
-require_text "docs/assets/star-history.svg" "<path" \
-	"the committed chart must actually plot the series; a titled but empty <svg> renders as blank space, not a broken image"
-require_last_line "docs/assets/star-history.svg" "</svg>" \
-	"the committed chart must be a complete SVG document; a truncated generator run renders as a broken image"
+# proves the file is both a closed SVG document and this repo's chart. Matched
+# as a prefix because the title also carries the live star count, which changes
+# on every refresh; pinning the whole string would fail on the next real one.
+#
+# Both files get the same three checks. Asserting only the light one would let a
+# half-finished generator run ship a broken dark chart, and dark is the half
+# nobody reviewing on a light screen would ever see.
+for chart in docs/assets/star-history.svg docs/assets/star-history-dark.svg; do
+	require_text "$chart" "<title>Star history for CodesWhat/portwing" \
+		"the committed chart must be this repository's chart, not a placeholder or another repo's"
+	require_text "$chart" "<path" \
+		"the committed chart must actually plot the series; a titled but empty <svg> renders as blank space, not a broken image"
+	require_last_line "$chart" "</svg>" \
+		"the committed chart must be a complete SVG document; a truncated generator run renders as a broken image"
+done
+
+# The one failure every check above passes: a renderer that writes the light
+# chart to both paths. Each file is then individually valid, titled, plotted and
+# closed, the <picture> resolves, nothing 404s, and dark-mode readers get a white
+# card anyway. That is the exact defect this whole theme pair exists to prevent,
+# so it is worth asserting directly rather than inferring from the parts.
+if cmp -s docs/assets/star-history.svg docs/assets/star-history-dark.svg; then
+	echo "FAIL: the light and dark charts are byte-identical, so the <picture> selects the same image for both themes (the dark variant should be drawn on the dark canvas with the derived accent)" >&2
+	failures=$((failures + 1))
+fi
 
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
 require_file "NOTICE" "project identity and copyright must live outside the standard license text"

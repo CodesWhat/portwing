@@ -1,11 +1,24 @@
 name: Star Chart
 
-# Regenerates docs/assets/star-history.svg from GitHub's own stargazer
+# Regenerates the docs/assets/star-history.svg pair from GitHub's own stargazer
 # timestamps and commits it back. The chart is a committed artifact rather
 # than a live third-party embed on purpose: a stale SVG is visible and a
 # missing one is a visibly broken image, where a live route renders a
 # plausible card at HTTP 200 forever. It also keeps visitor IPs off a third
 # party, which is what the cookieless posture requires.
+#
+# The trigger is the release cut, not a cron. A committed artifact refreshed on
+# a schedule mutates underneath a tag, which is what "main is the released
+# version" forbids for exactly this file. Regenerating at the cut means the
+# chart in a released README is as of that release.
+#
+# `accent` is this repo's logo colour, #7230d2 from the pigeon neck band, and
+# the registry is ops standards/readme-shape.md. It is required upstream with
+# no default so that a caller cannot silently inherit another repo's brand
+# colour. The dark variant is derived from it rather than passed, so there is
+# only one value to keep in sync, and the workflow emits both files: GitHub's
+# theme toggle drives a <picture> in the README but not a media query inside an
+# <img>-embedded SVG.
 #
 # `branch` has no default upstream and must be the dev branch: ruleset
 # 17620625 requires PRs plus two approvals on main, so a commit-back there
@@ -17,8 +30,8 @@ name: Star Chart
 # do not apply and there is nothing to add here.
 
 on:
-  schedule:
-    - cron: "17 6 * * 1"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions: {}
@@ -27,6 +40,7 @@ jobs:
   starchart:
     permissions:
       contents: write
-    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@96e2765052a5d01ad9db2dffa355636d9e9bde88  # main, 2026-08-20
+    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@a66a777304d657a90161a8859dbc0dfa7d5020f7  # main, 2026-08-21
     with:
       branch: dev/v0.9
+      accent: "#7230d2"
