@@ -83,7 +83,8 @@ RULESET="$(
           { "context": "Dependency Review",         "integration_id": 15368 },
           { "context": "CodeQL Analysis",           "integration_id": 15368 },
           { "context": "Security: Gosec SAST",      "integration_id": 15368 },
-          { "context": "Security: Grype Dependency Scan (Go + npm)", "integration_id": 15368 }
+          { "context": "Security: Grype Dependency Scan (Go + npm)", "integration_id": 15368 },
+          { "context": "Release Contract",          "integration_id": 15368 }
         ]
       }
     },
