@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The star-history chart is a committed SVG instead of a third-party
+  embed.** The README pulled a live chart from `warpchart.dev` on every
+  page view, which sent visitor IPs to a third party and made the section
+  depend on someone else's uptime. It's now generated from GitHub's own
+  stargazer timestamps and committed at `docs/assets/star-history.svg`,
+  referenced by relative path, so rendering it costs no external request.
+  No credential is needed: the Actions `GITHUB_TOKEN` already reads a
+  public repo's stargazers, and a committed artifact needs nothing at
+  runtime. `starchart.yml` refreshes it weekly through the org's reusable
+  workflow, committing back only when the chart actually changed. The
+  generator's output is deterministic, verified byte-for-byte across two
+  runs, so a quiet week is a clean no-op rather than a churn commit.
+
+  This is the second replacement for the same section, which is why
+  `scripts/package-release-config-test.sh` now rejects **both**
+  `star-history.com` and `warpchart.dev` by name in the README. Each was
+  the prescribed answer at some point, and both fail the same quiet way: a
+  live route serves a plausible card at HTTP 200 whether or not it has
+  data, so nothing goes visibly red. A committed file fails loudly instead
+  — stale is readable, missing is a broken image.
+
+  Rejecting the two hosts turned out not to be enough on its own. Both
+  rejects were case-sensitive, so `WARPCHART.DEV` made the identical
+  request and passed, and the paired `require_file` only proved some file
+  sat at the path — the suite stayed green with the chart deleted from the
+  README, repointed elsewhere, or truncated to zero bytes. The contract now
+  matches hostnames in any case, pins the `img` src to the committed path,
+  and requires the SVG to carry this repo's title and a closing tag, which
+  is what catches a scheduled refresh that dies mid-write.
+
 - **CodeRabbit reviews PRs into the dev branch again.** `.coderabbit.yaml`
   set no `reviews.auto_review.base_branches`, which makes CodeRabbit
   auto-review only PRs targeting the default branch. Under the strict

@@ -984,13 +984,13 @@ Exec tunnel events:
 
 <a id="star-history"></a>
 
-Growth over time, via [Warpchart](https://warpchart.dev/r/CodesWhat/portwing):
+Growth over time:
 
 <div align="center">
-  <a href="https://warpchart.dev/r/CodesWhat/portwing">
-    <img alt="CodesWhat/portwing star history · Warpchart" src="https://warpchart.dev/api/chart?repo=CodesWhat%2Fportwing" />
-  </a>
+  <img alt="CodesWhat/portwing star history" src="docs/assets/star-history.svg" width="800" />
 </div>
+
+<sub>Generated from GitHub's own stargazer timestamps and committed to the repo, so rendering it costs no third-party request. Refreshed on a schedule; see `.github/workflows/starchart.yml`.</sub>
 
 ---
 
