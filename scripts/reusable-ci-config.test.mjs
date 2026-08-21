@@ -166,8 +166,10 @@ function assertReusableCaller(source) {
 function assertFixedScripts() {
   for (const [name, markers] of FIXED_SCRIPTS) {
     const scriptPath = path.join(ROOT, "scripts", "ci", name);
-    assert.ok(fs.existsSync(scriptPath), `missing fixed script scripts/ci/${name}`);
-    const stat = fs.statSync(scriptPath);
+    // One stat rather than exists-then-stat, so a file that disappears between
+    // the two calls fails this assertion instead of throwing out of the test.
+    const stat = fs.statSync(scriptPath, { throwIfNoEntry: false });
+    assert.ok(stat, `missing fixed script scripts/ci/${name}`);
     assert.ok((stat.mode & 0o111) !== 0, `scripts/ci/${name} must be executable`);
     const source = fs.readFileSync(scriptPath, "utf8");
     assert.match(source, /^#!\/usr\/bin\/env bash\nset -euo pipefail\n/u);

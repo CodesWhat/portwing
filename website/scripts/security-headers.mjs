@@ -20,8 +20,11 @@ const COMMON_HEADERS = [
 
 function inlineScriptHashes(html) {
   const hashes = new Set();
-  for (const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
-    if (/\ssrc=/.test(match[0])) continue;
+  // Case-insensitive because HTML tag and attribute names are. A <SCRIPT> that
+  // this missed would get no hash, and the CSP would then block a script the
+  // page needs. The <img> scan below was already /gi; this one was not.
+  for (const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)) {
+    if (/\ssrc=/i.test(match[0])) continue;
     const digest = crypto.createHash("sha256").update(match[1]).digest("base64");
     hashes.add(`'sha256-${digest}'`);
   }

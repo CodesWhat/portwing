@@ -50,7 +50,15 @@ test("website source and runtime CSP contain no Go Report Card surface", () => {
 
   const headers = headersForHTML('<img src="https://pkg.go.dev/badge.svg">');
   const csp = headers.find((header) => header.key === "Content-Security-Policy")?.value;
-  assert.doesNotMatch(csp ?? "", /goreportcard\.com/i);
+  // Substring rather than an unanchored regex. CodeQL flags a hostname regex
+  // with no anchor as a bypass, which is right for an allow-list test and
+  // backwards for this one: unanchored is what makes a deny check catch the
+  // host wherever it appears. A plain case-folded includes says exactly that
+  // and leaves nothing to misread.
+  assert.ok(
+    !(csp ?? "").toLowerCase().includes("goreportcard.com"),
+    "CSP must not allow goreportcard.com",
+  );
 });
 
 test("build output packages the exact rendered files and per-page CSP", () => {

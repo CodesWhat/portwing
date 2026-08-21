@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The four open CodeQL alerts that extending the scan to JavaScript
+  surfaced.** Adding JS/TS coverage found them on 2026-08-20 and nothing acted
+  on them, which is the half of adding a scanner that actually matters. All
+  four were in build and test tooling; none were in the shipped agent.
+
+  The one worth reading is `js/bad-tag-filter` in the website's CSP generator.
+  It collected inline-script hashes with a case-sensitive regex, so a `<SCRIPT>`
+  written in upper case got no hash and the emitted CSP would then block a
+  script the page needs. The `<img>` scan four lines below it was already
+  case-insensitive, so this was an oversight rather than a decision. Verified by
+  behaviour, not by the alert clearing: the old pattern hashes one of two inline
+  scripts in a fixture, the new one hashes both.
+
+  Two `js/file-system-race` findings were `existsSync` followed by `statSync`,
+  in the page-weight gate and a CI config test. Both now take a single
+  `statSync({ throwIfNoEntry: false })`, so a file that disappears between the
+  two calls fails the check it is meant to fail instead of throwing.
+
+  The fourth, `js/regex/missing-regexp-anchor`, was a false positive: an
+  unanchored hostname regex is a bypass in an allow-list test and is exactly
+  what makes a deny test correct. Rewritten as a case-folded substring check
+  rather than dismissed, so the assertion says what it means and the rule has
+  nothing left to flag.
+
 - **The star-chart refresh now fires on the `v*` tag push, which is the only
   trigger that actually works.** v0.9.7 shipped it as an explicit dispatch from
   `release.yml`, and that failed on the first real release with

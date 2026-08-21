@@ -158,7 +158,11 @@ export function measurePage(
       rootOutputRoot,
     });
     if (!assetPath || files.has(assetPath)) continue;
-    if (!fs.existsSync(assetPath) || !fs.statSync(assetPath).isFile()) {
+    // One stat rather than exists-then-stat: the two calls can disagree, and
+    // the second one throws on a file that vanished between them, which would
+    // surface as a stack trace instead of this message.
+    const assetStat = fs.statSync(assetPath, { throwIfNoEntry: false });
+    if (!assetStat?.isFile()) {
       throw new Error(`missing local asset for ${route}: ${url}`);
     }
     files.add(assetPath);
