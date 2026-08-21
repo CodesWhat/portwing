@@ -61,6 +61,20 @@ reject_text() {
 	fi
 }
 
+# Case-insensitive variant, for rejecting hostnames. Hostnames resolve the same
+# in any case, so a case-sensitive reject is trivially defeated by an embed
+# written as WARPCHART.DEV, which makes the identical third-party request.
+reject_text_ci() {
+	local file="$1"
+	local text="$2"
+	local description="$3"
+
+	if grep -Fiq -- "$text" "$file"; then
+		echo "FAIL: ${description} (${file} must not contain, in any case: ${text})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
 require_text ".goreleaser.yml" "nfpms:" "GoReleaser must define native Linux packages"
 require_text ".goreleaser.yml" "formats: [deb, rpm]" "GoReleaser must build deb and rpm packages"
 require_text ".goreleaser.yml" "src: scripts/portwing.service" "native packages must include the systemd unit"
@@ -259,12 +273,30 @@ fi
 # SVG fails loudly instead: stale is readable, missing is a broken image.
 # Rejecting the hostnames also keeps visitor IPs off a third party, which is
 # what the cookieless analytics posture requires.
-reject_text "README.md" "star-history.com" \
+reject_text_ci "README.md" "star-history.com" \
 	"the README must not embed a third-party star-history chart; the chart is committed at docs/assets/star-history.svg"
-reject_text "README.md" "warpchart.dev" \
+reject_text_ci "README.md" "warpchart.dev" \
 	"the README must not embed a third-party star-history chart; warpchart.dev was the prescribed replacement for three days and is retired org-wide"
 require_file "docs/assets/star-history.svg" \
 	"the committed star-history chart must exist; the README references it by relative path and a missing file renders as a broken image"
+
+# Rejecting the two retired hosts is only half the contract: it stays satisfied
+# if the chart is dropped from the README entirely, or repointed at some third
+# host nobody has thought to name yet. Pin the img tag to the committed path so
+# the only way to pass is to actually ship the local chart.
+if ! grep -Eq '<img[^>]*src="docs/assets/star-history\.svg"' README.md; then
+	echo "FAIL: the README must render the star-history chart from the committed SVG (README.md needs an <img> whose src is docs/assets/star-history.svg)" >&2
+	failures=$((failures + 1))
+fi
+
+# And existence is not content: the refresh workflow commits this file back on a
+# schedule, so a generator that fails halfway can leave a truncated or
+# wrong-repo SVG in place. The title carries the repo slug, so requiring it
+# proves the file is both a closed SVG document and this repo's chart.
+require_text "docs/assets/star-history.svg" "<title>Star history for CodesWhat/portwing</title>" \
+	"the committed chart must be this repository's chart, not a placeholder or another repo's"
+require_text "docs/assets/star-history.svg" "</svg>" \
+	"the committed chart must be a complete SVG document; a truncated generator run renders as a broken image"
 
 require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
 require_file "NOTICE" "project identity and copyright must live outside the standard license text"
