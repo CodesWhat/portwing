@@ -25,9 +25,11 @@ name: Star Chart
 #   accessible by personal access token". Creating a workflow_dispatch is an
 #   Actions API write and RELEASE_PAT carries only Contents RW; contents: write
 #   does not imply actions: write. Suppression is NOT the reason here, and
-#   GITHUB_TOKEN would have hit the same wall: workflow_dispatch and
-#   repository_dispatch are the two documented exceptions to the rule above, so
-#   a dispatch needs the Actions scope whichever credential carries it.
+#   GITHUB_TOKEN would have hit the same wall: workflow_dispatch is exempt from
+#   the rule above, as is repository_dispatch, so a dispatch needs the Actions
+#   scope whichever credential carries it. (Do not read that exemption as "only
+#   these two ever run": a GITHUB_TOKEN pull_request also creates a run, but an
+#   approval-gated one. The dispatch pair is what fires unattended.)
 #
 # The tag push works and is already proven in this repo: release-cut.yml pushes
 # the v* tag with RELEASE_PAT precisely so downstream workflows fire, and

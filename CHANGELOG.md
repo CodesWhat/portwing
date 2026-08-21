@@ -53,9 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GITHUB_TOKEN` and GitHub creates no workflow run for an event emitted with
   that credential. The 403 is not that: creating a workflow dispatch is an
   Actions API write, and `contents: write` does not imply `actions: write`.
-  `GITHUB_TOKEN` would have hit the same wall, because `workflow_dispatch` and
-  `repository_dispatch` are the two documented exceptions to the suppression
-  rule.
+  `GITHUB_TOKEN` would have hit the same wall, because `workflow_dispatch` is
+  exempt from the suppression rule, as is `repository_dispatch`. That exemption
+  is not the same as "only those two ever run": a `GITHUB_TOKEN` `pull_request`
+  also creates a run, just an approval-gated one. The dispatch pair is what
+  fires unattended.
 
   The tag push needed nothing new: `release-cut.yml` already pushes the `v*`
   tag with `RELEASE_PAT` so that downstream workflows fire, which is how
