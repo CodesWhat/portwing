@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The star-chart refresh now fires on the `v*` tag push, which is the only
+  trigger that actually works.** v0.9.7 shipped it as an explicit dispatch from
+  `release.yml`, and that failed on the first real release with
+  `HTTP 403: Resource not accessible by personal access token`: `RELEASE_PAT`
+  carries Contents RW, and creating a workflow dispatch needs Actions write.
+
+  Both earlier attempts failed for the same underlying reason, that GitHub
+  suppresses workflow runs for events emitted by `GITHUB_TOKEN`. A
+  `release: [published]` trigger is inert because GoReleaser publishes with
+  `GITHUB_TOKEN`; dispatching with `GITHUB_TOKEN` instead of the PAT would have
+  been worse than the 403, because that call returns success and creates no run.
+
+  The tag push needed nothing new: `release-cut.yml` already pushes the `v*`
+  tag with `RELEASE_PAT` so that downstream workflows fire, which is how
+  `release.yml` has always been triggered. The `starchart-refresh` job is
+  removed from `release.yml` and the contract now asserts the working trigger is
+  present as well as the broken one being absent.
+
+### Changed
+
+- **Both reusable-workflow callers re-pinned to `11004e4`.** The organisation's
+  `starchart-refresh.yml` and `main-is-released.yml` moved together. Verified
+  before adopting: the `on:` and inputs surface of both is byte-identical to the
+  previous pin, so nothing in either caller changes but the SHA. The upstream
+  changes tighten `main-is-released` so that a tag named `snapshot` no longer
+  satisfies the invariant, and stop a promotion merge reporting drift for the
+  seconds between the merge and the tag push.
+
 ## [v0.9.7] - 2026-08-21
 
 ### Added
