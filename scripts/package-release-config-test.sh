@@ -318,7 +318,20 @@ fi
 # a regression guard, not an adversary control: it reads the markup literally,
 # so a deliberately entity-encoded host (warpchart&#46;dev) would slip past it.
 # Worth knowing, not worth an HTML decoder in shell.
-if printf '%s\n' "${star_section}" | grep -Eiq 'src="https?:'; then
+#
+# Deliberately not restricted to <img src>, and deliberately not a list of
+# attribute names either. Any attribute pointing at an external host is a
+# third-party request from this section — data-src is fetched by lazy-loaders,
+# <object data=> and <use href=> load too — and enumerating the attributes
+# worth checking is the same mistake as enumerating the hosts worth rejecting:
+# it only ever covers the ones already thought of. A reject is the one place
+# where matching too much is the safe direction, so this matches any attribute
+# whose value is an external URL. The quote handling covers the three legal
+# forms (double, single, bare) and the optional scheme covers protocol-relative
+# //host references. Prose URLs in this section are unaffected: they have no
+# preceding `=`.
+external_src_pattern="=[[:space:]]*[\"']?(https?:)?//"
+if printf '%s\n' "${star_section}" | grep -Eiq "${external_src_pattern}"; then
 	echo "FAIL: the star-history section must not load an image from a third party (the chart is committed at docs/assets/star-history.svg)" >&2
 	failures=$((failures + 1))
 fi
