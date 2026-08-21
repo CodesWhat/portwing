@@ -27,7 +27,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moving the unshipped work back to a dev branch, and both are decisions about
   what users see rather than something to quietly resolve.
 
+### Removed
+
+- **The local `CODE_OF_CONDUCT.md`, in favour of the organisation-wide one.**
+  The `.github` repository serves a Code of Conduct to every repository that
+  does not carry its own, so a local copy opts this repository out of that
+  permanently and nobody remembers to edit two files. Both documents named the
+  same reporting address, `security@codeswhat.com`, so nothing about where a
+  report goes changes; the organisation-wide document is the full Contributor
+  Covenant 2.1 with the enforcement ladder, where the local copy was a
+  fifteen-line summary. The README and `GOVERNANCE.md` now link to it directly
+  rather than by relative path, which would have 404'd once the file was gone.
+
 ### Changed
+
+- **The star-history chart refresh is dispatched from `release.yml` instead of
+  being triggered by the release event.** GitHub suppresses workflow runs for
+  events emitted by `GITHUB_TOKEN`, and GoReleaser publishes the release with
+  exactly that credential, so a `release: [published]` trigger on the chart
+  workflow fires and starts nothing. The workflow would have read as correctly
+  wired while silently never running, and the only symptom would have been a
+  chart that quietly stopped updating, which is the failure a committed
+  artifact was chosen to avoid in the first place. This repository already
+  documented the same hazard for tag pushes in `release-cut.yml`, which is why
+  the `v*` tag is pushed with `RELEASE_PAT`.
+
+  The refresh is now a `starchart-refresh` job in `release.yml`, gated on the
+  release job, dispatching the chart workflow with `RELEASE_PAT`. It needs no
+  new credential and fails in its own job rather than after the release has
+  already published. The release contract asserts both halves: that the
+  dispatch exists, and that the chart workflow has no `release:` trigger.
 
 - **The star-history chart ships as a light/dark pair, chosen by the README.**
   The renderer upstream now draws the chart to the house shape and emits both
