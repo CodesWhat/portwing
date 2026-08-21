@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The star-history chart ships as a light/dark pair, chosen by the README.**
+  The renderer upstream now draws the chart to the house shape and emits both
+  `docs/assets/star-history.svg` and `docs/assets/star-history-dark.svg` from
+  one fetch, and the README selects between them with a `<picture>` element.
+  A single self-theming SVG could not do this: a media query inside an SVG
+  loaded through `<img>` resolves against the reader's OS preference, not
+  GitHub's own theme toggle, so anyone reading GitHub in dark mode on a light
+  OS got a white card. `<picture>` follows the toggle. The `<img>` stays as the
+  fallback so raw file views and mirrors still render.
+
+  The refresh workflow is re-pinned to the paired renderer and now passes this
+  repository's accent colour, which upstream requires with no default so a
+  caller cannot silently inherit another repository's brand. Its trigger moves
+  from a weekly cron to a published release: a committed artifact refreshed on a
+  schedule mutates underneath a tag that already points at it. Because
+  `release: [published]` fires after the tag exists and the refresh commits to
+  the dev branch, each chart ships with the following release, which is a
+  one-release lag rather than a chart that is current as of its own tag.
+
+  The release contract grew checks for all of it, each one verified by mutation
+  rather than by reading it back. Two gaps turned up that way: a `<source>`
+  outside its `<picture>` is inert markup that satisfied every other check
+  while silently serving the light chart to everyone, and an external URL
+  inside a CSS `url()` is not preceded by `=`, so it slipped the
+  third-party-reference pattern entirely.
+
 - **`Release Contract` is declared as a required check on `main`.**
   `scripts/apply-branch-protection.sh` now lists it alongside the other
   twelve. The job has been running and passing on `main` since the change
