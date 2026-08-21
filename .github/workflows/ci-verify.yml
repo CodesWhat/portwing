@@ -357,3 +357,40 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+
+  # scripts/package-release-config-test.sh is also run by release-cut.yml, and
+  # that remains the gate that blocks a bad tag. The problem it doesn't solve is
+  # timing: release-cut only runs when a tag is being cut, so a change that
+  # breaks the contract stayed green from the PR that introduced it until
+  # someone tried to ship, and the person who has to fix it is whoever is
+  # mid-release rather than whoever wrote it.
+  #
+  # Deliberately carries no `if:` condition. A required context that evaluates
+  # to skipped reports SKIPPED rather than success, and on a promotion PR the
+  # push run and the PR run race to be last — which is how a required check
+  # ended up blocking a merge here before. Always running is what keeps that
+  # from recurring.
+  release-contract:
+    name: "Release Contract"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Pure grep/awk/shasum over files already in the checkout, so the only
+      # network this job needs is the clone itself.
+      - name: Verify the package release contract
+        run: bash scripts/package-release-config-test.sh

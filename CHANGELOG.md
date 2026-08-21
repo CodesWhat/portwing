@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The package release contract runs on every push and PR, not only when a
+  tag is cut.** `scripts/package-release-config-test.sh` is what keeps the
+  README, docs site, website, installation examples, Dockerfiles, and
+  GoReleaser config agreeing with each other and with CHANGELOG's newest
+  release. It was wired into `release-cut.yml` only, so a change that broke
+  it stayed green from the PR that introduced it right up until someone
+  tried to ship — and the person who then had to fix it was whoever was
+  mid-release, not whoever wrote it. It now also runs as a `Release
+  Contract` CI job and as a lefthook pre-push step. `release-cut.yml`
+  keeps its copy: that's the gate that actually blocks a bad tag.
+
+  The CI job carries no `if:` condition on purpose. A required context that
+  evaluates to skipped reports SKIPPED rather than success, and on a
+  promotion PR the push run and the PR run race to land last, which has
+  already blocked a merge in this repo once.
+
 - **The star-history chart is a committed SVG instead of a third-party
   embed.** The README pulled a live chart from `warpchart.dev` on every
   page view, which sent visitor IPs to a third party and made the section
