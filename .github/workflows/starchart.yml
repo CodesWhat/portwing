@@ -13,18 +13,23 @@ name: Star Chart
 # only ever moves when something ships.
 #
 # The trigger is the v* tag push, and picking it took two wrong answers first.
-# Both failed the same way: GitHub suppresses workflow runs for events emitted
-# by GITHUB_TOKEN.
+# They failed for DIFFERENT reasons, which is worth keeping apart: only one of
+# them can be fixed by granting something.
 #
 #   `release: [published]`, which the shared workflow documents, is inert here.
-#   release.yml publishes via GoReleaser with GITHUB_TOKEN, so the event fires
-#   and starts nothing. It would read as correctly wired and silently never run.
+#   release.yml publishes via GoReleaser with GITHUB_TOKEN, and GitHub creates
+#   no workflow run for an event emitted with that credential. It would read as
+#   correctly wired and silently never run. Nothing grants past this.
 #
-#   Dispatching from release.yml with RELEASE_PAT fails at the other end:
-#   RELEASE_PAT carries Contents RW, and creating a workflow_dispatch needs
-#   Actions write, so the API returns 403. Dispatching with GITHUB_TOKEN instead
-#   would be worse than the 403, because that call returns success and creates
-#   no run at all.
+#   Dispatching from release.yml with RELEASE_PAT returns 403, "Resource not
+#   accessible by personal access token". Creating a workflow_dispatch is an
+#   Actions API write and RELEASE_PAT carries only Contents RW; contents: write
+#   does not imply actions: write. Suppression is NOT the reason here, and
+#   GITHUB_TOKEN would have hit the same wall: workflow_dispatch is exempt from
+#   the rule above, as is repository_dispatch, so a dispatch needs the Actions
+#   scope whichever credential carries it. (Do not read that exemption as "only
+#   these two ever run": a GITHUB_TOKEN pull_request also creates a run, but an
+#   approval-gated one. The dispatch pair is what fires unattended.)
 #
 # The tag push works and is already proven in this repo: release-cut.yml pushes
 # the v* tag with RELEASE_PAT precisely so downstream workflows fire, and

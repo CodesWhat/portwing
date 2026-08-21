@@ -47,11 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HTTP 403: Resource not accessible by personal access token`: `RELEASE_PAT`
   carries Contents RW, and creating a workflow dispatch needs Actions write.
 
-  Both earlier attempts failed for the same underlying reason, that GitHub
-  suppresses workflow runs for events emitted by `GITHUB_TOKEN`. A
+  The two earlier attempts failed for different reasons, which is worth keeping
+  apart because only one of them can be fixed by granting something. A
   `release: [published]` trigger is inert because GoReleaser publishes with
-  `GITHUB_TOKEN`; dispatching with `GITHUB_TOKEN` instead of the PAT would have
-  been worse than the 403, because that call returns success and creates no run.
+  `GITHUB_TOKEN` and GitHub creates no workflow run for an event emitted with
+  that credential. The 403 is not that: creating a workflow dispatch is an
+  Actions API write, and `contents: write` does not imply `actions: write`.
+  `GITHUB_TOKEN` would have hit the same wall, because `workflow_dispatch` is
+  exempt from the suppression rule, as is `repository_dispatch`. That exemption
+  is not the same as "only those two ever run": a `GITHUB_TOKEN` `pull_request`
+  also creates a run, just an approval-gated one. The dispatch pair is what
+  fires unattended.
 
   The tag push needed nothing new: `release-cut.yml` already pushes the `v*`
   tag with `RELEASE_PAT` so that downstream workflows fire, which is how
