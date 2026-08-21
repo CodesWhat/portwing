@@ -22,9 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The refresh workflow is re-pinned to the paired renderer and now passes this
   repository's accent colour, which upstream requires with no default so a
   caller cannot silently inherit another repository's brand. Its trigger moves
-  from a weekly cron to the release cut: a committed artifact refreshed on a
-  schedule mutates underneath a tag, and the chart in a released README should
-  be the chart as of that release.
+  from a weekly cron to a published release: a committed artifact refreshed on a
+  schedule mutates underneath a tag that already points at it. Because
+  `release: [published]` fires after the tag exists and the refresh commits to
+  the dev branch, each chart ships with the following release, which is a
+  one-release lag rather than a chart that is current as of its own tag.
 
   The release contract grew checks for all of it, each one verified by mutation
   rather than by reading it back. Two gaps turned up that way: a `<source>`

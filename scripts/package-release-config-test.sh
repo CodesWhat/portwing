@@ -324,21 +324,29 @@ fi
 # That failure is invisible to whoever ships it, since it only appears in the
 # theme combination they are not using.
 #
-# The <picture> wrapper is asserted separately from the <source> inside it,
-# because deleting just the wrapper leaves both child elements in place and every
-# other check here still satisfied. A bare <source> next to an <img> is inert
-# markup: the browser ignores the source and every reader gets the light chart,
-# which is precisely the bug the pair exists to fix, shipped silently.
-if ! printf '%s\n' "${star_section}" | grep -Fq '<picture>'; then
+# Asserted as ONE <source> tag inside the <picture>, carrying BOTH attributes,
+# rather than as three independent checks for a <picture>, a dark media query and
+# a dark srcset. Three independent checks are all satisfied by markup that
+# renders the light chart to everyone: the media query on one element and the
+# srcset on another, or a correct-looking <source> sitting outside the <picture>
+# where the browser ignores it. Each part being present somewhere in the section
+# is not the same as the parts being wired together, which is the same defect
+# this file has now been bitten by three times in different places.
+#
+# The section is flattened to a single line first so the extraction survives the
+# block being reformatted across lines, and the two attribute orders are matched
+# explicitly because ERE has no lookahead to do it order-independently.
+picture_block="$(printf '%s\n' "${star_section}" | tr '\n' ' ' |
+	sed -n 's/.*<picture>\(.*\)<\/picture>.*/\1/p')"
+if [ -z "${picture_block}" ]; then
 	echo "FAIL: the star-history section must wrap the chart in a <picture> element (a <source> outside a <picture> is inert, and every reader silently gets the light chart)" >&2
 	failures=$((failures + 1))
 fi
-if ! printf '%s\n' "${star_section}" | grep -Eq '<source([[:space:]][^>]*)?[[:space:]]media="\(prefers-color-scheme:[[:space:]]*dark\)"'; then
-	echo "FAIL: the star-history section must pick the chart by theme (it needs a <picture> with a <source media=\"(prefers-color-scheme: dark)\">, because a media query inside an <img>-embedded SVG follows the OS, not GitHub's theme toggle)" >&2
-	failures=$((failures + 1))
-fi
-if ! printf '%s\n' "${star_section}" | grep -Eq '<source([[:space:]][^>]*)?[[:space:]]srcset="docs/assets/star-history-dark\.svg"'; then
-	echo "FAIL: the star-history section's dark <source> must point at the committed dark chart (srcset must be docs/assets/star-history-dark.svg)" >&2
+dark_source_pattern='<source[^>]*[[:space:]]media="\(prefers-color-scheme:[[:space:]]*dark\)"[^>]*[[:space:]]srcset="docs/assets/star-history-dark\.svg"'
+dark_source_pattern_swapped='<source[^>]*[[:space:]]srcset="docs/assets/star-history-dark\.svg"[^>]*[[:space:]]media="\(prefers-color-scheme:[[:space:]]*dark\)"'
+if ! printf '%s\n' "${picture_block}" |
+	grep -Eq "${dark_source_pattern}|${dark_source_pattern_swapped}"; then
+	echo 'FAIL: the star-history section needs a single <source> inside its <picture> carrying both media="(prefers-color-scheme: dark)" and srcset="docs/assets/star-history-dark.svg" (split across two elements, or placed outside the <picture>, the browser ignores it and every reader gets the light chart)' >&2
 	failures=$((failures + 1))
 fi
 # Catches the next replacement service without having to know its name. This is

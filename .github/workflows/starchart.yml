@@ -7,10 +7,17 @@ name: Star Chart
 # plausible card at HTTP 200 forever. It also keeps visitor IPs off a third
 # party, which is what the cookieless posture requires.
 #
-# The trigger is the release cut, not a cron. A committed artifact refreshed on
-# a schedule mutates underneath a tag, which is what "main is the released
-# version" forbids for exactly this file. Regenerating at the cut means the
-# chart in a released README is as of that release.
+# The trigger is a published release, not a cron. A committed artifact refreshed
+# on a schedule mutates underneath a tag, which is what "main is the released
+# version" forbids for exactly this file. Tying it to releases means the chart
+# only ever moves when something ships.
+#
+# It does NOT mean the chart inside tag vN is as of vN. `release: [published]`
+# fires after the tag already exists, and the refresh commits to the dev branch
+# below, so each chart ships with the FOLLOWING release. That is a deliberate
+# one-release lag, not an accident: regenerating before the tag would mean
+# committing to the release branch mid-cut. The bound that matters is that the
+# artifact never changes underneath a tag that already points at it.
 #
 # `accent` is this repo's logo colour, #7230d2 from the pigeon neck band, and
 # the registry is ops standards/readme-shape.md. It is required upstream with

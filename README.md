@@ -995,7 +995,7 @@ Growth over time:
   </a>
 </div>
 
-<sub>Generated from GitHub's own stargazer timestamps and committed to the repo, so rendering it costs no third-party request. Refreshed at each release cut, so the chart in a released README is as of that release; see `.github/workflows/starchart.yml`.</sub>
+<sub>Generated from GitHub's own stargazer timestamps and committed to the repo, so rendering it costs no third-party request. Refreshed when a release is published rather than on a schedule, so it never changes underneath a tag that already points at it; each chart ships with the following release. See `.github/workflows/starchart.yml`.</sub>
 
 ---
 
