@@ -103,7 +103,7 @@ flowchart LR
 | OpenAPI Spec | [`api/openapi.yaml`](api/openapi.yaml) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Code of Conduct | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
+| Code of Conduct | [Contributor Covenant 2.1](https://github.com/CodesWhat/.github/blob/main/CODE_OF_CONDUCT.md) (organisation-wide) |
 | Governance | [`GOVERNANCE.md`](GOVERNANCE.md) |
 | Security Assurance | [`SECURITY-ASSURANCE.md`](SECURITY-ASSURANCE.md) |
 | Security Policy | [`SECURITY.md`](SECURITY.md) |
@@ -995,7 +995,7 @@ Growth over time:
   </a>
 </div>
 
-<sub>Generated from GitHub's own stargazer timestamps and committed to the repo, so rendering it costs no third-party request. Refreshed when a release is published rather than on a schedule, so it never changes underneath a tag that already points at it; each chart ships with the following release. See `.github/workflows/starchart.yml`.</sub>
+<sub>Generated from GitHub's own stargazer timestamps and committed to the repo, so rendering it costs no third-party request. Refreshed at each release rather than on a schedule, so it never changes underneath a tag that already points at it; each chart ships with the following release. See `.github/workflows/starchart.yml`.</sub>
 
 ---
 
