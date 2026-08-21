@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   data, so nothing goes visibly red. A committed file fails loudly instead
   — stale is readable, missing is a broken image.
 
+  Rejecting the two hosts turned out not to be enough on its own. Both
+  rejects were case-sensitive, so `WARPCHART.DEV` made the identical
+  request and passed, and the paired `require_file` only proved some file
+  sat at the path — the suite stayed green with the chart deleted from the
+  README, repointed elsewhere, or truncated to zero bytes. The contract now
+  matches hostnames in any case, pins the `img` src to the committed path,
+  and requires the SVG to carry this repo's title and a closing tag, which
+  is what catches a scheduled refresh that dies mid-write.
+
 - **CodeRabbit reviews PRs into the dev branch again.** `.coderabbit.yaml`
   set no `reviews.auto_review.base_branches`, which makes CodeRabbit
   auto-review only PRs targeting the default branch. Under the strict
