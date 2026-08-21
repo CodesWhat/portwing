@@ -5,9 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v0.9.8] - 2026-08-21
 
 ### Fixed
+
+- **A test that raced its own script and failed a required gate.**
+  `TestExecute_MergesStdoutAndStderr` writes a shell script and then execs it,
+  while marked `t.Parallel()`. Any concurrent fork in the process inherits the
+  still-open write descriptor, and exec of a file held open for writing returns
+  `ETXTBSY` — `fork/exec .../compose-both.sh: text file busy`, which is what CI
+  reported. Dropping `t.Parallel()` closes it deterministically, because Go
+  resumes parallel tests only once the serial ones finish, so nothing else in
+  the package can fork while this test writes and execs. The four other tests
+  here that write a fake binary were already serial for their own reasons,
+  which is why this was the only one exposed. Not a retry and not a skip.
 
 - **The four open CodeQL alerts that extending the scan to JavaScript
   surfaced.** Adding JS/TS coverage found them on 2026-08-20 and nothing acted
