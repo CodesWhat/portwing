@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`Release Contract` is declared as a required check on `main`.**
+  `scripts/apply-branch-protection.sh` now lists it alongside the other
+  twelve. The job has been running and passing on `main` since the change
+  below landed, so the context exists before anything requires it —
+  declaring a context that never posts would block every PR on a check
+  that can never go green. Applying it is still the one human-run step;
+  the script is the declared state, not the live state.
+
 - **The package release contract runs on every push and PR, not only when a
   tag is cut.** `scripts/package-release-config-test.sh` is what keeps the
   README, docs site, website, installation examples, Dockerfiles, and
