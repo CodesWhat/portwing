@@ -323,6 +323,16 @@ fi
 # <picture> follows the toggle because GitHub sets color-scheme on the page.
 # That failure is invisible to whoever ships it, since it only appears in the
 # theme combination they are not using.
+#
+# The <picture> wrapper is asserted separately from the <source> inside it,
+# because deleting just the wrapper leaves both child elements in place and every
+# other check here still satisfied. A bare <source> next to an <img> is inert
+# markup: the browser ignores the source and every reader gets the light chart,
+# which is precisely the bug the pair exists to fix, shipped silently.
+if ! printf '%s\n' "${star_section}" | grep -Fq '<picture>'; then
+	echo "FAIL: the star-history section must wrap the chart in a <picture> element (a <source> outside a <picture> is inert, and every reader silently gets the light chart)" >&2
+	failures=$((failures + 1))
+fi
 if ! printf '%s\n' "${star_section}" | grep -Eq '<source([[:space:]][^>]*)?[[:space:]]media="\(prefers-color-scheme:[[:space:]]*dark\)"'; then
 	echo "FAIL: the star-history section must pick the chart by theme (it needs a <picture> with a <source media=\"(prefers-color-scheme: dark)\">, because a media query inside an <img>-embedded SVG follows the OS, not GitHub's theme toggle)" >&2
 	failures=$((failures + 1))
@@ -354,10 +364,14 @@ fi
 # a resource the browser fetches on render, so it leaks no visitor IP and is
 # not what this check is about. Neutralising href only on <a> open tags keeps
 # every other element in scope, so <use href>, <object data> and data-src are
-# still caught, and so is a style="background:url(//host)" on the anchor
-# itself. Exempting the stargazers URL by name instead would have been an
+# still caught. Exempting the stargazers URL by name instead would have been an
 # allow-list of one, which is the enumeration mistake described above.
-external_src_pattern="=[[:space:]]*[\"']?(https?:)?//"
+#
+# The url(...) alternation is not decoration: an external reference inside a CSS
+# value is not preceded by `=`, so style="background:url(//host/x.png)" slipped
+# the attribute pattern entirely. Found by mutation, not by reading it back —
+# the comment here previously claimed that case was covered when it was not.
+external_src_pattern="(=|url\()[[:space:]]*[\"']?(https?:)?//"
 scrubbed_section="$(printf '%s\n' "${star_section}" |
 	sed -E 's@<a[[:space:]]([^>]*[[:space:]])?href="[^"]*"@<a \1href="#"@g')"
 if printf '%s\n' "${scrubbed_section}" | grep -Eiq "${external_src_pattern}"; then
