@@ -1,0 +1,32 @@
+name: Star Chart
+
+# Regenerates docs/assets/star-history.svg from GitHub's own stargazer
+# timestamps and commits it back. The chart is a committed artifact rather
+# than a live third-party embed on purpose: a stale SVG is visible and a
+# missing one is a visibly broken image, where a live route renders a
+# plausible card at HTTP 200 forever. It also keeps visitor IPs off a third
+# party, which is what the cookieless posture requires.
+#
+# `branch` has no default upstream and must be the dev branch: ruleset
+# 17620625 requires PRs plus two approvals on main, so a commit-back there
+# would be rejected. The reusable workflow rejects main/master before
+# checkout rather than dying at the push.
+#
+# The reusable workflow declares its own harden-runner as its first step, and
+# this caller job has no steps of its own, so this repo's egress allow-lists
+# do not apply and there is nothing to add here.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  starchart:
+    permissions:
+      contents: write
+    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@96e2765052a5d01ad9db2dffa355636d9e9bde88  # main, 2026-08-20
+    with:
+      branch: dev/v0.9
