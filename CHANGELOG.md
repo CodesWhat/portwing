@@ -14,24 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on them, which is the half of adding a scanner that actually matters. All
   four were in build and test tooling; none were in the shipped agent.
 
+  The first attempt at all four moved them instead of fixing them. CodeQL closed
+  two and opened two fresh ones on the shifted lines, and the other two never
+  closed at all. An edit that keeps a rule quiet is not the same as one that
+  removes the defect, and only re-running the scan tells the two apart.
+
   The one worth reading is `js/bad-tag-filter` in the website's CSP generator.
-  It collected inline-script hashes with a case-sensitive regex, so a `<SCRIPT>`
-  written in upper case got no hash and the emitted CSP would then block a
-  script the page needs. The `<img>` scan four lines below it was already
-  case-insensitive, so this was an oversight rather than a decision. Verified by
-  behaviour, not by the alert clearing: the old pattern hashes one of two inline
-  scripts in a fixture, the new one hashes both.
+  It collected inline-script hashes with a pattern that recognised only
+  `<script>...</script>` in lower case with an exact end tag. A browser also
+  accepts `<SCRIPT>`, `</script >` and `</script foo="bar">`, and every form the
+  scan missed got no hash, so the emitted CSP would block a script the page
+  needs: silent at build time and fatal in the browser. The end tag now mirrors
+  the start tag and the whole pattern is case-insensitive. Verified by behaviour
+  rather than by the alert clearing, with a test that hashes five tag forms and
+  that fails on each of the two earlier patterns.
 
-  Two `js/file-system-race` findings were `existsSync` followed by `statSync`,
-  in the page-weight gate and a CI config test. Both now take a single
-  `statSync({ throwIfNoEntry: false })`, so a file that disappears between the
-  two calls fails the check it is meant to fail instead of throwing.
+  Two `js/file-system-race` findings were a path check followed by a read of the
+  same path, in the page-weight gate and a CI config test. Both now open the
+  file once and take size, mode and contents from that one descriptor, so the
+  two lookups cannot land on different files. Measured before and after: the
+  page-weight totals are byte-identical.
 
-  The fourth, `js/regex/missing-regexp-anchor`, was a false positive: an
-  unanchored hostname regex is a bypass in an allow-list test and is exactly
-  what makes a deny test correct. Rewritten as a case-folded substring check
-  rather than dismissed, so the assertion says what it means and the rule has
-  nothing left to flag.
+  The fourth was a test asserting that the CSP does not name Go Report Card.
+  Naming one host in a deny check only catches the host you thought of, and
+  writing that check as a substring or an unanchored regex is itself the bypass
+  pattern the scanner flags. It now asserts the CSP's entire external origin
+  list, which is the stronger claim and leaves the rule nothing to match.
 
 - **The star-chart refresh now fires on the `v*` tag push, which is the only
   trigger that actually works.** v0.9.7 shipped it as an explicit dispatch from

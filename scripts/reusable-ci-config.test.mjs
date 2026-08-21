@@ -166,12 +166,24 @@ function assertReusableCaller(source) {
 function assertFixedScripts() {
   for (const [name, markers] of FIXED_SCRIPTS) {
     const scriptPath = path.join(ROOT, "scripts", "ci", name);
-    // One stat rather than exists-then-stat, so a file that disappears between
-    // the two calls fails this assertion instead of throwing out of the test.
-    const stat = fs.statSync(scriptPath, { throwIfNoEntry: false });
-    assert.ok(stat, `missing fixed script scripts/ci/${name}`);
-    assert.ok((stat.mode & 0o111) !== 0, `scripts/ci/${name} must be executable`);
-    const source = fs.readFileSync(scriptPath, "utf8");
+    // Mode and contents both come off one descriptor. Statting the path and
+    // then reading it is two lookups that can land on different files, which
+    // would let this assert the mode of one script and the body of another.
+    let fd;
+    try {
+      fd = fs.openSync(scriptPath, "r");
+    } catch (error) {
+      assert.fail(`missing fixed script scripts/ci/${name}: ${error.code}`);
+    }
+    let source;
+    try {
+      const stat = fs.fstatSync(fd);
+      assert.ok(stat.isFile(), `scripts/ci/${name} must be a regular file`);
+      assert.ok((stat.mode & 0o111) !== 0, `scripts/ci/${name} must be executable`);
+      source = fs.readFileSync(fd, "utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
     assert.match(source, /^#!\/usr\/bin\/env bash\nset -euo pipefail\n/u);
     for (const marker of markers) {
       assert.ok(source.includes(marker), `scripts/ci/${name} is missing ${marker}`);

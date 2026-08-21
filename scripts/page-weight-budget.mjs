@@ -138,15 +138,40 @@ function resolveLocalAsset(outputRoot, sourceFile, rawUrl, options) {
   return candidate;
 }
 
+// Size and contents both come from one open descriptor. Checking a path and
+// then acting on it is two lookups that can disagree, and here they would
+// disagree for a mundane reason rather than a hostile one: a build writing into
+// the output tree while the budget walks it would report a size that belongs to
+// a different file than the one it went on to read. The descriptor pins one
+// inode for both. Returns null when the path is not a readable regular file, so
+// the caller decides what a miss means.
+function readAsset(target, { text = false } = {}) {
+  let fd;
+  try {
+    fd = fs.openSync(target, "r");
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR" || error.code === "EACCES") return null;
+    throw error;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) return null;
+    return { size: stat.size, text: text ? fs.readFileSync(fd, "utf8") : null };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function measurePage(
   outputRoot,
   route,
   { mountPath = "/", rootOutputRoot = outputRoot } = {},
 ) {
   const htmlPath = path.join(outputRoot, route);
-  if (!fs.existsSync(htmlPath)) throw new Error(`missing page: ${route}`);
-  const files = new Set([htmlPath]);
-  const html = fs.readFileSync(htmlPath, "utf8");
+  const page = readAsset(htmlPath, { text: true });
+  if (!page) throw new Error(`missing page: ${route}`);
+  const sizes = new Map([[htmlPath, page.size]]);
+  const html = page.text;
   const pending = [...resourceUrls(html)].map((url) => ({ sourceFile: htmlPath, url }));
   for (const css of inlineCss(html)) {
     pending.push(...[...cssUrls(css)].map((url) => ({ sourceFile: htmlPath, url })));
@@ -157,30 +182,24 @@ export function measurePage(
       mountPath,
       rootOutputRoot,
     });
-    if (!assetPath || files.has(assetPath)) continue;
-    // One stat rather than exists-then-stat: the two calls can disagree, and
-    // the second one throws on a file that vanished between them, which would
-    // surface as a stack trace instead of this message.
-    const assetStat = fs.statSync(assetPath, { throwIfNoEntry: false });
-    if (!assetStat?.isFile()) {
-      throw new Error(`missing local asset for ${route}: ${url}`);
-    }
-    files.add(assetPath);
-    if (path.extname(assetPath).toLowerCase() === ".css") {
-      const css = fs.readFileSync(assetPath, "utf8");
+    if (!assetPath || sizes.has(assetPath)) continue;
+    const isCss = path.extname(assetPath).toLowerCase() === ".css";
+    const asset = readAsset(assetPath, { text: isCss });
+    if (!asset) throw new Error(`missing local asset for ${route}: ${url}`);
+    sizes.set(assetPath, asset.size);
+    if (isCss) {
       pending.push(
-        ...[...cssUrls(css)].map((nestedUrl) => ({ sourceFile: assetPath, url: nestedUrl })),
+        ...[...cssUrls(asset.text)].map((nestedUrl) => ({ sourceFile: assetPath, url: nestedUrl })),
       );
     }
   }
   let totalBytes = 0;
   let scriptBytes = 0;
-  for (const file of files) {
-    const bytes = fs.statSync(file).size;
+  for (const [file, bytes] of sizes) {
     totalBytes += bytes;
     if (path.extname(file) === ".js") scriptBytes += bytes;
   }
-  return { totalBytes, scriptBytes, assetCount: files.size };
+  return { totalBytes, scriptBytes, assetCount: sizes.size };
 }
 
 export function verifyPageBudgets(outputRoot, budgets = BUDGETS, options = {}) {
