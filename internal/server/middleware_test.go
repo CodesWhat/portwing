@@ -1,14 +1,18 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -743,6 +747,75 @@ func TestEd25519MiddlewareRejectsWhenVerificationCapacityFull(t *testing.T) {
 	rl.mu.Unlock()
 	if attempt.inFlight != 1 || attempt.count != 0 {
 		t.Fatalf("rejected verification changed rate-limit state: %+v", attempt)
+	}
+}
+
+// TestEd25519MiddlewareAuthBodyReadDeadline is a regression test for the
+// pre-auth slowloris finding: a client that sends signature headers plus a
+// Content-Length body but never actually sends the body bytes must not pin
+// the handler goroutine in io.ReadAll forever. It must instead get a 408
+// once authBodyReadDeadline elapses.
+//
+// Not t.Parallel(): it mutates the package-level authBodyReadDeadline var,
+// which every request through this middleware reads.
+func TestEd25519MiddlewareAuthBodyReadDeadline(t *testing.T) {
+	ed, priv := setupEd25519(t)
+	rl := NewRateLimiter()
+	defer rl.Stop()
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
+
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	orig := authBodyReadDeadline
+	authBodyReadDeadline = 200 * time.Millisecond
+	t.Cleanup(func() { authBodyReadDeadline = orig })
+
+	// Sign a request for a body we will declare (via Content-Length) but
+	// never send, simulating a slow drip that never completes.
+	body := []byte("hello")
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	signEd25519Request(t, req, body, priv, time.Now().Unix(), freshNonce(t))
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	conn, err := net.DialTimeout("tcp", u.Host, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial test server: %v", err)
+	}
+	defer conn.Close()
+
+	var raw strings.Builder
+	raw.WriteString("POST / HTTP/1.1\r\n")
+	raw.WriteString("Host: " + u.Host + "\r\n")
+	raw.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
+	for name, values := range req.Header {
+		for _, v := range values {
+			raw.WriteString(name + ": " + v + "\r\n")
+		}
+	}
+	raw.WriteString("\r\n")
+	// Deliberately do not write the body.
+
+	if _, err := conn.Write([]byte(raw.String())); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+
+	// Safety net: if the deadline logic regresses to blocking forever, fail
+	// with a clear timeout instead of hanging the test suite.
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestTimeout {
+		t.Fatalf("expected 408 once the auth body read deadline fires, got %d", resp.StatusCode)
 	}
 }
 
