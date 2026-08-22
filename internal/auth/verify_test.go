@@ -253,6 +253,50 @@ func TestVerifyRequest_ReplayedNonce(t *testing.T) {
 	}
 }
 
+// TestVerifyRequest_NonceOutlivesTimestampWindow is a regression test for the
+// nonce-replay window: a request signed with a clock that runs fast stays
+// timestamp-valid until nearly 2×maxSkew after it was first seen (skew is
+// checked symmetrically), so the nonce must be retained for that entire
+// span. Before the fix, NonceLRU's TTL equalled maxSkew, so a nonce could be
+// evicted while its signature was still valid, letting a captured
+// byte-identical replay through.
+func TestVerifyRequest_NonceOutlivesTimestampWindow(t *testing.T) {
+	t.Parallel()
+	reg, lru, pub, priv := testSetup(t)
+
+	const maxSkew = 60
+
+	// A client clock that is fast by nearly the full skew window: still
+	// within maxSkew of "now", but at the future edge, so the signature
+	// stays valid up to nearly 2*maxSkew after the nonce is first recorded.
+	nonce := randomNonce(t)
+	tsUnix := time.Now().Unix() + maxSkew - 1
+
+	req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
+	signRequest(t, req, nil, priv, pub, tsUnix, nonce)
+	if _, err := VerifyRequest(req, nil, reg, lru, maxSkew); err != nil {
+		t.Fatalf("first verification failed: %v", err)
+	}
+
+	// Simulate the nonce having sat in the cache for longer than the OLD
+	// (pre-fix) ttl of maxSkew seconds, but less than the current
+	// 2*maxSkew ttl, then force an eviction pass. Under the old ttl this
+	// entry would already be gone.
+	lru.mu.Lock()
+	lru.seen[nonce] = time.Now().Add(-(maxSkew + 30) * time.Second)
+	lru.mu.Unlock()
+	lru.evictExpired()
+
+	// Replay the identical, still timestamp-valid request. It must be
+	// rejected: the nonce must outlive the widest timestamp-valid window,
+	// else an evicted nonce lets a still-valid signature replay.
+	req2 := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
+	signRequest(t, req2, nil, priv, pub, tsUnix, nonce)
+	if _, err := VerifyRequest(req2, nil, reg, lru, maxSkew); !errors.Is(err, ErrNonceReplay) {
+		t.Fatalf("expected ErrNonceReplay for replay within timestamp-valid window, got: %v", err)
+	}
+}
+
 func TestVerifyRequest_UnknownKey(t *testing.T) {
 	t.Parallel()
 	reg, lru, _, _ := testSetup(t)
