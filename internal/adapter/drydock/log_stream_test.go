@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"runtime"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -462,5 +464,86 @@ func TestForwardRawContainerLogStreamReaderAndSenderFailures(t *testing.T) {
 		[]byte("ignored"),
 	); err == nil {
 		t.Fatal("nil sender should fail")
+	}
+}
+
+// opaqueDoneContext is a context.Context whose Value never satisfies the
+// context package's internal parentCancelCtx type assertion. A
+// context.WithCancel child of a real *cancelCtx (like the edge read pump's
+// connection-lifetime pumpCtx) registers itself in the parent's children
+// map and unregisters silently when canceled, which makes a leaked
+// registration invisible to a test. Deriving from opaqueDoneContext instead
+// forces the context package onto its other propagation path: a persistent
+// goroutine per child that blocks on "<-parent.Done()" until the child (or
+// parent) is canceled. That turns the same underlying leak into a leaked
+// goroutine this test can count.
+type opaqueDoneContext struct {
+	done chan struct{}
+}
+
+func (opaqueDoneContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (o opaqueDoneContext) Done() <-chan struct{}     { return o.done }
+func (opaqueDoneContext) Err() error                  { return nil }
+func (opaqueDoneContext) Value(any) any               { return nil }
+
+func TestContainerLogStreamNormalCompletionCancelsStreamContext(t *testing.T) {
+	client, calls, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+	calls.setLogsResponse("container-1", routeTestDockerLogFrame(1, []byte("out\n")))
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	// Never canceled during the test: a leaked child's watcher goroutine
+	// would otherwise exit anyway when this parent is canceled, hiding the
+	// bug. A real pumpCtx stays live for the life of the WebSocket
+	// connection, which is exactly what makes the leak this test targets
+	// unbounded in production.
+	parent := opaqueDoneContext{done: make(chan struct{})}
+
+	baseline := runtime.NumGoroutine()
+
+	const streams = 25
+	for i := range streams {
+		sender := newLogStreamTestSender()
+		payload, err := json.Marshal(protocol.DDContainerLogRequestMessage{
+			RequestID:   fmt.Sprintf("stream-normal-%d", i),
+			ContainerID: "container-1",
+			Stream:      true,
+		})
+		if err != nil {
+			t.Fatalf("marshal request %d: %v", i, err)
+		}
+		if !a.HandleMessage(parent, sender, protocol.TypeDDContainerLogRequest, payload) {
+			t.Fatalf("expected streaming request %d to be handled", i)
+		}
+		for {
+			event := waitForLogStreamEvent(t, sender)
+			if event.msgType == "dd:container_log_end" {
+				break
+			}
+		}
+	}
+
+	// Each completed stream's deferred cleanup calls cancel() synchronously
+	// before it returns, but the watcher goroutine it releases still needs
+	// a scheduler tick to actually exit; poll briefly instead of asserting
+	// on the very next NumGoroutine() call.
+	var after int
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		runtime.GC()
+		after = runtime.NumGoroutine()
+		if after-baseline < streams/2 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if leaked := after - baseline; leaked >= streams/2 {
+		t.Fatalf(
+			"goroutine count grew by %d after %d normally-completed log streams (baseline=%d after=%d); "+
+				"runContainerLogStream's deferred cleanup must cancel the stream's context so it unregisters "+
+				"from its parent instead of leaking for the life of the connection",
+			leaked, streams, baseline, after,
+		)
 	}
 }

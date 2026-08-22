@@ -392,7 +392,7 @@ func (a *Adapter) startContainerLogStream(ctx context.Context, sender adapter.Me
 		a.logStreamsMu.Unlock()
 	}
 
-	go a.runContainerLogStream(streamCtx, sender, msg)
+	go a.runContainerLogStream(streamCtx, cancel, sender, msg)
 }
 
 func (a *Adapter) cancelContainerLogStream(msg protocol.DDContainerLogCancelMessage) {
@@ -405,11 +405,20 @@ func (a *Adapter) cancelContainerLogStream(msg protocol.DDContainerLogCancelMess
 	active.cancel()
 }
 
-func (a *Adapter) runContainerLogStream(ctx context.Context, sender adapter.MessageSender, msg protocol.DDContainerLogRequestMessage) {
+func (a *Adapter) runContainerLogStream(ctx context.Context, cancel context.CancelFunc, sender adapter.MessageSender, msg protocol.DDContainerLogRequestMessage) {
 	defer func() {
 		a.logStreamsMu.Lock()
 		delete(a.logStreams, msg.RequestID)
 		a.logStreamsMu.Unlock()
+		// streamCtx is a context.WithCancel child of the connection-lifetime
+		// pumpCtx: the child only unregisters itself from the parent's
+		// cancelCtx.children map when its own CancelFunc runs (context
+		// package internals), so a stream that ends on its own — EOF, a
+		// daemon error, a failed send — must still call cancel here or its
+		// child registration leaks on pumpCtx for the rest of the WebSocket
+		// connection. Safe to call unconditionally: cancel is idempotent, so
+		// this is a no-op on the already-canceled path.
+		cancel()
 	}()
 
 	tail := ""
