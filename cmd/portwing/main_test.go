@@ -528,6 +528,10 @@ func clearEdgeEnv(t *testing.T) {
 	} {
 		unsetenv(t, k)
 	}
+	// These tests point DRYDOCK_URL at a local, unencrypted test double (a dead
+	// address or a plain-HTTP fake server), never a real controller, so opt
+	// into the plaintext scheme the same way a trusted local test setup would.
+	setenv(t, "ALLOW_INSECURE_EDGE_URL", "true")
 }
 
 // startFakeWS404Server starts an HTTP server on a random TCP port that
