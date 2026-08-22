@@ -111,7 +111,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			slog.Error("failed to create server", "error", err)
 			return 1
 		}
+		// shutdownDone is closed once the signal-triggered Shutdown call
+		// returns (drained or timed out). ListenAndServe unblocks the
+		// instant Shutdown closes the listener, well before in-flight
+		// handlers finish, so run() must join this channel rather than
+		// returning as soon as ListenAndServe does — otherwise main()'s
+		// os.Exit races ahead of active handlers (e.g. a compose deploy)
+		// and cuts them off mid-request.
+		shutdownDone := make(chan struct{})
 		go func() {
+			defer close(shutdownDone)
 			<-sigCh
 			slog.Info("shutting down...")
 			cancel()
@@ -125,6 +134,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			slog.Error("server error", "error", err)
 			return 1
 		}
+		// A nil or ErrServerClosed result only happens once Shutdown has
+		// closed the listener, i.e. after the signal fired, so this always
+		// completes; it just waits for the drain (or its timeout) too.
+		<-shutdownDone
 	}
 
 	slog.Info("portwing stopped")
