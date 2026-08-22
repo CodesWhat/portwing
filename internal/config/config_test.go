@@ -143,11 +143,16 @@ func TestLoadEdgeModeDefaultsOperationsListenerToLoopback(t *testing.T) {
 	}
 }
 
+// TestLoadEdgeModeHonorsExplicitOperationsBindAddress verifies a non-loopback
+// BIND_ADDRESS is accepted once the operator opts in with
+// ALLOW_UNAUTHENTICATED_REMOTE — the operations listener has no auth of its
+// own, so the opt-in is required (see TestLoadEdgeModeRejectsUnauthenticatedNonLoopbackBind).
 func TestLoadEdgeModeHonorsExplicitOperationsBindAddress(t *testing.T) {
 	setEnv(t,
 		"DRYDOCK_URL", "https://drydock.example.com",
 		"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
 		"BIND_ADDRESS", "0.0.0.0",
+		"ALLOW_UNAUTHENTICATED_REMOTE", "true",
 	)
 
 	cfg, err := Load()
@@ -156,6 +161,44 @@ func TestLoadEdgeModeHonorsExplicitOperationsBindAddress(t *testing.T) {
 	}
 	if cfg.BindAddress != "0.0.0.0" {
 		t.Fatalf("explicit edge BindAddress: got %q, want 0.0.0.0", cfg.BindAddress)
+	}
+}
+
+// TestLoadEdgeModeRejectsUnauthenticatedNonLoopbackBind ensures edge mode
+// fails closed on a non-loopback operations bind without the explicit opt-in:
+// health, metrics, and audit export carry no authentication of their own.
+func TestLoadEdgeModeRejectsUnauthenticatedNonLoopbackBind(t *testing.T) {
+	setEnv(t,
+		"DRYDOCK_URL", "https://drydock.example.com",
+		"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
+		"BIND_ADDRESS", "0.0.0.0",
+	)
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected unauthenticated non-loopback operations bind to be rejected")
+	}
+	if !strings.Contains(err.Error(), "ALLOW_UNAUTHENTICATED_REMOTE") {
+		t.Fatalf("expected remote opt-in guidance, got: %v", err)
+	}
+}
+
+// TestLoadEdgeModeLoopbackBindUnaffectedByRemoteOptIn verifies the default
+// loopback bind loads whether or not ALLOW_UNAUTHENTICATED_REMOTE is set —
+// the opt-in only matters once the bind leaves loopback.
+func TestLoadEdgeModeLoopbackBindUnaffectedByRemoteOptIn(t *testing.T) {
+	setEnv(t,
+		"DRYDOCK_URL", "https://drydock.example.com",
+		"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
+		"BIND_ADDRESS", "127.0.0.1",
+	)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error for loopback bind: %v", err)
+	}
+	if cfg.BindAddress != "127.0.0.1" {
+		t.Fatalf("edge BindAddress: got %q, want 127.0.0.1", cfg.BindAddress)
 	}
 }
 
