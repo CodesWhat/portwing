@@ -790,7 +790,7 @@ func TestEd25519MiddlewareAuthBodyReadDeadline(t *testing.T) {
 	var raw strings.Builder
 	raw.WriteString("POST / HTTP/1.1\r\n")
 	raw.WriteString("Host: " + u.Host + "\r\n")
-	raw.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
+	fmt.Fprintf(&raw, "Content-Length: %d\r\n", len(body))
 	for name, values := range req.Header {
 		for _, v := range values {
 			raw.WriteString(name + ": " + v + "\r\n")
