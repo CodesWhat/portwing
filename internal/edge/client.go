@@ -717,13 +717,28 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 		// Read body (capped).
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 
-		_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		// ResponseMessage.Body is a json.RawMessage, so a body that isn't valid
+		// JSON (e.g. the plain-text "OK" from GET /_ping) fails this marshal.
+		// Dropping that error, as this used to, left the controller waiting
+		// forever for a response envelope that would never arrive. Until the
+		// wire protocol carries raw bytes instead of json.RawMessage — a
+		// coordinated change with the drydock controller, out of scope here —
+		// surface the failure as an error envelope so the controller gets a
+		// definitive (if unhelpful) response instead of hanging.
+		if err := c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
 			RequestID:   req.RequestID,
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
 			Body:        json.RawMessage(body),
 			ContentType: resp.Header.Get("Content-Type"),
-		})
+		}); err != nil {
+			slog.Warn("failed to encode Docker response envelope", "requestId", req.RequestID, "path", req.Path, "error", err)
+			// Best-effort error reply; connection loss will surface on the read pump.
+			_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+				Message:   fmt.Sprintf("encoding response: %v", err),
+				RequestID: req.RequestID,
+			})
+		}
 	}
 }
 

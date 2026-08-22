@@ -172,6 +172,36 @@ func TestHandleRequestStream(t *testing.T) {
 	}
 }
 
+// A non-stream response whose body isn't valid JSON (e.g. the plain-text "OK"
+// from GET /_ping) can't be embedded in ResponseMessage.Body, a json.RawMessage
+// field. Dropping that marshal error used to leave the controller waiting
+// forever for a response envelope that would never arrive (finding
+// C6-SAFE); it must now surface as an error envelope carrying the same
+// requestId instead.
+func TestHandleRequestNonJSONBodySendsErrorEnvelope(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	//nolint:bodyclose // the response body is consumed and closed by handleRequest, the code under test.
+	fd := &fakeDocker{doResp: mkResp(http.StatusOK, "text/plain", "OK")}
+	c.dockerClient = fd
+
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "ping-1",
+		Method:    http.MethodGet,
+		Path:      "/_ping",
+	})
+
+	var em protocol.ErrorMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeError), &em)
+	if em.RequestID != "ping-1" {
+		t.Errorf("error RequestID = %q, want ping-1", em.RequestID)
+	}
+	if em.Message == "" {
+		t.Error("error Message is empty, want an explanation of the encoding failure")
+	}
+}
+
 // A request on /_portwing/compose must reach the compose manager rather than
 // fall through to the dockerd proxy — dockerd has no such route and would
 // otherwise 404 every compose deploy (finding C7). Reverting the
