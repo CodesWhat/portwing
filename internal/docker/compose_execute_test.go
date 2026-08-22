@@ -3,6 +3,7 @@ package docker
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -194,6 +195,54 @@ func TestExecute_MergesStdoutAndStderr(t *testing.T) {
 	}
 	if resp.Output == "" {
 		t.Fatalf("Execute: expected merged output, got empty (Success=%v, Error=%q)", resp.Success, resp.Error)
+	}
+}
+
+// ---- Execute: output truncation ----
+
+// TestExecute_TruncatesOversizedOutput exercises the bounded-writer cap using
+// a fake compose binary that writes well past maxComposeOutputBytes on
+// stdout. Execute must not buffer the whole thing: the captured output is
+// bounded and carries a truncation marker.
+//
+// Note: not parallel for the same ETXTBSY reason as TestExecute_MergesStdoutAndStderr
+// above — this test writes a script and immediately execs it.
+func TestExecute_TruncatesOversizedOutput(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "app"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a script that emits well over the cap (10MB) in 1MB chunks so the
+	// test doesn't depend on any single write() being larger than the cap.
+	scriptPath := filepath.Join(dir, "compose-chatty.sh")
+	script := "#!/usr/bin/env sh\n" +
+		"i=0\n" +
+		"chunk=$(printf 'x%.0s' $(seq 1 1000000))\n" +
+		"while [ $i -lt 12 ]; do\n" +
+		"  printf '%s' \"$chunk\"\n" +
+		"  i=$((i + 1))\n" +
+		"done\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cm := &ComposeManager{stacksDir: dir, composeBin: scriptPath, isV2: false}
+
+	resp, err := cm.Execute(t.Context(), ComposeRequest{StackName: "app", Operation: "up"})
+	if err != nil {
+		t.Fatalf("Execute: unexpected error %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("Execute: expected Success=true, got Error=%q", resp.Error)
+	}
+	// Captured output must be bounded well below the ~12MB the script wrote,
+	// and carry a marker so operators know it was cut short.
+	if len(resp.Output) > maxComposeOutputBytes+1024 {
+		t.Fatalf("Execute: output not bounded, got %d bytes", len(resp.Output))
+	}
+	if !strings.Contains(resp.Output, "truncated") {
+		t.Fatalf("Execute: expected a truncation marker in output, got %d bytes with no marker", len(resp.Output))
 	}
 }
 

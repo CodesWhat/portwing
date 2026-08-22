@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,6 +213,50 @@ func TestBuildCommand_Logs(t *testing.T) {
 	}
 	if !containsAll(cmd.Args, "logs", "--tail", "50", "web") {
 		t.Fatalf("buildCommand logs: unexpected args %v", cmd.Args)
+	}
+}
+
+// TestBuildCommand_Logs_DefaultTail confirms --tail is always passed for
+// "logs" even when the request omits Tail, so an unset request can't dump an
+// unbounded log history.
+func TestBuildCommand_Logs_DefaultTail(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cm := &ComposeManager{stacksDir: dir, composeBin: "docker", isV2: true}
+	if err := os.MkdirAll(filepath.Join(dir, "myapp"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, err := cm.buildCommand(t.Context(), ComposeRequest{StackName: "myapp", Operation: "logs"})
+	if err != nil {
+		t.Fatalf("buildCommand: %v", err)
+	}
+	if !containsAll(cmd.Args, "logs", "--tail", fmt.Sprintf("%d", defaultComposeLogsTail)) {
+		t.Fatalf("buildCommand logs (no Tail): unexpected args %v", cmd.Args)
+	}
+}
+
+// TestBuildCommand_Logs_TailCapped confirms a Tail above the cap is clamped
+// rather than passed through verbatim.
+func TestBuildCommand_Logs_TailCapped(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cm := &ComposeManager{stacksDir: dir, composeBin: "docker", isV2: true}
+	if err := os.MkdirAll(filepath.Join(dir, "myapp"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, err := cm.buildCommand(t.Context(), ComposeRequest{StackName: "myapp", Operation: "logs", Tail: 1_000_000})
+	if err != nil {
+		t.Fatalf("buildCommand: %v", err)
+	}
+	if !containsAll(cmd.Args, "logs", "--tail", fmt.Sprintf("%d", maxComposeLogsTail)) {
+		t.Fatalf("buildCommand logs (Tail over cap): unexpected args %v", cmd.Args)
+	}
+	if containsAll(cmd.Args, "1000000") {
+		t.Fatalf("buildCommand logs: uncapped tail leaked into args %v", cmd.Args)
 	}
 }
 

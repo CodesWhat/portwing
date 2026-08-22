@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -325,6 +327,86 @@ func TestStartExec_Success_WithBuffered(t *testing.T) {
 	if _, ok := conn.(*bufferedConn); !ok {
 		t.Fatal("expected bufferedConn (extra buffered bytes), got plain net.Conn")
 	}
+}
+
+// TestStartExec_WedgedDaemon reproduces a dockerd that accepts the exec-start
+// connection but never writes a response (a wedged daemon or a deadlocked
+// exec subsystem). Before the fix, StartExec dialed with plain net.Dial and
+// blocked on http.ReadResponse with no deadline, so this would hang forever
+// and leak the ExecSession registration. StartExec must now honor ctx's
+// deadline and return promptly. The outer timeout is generous so a
+// regression shows up as a failure, not a hang.
+func TestStartExec_WedgedDaemon(t *testing.T) {
+	t.Parallel()
+
+	dir := shortTempDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	accepted := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(accepted)
+		// Drain whatever the client writes but never answer and never close:
+		// the connection must stay open and silent until the client's own
+		// deadline fires, or this test proves nothing. A single Read here
+		// returns as soon as the request lands, and returning from this
+		// goroutine closes the conn, handing the client a fast EOF that the
+		// pre-fix code also survives. Loop until the client closes its side.
+		buf := make([]byte, 4096)
+		for {
+			conn.SetReadDeadline(time.Now().Add(30 * time.Second)) //nolint:errcheck
+			if _, err := conn.Read(buf); err != nil {
+				return // the client gave up and closed its side
+			}
+		}
+	}()
+
+	c := &Client{socketPath: sockPath, apiVersion: "v1.44", dialTimeout: 200 * time.Millisecond}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.StartExec(ctx, "exec-123", false)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected an error from a wedged handshake, got nil")
+		}
+		// The error must be the deadline firing, not a fast EOF from a server
+		// that hung up — an EOF here means the mock stopped wedging and the
+		// test stopped testing the fix.
+		var nerr net.Error
+		if !errors.As(err, &nerr) || !nerr.Timeout() {
+			t.Fatalf("expected a timeout from a wedged handshake, got %v", err)
+		}
+		if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+			t.Fatalf("StartExec returned in %v, before the 200ms deadline could have fired", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("StartExec did not return within the outer timeout; handshake is not bounded")
+	}
+
+	<-accepted
+	ln.Close()
+	wg.Wait()
 }
 
 // ---- closeConn ----

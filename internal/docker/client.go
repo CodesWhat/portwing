@@ -120,7 +120,17 @@ type Client struct {
 	apiVersion   string
 	httpClient   *http.Client
 	streamClient *http.Client
+
+	// dialTimeout mirrors the timeout the transports above dial with. It also
+	// bounds StartExec's raw handshake when a caller's context carries no
+	// deadline of its own; see StartExec for why that matters.
+	dialTimeout time.Duration
 }
+
+// defaultDialTimeout is the fallback used when a Client is built without
+// dialTimeout set (e.g. constructed directly by tests rather than through
+// NewClient). It matches config's default REQUEST_TIMEOUT of 30s.
+const defaultDialTimeout = 30 * time.Second
 
 // NewClient creates a Docker API client that talks to the daemon via the
 // given Unix socket. requestTimeout is in seconds; it applies to normal
@@ -149,7 +159,8 @@ func NewClient(socketPath string, requestTimeout int) (*Client, error) {
 	}
 
 	c := &Client{
-		socketPath: socketPath,
+		socketPath:  socketPath,
+		dialTimeout: timeout,
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   timeout,
@@ -543,9 +554,34 @@ func (c *Client) CreateExec(ctx context.Context, containerID string, cmd []strin
 func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Conn, error) {
 	body := fmt.Sprintf(`{"Detach":false,"Tty":%v}`, tty)
 
-	conn, err := net.Dial("unix", c.socketPath)
+	// Dial through ctx, and fall back to the same timeout the client's other
+	// transports dial with (dialTimeout, set from NewClient's requestTimeout)
+	// when the caller's context carries no deadline of its own.
+	fallback := c.dialTimeout
+	if fallback <= 0 {
+		fallback = defaultDialTimeout
+	}
+	deadline, hasDeadline := ctx.Deadline()
+	dialer := net.Dialer{}
+	if !hasDeadline {
+		dialer.Timeout = fallback
+		deadline = time.Now().Add(fallback)
+	}
+	conn, err := dialer.DialContext(ctx, "unix", c.socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("dial docker socket: %w", err)
+	}
+
+	// Bound the write and the 101 read with the same deadline: dockerd can
+	// accept a connection and then never answer (a wedged daemon, or its exec
+	// subsystem deadlocked), and without a deadline that leaves this goroutine
+	// blocked in http.ReadResponse forever. The ExecSession would stay
+	// registered - the only deletion path runs after this call returns - and
+	// since admission counts live sessions against maxExecSessions, enough
+	// stuck bring-ups permanently exhaust exec capacity until restart.
+	if err := conn.SetDeadline(deadline); err != nil {
+		closeConn(conn, "exec start deadline failure")
+		return nil, fmt.Errorf("setting exec start deadline: %w", err)
 	}
 
 	path := fmt.Sprintf("/%s/exec/%s/start", c.apiVersion, execID)
@@ -573,6 +609,13 @@ func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Co
 			return nil, fmt.Errorf("expected 101 Switching Protocols, got %d: %s", resp.StatusCode, msg)
 		}
 		return nil, fmt.Errorf("expected 101 Switching Protocols, got %d", resp.StatusCode)
+	}
+
+	// The handshake succeeded; clear the deadline before handing the conn off
+	// so it doesn't cut short the exec session's ongoing bidirectional I/O.
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		closeConn(conn, "exec start deadline clear failure")
+		return nil, fmt.Errorf("clearing exec start deadline: %w", err)
 	}
 
 	// If the bufio reader has consumed bytes past the HTTP response, wrap
