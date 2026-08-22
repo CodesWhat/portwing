@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -357,13 +358,19 @@ func TestStartExec_WedgedDaemon(t *testing.T) {
 		}
 		defer conn.Close()
 		close(accepted)
-		// Accept the connection and read whatever the client sends, but never
-		// write a response — this is the wedged-daemon scenario StartExec
-		// must bound itself against. The read unblocks (with EOF) once the
-		// client gives up and closes its side, ending the goroutine.
+		// Drain whatever the client writes but never answer and never close:
+		// the connection must stay open and silent until the client's own
+		// deadline fires, or this test proves nothing. A single Read here
+		// returns as soon as the request lands, and returning from this
+		// goroutine closes the conn, handing the client a fast EOF that the
+		// pre-fix code also survives. Loop until the client closes its side.
 		buf := make([]byte, 4096)
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second)) //nolint:errcheck
-		conn.Read(buf)                                        //nolint:errcheck
+		for {
+			conn.SetReadDeadline(time.Now().Add(30 * time.Second)) //nolint:errcheck
+			if _, err := conn.Read(buf); err != nil {
+				return // the client gave up and closed its side
+			}
+		}
 	}()
 
 	c := &Client{socketPath: sockPath, apiVersion: "v1.44", dialTimeout: 200 * time.Millisecond}
@@ -371,6 +378,7 @@ func TestStartExec_WedgedDaemon(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 
+	start := time.Now()
 	done := make(chan error, 1)
 	go func() {
 		_, err := c.StartExec(ctx, "exec-123", false)
@@ -381,6 +389,16 @@ func TestStartExec_WedgedDaemon(t *testing.T) {
 	case err := <-done:
 		if err == nil {
 			t.Fatal("expected an error from a wedged handshake, got nil")
+		}
+		// The error must be the deadline firing, not a fast EOF from a server
+		// that hung up — an EOF here means the mock stopped wedging and the
+		// test stopped testing the fix.
+		var nerr net.Error
+		if !errors.As(err, &nerr) || !nerr.Timeout() {
+			t.Fatalf("expected a timeout from a wedged handshake, got %v", err)
+		}
+		if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+			t.Fatalf("StartExec returned in %v, before the 200ms deadline could have fired", elapsed)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("StartExec did not return within the outer timeout; handshake is not bounded")
