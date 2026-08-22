@@ -636,3 +636,43 @@ func TestDemuxLogs(t *testing.T) {
 		t.Errorf("line[1] = %q, want stderr: prefix", lines[1])
 	}
 }
+
+// TestResponseIDMatchesRequestID verifies that every response carries the
+// same id as the request that produced it, byte-for-byte, for both a
+// numeric and a string id. Nothing else in this package checks id
+// correlation — the fuzz property only checks jsonrpc=="2.0" — so a bug that
+// swapped or dropped the id (breaking a client's ability to match responses
+// to in-flight requests) could ship unnoticed.
+func TestResponseIDMatchesRequestID(t *testing.T) {
+	h, shutdown := newTestHandler(t)
+	defer shutdown()
+
+	for _, tc := range []struct {
+		name string
+		id   any
+	}{
+		{"numeric id", 42},
+		{"string id", "req-abc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := postMCP(t, h, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      tc.id,
+				"method":  "ping",
+			})
+
+			wantID, err := json.Marshal(tc.id)
+			if err != nil {
+				t.Fatalf("marshal want id: %v", err)
+			}
+
+			resp := decodeResponse(t, rr)
+			if resp.Error != nil {
+				t.Fatalf("unexpected error: %+v", resp.Error)
+			}
+			if !bytes.Equal(resp.ID, wantID) {
+				t.Errorf("response id = %s, want %s", resp.ID, wantID)
+			}
+		})
+	}
+}
