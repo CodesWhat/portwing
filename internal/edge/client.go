@@ -941,17 +941,6 @@ func closeWebSocket(conn *websocket.Conn, context string) {
 	}
 }
 
-type edgeHealthResponse struct {
-	Status        string  `json:"status"`
-	Live          bool    `json:"live"`
-	Ready         bool    `json:"ready"`
-	Mode          string  `json:"mode"`
-	Version       string  `json:"version"`
-	UptimeSeconds float64 `json:"uptimeSeconds"`
-	Docker        string  `json:"docker"`
-	Controller    string  `json:"controller"`
-}
-
 // startHealthServer starts the local liveness, readiness, and operational
 // metrics server used by Docker, Kubernetes, and Prometheus.
 func (c *Client) startHealthServer() {
@@ -959,7 +948,7 @@ func (c *Client) startHealthServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(edgeHealthResponse{
+		_ = json.NewEncoder(w).Encode(protocol.HealthResponse{
 			Status:        "ok",
 			Live:          true,
 			Ready:         false,
@@ -981,7 +970,7 @@ func (c *Client) startHealthServer() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(httpStatus)
-		_ = json.NewEncoder(w).Encode(edgeHealthResponse{
+		_ = json.NewEncoder(w).Encode(protocol.HealthResponse{
 			Status:        status,
 			Live:          true,
 			Ready:         dockerConnected && controllerConnected,

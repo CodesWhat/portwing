@@ -812,14 +812,11 @@ func TestStartHealthServerEndpointResponds(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("health status = %d, want 200", resp.StatusCode)
 	}
-	var body struct {
-		Status     string `json:"status"`
-		Live       bool   `json:"live"`
-		Ready      bool   `json:"ready"`
-		Mode       string `json:"mode"`
-		Docker     string `json:"docker"`
-		Controller string `json:"controller"`
-	}
+	// Decode into the shared wire type (not an ad hoc anonymous struct) so
+	// this test also catches a drift between the edge and standard-mode
+	// health responses, including fields an anonymous struct could silently
+	// drop, like Version and UptimeSeconds.
+	var body protocol.HealthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode health response: %v", err)
 	}
@@ -828,6 +825,12 @@ func TestStartHealthServerEndpointResponds(t *testing.T) {
 	}
 	if body.Mode != "edge" || body.Docker != "connected" || body.Controller != "connected" {
 		t.Fatalf("operational health fields = %+v", body)
+	}
+	if body.Version != protocol.AgentVersion {
+		t.Errorf("health response Version = %q, want %q", body.Version, protocol.AgentVersion)
+	}
+	if body.UptimeSeconds <= 0 {
+		t.Errorf("health response UptimeSeconds = %v, want > 0", body.UptimeSeconds)
 	}
 
 	metricsResp, err := http.Get("http://" + c.healthServer.Addr + "/metrics") //nolint:noctx,gosec

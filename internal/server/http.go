@@ -282,17 +282,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("/", authWrap(s.handleDockerProxy))
 }
 
-type healthResponse struct {
-	Status        string  `json:"status"`
-	Live          bool    `json:"live"`
-	Ready         bool    `json:"ready"`
-	Mode          string  `json:"mode"`
-	Version       string  `json:"version"`
-	UptimeSeconds float64 `json:"uptimeSeconds"`
-	Docker        string  `json:"docker"`
-	Controller    string  `json:"controller"`
-}
-
 // handleHealth returns readiness including Docker connectivity. It is exposed
 // at both the compatibility path /_portwing/health and the explicit /ready.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +299,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
-	_ = json.NewEncoder(w).Encode(healthResponse{
+	_ = json.NewEncoder(w).Encode(protocol.HealthResponse{
 		Status:        status,
 		Live:          true,
 		Ready:         err == nil,
@@ -326,7 +315,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(healthResponse{
+	_ = json.NewEncoder(w).Encode(protocol.HealthResponse{
 		Status:        "ok",
 		Live:          true,
 		Ready:         false,
