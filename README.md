@@ -464,6 +464,14 @@ Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRY
 - Sends watcher component ownership before raw inventory; controller-owned
   Docker calls use correlated WebSocket `request`/`response` messages
 
+Edge mode's controller trust is **TLS-only and one-directional**: the signed
+hello lets the controller verify Portwing, but nothing verifies the
+controller's identity in return, so a plaintext `http://`/`ws://`
+`DRYDOCK_URL` would let an on-path attacker complete the handshake and drive
+dockerd. Portwing fails closed on a plaintext `DRYDOCK_URL` unless you set
+`ALLOW_INSECURE_EDGE_URL=true`, which is for trusted local testing only —
+always use `https://`/`wss://` against a real controller.
+
 ```text
 DRYDOCK_URL set + PRIVATE_KEY_FILE set  →  Edge Mode (outbound WebSocket)
 Otherwise                                →  Standard Mode (inbound HTTP server)
@@ -556,7 +564,7 @@ the connection alive through proxies.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DRYDOCK_URL` | -- | WebSocket URL for Edge mode (`wss://...`) |
+| `DRYDOCK_URL` | -- | WebSocket URL for Edge mode (`wss://...`). A plaintext `http://`/`ws://` scheme is rejected unless `ALLOW_INSECURE_EDGE_URL=true` — see below. |
 | `TOKEN` | -- | Authentication token (plaintext) |
 | `TOKEN_FILE` | -- | Path to file containing token |
 | `TOKEN_HASH` | -- | Argon2id hash of token (generate with `portwing hash-token`) |
@@ -577,6 +585,7 @@ the connection alive through proxies.
 | `TRUSTED_PROXIES` | -- | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` is trusted; unset means forwarding headers are ignored |
 | `ALLOW_UNAUTHENTICATED` | `false` | Explicit local-development opt-in when no credential is configured; otherwise startup fails closed |
 | `ALLOW_UNAUTHENTICATED_REMOTE` | `false` | Additional dangerous opt-in required for unauthenticated non-loopback binds |
+| `ALLOW_INSECURE_EDGE_URL` | `false` | Dangerous opt-in to connect Edge mode to a plaintext `http://`/`ws://` `DRYDOCK_URL`; the controller's identity is otherwise verified by TLS alone, so this is for trusted local testing only |
 
 `TLS_CERT` and `TLS_KEY` must be configured together. Setting only one is a
 startup error.

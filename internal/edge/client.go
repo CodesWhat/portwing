@@ -631,9 +631,20 @@ func (c *Client) readPump(ctx context.Context) error {
 	}
 }
 
+// composeRequestPrefix is the path standard mode's handleCompose (see
+// internal/server/http.go) serves on, and the one edge mode must detect and
+// route to c.compose instead of forwarding to dockerd — dockerd has no such
+// route and would otherwise 404 every compose deploy (see handleComposeRequest).
+const composeRequestPrefix = "/_portwing/compose"
+
 // handleRequest executes a Docker API request locally and sends the response
 // back over the WebSocket.
 func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage) {
+	if strings.HasPrefix(req.Path, composeRequestPrefix) {
+		c.handleComposeRequest(ctx, req)
+		return
+	}
+
 	start := time.Now()
 	isStream := docker.IsStreamingPath(req.Path)
 
@@ -706,14 +717,82 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 		// Read body (capped).
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 
-		_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		// ResponseMessage.Body is a json.RawMessage, so a body that isn't valid
+		// JSON (e.g. the plain-text "OK" from GET /_ping) fails this marshal.
+		// Dropping that error, as this used to, left the controller waiting
+		// forever for a response envelope that would never arrive. Until the
+		// wire protocol carries raw bytes instead of json.RawMessage — a
+		// coordinated change with the drydock controller, out of scope here —
+		// surface the failure as an error envelope so the controller gets a
+		// definitive (if unhelpful) response instead of hanging.
+		if err := c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
 			RequestID:   req.RequestID,
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
 			Body:        json.RawMessage(body),
 			ContentType: resp.Header.Get("Content-Type"),
-		})
+		}); err != nil {
+			slog.Warn("failed to encode Docker response envelope", "requestId", req.RequestID, "path", req.Path, "error", err)
+			// Best-effort error reply; connection loss will surface on the read pump.
+			_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+				Message:   fmt.Sprintf("encoding response: %v", err),
+				RequestID: req.RequestID,
+			})
+		}
 	}
+}
+
+// handleComposeRequest decodes and executes a compose request against the
+// ComposeManager the client already holds, mirroring standard mode's
+// handleCompose (internal/server/http.go). Edge mode advertises the
+// "compose" capability, so a request on composeRequestPrefix must reach the
+// compose manager rather than fall through to the dockerd proxy above, which
+// has no such route and would 404.
+func (c *Client) handleComposeRequest(ctx context.Context, req protocol.RequestMessage) {
+	var composeReq docker.ComposeRequest
+	if err := json.Unmarshal(req.Body, &composeReq); err != nil {
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   fmt.Sprintf("invalid compose request: %v", err),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	resp, err := c.compose.Execute(ctx, composeReq)
+	if err != nil {
+		c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, audit.OutcomeError)
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   err.Error(),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	outcome := audit.OutcomeAllowed
+	if !resp.Success {
+		outcome = audit.OutcomeError
+	}
+	c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, outcome)
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		// ComposeResponse is a plain struct of strings/bools and always
+		// marshals cleanly; this guards against a future field change
+		// introducing something that doesn't, surfacing it as an error
+		// envelope instead of silently dropping the response.
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   fmt.Sprintf("encoding compose response: %v", err),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		RequestID:   req.RequestID,
+		StatusCode:  http.StatusOK,
+		Body:        json.RawMessage(body),
+		ContentType: "application/json",
+	})
 }
 
 // allowedDockerRequestHeaders forwards only Docker API metadata needed by the
