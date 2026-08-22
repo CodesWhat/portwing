@@ -166,9 +166,9 @@ func TestExecute_CommandSuccess(t *testing.T) {
 // Note: not parallel because it execs a script it just wrote. Any concurrent
 // fork in this process inherits the still-open write descriptor, and exec of a
 // file held open for writing fails with ETXTBSY (golang/go#22315). It failed
-// that way in CI on 2026-08-21 with "text file busy". The other tests here that
-// write a fake binary are already serial for their own reasons, so this was the
-// only one exposed.
+// that way in CI on 2026-08-21 with "text file busy". The only other test here
+// that writes and then execs a fake binary, TestRegistryLogin_Success, is
+// already serial because it mutates PATH, so this was the one exposed case.
 func TestExecute_MergesStdoutAndStderr(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "app"), 0o750); err != nil {
