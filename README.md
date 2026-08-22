@@ -571,7 +571,7 @@ the connection alive through proxies.
 | `CA_CERT` | -- | Custom CA certificate for Edge mode |
 | `TLS_SKIP_VERIFY` | `false` | Skip TLS verification (testing only) |
 | `PORT` | `3000` | HTTP server port |
-| `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | HTTP/operations listener bind address. Set Edge mode to a non-loopback address only on an isolated monitoring network. |
+| `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | HTTP/operations listener bind address. Edge mode refuses a non-loopback address unless `ALLOW_UNAUTHENTICATED_REMOTE=true` — the operations listener carries no authentication, so set it only on an isolated monitoring network. |
 | `TLS_CERT` | -- | Server TLS certificate (Standard mode) |
 | `TLS_KEY` | -- | Server TLS key (Standard mode) |
 | `TRUSTED_PROXIES` | -- | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` is trusted; unset means forwarding headers are ignored |

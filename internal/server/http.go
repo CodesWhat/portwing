@@ -138,7 +138,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		if !cfg.AllowUnauthenticated {
 			return nil, fmt.Errorf("no authentication configured: set TOKEN, TOKEN_HASH, or AUTHORIZED_KEYS; for local development only, set ALLOW_UNAUTHENTICATED=true")
 		}
-		if !isLoopbackBind(cfg.BindAddress) && !cfg.AllowUnauthenticatedRemote {
+		if !config.IsLoopbackBind(cfg.BindAddress) && !cfg.AllowUnauthenticatedRemote {
 			return nil, fmt.Errorf("refusing unauthenticated non-loopback bind %q: set authentication, bind to loopback, or additionally set ALLOW_UNAUTHENTICATED_REMOTE=true", cfg.BindAddress)
 		}
 		slog.Warn("no authentication configured: all requests will be accepted without credentials — set TOKEN, TOKEN_HASH, or AUTHORIZED_KEYS")
@@ -242,14 +242,6 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	}
 
 	return s, nil
-}
-
-func isLoopbackBind(address string) bool {
-	if strings.EqualFold(address, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(strings.Trim(address, "[]"))
-	return ip != nil && ip.IsLoopback()
 }
 
 // registerRoutes wires up all HTTP endpoints. Routes requiring authentication

@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -214,7 +216,31 @@ func Load() (*Config, error) {
 		PrivateKeyFile: getEnv("PRIVATE_KEY_FILE", ""),
 	}
 
+	// Edge mode's operations listener (health, metrics, audit export) carries
+	// no authentication of its own — see the bindAddressDefault comment above.
+	// A non-loopback bind hands the full audit trail and metrics to anyone
+	// routable, so fail closed the same way standard mode's unauthenticated
+	// Docker proxy does, unless the operator explicitly opts in.
+	if drydockURL != "" && !IsLoopbackBind(cfg.BindAddress) {
+		if !cfg.AllowUnauthenticatedRemote {
+			return nil, fmt.Errorf("refusing unauthenticated non-loopback operations bind %q: bind to loopback or set ALLOW_UNAUTHENTICATED_REMOTE=true", cfg.BindAddress)
+		}
+		slog.Warn("operations listener (health, metrics, audit export) bound to a non-loopback address with no authentication: reachable by anyone routable — set ALLOW_UNAUTHENTICATED_REMOTE=true only on an isolated monitoring network", "bindAddress", cfg.BindAddress)
+	}
+
 	return cfg, nil
+}
+
+// IsLoopbackBind reports whether address is a loopback bind (127.0.0.1,
+// ::1, or "localhost"). Shared by standard mode's Docker-proxy listener and
+// edge mode's operations listener, both of which fail closed on an
+// unauthenticated non-loopback bind unless ALLOW_UNAUTHENTICATED_REMOTE is set.
+func IsLoopbackBind(address string) bool {
+	if strings.EqualFold(address, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(address, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 func (c *Config) IsEdgeMode() bool {
