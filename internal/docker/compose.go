@@ -155,6 +155,11 @@ type ComposeManager struct {
 	isV2         bool
 	apiVersion   string
 	dockerSocket string
+
+	// stackLocks holds one *sync.Mutex per StackName, created lazily. It
+	// serializes writeStackFiles through cmd.Run() (see Execute) for a given
+	// stack while leaving unrelated stacks free to run concurrently.
+	stackLocks sync.Map
 }
 
 // NewComposeManager creates a ComposeManager. It auto-detects whether the
@@ -190,11 +195,31 @@ func (cm *ComposeManager) detectCompose() {
 	cm.isV2 = true
 }
 
+// lockStack acquires the per-StackName mutex, creating it on first use, and
+// returns a func that releases it. Two requests for different stack names
+// get independent mutexes and never block each other.
+func (cm *ComposeManager) lockStack(stackName string) func() {
+	lockIface, _ := cm.stackLocks.LoadOrStore(stackName, &sync.Mutex{})
+	lock := lockIface.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
+}
+
 // Execute dispatches a compose operation and returns the result.
 func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*ComposeResponse, error) {
 	if err := cm.validateRequest(req); err != nil {
 		return &ComposeResponse{Success: false, Error: err.Error()}, nil
 	}
+
+	// Serialize the write-then-exec sequence below per stack: without this,
+	// two concurrent "up" requests for the same StackName can interleave —
+	// request A writes its compose files, request B overwrites them before A
+	// runs "docker compose", and A deploys B's configuration while reporting
+	// success for A's request. Both requests are already authenticated with
+	// full compose control over this stack, so the lock is about correctness
+	// (deploying the config you asked for) rather than access control.
+	unlock := cm.lockStack(req.StackName)
+	defer unlock()
 
 	if req.Files != nil {
 		if err := cm.writeStackFiles(req); err != nil {

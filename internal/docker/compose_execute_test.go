@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -243,6 +244,78 @@ func TestExecute_TruncatesOversizedOutput(t *testing.T) {
 	}
 	if !strings.Contains(resp.Output, "truncated") {
 		t.Fatalf("Execute: expected a truncation marker in output, got %d bytes with no marker", len(resp.Output))
+	}
+}
+
+// ---- Execute: concurrent operations on the same stack serialize ----
+
+// TestComposeManagerExecute_ConcurrentSameStackSerializes exercises finding
+// C4: without a per-stack lock, two concurrent "up" requests for the same
+// StackName can interleave — request B's writeStackFiles can overwrite
+// request A's compose file before A's "docker compose" process reads it, so
+// A ends up deploying B's configuration while reporting its own success. This
+// drives two concurrent Execute calls for the same stack with distinct file
+// contents through a fake compose binary that sleeps briefly before reading
+// the compose file, widening the write/exec race window so the bug would
+// show up reliably if the two operations weren't serialized. Each Execute
+// call must observe only the content it wrote itself.
+//
+// Note: not parallel, for the same ETXTBSY reason documented on
+// TestExecute_MergesStdoutAndStderr above — it writes and immediately execs
+// a script.
+func TestComposeManagerExecute_ConcurrentSameStackSerializes(t *testing.T) {
+	dir := t.TempDir()
+
+	// Fake compose binary: sleep to widen the write/exec race window, then
+	// print whatever docker-compose.yml currently holds in the project
+	// directory (buildCommand sets cmd.Dir to it).
+	scriptPath := filepath.Join(dir, "compose-lock-test.sh")
+	script := "#!/usr/bin/env sh\nsleep 0.1\ncat docker-compose.yml\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cm := &ComposeManager{stacksDir: dir, composeBin: scriptPath, isV2: false}
+
+	const runs = 5
+	contents := []string{"content-A", "content-B"}
+	for i := 0; i < runs; i++ {
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		results := make([]*ComposeResponse, len(contents))
+		errs := make([]error, len(contents))
+
+		for idx, content := range contents {
+			wg.Add(1)
+			go func(idx int, content string) {
+				defer wg.Done()
+				<-start
+				resp, err := cm.Execute(t.Context(), ComposeRequest{
+					StackName: "app",
+					Operation: "up",
+					Files: map[string]string{
+						"docker-compose.yml": content,
+					},
+				})
+				results[idx] = resp
+				errs[idx] = err
+			}(idx, content)
+		}
+
+		close(start)
+		wg.Wait()
+
+		for idx, resp := range results {
+			if errs[idx] != nil {
+				t.Fatalf("run %d: Execute: unexpected error %v", i, errs[idx])
+			}
+			if !resp.Success {
+				t.Fatalf("run %d: Execute: expected Success=true, got Error=%q", i, resp.Error)
+			}
+			if got, want := strings.TrimSpace(resp.Output), contents[idx]; got != want {
+				t.Fatalf("run %d: Execute observed %q, want its own content %q (cross-contamination from a concurrent write to the same stack)", i, got, want)
+			}
+		}
 	}
 }
 
