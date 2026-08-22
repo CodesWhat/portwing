@@ -631,9 +631,20 @@ func (c *Client) readPump(ctx context.Context) error {
 	}
 }
 
+// composeRequestPrefix is the path standard mode's handleCompose (see
+// internal/server/http.go) serves on, and the one edge mode must detect and
+// route to c.compose instead of forwarding to dockerd — dockerd has no such
+// route and would otherwise 404 every compose deploy (see handleComposeRequest).
+const composeRequestPrefix = "/_portwing/compose"
+
 // handleRequest executes a Docker API request locally and sends the response
 // back over the WebSocket.
 func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage) {
+	if strings.HasPrefix(req.Path, composeRequestPrefix) {
+		c.handleComposeRequest(ctx, req)
+		return
+	}
+
 	start := time.Now()
 	isStream := docker.IsStreamingPath(req.Path)
 
@@ -714,6 +725,59 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			ContentType: resp.Header.Get("Content-Type"),
 		})
 	}
+}
+
+// handleComposeRequest decodes and executes a compose request against the
+// ComposeManager the client already holds, mirroring standard mode's
+// handleCompose (internal/server/http.go). Edge mode advertises the
+// "compose" capability, so a request on composeRequestPrefix must reach the
+// compose manager rather than fall through to the dockerd proxy above, which
+// has no such route and would 404.
+func (c *Client) handleComposeRequest(ctx context.Context, req protocol.RequestMessage) {
+	var composeReq docker.ComposeRequest
+	if err := json.Unmarshal(req.Body, &composeReq); err != nil {
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   fmt.Sprintf("invalid compose request: %v", err),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	resp, err := c.compose.Execute(ctx, composeReq)
+	if err != nil {
+		c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, audit.OutcomeError)
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   err.Error(),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	outcome := audit.OutcomeAllowed
+	if !resp.Success {
+		outcome = audit.OutcomeError
+	}
+	c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, outcome)
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		// ComposeResponse is a plain struct of strings/bools and always
+		// marshals cleanly; this guards against a future field change
+		// introducing something that doesn't, surfacing it as an error
+		// envelope instead of silently dropping the response.
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   fmt.Sprintf("encoding compose response: %v", err),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		RequestID:   req.RequestID,
+		StatusCode:  http.StatusOK,
+		Body:        json.RawMessage(body),
+		ContentType: "application/json",
+	})
 }
 
 // allowedDockerRequestHeaders forwards only Docker API metadata needed by the

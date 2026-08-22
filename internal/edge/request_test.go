@@ -3,12 +3,14 @@ package edge
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -167,5 +169,56 @@ func TestHandleRequestStream(t *testing.T) {
 	decodeData(t, expectType(t, ctrl, protocol.TypeStreamEnd), &end)
 	if end.RequestID != "r3" || end.Reason != "complete" {
 		t.Errorf("stream_end = %+v, want r3 / complete", end)
+	}
+}
+
+// A request on /_portwing/compose must reach the compose manager rather than
+// fall through to the dockerd proxy — dockerd has no such route and would
+// otherwise 404 every compose deploy (finding C7). Reverting the
+// composeRequestPrefix check in handleRequest routes this through
+// c.dockerClient instead, which this test would catch via fd.doCalls.
+func TestHandleRequestRoutesComposeToComposeManager(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	fd := &fakeDocker{} // no canned response: a call here means mis-routing to dockerd.
+	c.dockerClient = fd
+	c.compose = docker.NewComposeManager(t.TempDir(), "1.44", "")
+
+	body, err := json.Marshal(docker.ComposeRequest{
+		// Omitting StackName fails ComposeManager's own validation, so this
+		// exercises the routing without shelling out to a real compose binary.
+		Operation: "up",
+	})
+	if err != nil {
+		t.Fatalf("marshal compose request: %v", err)
+	}
+
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "compose-1",
+		Method:    http.MethodPost,
+		Path:      "/_portwing/compose",
+		Body:      body,
+	})
+
+	var resp protocol.ResponseMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+	if resp.RequestID != "compose-1" {
+		t.Errorf("RequestID = %q, want compose-1", resp.RequestID)
+	}
+
+	var composeResp docker.ComposeResponse
+	decodeData(t, resp.Body, &composeResp)
+	if composeResp.Success {
+		t.Error("Success = true, want false for a request missing StackName")
+	}
+	if !strings.Contains(composeResp.Error, "stack name is required") {
+		t.Errorf("Error = %q, want it to mention the missing stack name", composeResp.Error)
+	}
+
+	fd.mu.Lock()
+	defer fd.mu.Unlock()
+	if len(fd.doCalls) != 0 {
+		t.Errorf("Docker calls = %d, want 0 — compose requests must not reach dockerd", len(fd.doCalls))
 	}
 }
