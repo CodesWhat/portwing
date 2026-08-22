@@ -78,6 +78,13 @@ type HelloMessage struct {
 type WelcomeMessage struct {
 	PollInterval int               `json:"pollInterval"`
 	Config       map[string]string `json:"config,omitempty"`
+
+	// Capabilities lists optional wire-protocol extensions the controller
+	// supports, gating features that must not fire against an older
+	// controller that doesn't understand them (e.g. CapResponseBodyBase64).
+	// Additive and omitted by older controllers, so an absent field parses
+	// as a nil/empty slice rather than an error — see version.go.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // UnmarshalJSON tolerates pollInterval arriving as either a JSON number (the
@@ -128,12 +135,20 @@ type RequestMessage struct {
 }
 
 type ResponseMessage struct {
-	RequestID   string            `json:"requestId"`
-	StatusCode  int               `json:"statusCode"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	Body        json.RawMessage   `json:"body,omitempty"`
-	IsStream    bool              `json:"isStream,omitempty"`
-	ContentType string            `json:"contentType,omitempty"`
+	RequestID  string            `json:"requestId"`
+	StatusCode int               `json:"statusCode"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	Body       json.RawMessage   `json:"body,omitempty"`
+	// BodyBase64 carries the raw response body, standard-base64-encoded, when
+	// the connection negotiated CapResponseBodyBase64 (see version.go). It
+	// lets a non-JSON body (e.g. the literal "OK" from GET /_ping) cross the
+	// wire without requiring it to also be valid JSON, which Body as a
+	// json.RawMessage cannot represent. Set XOR Body, never both: a
+	// negotiated connection sends BodyBase64 and leaves Body nil; an
+	// unnegotiated one sends legacy Body and leaves this empty.
+	BodyBase64  string `json:"bodyBase64,omitempty"`
+	IsStream    bool   `json:"isStream,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
 }
 
 type StreamMessage struct {
