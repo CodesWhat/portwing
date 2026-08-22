@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -308,5 +310,84 @@ func TestLoadEdgeModeWithoutPrivateKeyErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "PRIVATE_KEY_FILE") {
 		t.Fatalf("expected 'PRIVATE_KEY_FILE' in error, got: %v", err)
+	}
+}
+
+// TestLoadEdgeModeRejectsPlaintextURL ensures a plaintext http:// or ws://
+// DRYDOCK_URL is rejected: edge mode never verifies the controller's identity
+// beyond TLS, so a plaintext scheme lets an on-path attacker who wins the
+// connection race complete the handshake and drive dockerd (see
+// internal/edge/client.go's http->ws / https->wss rewrite).
+func TestLoadEdgeModeRejectsPlaintextURL(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "http", url: "http://drydock.example.com"},
+		{name: "ws", url: "ws://drydock.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setEnv(t,
+				"DRYDOCK_URL", tc.url,
+				"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
+			)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatal("expected plaintext controller URL to be rejected")
+			}
+			if !strings.Contains(err.Error(), "ALLOW_INSECURE_EDGE_URL") {
+				t.Fatalf("expected opt-in guidance, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoadEdgeModePlaintextURLWithOptInStartsAndWarns verifies
+// ALLOW_INSECURE_EDGE_URL=true lets a plaintext controller URL through, but
+// only after logging a prominent warning — mirroring the standard-mode
+// ALLOW_UNAUTHENTICATED path.
+func TestLoadEdgeModePlaintextURLWithOptInStartsAndWarns(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	setEnv(t,
+		"DRYDOCK_URL", "http://drydock.example.com",
+		"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
+		"ALLOW_INSECURE_EDGE_URL", "true",
+	)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error with ALLOW_INSECURE_EDGE_URL set: %v", err)
+	}
+	if cfg.DrydockURL != "http://drydock.example.com" {
+		t.Fatalf("DrydockURL: got %q, want the plaintext URL unchanged", cfg.DrydockURL)
+	}
+	if !strings.Contains(buf.String(), "plaintext scheme") {
+		t.Fatalf("expected a plaintext-scheme warning to be logged, got: %s", buf.String())
+	}
+}
+
+// TestLoadEdgeModeSecureURLsUnaffected verifies https:// and wss:// URLs load
+// without error or requiring the opt-in.
+func TestLoadEdgeModeSecureURLsUnaffected(t *testing.T) {
+	for _, u := range []string{"https://drydock.example.com", "wss://drydock.example.com"} {
+		t.Run(u, func(t *testing.T) {
+			setEnv(t,
+				"DRYDOCK_URL", u,
+				"PRIVATE_KEY_FILE", "/etc/portwing/agent.key",
+			)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("unexpected error for secure URL %q: %v", u, err)
+			}
+			if cfg.DrydockURL != u {
+				t.Fatalf("DrydockURL: got %q, want %q", cfg.DrydockURL, u)
+			}
+		})
 	}
 }
