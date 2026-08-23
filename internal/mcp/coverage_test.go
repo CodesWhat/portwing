@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -391,9 +392,77 @@ func TestToolContainerStats_EmptyID(t *testing.T) {
 
 // ---- container_logs tail clamping ---------------------------------------
 
+// tailCapture records the "tail" query-string value the stub logs endpoint
+// last received, so tests can verify the server-side clamp (mcp.go:354-359)
+// instead of just checking that the call didn't error.
+type tailCapture struct {
+	mu   sync.Mutex
+	tail string
+}
+
+func (c *tailCapture) set(v string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tail = v
+}
+
+func (c *tailCapture) get() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tail
+}
+
+// newTailCapturingHandler is like newTestHandler but its logs endpoint
+// records the incoming "tail" query param instead of ignoring it.
+func newTailCapturingHandler(t *testing.T) (*Handler, *tailCapture, func()) {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "lk")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "d.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	capture := &tailCapture{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1.44/containers/abc123/logs", func(w http.ResponseWriter, r *http.Request) {
+		capture.set(r.URL.Query().Get("tail"))
+		// Empty body is fine — these tests only assert the tail the server sent upstream.
+	})
+
+	srv := &http.Server{Handler: mux}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = srv.Serve(listener)
+	}()
+
+	client, err := docker.NewClient(socketPath, 2)
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	shutdown := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		_ = listener.Close()
+		<-done
+	}
+
+	collector := metrics.NewCollector("/tmp", true)
+	return NewHandler(client, collector), capture, shutdown
+}
+
 func TestToolContainerLogs_DefaultTail(t *testing.T) {
 	// tail == 0 → default to 100.
-	h, shutdown := newTestHandler(t)
+	h, capture, shutdown := newTailCapturingHandler(t)
 	defer shutdown()
 
 	rr := postMCP(t, h, map[string]any{
@@ -407,11 +476,14 @@ func TestToolContainerLogs_DefaultTail(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
+	if got := capture.get(); got != "100" {
+		t.Errorf("expected the default tail=100 to be sent upstream, got tail=%q", got)
+	}
 }
 
 func TestToolContainerLogs_TailOver500(t *testing.T) {
 	// tail > 500 → capped to 500.
-	h, shutdown := newTestHandler(t)
+	h, capture, shutdown := newTailCapturingHandler(t)
 	defer shutdown()
 
 	rr := postMCP(t, h, map[string]any{
@@ -424,6 +496,9 @@ func TestToolContainerLogs_TailOver500(t *testing.T) {
 	resp := decodeResponse(t, rr)
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+	if got := capture.get(); got != "500" {
+		t.Errorf("expected tail to be clamped to 500 upstream, got tail=%q", got)
 	}
 }
 
@@ -502,8 +577,12 @@ func TestToolContainerStats_WithNetworks(t *testing.T) {
 	}
 	result := extractToolResult(t, resp)
 	text := extractTextContent(t, result)
-	if !strings.Contains(text, "rxBytes") && !strings.Contains(text, "networks") {
-		t.Errorf("expected network data in response, got: %s", text)
+	// "networks" is always present in the marshaled output (it's an
+	// unconditional map field), so asserting its presence alone can never
+	// fail. Assert the eth0 rxBytes value the stub actually supplies
+	// (rx_bytes: 1234) round-trips through the tool's response.
+	if !strings.Contains(text, `"rxBytes":1234`) {
+		t.Errorf("expected eth0 rxBytes=1234 in response, got: %s", text)
 	}
 }
 

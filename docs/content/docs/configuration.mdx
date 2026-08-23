@@ -15,7 +15,8 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 |---|---|---|
 | `PORT` | `3000` | TCP port the HTTP server listens on. |
 | `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | IP address the HTTP/operations listener binds to. Edge mode defaults to loopback because its operations routes have no inbound authentication; explicitly use a broader address only on an isolated monitoring network. |
-| `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Portwing operates in Edge mode and connects outbound to Drydock. |
+| `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Portwing operates in Edge mode and connects outbound to Drydock. A plaintext `http://`/`ws://` scheme is rejected at startup unless `ALLOW_INSECURE_EDGE_URL=true`. |
+| `ALLOW_INSECURE_EDGE_URL` | `false` | Dangerous opt-in to connect Edge mode to a plaintext `http://`/`ws://` `DRYDOCK_URL`. The controller's identity is otherwise verified by TLS alone, so this is for trusted local testing only. |
 | `TLS_CERT` | — | Path to server TLS certificate (Standard mode). Must be set together with `TLS_KEY`; partial configuration is a startup error. |
 | `TLS_KEY` | — | Path to server TLS private key (Standard mode). Must be set together with `TLS_CERT`; partial configuration is a startup error. |
 | `CA_CERT` | — | Path to a custom CA certificate used when verifying the Drydock server in Edge mode. |

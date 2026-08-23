@@ -114,6 +114,15 @@ type Client struct {
 	// connection before writePump starts; writePump reads it without a lock.
 	welcomePollInterval int
 
+	// controllerCaps holds the capability tokens the controller advertised in
+	// its welcome frame (nil/empty for a controller that predates
+	// capabilities, or one with none to advertise). Set once per connection
+	// in connect() before the read pump starts dispatching handleRequest
+	// goroutines, and read-only for the rest of that connection's lifetime —
+	// same single-writer-before-readers pattern as welcomePollInterval above,
+	// so handleRequest's concurrent goroutines read it without a lock.
+	controllerCaps []string
+
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
 }
@@ -319,10 +328,16 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("expected welcome, got %q", env.Type)
 	}
 
+	// Reset per-connection negotiated state so a reconnect to an older
+	// controller (or one with a parse failure below) doesn't inherit
+	// capabilities advertised by a previous connection.
+	c.controllerCaps = nil
+
 	var welcome protocol.WelcomeMessage
 	if err := json.Unmarshal(env.Data, &welcome); err != nil {
 		slog.Warn("could not parse welcome payload", "error", err)
 	} else {
+		c.controllerCaps = welcome.Capabilities
 		if welcome.PollInterval > 0 {
 			c.welcomePollInterval = welcome.PollInterval
 		}
@@ -436,6 +451,11 @@ func (c *Client) sendHello(ctx context.Context) error {
 		"exec",
 		"metrics",
 		"events",
+		// Symmetric advertisement only — the controller does not gate on
+		// anything in hello.capabilities today. The load-bearing negotiation
+		// direction is welcome.capabilities -> controllerCaps, checked in
+		// handleRequest via hasControllerCap.
+		protocol.CapResponseBodyBase64,
 	}
 	capabilities = append(capabilities, c.adapter.Capabilities()...)
 
@@ -473,6 +493,20 @@ func (c *Client) sendHello(ctx context.Context) error {
 }
 
 // setTokenHash sets the TokenHash field from cfg.Token.
+// hasControllerCap reports whether the controller advertised the given
+// capability token in its welcome frame for the current connection. An older
+// controller's welcome omits the capabilities field entirely, which parses
+// as a nil slice, so this reports false for it — the correct legacy-path
+// answer — rather than erroring.
+func (c *Client) hasControllerCap(token string) bool {
+	for _, got := range c.controllerCaps {
+		if got == token {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Client) setTokenHash(hello *protocol.HelloMessage) {
 	if c.cfg.Token != "" {
 		hash := sha256.Sum256([]byte(c.cfg.Token))
@@ -631,9 +665,20 @@ func (c *Client) readPump(ctx context.Context) error {
 	}
 }
 
+// composeRequestPrefix is the path standard mode's handleCompose (see
+// internal/server/http.go) serves on, and the one edge mode must detect and
+// route to c.compose instead of forwarding to dockerd — dockerd has no such
+// route and would otherwise 404 every compose deploy (see handleComposeRequest).
+const composeRequestPrefix = "/_portwing/compose"
+
 // handleRequest executes a Docker API request locally and sends the response
 // back over the WebSocket.
 func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage) {
+	if strings.HasPrefix(req.Path, composeRequestPrefix) {
+		c.handleComposeRequest(ctx, req)
+		return
+	}
+
 	start := time.Now()
 	isStream := docker.IsStreamingPath(req.Path)
 
@@ -706,14 +751,102 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 		// Read body (capped).
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 
-		_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		respMsg := protocol.ResponseMessage{
 			RequestID:   req.RequestID,
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
-			Body:        json.RawMessage(body),
 			ContentType: resp.Header.Get("Content-Type"),
-		})
+		}
+
+		// Negotiated via welcome.capabilities (see connect/hasControllerCap),
+		// not a ProtocolVersion bump: bumping the version is a terminal,
+		// hard mismatch that permanently breaks any agent/controller pairing
+		// that disagrees on it, whereas this capability token degrades
+		// gracefully — an old controller's welcome simply lacks the token,
+		// and we fall through to the legacy path unchanged.
+		if c.hasControllerCap(protocol.CapResponseBodyBase64) {
+			// The controller understands bodyBase64, so send the raw response
+			// bytes as standard base64 regardless of whether they're valid
+			// JSON. This is what lets a non-JSON body (e.g. the plain-text
+			// "OK" from GET /_ping) cross the wire at all — leave legacy Body
+			// nil so the drydock decoder's bodyBase64-first check picks this
+			// branch instead of the legacy json.RawMessage one.
+			respMsg.BodyBase64 = base64.StdEncoding.EncodeToString(body)
+		} else {
+			// Legacy path, unchanged: ResponseMessage.Body is a
+			// json.RawMessage, so a body that isn't valid JSON (e.g. the
+			// plain-text "OK" from GET /_ping) fails this marshal. Dropping
+			// that error, as this used to, left the controller waiting
+			// forever for a response envelope that would never arrive.
+			// Surface the failure as an error envelope (PR #201) so the
+			// controller gets a definitive (if unhelpful) response instead
+			// of hanging, since an unnegotiated connection has no other way
+			// to carry a non-JSON body.
+			respMsg.Body = json.RawMessage(body)
+		}
+
+		if err := c.sendTypedMessage(protocol.TypeResponse, respMsg); err != nil {
+			slog.Warn("failed to encode Docker response envelope", "requestId", applog.Sanitize(req.RequestID), "path", applog.Sanitize(req.Path), "error", err)
+			// Best-effort error reply; connection loss will surface on the read pump.
+			_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+				Message:   fmt.Sprintf("encoding response: %v", err),
+				RequestID: req.RequestID,
+			})
+		}
 	}
+}
+
+// handleComposeRequest decodes and executes a compose request against the
+// ComposeManager the client already holds, mirroring standard mode's
+// handleCompose (internal/server/http.go). Edge mode advertises the
+// "compose" capability, so a request on composeRequestPrefix must reach the
+// compose manager rather than fall through to the dockerd proxy above, which
+// has no such route and would 404.
+func (c *Client) handleComposeRequest(ctx context.Context, req protocol.RequestMessage) {
+	var composeReq docker.ComposeRequest
+	if err := json.Unmarshal(req.Body, &composeReq); err != nil {
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   fmt.Sprintf("invalid compose request: %v", err),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	resp, err := c.compose.Execute(ctx, composeReq)
+	if err != nil {
+		c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, audit.OutcomeError)
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   err.Error(),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	outcome := audit.OutcomeAllowed
+	if !resp.Success {
+		outcome = audit.OutcomeError
+	}
+	c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, outcome)
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		// ComposeResponse is a plain struct of strings/bools and always
+		// marshals cleanly; this guards against a future field change
+		// introducing something that doesn't, surfacing it as an error
+		// envelope instead of silently dropping the response.
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message:   fmt.Sprintf("encoding compose response: %v", err),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		RequestID:   req.RequestID,
+		StatusCode:  http.StatusOK,
+		Body:        json.RawMessage(body),
+		ContentType: "application/json",
+	})
 }
 
 // allowedDockerRequestHeaders forwards only Docker API metadata needed by the
@@ -941,17 +1074,6 @@ func closeWebSocket(conn *websocket.Conn, context string) {
 	}
 }
 
-type edgeHealthResponse struct {
-	Status        string  `json:"status"`
-	Live          bool    `json:"live"`
-	Ready         bool    `json:"ready"`
-	Mode          string  `json:"mode"`
-	Version       string  `json:"version"`
-	UptimeSeconds float64 `json:"uptimeSeconds"`
-	Docker        string  `json:"docker"`
-	Controller    string  `json:"controller"`
-}
-
 // startHealthServer starts the local liveness, readiness, and operational
 // metrics server used by Docker, Kubernetes, and Prometheus.
 func (c *Client) startHealthServer() {
@@ -959,7 +1081,7 @@ func (c *Client) startHealthServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(edgeHealthResponse{
+		_ = json.NewEncoder(w).Encode(protocol.HealthResponse{
 			Status:        "ok",
 			Live:          true,
 			Ready:         false,
@@ -981,7 +1103,7 @@ func (c *Client) startHealthServer() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(httpStatus)
-		_ = json.NewEncoder(w).Encode(edgeHealthResponse{
+		_ = json.NewEncoder(w).Encode(protocol.HealthResponse{
 			Status:        status,
 			Live:          true,
 			Ready:         dockerConnected && controllerConnected,

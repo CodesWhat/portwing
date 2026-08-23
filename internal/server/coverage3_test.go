@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -678,8 +679,30 @@ func TestHandleComposeSuccessPathAuditOutcomeError(t *testing.T) {
 
 	// ComposeManager.Execute always returns (response, nil) with Success=false
 	// when the command fails (e.g., docker-compose not installed).
-	// This exercises lines 356-360 in http.go (the resp.Success=false branch).
-	s := buildComposeServer(t)
+	// This exercises lines 356-360 in http.go (the resp.Success=false branch),
+	// including the audit.OutcomeError record that branch is responsible for.
+	client, stop := newStubDockerClient(t)
+	defer stop()
+
+	// buildComposeServer's auditor uses bufferSize 0 (ring disabled), which
+	// would make the audit trail unobservable here. Use a non-zero buffer so
+	// the record this test exists to verify is actually retrievable.
+	auditor, closeAudit, err := audit.New("", 16)
+	if err != nil {
+		t.Fatalf("audit.New: %v", err)
+	}
+	defer closeAudit()
+
+	rl := NewRateLimiter()
+	defer rl.Stop()
+
+	s := &Server{
+		dockerClient: client,
+		compose:      docker.NewComposeManager("", "1.44", client.GetSocketPath()),
+		rateLimiter:  rl,
+		auditor:      auditor,
+		cfg:          minimalConfig(),
+	}
 
 	// The compose manager with no stacksDir will run validateRequest → returns
 	// {Success:false, Error:...}, nil — exercising lines 356-360.
@@ -689,9 +712,35 @@ func TestHandleComposeSuccessPathAuditOutcomeError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleCompose(rec, req)
 
-	// 200 is returned (compose returns resp with Success=false, but no error).
+	// The resp.Success=false branch never calls http.Error, so the status
+	// stays the implicit 200 default; the failure is reported in the body.
 	if rec.Code != http.StatusOK {
-		t.Logf("handleCompose returned %d (may vary by environment)", rec.Code)
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp docker.ComposeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding response body: %v (body=%s)", err, rec.Body.String())
+	}
+	if resp.Success {
+		t.Fatalf("expected Success=false for a stack directory that doesn't exist, got %+v", resp)
+	}
+
+	// Now verify the audit side effect this test is named for: the
+	// resp.Success=false branch must record a compose_op event with outcome
+	// "error" for this operation/stack.
+	records := auditor.Records(0)
+	found := false
+	for _, ar := range records {
+		if ar.Event == audit.EventComposeOp && ar.Operation == "ps" && ar.Stack == "mystack" {
+			found = true
+			if ar.Outcome != audit.OutcomeError {
+				t.Errorf("expected audit outcome %q for the failed compose op, got %q", audit.OutcomeError, ar.Outcome)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no compose_op audit record found for operation=ps stack=mystack; records=%+v", records)
 	}
 }
 

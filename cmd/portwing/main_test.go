@@ -528,6 +528,10 @@ func clearEdgeEnv(t *testing.T) {
 	} {
 		unsetenv(t, k)
 	}
+	// These tests point DRYDOCK_URL at a local, unencrypted test double (a dead
+	// address or a plain-HTTP fake server), never a real controller, so opt
+	// into the plaintext scheme the same way a trusted local test setup would.
+	setenv(t, "ALLOW_INSECURE_EDGE_URL", "true")
 }
 
 // startFakeWS404Server starts an HTTP server on a random TCP port that
@@ -690,5 +694,205 @@ func TestRun_StandardMode_MockDocker(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not exit within 5s after SIGTERM")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// run — standard mode: SIGTERM must drain an in-flight handler, not cut it
+// ---------------------------------------------------------------------------
+
+// startMockDockerSlowPing is startMockDocker plus a /_ping handler that
+// signals pingStarted before sleeping for delay. That lets a test send
+// SIGTERM while a request is genuinely in flight inside the handler, instead
+// of guessing with a fixed sleep.
+func startMockDockerSlowPing(t *testing.T, pingStarted chan<- struct{}, delay time.Duration) string {
+	t.Helper()
+	dir := shortTempDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen unix %s: %v", sockPath, err)
+	}
+	if err := os.Chmod(sockPath, 0o600); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	versionPrefix := regexp.MustCompile(`^/v[0-9]+\.[0-9]+`)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := versionPrefix.ReplaceAllString(r.URL.Path, "")
+		switch path {
+		case "/version":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"Version":    "24.0.0-mock",
+				"ApiVersion": "1.44",
+			})
+		case "/_ping":
+			select {
+			case pingStarted <- struct{}{}:
+			default:
+			}
+			time.Sleep(delay)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go srv.Serve(ln) //nolint:errcheck
+	t.Cleanup(func() { srv.Close() })
+	return sockPath
+}
+
+// freeTCPPort asks the OS for an ephemeral port, then releases it so the
+// server under test can bind it by number (needed because PORT=0 doesn't
+// tell the test which port the OS picked).
+func freeTCPPort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort: %v", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+	return port
+}
+
+// TestRun_StandardMode_DrainsInFlightRequestOnShutdown is a regression test
+// for run() returning as soon as ListenAndServe unblocks (which happens the
+// instant Shutdown closes the listener) instead of waiting for Shutdown
+// itself to finish draining in-flight handlers. If run() returns early,
+// main()'s os.Exit would race ahead of a still-running handler (e.g. a
+// compose deploy) and cut it off.
+//
+// It sends SIGTERM only once a real request is confirmed in flight inside a
+// slow handler, then asserts both that the request completes successfully
+// and that run() does not return until after it does.
+func TestRun_StandardMode_DrainsInFlightRequestOnShutdown(t *testing.T) {
+	const pingDelay = 400 * time.Millisecond
+
+	pingStarted := make(chan struct{}, 1)
+	sockPath := startMockDockerSlowPing(t, pingStarted, pingDelay)
+	port := freeTCPPort(t)
+
+	setenv(t, "DOCKER_SOCKET", sockPath)
+	setenv(t, "BIND_ADDRESS", "127.0.0.1")
+	setenv(t, "PORT", port)
+	setenv(t, "TOKEN", "test-token")
+	unsetenv(t, "TOKEN_HASH")
+	unsetenv(t, "DRYDOCK_URL")
+	unsetenv(t, "TOKEN_FILE")
+	unsetenv(t, "DD_AGENT_SECRET_FILE")
+	unsetenv(t, "TOKEN_HASH_FILE")
+	unsetenv(t, "ENROLLMENT_TOKEN_FILE")
+	setenv(t, "ADAPTER", "drydock")
+
+	base := "http://127.0.0.1:" + port
+
+	// runResult carries the return time captured inside the goroutine, at the
+	// moment run() actually returns — NOT the time the test later happens to
+	// receive from the channel. runDone is buffered, so a receive-time
+	// timestamp would just measure when the test got around to reading it,
+	// silently defeating the regression check below.
+	type runResult struct {
+		code       int
+		returnedAt time.Time
+	}
+	runDone := make(chan runResult, 1)
+	go func() {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"portwing"}, strings.NewReader(""), &stdout, &stderr)
+		runDone <- runResult{code: code, returnedAt: time.Now()}
+	}()
+
+	// Wait for the server to accept connections (unauthenticated liveness
+	// endpoint, doesn't touch docker).
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		resp, err := http.Get(base + "/health")
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not become reachable: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// /_portwing/health requires no auth and calls docker Ping, which the
+	// mock daemon delays by pingDelay — our in-flight handler.
+	type reqResult struct {
+		status int
+		err    error
+		done   time.Time
+	}
+	reqDone := make(chan reqResult, 1)
+	go func() {
+		resp, err := http.Get(base + "/_portwing/health")
+		res := reqResult{err: err, done: time.Now()}
+		if err == nil {
+			res.status = resp.StatusCode
+			resp.Body.Close()
+		}
+		reqDone <- res
+	}()
+
+	// Send SIGTERM only once the handler is confirmed to be inside the slow
+	// docker call, so the shutdown genuinely races an in-flight request.
+	select {
+	case <-pingStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("in-flight request never reached the docker ping")
+	}
+	sigSentAt := time.Now()
+	p, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("FindProcess: %v", err)
+	}
+	if err := p.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("Signal: %v", err)
+	}
+
+	var result reqResult
+	select {
+	case result = <-reqDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("in-flight request never completed")
+	}
+	if result.err != nil {
+		t.Fatalf("in-flight request was cut off by shutdown: %v", result.err)
+	}
+	if result.status != http.StatusOK {
+		t.Fatalf("in-flight request status = %d, want 200", result.status)
+	}
+	if result.done.Sub(sigSentAt) < pingDelay/2 {
+		t.Fatalf("in-flight request completed suspiciously fast after SIGTERM (%v); the mock's delay may not have been exercised", result.done.Sub(sigSentAt))
+	}
+
+	var runRes runResult
+	select {
+	case runRes = <-runDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not exit within 5s after SIGTERM")
+	}
+	if runRes.code != 0 {
+		t.Fatalf("run returned %d, want 0", runRes.code)
+	}
+	// The crux of the regression test: run() must not return until after the
+	// in-flight handler actually finished draining. Reverting the fix makes
+	// run() return as soon as ListenAndServe unblocks (right after Shutdown
+	// closes the listener), which happens well before the handler above
+	// finishes sleeping — this assertion catches that.
+	if runRes.returnedAt.Before(result.done) {
+		t.Fatalf("run() returned at %v, before the in-flight request finished at %v", runRes.returnedAt, result.done)
 	}
 }

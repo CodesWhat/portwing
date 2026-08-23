@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -42,6 +43,15 @@ func FuzzMCPHandler(f *testing.F) {
 	h := &Handler{docker: nil, collector: nil}
 
 	f.Fuzz(func(t *testing.T, body string) {
+		// Parse the request the same way ServeHTTP does, so we know whether
+		// the request carried an "id" and, if so, what it was. This mirrors
+		// rpcRequest.ID's json:"id,omitempty" semantics: a present "id" key
+		// (even an explicit null) unmarshals to a non-nil RawMessage, while
+		// an absent key leaves it nil.
+		var parsedReq rpcRequest
+		reqParseOK := json.Unmarshal([]byte(body), &parsedReq) == nil
+		hadID := reqParseOK && parsedReq.ID != nil
+
 		req := httptest.NewRequest(http.MethodPost, "/_portwing/mcp", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -79,6 +89,23 @@ func FuzzMCPHandler(f *testing.F) {
 			var ver string
 			if err := json.Unmarshal(raw, &ver); err != nil || ver != "2.0" {
 				t.Errorf("jsonrpc field is not \"2.0\": %s", raw)
+			}
+		}
+
+		// A response must correlate to its request: whenever the request
+		// carried an "id", the response's "id" must be that same value.
+		// Compare raw bytes (trimmed) rather than decoding into a Go value —
+		// the server round-trips json.RawMessage verbatim, and decoding into
+		// `any` would misreport out-of-float64-range numbers (e.g. 1e700) as
+		// a mismatch when they're actually untouched by the server.
+		if hadID {
+			respID, ok := envelope["id"]
+			if !ok {
+				t.Errorf("response missing id field for request with id %s", parsedReq.ID)
+				return
+			}
+			if !bytes.Equal(bytes.TrimSpace(parsedReq.ID), bytes.TrimSpace(respID)) {
+				t.Errorf("response id %s does not match request id %s", respID, parsedReq.ID)
 			}
 		}
 	})

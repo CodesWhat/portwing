@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -434,6 +436,25 @@ type Ed25519Config struct {
 	MaxSkewSeconds int
 }
 
+// authBodyReadDeadline bounds how long the Ed25519 auth path may block
+// reading the (MaxBytesReader-capped) request body. This read happens before
+// tryBeginAuth's per-IP concurrency gate, so without a deadline an
+// unauthenticated caller could drip a signature-headed body slowly and pin
+// a goroutine indefinitely, exhausting fds/goroutines with no credentials.
+// Matches ReadHeaderTimeout in http.go: by the time headers (including the
+// signature headers) have already arrived, reading up to 1 MiB of body
+// should comfortably finish within the same 10 s budget.
+// A var, not a const, so tests can shrink it rather than waiting out the
+// real deadline.
+var authBodyReadDeadline = 10 * time.Second
+
+// isDeadlineExceeded reports whether err was caused by the read deadline set
+// via http.ResponseController.SetReadDeadline, as opposed to some other I/O
+// error (e.g. a reset connection) or the MaxBytesReader size cap.
+func isDeadlineExceeded(err error) bool {
+	return errors.Is(err, os.ErrDeadlineExceeded)
+}
+
 // AuthMiddlewareWithEd25519 is AuthMiddleware extended with an optional Ed25519
 // verification path. When an incoming request carries X-Portwing-Signature,
 // it is verified via Ed25519;
@@ -491,12 +512,31 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			var body []byte
 			if r.Body != nil {
 				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+				// Deadline the read itself, not just its size: a slow drip
+				// under the 1 MiB cap would otherwise pin this goroutine
+				// forever, and this happens before tryBeginAuth below, the
+				// only per-IP concurrency gate on this path.
+				rc := http.NewResponseController(w)
+				if err := rc.SetReadDeadline(time.Now().Add(authBodyReadDeadline)); err != nil {
+					slog.Warn("setting auth body read deadline", "error", err)
+				}
 				var err error
 				body, err = io.ReadAll(r.Body)
 				if closeErr := r.Body.Close(); closeErr != nil {
 					slog.Warn("closing request body", "error", closeErr)
 				}
+				// Clear the deadline so it doesn't linger onto downstream
+				// handlers, some of which are deliberately unbounded
+				// streaming endpoints (logs, events, stats, exec).
+				if clearErr := rc.SetReadDeadline(time.Time{}); clearErr != nil {
+					slog.Warn("clearing auth body read deadline", "error", clearErr)
+				}
 				if err != nil {
+					if isDeadlineExceeded(err) {
+						http.Error(w, "request body read timed out", http.StatusRequestTimeout)
+						return
+					}
 					http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 					return
 				}

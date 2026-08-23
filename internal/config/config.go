@@ -2,6 +2,9 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -135,6 +138,24 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents")
 	}
 
+	// Edge mode's controller auth is one-directional: portwing signs its hello
+	// so the controller can verify the agent, but nothing verifies the
+	// controller's identity in return — that trust rests entirely on TLS. A
+	// plaintext http(s)/ws(s) scheme lets an on-path attacker who wins the
+	// connection race complete the handshake and drive dockerd, so fail closed
+	// the same way standard mode's unauthenticated bind does, unless the
+	// operator explicitly opts in.
+	allowInsecureEdgeURL := getEnvBool("ALLOW_INSECURE_EDGE_URL", false)
+	if drydockURL != "" {
+		scheme := getURLScheme(drydockURL)
+		if scheme == "http" || scheme == "ws" {
+			if !allowInsecureEdgeURL {
+				return nil, fmt.Errorf("refusing plaintext controller URL %q: use https:// or wss://, or set ALLOW_INSECURE_EDGE_URL=true", drydockURL)
+			}
+			slog.Warn("connecting to the controller over a plaintext scheme: the controller's identity is unverified and an on-path attacker can drive dockerd — set ALLOW_INSECURE_EDGE_URL=true only for trusted local testing", "drydockURL", drydockURL)
+		}
+	}
+
 	agentID := getEnv("AGENT_ID", "")
 	if agentID == "" {
 		agentID = uuid.New().String()
@@ -214,7 +235,42 @@ func Load() (*Config, error) {
 		PrivateKeyFile: getEnv("PRIVATE_KEY_FILE", ""),
 	}
 
+	// Edge mode's operations listener (health, metrics, audit export) carries
+	// no authentication of its own — see the bindAddressDefault comment above.
+	// A non-loopback bind hands the full audit trail and metrics to anyone
+	// routable, so fail closed the same way standard mode's unauthenticated
+	// Docker proxy does, unless the operator explicitly opts in.
+	if drydockURL != "" && !IsLoopbackBind(cfg.BindAddress) {
+		if !cfg.AllowUnauthenticatedRemote {
+			return nil, fmt.Errorf("refusing unauthenticated non-loopback operations bind %q: bind to loopback or set ALLOW_UNAUTHENTICATED_REMOTE=true", cfg.BindAddress)
+		}
+		slog.Warn("operations listener (health, metrics, audit export) bound to a non-loopback address with no authentication: reachable by anyone routable — set ALLOW_UNAUTHENTICATED_REMOTE=true only on an isolated monitoring network", "bindAddress", cfg.BindAddress)
+	}
+
 	return cfg, nil
+}
+
+// IsLoopbackBind reports whether address is a loopback bind (127.0.0.1,
+// ::1, or "localhost"). Shared by standard mode's Docker-proxy listener and
+// edge mode's operations listener, both of which fail closed on an
+// unauthenticated non-loopback bind unless ALLOW_UNAUTHENTICATED_REMOTE is set.
+func IsLoopbackBind(address string) bool {
+	if strings.EqualFold(address, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(address, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+// getURLScheme returns the lowercase scheme of rawURL, or "" if it cannot be
+// parsed as a URL. Used to detect a plaintext http/ws controller URL before
+// client.connect rewrites it to wss/ws (see internal/edge/client.go).
+func getURLScheme(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Scheme
 }
 
 func (c *Config) IsEdgeMode() bool {

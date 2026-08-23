@@ -21,6 +21,7 @@ import (
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // ---------------------------------------------------------------------------
@@ -326,7 +327,7 @@ func TestHandleSimpleHealthDirect(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		t.Errorf("unexpected Content-Type: %q", ct)
 	}
-	var body healthResponse
+	var body protocol.HealthResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -353,7 +354,7 @@ func TestHandleHealthConnected(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	var body healthResponse
+	var body protocol.HealthResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -379,7 +380,7 @@ func TestHandleHealthDisconnected(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", rec.Code)
 	}
-	var body healthResponse
+	var body protocol.HealthResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

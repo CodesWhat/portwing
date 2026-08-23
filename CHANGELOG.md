@@ -5,6 +5,111 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.9.9] - 2026-08-23
+
+The output of a whole-app audit: five parallel review lanes plus an
+outside-family pass over the codebase at v0.9.8, every finding adversarially
+verified before it was accepted, and every accepted finding fixed. Nothing
+here is a feature request; each entry below traces to a confirmed defect.
+
+### Added
+
+- **Non-JSON response bodies now cross the edge tunnel, when negotiated.** The
+  edge response envelope's `body` is a `json.RawMessage`, so a Docker API
+  response that isn't valid JSON — the plain-text `OK` from `GET /_ping` —
+  could never be carried. The agent now advertises an `edge-response-body-b64`
+  capability in its hello; a controller that echoes it in the welcome's new
+  `capabilities` field gets every non-streaming response body as standard
+  base64 in a `bodyBase64` field. Negotiated rather than versioned on purpose:
+  a version bump is a terminal mismatch that breaks any disagreeing pairing,
+  while an old controller's welcome simply lacks the value and the agent keeps
+  the legacy encoding. Requires a Drydock with the matching decoder
+  (CodesWhat/drydock#852) to take effect; without one, an unencodable body now
+  produces an error envelope instead of leaving the controller waiting forever
+  for a response that will never arrive.
+
+### Security
+
+- **Edge mode refuses a plaintext controller URL.** Edge mode never
+  authenticates the controller — trust rests entirely on TLS — yet
+  `DRYDOCK_URL` accepted `http://` and `ws://` verbatim, so an on-path
+  attacker who won the connection race could drive dockerd. Startup now fails
+  closed on a plaintext scheme unless `ALLOW_INSECURE_EDGE_URL=true`, which
+  warns on use and is for trusted local testing only.
+- **The edge operations listener refuses non-loopback binds.** The listener
+  serving health, metrics, and the audit export has no inbound
+  authentication, and `BIND_ADDRESS=0.0.0.0` silently exposed the full audit
+  trail. It now refuses a non-loopback address unless
+  `ALLOW_UNAUTHENTICATED_REMOTE` is set, mirroring standard mode's guard —
+  same env var, same fail-closed semantics.
+- **The nonce-replay window is closed.** The timestamp check accepts clock
+  skew symmetrically, but the nonce TTL equalled the skew window, so a nonce
+  was evicted before its signature stopped being timestamp-valid — a captured
+  request replayed in that gap passed both checks. Nonce retention is now
+  twice `MAX_CLOCK_SKEW_SECONDS`, the full span a signed timestamp can stay
+  valid.
+- **A slow-trickled body can no longer pin goroutines before
+  authentication.** The Ed25519 auth path read the whole request body with no
+  deadline (`ReadTimeout` is deliberately 0 for streaming), so unauthenticated
+  slow-drip connections each held a goroutine indefinitely. The auth body read
+  now carries a 10-second `ResponseController` deadline, cleared before the
+  streaming handlers so their unbounded reads are untouched.
+
+### Fixed
+
+- **Shutdown waits for in-flight handlers to drain.** On SIGTERM the process
+  exited the instant the listener closed, cutting an in-progress compose
+  deploy or image pull mid-flight and leaving it partially applied. `run()`
+  now waits for `Shutdown` to return — handlers drain or the shutdown timeout
+  elapses — before `os.Exit` is reached.
+- **Compose operations are serialized per stack.** Two concurrent `up`
+  requests for the same stack could interleave file writes, deploying one
+  caller's configuration while reporting success to the other. A per-stack
+  lock is held from file write through `docker compose`, so same-stack
+  requests serialize while different stacks stay concurrent.
+- **The exec handshake is bounded.** `StartExec` dialed the Docker socket and
+  blocked on the 101 upgrade with no deadline; a daemon that accepted the
+  connection but never answered hung the goroutine forever, and each wedged
+  session counted against the 100-session exec cap until restart exhausted
+  it. The dial now honors the request context and the handshake carries a
+  connection deadline.
+- **Compose output is capped and the logs tail clamped.** `Execute` buffered
+  a subprocess's entire stdout+stderr unbounded, and a `logs` call without a
+  positive `tail` dumped the full container log — either could OOM the agent
+  managing every other stack. Combined output is now capped at 10 MB with a
+  truncation marker, and `logs` always passes `--tail` (default 100, max 500).
+- **One shared Docker event stream.** `EventBroadcaster`'s registry was dead
+  code while every SSE client opened its own `/events` connection to dockerd
+  with its own reconnect loop. One upstream subscription now fans out to all
+  clients, started on first register and cancelled on last leave.
+- **Finished edge log streams release their context registration.** Every log
+  stream that ended normally leaked its child registration on the
+  connection-lifetime context — unbounded growth on a tunnel designed to stay
+  up for weeks. Stream cleanup now cancels the context it created.
+- **Edge compose requests reach the ComposeManager.** Edge mode advertised
+  the `compose` capability but forwarded `/_portwing/compose` to dockerd,
+  which 404s — a stack deployed through the tunnel never deployed. The path
+  is now routed to the ComposeManager, mirroring standard mode.
+- **Large image and container exports stream.** `GET /images/{name}/get`,
+  `GET /images/get`, and `GET /containers/{id}/export` fell through to the
+  full-buffer branch — up to 100 MB of binary tar held in memory per request.
+  They now take the streaming path.
+- **The comparison pages take their version from `SITE_CONFIG`.** Four of the
+  website's six `/compare` pages hardcoded "Portwing v0.9.2" in SEO metadata,
+  JSON-LD, and hero copy, six patch releases stale. They now interpolate the
+  shared version constant, so the string can't drift again.
+- **Tests that accepted any outcome now assert.** Seven tests looked like
+  coverage of security-critical paths but constrained nothing — `t.Logf`
+  where `t.Errorf` belonged, `if x != nil` wrappers with no else, a De Morgan
+  inversion that always passed, a proxy test that passed when the request
+  never arrived. Each now asserts the exact contract, verified by
+  hand-reverting the production behavior it guards.
+- **The docs match the code.** A docs-site audit closed the gaps the release
+  cycle opened: `ALLOW_INSECURE_EDGE_URL` in the env-var references, the
+  capability negotiation in the wire-protocol pages and SPEC, the compose
+  caps, the precise nonce-retention semantics, the auth read deadline in the
+  resource-caps table, and the `enrollment` audit event in the README.
+
 ## [v0.9.8] - 2026-08-21
 
 ### Fixed

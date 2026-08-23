@@ -1,5 +1,6 @@
 import { Activity, Bot, FileText, KeyRound, Network, ShieldCheck } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
+import { SITE_CONFIG } from "@/lib/site-config";
 
 export const portainerComparisonRouteData = {
   slug: "portainer",
@@ -34,8 +35,7 @@ bot|Prometheus and Read-Only MCP|Portwing exposes an agent Prometheus endpoint a
     bot: Bot,
   },
   metadataTitle: "Portainer Agent vs Portwing — Remote Docker Agent Comparison",
-  metadataDescription:
-    "Compare Portainer 2.39 Agent/Edge Agent and Portwing v0.9.2 across transport, authentication, socket policy, audit, fleet upgrades, host access, metrics, and MCP.",
+  metadataDescription: `Compare Portainer 2.39 Agent/Edge Agent and Portwing v${SITE_CONFIG.version} across transport, authentication, socket policy, audit, fleet upgrades, host access, metrics, and MCP.`,
   metadataKeywords: [
     "portainer agent vs portwing",
     "portainer alternative",
@@ -46,15 +46,14 @@ bot|Prometheus and Read-Only MCP|Portwing exposes an agent Prometheus endpoint a
   ],
   openGraphDescription:
     "Portainer leads mature fleet and async-edge operations; Portwing focuses on signed requests, narrow socket policy, agent audit export, Prometheus, and MCP.",
-  twitterDescription:
-    "Portainer 2.39 Agent vs Portwing v0.9.2: an evidence-backed comparison of transport, security, fleet operations, and scope.",
+  twitterDescription: `Portainer 2.39 Agent vs Portwing v${SITE_CONFIG.version}: an evidence-backed comparison of transport, security, fleet operations, and scope.`,
   competitorName: "Portainer",
   heroTitle: "Portainer vs Portwing",
   heroDescription: (
     <p>
       Portainer 2.39 is the mature fleet-management benchmark, with classic, Edge, and Async Edge
-      agents plus Swarm and controller-driven updates. Portwing v0.9.2 is a narrower Drydock agent
-      focused on{" "}
+      agents plus Swarm and controller-driven updates. Portwing v{SITE_CONFIG.version} is a narrower
+      Drydock agent focused on{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
         signed requests, replay defense, Sockguard policy, agent-level audit, Prometheus, and MCP
       </strong>{" "}
@@ -66,6 +65,5 @@ bot|Prometheus and Read-Only MCP|Portwing exposes an agent Prometheus endpoint a
   migrationDescription:
     "Inventory Edge Stacks, Jobs, Configurations, RBAC, Swarm, host browsing, and agent update policies before moving controllers. Map those responsibilities to Drydock, then deploy Portwing with Ed25519 keys and the narrowest Sockguard preset that permits the workflows you actually need.",
   jsonLdName: "Portainer Agent vs Portwing — Remote Docker Agent Comparison",
-  jsonLdDescription:
-    "Evidence-backed comparison of Portainer 2.39 Agent/Edge Agent and Portwing v0.9.2.",
+  jsonLdDescription: `Evidence-backed comparison of Portainer 2.39 Agent/Edge Agent and Portwing v${SITE_CONFIG.version}.`,
 } satisfies ComparisonRouteRawConfig;

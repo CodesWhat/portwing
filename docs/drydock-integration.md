@@ -79,7 +79,7 @@ sequenceDiagram
     participant D as Drydock controller
     L->>D: WSS /api/portwing/ws
     L->>D: hello {version, protocol, agentId, agentName, pubKeyId,<br/>timestamp, nonce, signature, dockerVersion,<br/>capabilities, drydockCompat, watcherTypes}
-    D->>L: welcome {pollInterval: 300}
+    D->>L: welcome {pollInterval: 300, capabilities: [...]}
     L->>D: dd:component_sync {watchers: [...], triggers: []}
     L->>D: dd:container_sync {containers: [...]}
     L->>D: metrics {...}

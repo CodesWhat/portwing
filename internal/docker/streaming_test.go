@@ -20,6 +20,24 @@ func TestIsStreamingPath(t *testing.T) {
 		{name: "exec start", path: "/v1.44/exec/abc/start", want: true},
 		{name: "non-stream endpoint", path: "/v1.44/containers/json", want: false},
 		{name: "exec inspect not stream", path: "/v1.44/exec/abc/json", want: false},
+
+		// Large-body export endpoints: docker save (single and multi-image)
+		// and docker export (container filesystem tar) must stream instead
+		// of buffering, both to avoid the 100MB memory spike and because the
+		// body is a binary tar, not the JSON these responses get wrapped as
+		// on the non-streaming path.
+		{name: "container export", path: "/v1.44/containers/abc/export", want: true},
+		{name: "images get (single, named)", path: "/v1.44/images/nginx/get", want: true},
+		{name: "images get (single, namespaced repo)", path: "/v1.44/images/library%2Fnginx/get", want: true},
+		{name: "images get (multi-image)", path: "/v1.44/images/get?names=nginx&names=alpine", want: true},
+
+		// Near misses: paths that share a segment with the export endpoints
+		// above but are not themselves streaming responses.
+		{name: "images json is not an export", path: "/v1.44/images/json", want: false},
+		{name: "image inspect is not an export", path: "/v1.44/images/nginx/json", want: false},
+		{name: "container archive is not an export", path: "/v1.44/containers/abc/archive", want: false},
+		{name: "images load is not an export", path: "/v1.44/images/load", want: false},
+		{name: "bare /get without /images/ does not match", path: "/v1.44/secrets/abc/get", want: false},
 	}
 
 	for _, tt := range tests {

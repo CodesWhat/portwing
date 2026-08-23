@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 var (
@@ -61,6 +62,91 @@ type ComposeResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
+const (
+	// defaultComposeLogsTail and maxComposeLogsTail bound the "logs"
+	// operation's --tail flag, which is otherwise unbounded and can dump an
+	// entire container's log history into memory. Mirrors the MCP
+	// container-logs default/cap in internal/mcp/mcp.go so the two log-tail
+	// entry points behave the same way.
+	defaultComposeLogsTail = 100
+	maxComposeLogsTail     = 500
+
+	// maxComposeOutputBytes bounds the combined stdout+stderr captured from a
+	// compose subprocess. A verbose "up --build" or an unfiltered "logs" call
+	// can otherwise write without limit, and since Execute buffers the whole
+	// thing before returning, that's an easy way to OOM the agent process
+	// that's managing every other stack too. 10MB is generous for a compose
+	// invocation's output while still bounding worst case.
+	maxComposeOutputBytes = 10 * 1024 * 1024
+)
+
+// composeLogsTail clamps a requested --tail value to
+// [1, maxComposeLogsTail], defaulting to defaultComposeLogsTail when the
+// request didn't specify one (or specified a nonsense non-positive value).
+// The logs operation always passes --tail so an unbounded dump is never the
+// default behavior.
+func composeLogsTail(requested int) int {
+	if requested <= 0 {
+		return defaultComposeLogsTail
+	}
+	if requested > maxComposeLogsTail {
+		return maxComposeLogsTail
+	}
+	return requested
+}
+
+// outputLimiter enforces a shared byte budget across a compose subprocess's
+// stdout and stderr writers, so the two streams are bounded together rather
+// than each independently up to the cap (which would let combined output run
+// to 2x the intended limit). os/exec drains stdout and stderr concurrently
+// from separate goroutines, so the budget is mutex-guarded.
+type outputLimiter struct {
+	mu        sync.Mutex
+	remaining int
+	truncated bool
+}
+
+func newOutputLimiter(limit int) *outputLimiter {
+	return &outputLimiter{remaining: limit}
+}
+
+// reserve claims up to n bytes from the remaining budget and returns how
+// many were actually granted, flipping truncated once the budget runs out.
+func (l *outputLimiter) reserve(n int) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if n > l.remaining {
+		l.truncated = true
+		n = l.remaining
+	}
+	l.remaining -= n
+	return n
+}
+
+func (l *outputLimiter) isTruncated() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.truncated
+}
+
+// boundedWriter retains bytes up to its shared limiter's remaining budget and
+// silently drops the rest. Write always reports success and the full length
+// written even when it drops bytes: the caller here is os/exec's internal
+// pipe-copy goroutine, and returning an error would stop it draining the
+// pipe, which would leave the subprocess blocked writing to a full pipe and
+// cmd.Run never returning — trading an OOM for a permanent hang.
+type boundedWriter struct {
+	buf     bytes.Buffer
+	limiter *outputLimiter
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	if n := w.limiter.reserve(len(p)); n > 0 {
+		w.buf.Write(p[:n])
+	}
+	return len(p), nil
+}
+
 // ComposeManager executes Docker Compose operations in a managed stacks
 // directory.
 type ComposeManager struct {
@@ -69,6 +155,11 @@ type ComposeManager struct {
 	isV2         bool
 	apiVersion   string
 	dockerSocket string
+
+	// stackLocks holds one *sync.Mutex per StackName, created lazily. It
+	// serializes writeStackFiles through cmd.Run() (see Execute) for a given
+	// stack while leaving unrelated stacks free to run concurrently.
+	stackLocks sync.Map
 }
 
 // NewComposeManager creates a ComposeManager. It auto-detects whether the
@@ -104,11 +195,31 @@ func (cm *ComposeManager) detectCompose() {
 	cm.isV2 = true
 }
 
+// lockStack acquires the per-StackName mutex, creating it on first use, and
+// returns a func that releases it. Two requests for different stack names
+// get independent mutexes and never block each other.
+func (cm *ComposeManager) lockStack(stackName string) func() {
+	lockIface, _ := cm.stackLocks.LoadOrStore(stackName, &sync.Mutex{})
+	lock := lockIface.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
+}
+
 // Execute dispatches a compose operation and returns the result.
 func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*ComposeResponse, error) {
 	if err := cm.validateRequest(req); err != nil {
 		return &ComposeResponse{Success: false, Error: err.Error()}, nil
 	}
+
+	// Serialize the write-then-exec sequence below per stack: without this,
+	// two concurrent "up" requests for the same StackName can interleave —
+	// request A writes its compose files, request B overwrites them before A
+	// runs "docker compose", and A deploys B's configuration while reporting
+	// success for A's request. Both requests are already authenticated with
+	// full compose control over this stack, so the lock is about correctness
+	// (deploying the config you asked for) rather than access control.
+	unlock := cm.lockStack(req.StackName)
+	defer unlock()
 
 	if req.Files != nil {
 		if err := cm.writeStackFiles(req); err != nil {
@@ -129,18 +240,25 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 
 	cmd.Env = cm.buildEnv()
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// stdout and stderr share one limiter so the combined capture is bounded,
+	// not each stream up to the cap independently.
+	limiter := newOutputLimiter(maxComposeOutputBytes)
+	stdout := &boundedWriter{limiter: limiter}
+	stderr := &boundedWriter{limiter: limiter}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err = cmd.Run()
 
-	output := stdout.String()
-	if stderr.Len() > 0 {
+	output := stdout.buf.String()
+	if stderr.buf.Len() > 0 {
 		if output != "" {
 			output += "\n"
 		}
-		output += stderr.String()
+		output += stderr.buf.String()
+	}
+	if limiter.isTruncated() {
+		output += fmt.Sprintf("\n[output truncated: exceeded %d MB combined output limit]", maxComposeOutputBytes/(1024*1024))
 	}
 
 	if err != nil {
@@ -441,9 +559,10 @@ func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) 
 
 	case "logs":
 		args = append(args, "logs")
-		if req.Tail > 0 {
-			args = append(args, "--tail", fmt.Sprintf("%d", req.Tail))
-		}
+		// --tail is always passed (never omitted) so an unset or unbounded
+		// request can't dump a container's entire log history through the
+		// bounded-but-still-finite output capture above.
+		args = append(args, "--tail", fmt.Sprintf("%d", composeLogsTail(req.Tail)))
 		args = append(args, req.Services...)
 
 	case "restart":

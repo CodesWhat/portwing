@@ -31,12 +31,22 @@ type sseClient struct {
 }
 
 // EventBroadcaster subscribes to Docker container events and fans them out
-// to connected SSE clients.
+// to connected SSE clients. It keeps exactly one upstream docker.EventStream
+// subscription alive regardless of how many clients are connected: the
+// subscription starts lazily when the first client registers and stops when
+// the last one leaves, so N dashboards watching the same agent cost the
+// daemon one /events connection, not N.
 type EventBroadcaster struct {
 	dockerClient *docker.Client
 
 	mu      sync.RWMutex
 	clients map[string]*sseClient
+
+	// upstreamCancel stops the current shared docker.EventStream
+	// subscription. Non-nil only while at least one client is connected;
+	// guarded by mu like the clients map, since both change together at
+	// the first-join/last-leave edges.
+	upstreamCancel context.CancelFunc
 }
 
 // NewEventBroadcaster creates an EventBroadcaster.
@@ -66,24 +76,11 @@ func (b *EventBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		events: make(chan []byte, 64),
 	}
 
-	b.mu.Lock()
-	b.clients[client.id] = client
-	b.mu.Unlock()
+	b.registerClient(client)
 
 	slog.Info("generic SSE client connected", "clientId", client.id)
 
-	// Subscribe to Docker events for this client's lifetime.
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
-	stream := docker.NewEventStream(b.dockerClient)
-	eventCh, err := stream.Subscribe(ctx)
-	if err != nil {
-		slog.Error("failed to subscribe to docker events", "error", err)
-		b.removeClient(client.id)
-		return
-	}
-
+	ctx := r.Context()
 	heartbeat := time.NewTicker(30 * time.Second)
 	defer heartbeat.Stop()
 
@@ -101,26 +98,9 @@ func (b *EventBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 
-		case de, ok := <-eventCh:
+		case data, ok := <-client.events:
 			if !ok {
-				b.removeClient(client.id)
 				return
-			}
-
-			ge := genericEvent{
-				TS:          time.Unix(de.Time, 0).UTC().Format(time.RFC3339),
-				Type:        de.Type,
-				Action:      de.Action,
-				ContainerID: de.Actor.ID,
-				Name:        de.Actor.Attributes["name"],
-				Image:       de.Actor.Attributes["image"],
-				Labels:      filterLabels(de.Actor.Attributes),
-			}
-
-			data, err := json.Marshal(ge)
-			if err != nil {
-				slog.Error("failed to marshal generic event", "error", err)
-				continue
 			}
 
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
@@ -132,12 +112,107 @@ func (b *EventBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// removeClient cleans up a disconnected client.
+// registerClient adds a client and, if it is the first one, starts the
+// shared upstream Docker event subscription that will feed it.
+func (b *EventBroadcaster) registerClient(client *sseClient) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.clients[client.id] = client
+	if len(b.clients) == 1 {
+		b.startUpstreamLocked()
+	}
+}
+
+// removeClient cleans up a disconnected client and, if it was the last one,
+// stops the shared upstream subscription — nothing is left to feed.
 func (b *EventBroadcaster) removeClient(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	client, ok := b.clients[id]
+	if !ok {
+		return
+	}
+
+	close(client.events)
 	delete(b.clients, id)
+	if len(b.clients) == 0 {
+		b.stopUpstreamLocked()
+	}
 	slog.Info("generic SSE client removed", "clientId", id)
+}
+
+// startUpstreamLocked opens the shared docker.EventStream subscription and
+// starts the goroutine that fans its events out to every registered client.
+// Callers must hold mu.
+func (b *EventBroadcaster) startUpstreamLocked() {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	stream := docker.NewEventStream(b.dockerClient)
+	eventCh, err := stream.Subscribe(ctx)
+	if err != nil {
+		// EventStream.Subscribe's current implementation never fails
+		// synchronously — it reconnects with backoff internally and only
+		// reports failures via log lines — but don't leave upstreamCancel
+		// unset (and clients waiting on a subscription that never started)
+		// if a future implementation does.
+		cancel()
+		slog.Error("failed to subscribe to docker events", "error", err)
+		return
+	}
+
+	b.upstreamCancel = cancel
+	go b.pumpUpstream(eventCh)
+}
+
+// stopUpstreamLocked cancels the shared upstream subscription, if any.
+// Callers must hold mu.
+func (b *EventBroadcaster) stopUpstreamLocked() {
+	if b.upstreamCancel != nil {
+		b.upstreamCancel()
+		b.upstreamCancel = nil
+	}
+}
+
+// pumpUpstream reads events off the shared subscription until it closes
+// (which happens once stopUpstreamLocked cancels its context) and fans each
+// one out to every connected client.
+func (b *EventBroadcaster) pumpUpstream(eventCh <-chan docker.DockerEvent) {
+	for de := range eventCh {
+		ge := genericEvent{
+			TS:          time.Unix(de.Time, 0).UTC().Format(time.RFC3339),
+			Type:        de.Type,
+			Action:      de.Action,
+			ContainerID: de.Actor.ID,
+			Name:        de.Actor.Attributes["name"],
+			Image:       de.Actor.Attributes["image"],
+			Labels:      filterLabels(de.Actor.Attributes),
+		}
+
+		data, err := json.Marshal(ge)
+		if err != nil {
+			slog.Error("failed to marshal generic event", "error", err)
+			continue
+		}
+
+		b.broadcast(data)
+	}
+}
+
+// broadcast sends raw event data to every connected SSE client. A client
+// whose buffer is full is slow or stuck; drop the event for that client
+// rather than block the shared upstream pump on it.
+func (b *EventBroadcaster) broadcast(data []byte) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	for _, client := range b.clients {
+		select {
+		case client.events <- data:
+		default:
+			slog.Warn("generic SSE client buffer full, dropping event", "clientId", client.id)
+		}
+	}
 }
 
 // filterLabels strips the synthetic Docker attributes (name, image, etc.)

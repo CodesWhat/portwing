@@ -32,7 +32,7 @@
 <hr>
 
 > [!WARNING]
-> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.8`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.9`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <h2 align="center">Contents</h2>
 
@@ -59,7 +59,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.9.8 is the current release.** It keeps the v0.9.0 controller-owned watcher/update, Edge audit export, and exec/sockguard error improvements, and the v0.9.2 security fixes: `X-Real-IP` is validated before it can key the auth rate limiter, the Compose env-file lookup is contained by `os.Root`, and the edge exec resize log is sanitized. v0.9.8 acts on what the previous release's newly widened scanners found — nothing in the shipped agent changed, and the only Go edit is to a test. The four CodeQL alerts that extending the scan to JavaScript surfaced are fixed, all of them in build and test tooling: two file-system races in the page-weight gate and a CI config test, a test that checked a hostname by substring, and the website's Content-Security-Policy generator, whose inline-script scan matched only lower-case tags closed by an exact `</script>` and would therefore have emitted a policy blocking a script the page needs. The star-history refresh now fires on the `v*` tag push, which is the trigger that actually works. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.9 is the current release.** It ships the results of a whole-app audit, every finding adversarially verified before it was fixed. Edge mode now fails closed on a plaintext `DRYDOCK_URL` (opt-out: `ALLOW_INSECURE_EDGE_URL`) and refuses non-loopback binds of its unauthenticated operations listener; the Ed25519 nonce cache retains entries for the full span a signed timestamp can stay valid, and an unauthenticated client can no longer trickle a request body indefinitely. Shutdown drains in-flight handlers before exit, compose operations serialize per stack with output capped at 10 MB, the exec handshake is bounded, large image and container exports stream instead of buffering, and all SSE clients share one Docker event stream. With a Drydock controller that negotiates the new `edge-response-body-b64` capability, non-JSON Docker API response bodies cross the edge tunnel as base64 — additive, no wire-version bump, older controllers keep the legacy encoding. Full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`; the stable wire contract remains `DrydockCompat` 1.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
@@ -147,10 +147,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.9.8_linux_amd64.deb
+sudo apt install ./portwing_0.9.9_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.9.8_linux_amd64.rpm
+sudo rpm --install ./portwing_0.9.9_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -199,7 +199,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.8
+    image: ghcr.io/codeswhat/portwing:0.9.9
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -252,7 +252,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.8
+    image: ghcr.io/codeswhat/portwing:0.9.9
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -293,7 +293,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:0.9.8
+  ghcr.io/codeswhat/portwing:0.9.9
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -323,7 +323,7 @@ curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/ins
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-For v0.4.0 and later — including v0.9.8, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+For v0.4.0 and later — including v0.9.9, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 - **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
 - **v0.2.0** — the security & observability release. Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`. Also shipped in v0.2.0:
@@ -380,7 +380,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:0.9.8
+  ghcr.io/codeswhat/portwing:0.9.9
 ```
 
 </details>
@@ -415,7 +415,7 @@ docker run -d --name portwing \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:0.9.8
+  ghcr.io/codeswhat/portwing:0.9.9
 ```
 
 **Key rotation (zero-downtime):**
@@ -464,6 +464,14 @@ Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRY
 - Sends watcher component ownership before raw inventory; controller-owned
   Docker calls use correlated WebSocket `request`/`response` messages
 
+Edge mode's controller trust is **TLS-only and one-directional**: the signed
+hello lets the controller verify Portwing, but nothing verifies the
+controller's identity in return, so a plaintext `http://`/`ws://`
+`DRYDOCK_URL` would let an on-path attacker complete the handshake and drive
+dockerd. Portwing fails closed on a plaintext `DRYDOCK_URL` unless you set
+`ALLOW_INSECURE_EDGE_URL=true`, which is for trusted local testing only —
+always use `https://`/`wss://` against a real controller.
+
 ```text
 DRYDOCK_URL set + PRIVATE_KEY_FILE set  →  Edge Mode (outbound WebSocket)
 Otherwise                                →  Standard Mode (inbound HTTP server)
@@ -490,7 +498,7 @@ docker run -d \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
   -p 3000:3000 \
-  ghcr.io/codeswhat/portwing:0.9.8
+  ghcr.io/codeswhat/portwing:0.9.9
 ```
 
 ### Endpoints
@@ -556,7 +564,7 @@ the connection alive through proxies.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DRYDOCK_URL` | -- | WebSocket URL for Edge mode (`wss://...`) |
+| `DRYDOCK_URL` | -- | WebSocket URL for Edge mode (`wss://...`). A plaintext `http://`/`ws://` scheme is rejected unless `ALLOW_INSECURE_EDGE_URL=true` — see below. |
 | `TOKEN` | -- | Authentication token (plaintext) |
 | `TOKEN_FILE` | -- | Path to file containing token |
 | `TOKEN_HASH` | -- | Argon2id hash of token (generate with `portwing hash-token`) |
@@ -571,12 +579,13 @@ the connection alive through proxies.
 | `CA_CERT` | -- | Custom CA certificate for Edge mode |
 | `TLS_SKIP_VERIFY` | `false` | Skip TLS verification (testing only) |
 | `PORT` | `3000` | HTTP server port |
-| `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | HTTP/operations listener bind address. Set Edge mode to a non-loopback address only on an isolated monitoring network. |
+| `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | HTTP/operations listener bind address. Edge mode refuses a non-loopback address unless `ALLOW_UNAUTHENTICATED_REMOTE=true` — the operations listener carries no authentication, so set it only on an isolated monitoring network. |
 | `TLS_CERT` | -- | Server TLS certificate (Standard mode) |
 | `TLS_KEY` | -- | Server TLS key (Standard mode) |
 | `TRUSTED_PROXIES` | -- | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` is trusted; unset means forwarding headers are ignored |
 | `ALLOW_UNAUTHENTICATED` | `false` | Explicit local-development opt-in when no credential is configured; otherwise startup fails closed |
 | `ALLOW_UNAUTHENTICATED_REMOTE` | `false` | Additional dangerous opt-in required for unauthenticated non-loopback binds |
+| `ALLOW_INSECURE_EDGE_URL` | `false` | Dangerous opt-in to connect Edge mode to a plaintext `http://`/`ws://` `DRYDOCK_URL`; the controller's identity is otherwise verified by TLS alone, so this is for trusted local testing only |
 
 `TLS_CERT` and `TLS_KEY` must be configured together. Setting only one is a
 startup error.
@@ -821,7 +830,7 @@ documented,” not guessed as absent.
 ```bash
 # Generate a strong token
 TOKEN=$(openssl rand -hex 32)
-docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:0.9.8
+docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:0.9.9
 ```
 
 ### File-based token (production)
@@ -832,7 +841,7 @@ printf '%s' "$TOKEN" > /run/secrets/portwing-token
 chown 65532:65532 /run/secrets/portwing-token && chmod 0400 /run/secrets/portwing-token
 docker run -e TOKEN_FILE=/run/secrets/portwing-token \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
-  ... ghcr.io/codeswhat/portwing:0.9.8
+  ... ghcr.io/codeswhat/portwing:0.9.9
 ```
 
 ### Hash-at-rest with TOKEN_HASH
@@ -846,7 +855,7 @@ HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
 # $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 
 # Use the hash instead of the plaintext
-docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:0.9.8
+docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:0.9.9
 ```
 
 Or write the hash to a file and use `TOKEN_HASH_FILE`:
@@ -872,7 +881,7 @@ verified without managing signing keys.
 ### Verify the checksums file
 
 ```bash
-VERSION=0.9.8
+VERSION=0.9.9
 
 cosign verify-blob \
   --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
@@ -884,7 +893,7 @@ cosign verify-blob \
 ### Verify the container image
 
 ```bash
-VERSION=0.9.8
+VERSION=0.9.9
 
 cosign verify \
   --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
@@ -895,7 +904,7 @@ cosign verify \
 ### SBOM
 
 Each binary archive has a matching CycloneDX release asset, for example
-`portwing_0.9.8_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
+`portwing_0.9.9_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
 cosign bundle; verify the signed `checksums.txt`, then verify the SBOM's digest
 against that manifest. Public releases also give every checksummed asset its
 own GitHub build-provenance attestation. The container image carries a separate
@@ -959,6 +968,7 @@ dropping records. The sink and export schemas are stable from v0.8.0.
 | `rate_limited` | An IP is blocked by the rate limiter |
 | `compose_op` | A Docker Compose operation runs |
 | `exec_start` | An interactive exec tunnel opens |
+| `enrollment` | An Ed25519 key is enrolled via `/api/portwing/enroll` |
 
 ### Sample JSON lines
 

@@ -138,7 +138,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		if !cfg.AllowUnauthenticated {
 			return nil, fmt.Errorf("no authentication configured: set TOKEN, TOKEN_HASH, or AUTHORIZED_KEYS; for local development only, set ALLOW_UNAUTHENTICATED=true")
 		}
-		if !isLoopbackBind(cfg.BindAddress) && !cfg.AllowUnauthenticatedRemote {
+		if !config.IsLoopbackBind(cfg.BindAddress) && !cfg.AllowUnauthenticatedRemote {
 			return nil, fmt.Errorf("refusing unauthenticated non-loopback bind %q: set authentication, bind to loopback, or additionally set ALLOW_UNAUTHENTICATED_REMOTE=true", cfg.BindAddress)
 		}
 		slog.Warn("no authentication configured: all requests will be accepted without credentials — set TOKEN, TOKEN_HASH, or AUTHORIZED_KEYS")
@@ -244,14 +244,6 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	return s, nil
 }
 
-func isLoopbackBind(address string) bool {
-	if strings.EqualFold(address, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(strings.Trim(address, "[]"))
-	return ip != nil && ip.IsLoopback()
-}
-
 // registerRoutes wires up all HTTP endpoints. Routes requiring authentication
 // are wrapped with the auth middleware.
 func (s *Server) registerRoutes(mux *http.ServeMux) {
@@ -290,17 +282,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("/", authWrap(s.handleDockerProxy))
 }
 
-type healthResponse struct {
-	Status        string  `json:"status"`
-	Live          bool    `json:"live"`
-	Ready         bool    `json:"ready"`
-	Mode          string  `json:"mode"`
-	Version       string  `json:"version"`
-	UptimeSeconds float64 `json:"uptimeSeconds"`
-	Docker        string  `json:"docker"`
-	Controller    string  `json:"controller"`
-}
-
 // handleHealth returns readiness including Docker connectivity. It is exposed
 // at both the compatibility path /_portwing/health and the explicit /ready.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +299,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
-	_ = json.NewEncoder(w).Encode(healthResponse{
+	_ = json.NewEncoder(w).Encode(protocol.HealthResponse{
 		Status:        status,
 		Live:          true,
 		Ready:         err == nil,
@@ -334,7 +315,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(healthResponse{
+	_ = json.NewEncoder(w).Encode(protocol.HealthResponse{
 		Status:        "ok",
 		Live:          true,
 		Ready:         false,

@@ -17,13 +17,23 @@ type NonceLRU struct {
 	mu      sync.Mutex
 	seen    map[string]time.Time // nonce → time first seen
 	maxSize int
-	ttl     time.Duration // entries are safe to evict after this duration
-	done    chan struct{}
+	// ttl is how long a nonce must be retained before it is safe to evict.
+	// Invariant: ttl must be >= the widest span a signed timestamp can stay
+	// valid for, measured from when the nonce was first recorded, or an
+	// evicted nonce lets a still-valid signature replay. See NewNonceLRU.
+	ttl  time.Duration
+	done chan struct{}
 }
 
-// NewNonceLRU returns a NonceLRU with the given capacity and a TTL equal to
-// the clock-skew window (entries can be evicted after 2× the window to give
-// some extra margin). A background goroutine starts immediately.
+// NewNonceLRU returns a NonceLRU with the given capacity. windowSeconds is
+// the caller's clock-skew window (verify.go's maxSkewSeconds). The TTL is
+// set to 2×windowSeconds, not windowSeconds itself: a request's timestamp
+// stays signature-valid as long as it is within windowSeconds of "now" in
+// EITHER direction, so a timestamp signed windowSeconds in the future is
+// still accepted right up until 2×windowSeconds after the nonce was first
+// recorded. A nonce must outlive that entire span, or a captured
+// byte-identical replay can pass the timestamp check again after its nonce
+// has already been evicted. A background goroutine starts immediately.
 func NewNonceLRU(maxSize int, windowSeconds int) *NonceLRU {
 	if maxSize <= 0 {
 		maxSize = 10000
@@ -34,7 +44,7 @@ func NewNonceLRU(maxSize int, windowSeconds int) *NonceLRU {
 	lru := &NonceLRU{
 		seen:    make(map[string]time.Time),
 		maxSize: maxSize,
-		ttl:     time.Duration(windowSeconds) * time.Second,
+		ttl:     2 * time.Duration(windowSeconds) * time.Second,
 		done:    make(chan struct{}),
 	}
 	go lru.cleanup()
@@ -101,14 +111,21 @@ func (l *NonceLRU) cleanup() {
 		case <-l.done:
 			return
 		case <-ticker.C:
-			l.mu.Lock()
-			cutoff := time.Now().Add(-l.ttl)
-			for nonce, t := range l.seen {
-				if t.Before(cutoff) {
-					delete(l.seen, nonce)
-				}
-			}
-			l.mu.Unlock()
+			l.evictExpired()
+		}
+	}
+}
+
+// evictExpired removes every nonce whose recorded time is older than the
+// TTL. Factored out of cleanup so tests can force an eviction pass
+// deterministically instead of waiting on the ticker.
+func (l *NonceLRU) evictExpired() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cutoff := time.Now().Add(-l.ttl)
+	for nonce, t := range l.seen {
+		if t.Before(cutoff) {
+			delete(l.seen, nonce)
 		}
 	}
 }

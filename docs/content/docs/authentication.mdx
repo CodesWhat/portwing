@@ -107,7 +107,9 @@ version 2 request carries a detached signature over the HTTP method, complete
 origin-form request target, a SHA-256 body hash, a Unix timestamp, and a
 128-bit random nonce. The agent verifies the signature, rejects requests with
 a timestamp skew greater than 60 seconds, and tracks nonces in an in-memory
-LRU to prevent replay within the timestamp window.
+LRU to prevent replay. Each nonce is retained for at least twice the skew
+window before it can be evicted, so a nonce stays blocked for as long as its
+timestamp could still verify.
 
 No shared secret is involved. Compromising one client's private key does not affect other enrolled clients.
 

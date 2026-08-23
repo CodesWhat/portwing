@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/codeswhat/portwing/internal/config"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 func TestHealthServerConfiguresReadHeaderTimeout(t *testing.T) {
@@ -59,7 +60,7 @@ func TestHealthServerSeparatesLivenessFromDisconnectedReadiness(t *testing.T) {
 	if liveness.Code != http.StatusOK {
 		t.Fatalf("liveness status = %d, want 200", liveness.Code)
 	}
-	var live edgeHealthResponse
+	var live protocol.HealthResponse
 	if err := json.NewDecoder(liveness.Body).Decode(&live); err != nil {
 		t.Fatalf("decode liveness: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestHealthServerSeparatesLivenessFromDisconnectedReadiness(t *testing.T) {
 	if readiness.Code != http.StatusServiceUnavailable {
 		t.Fatalf("readiness status = %d, want 503", readiness.Code)
 	}
-	var ready edgeHealthResponse
+	var ready protocol.HealthResponse
 	if err := json.NewDecoder(readiness.Body).Decode(&ready); err != nil {
 		t.Fatalf("decode readiness: %v", err)
 	}

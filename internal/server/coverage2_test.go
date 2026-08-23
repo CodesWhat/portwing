@@ -1379,8 +1379,8 @@ func TestClientIPAllHopsTrustedFallsBackToRemote(t *testing.T) {
 	// No X-Real-IP either → should fall back to remote (the trusted proxy).
 	got := rl.clientIP(req)
 	// Result is the remote peer since all XFF hops are trusted and there's no X-Real-IP.
-	if got == "" {
-		t.Error("clientIP returned empty string")
+	if got != "192.0.2.1" {
+		t.Fatalf("expected fallback to remote 192.0.2.1, got %q", got)
 	}
 }
 
@@ -1622,9 +1622,23 @@ func TestHandleComposeExecuteError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleCompose(rec, req)
 
-	// Should return 500 since the compose manager will fail to connect.
-	if rec.Code != http.StatusInternalServerError && rec.Code != http.StatusBadRequest {
-		t.Logf("got %d (acceptable — compose error → non-200)", rec.Code)
+	// ComposeManager.Execute never returns a non-nil Go error: every failure
+	// (bad stack dir, missing compose binary, a failing compose invocation)
+	// is folded into ComposeResponse{Success: false, Error: ...} instead. So
+	// handleCompose always takes its "success" branch here and writes the
+	// default 200 status with a JSON body reporting the failure.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 (handleCompose reports failure in the body, not the status), got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp docker.ComposeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding response body: %v (body=%s)", err, rec.Body.String())
+	}
+	if resp.Success {
+		t.Errorf("expected Success=false for a stack directory that doesn't exist, got %+v", resp)
+	}
+	if resp.Error == "" {
+		t.Error("expected a non-empty Error explaining the failure")
 	}
 }
 
@@ -1648,9 +1662,21 @@ func TestHandleComposeSuccessFalse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleCompose(rec, req)
 
-	// 500 is expected since compose isn't installed in the test env.
-	if rec.Code == http.StatusBadRequest {
-		t.Errorf("should not get 400 for valid JSON body")
+	// The stub server's stacksDir is empty, so "teststack" doesn't exist and
+	// Execute reports Success=false with a nil Go error. handleCompose still
+	// writes the default 200 status; only the body signals the failure.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for a valid JSON body, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp docker.ComposeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding response body: %v (body=%s)", err, rec.Body.String())
+	}
+	if resp.Success {
+		t.Errorf("expected Success=false for a stack directory that doesn't exist, got %+v", resp)
+	}
+	if resp.Error == "" {
+		t.Error("expected a non-empty Error explaining the failure")
 	}
 }
 
@@ -1968,6 +1994,11 @@ func TestHandleDockerProxyStripsAuthHeaders(t *testing.T) {
 		if got := receivedHeaders.Get("X-Custom"); got != "keepme" {
 			t.Errorf("X-Custom was wrongly stripped: %q", got)
 		}
+	} else {
+		// If the proxied request never reached the fake daemon, the header
+		// assertions above never ran and this test would pass having checked
+		// nothing. Fail loudly instead of silently skipping the coverage.
+		t.Fatal("proxied request never reached the fake daemon")
 	}
 }
 
