@@ -1,5 +1,6 @@
 import { Activity, Bot, KeyRound, Network, PackageCheck, ShieldCheck } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
+import { SITE_CONFIG } from "@/lib/site-config";
 
 export const arcaneComparisonRouteData = {
   slug: "arcane",
@@ -33,8 +34,7 @@ bot|Read-Only MCP|Portwing exposes five read-only host and container inspection 
     bot: Bot,
   },
   metadataTitle: "Arcane Agent vs Portwing — Remote Docker Agent Comparison",
-  metadataDescription:
-    "Compare Arcane Agent v2.5 and Portwing v0.9.2 across edge transport, mTLS and Ed25519 auth, Docker API compatibility, socket policy, auditing, and fleet scope.",
+  metadataDescription: `Compare Arcane Agent v2.5 and Portwing v${SITE_CONFIG.version} across edge transport, mTLS and Ed25519 auth, Docker API compatibility, socket policy, auditing, and fleet scope.`,
   metadataKeywords: [
     "arcane agent vs portwing",
     "arcane docker alternative",
@@ -45,15 +45,14 @@ bot|Read-Only MCP|Portwing exposes five read-only host and container inspection 
   ],
   openGraphDescription:
     "Arcane and Portwing both manage remote Docker hosts. Compare Arcane's polling and mTLS with Portwing's signed requests, transparent API, Sockguard policy, audit export, and MCP.",
-  twitterDescription:
-    "Arcane Agent v2.5 vs Portwing v0.9.2: transport, authentication, socket policy, audit, and product scope.",
+  twitterDescription: `Arcane Agent v2.5 vs Portwing v${SITE_CONFIG.version}: transport, authentication, socket policy, audit, and product scope.`,
   competitorName: "Arcane",
   heroTitle: "Arcane vs Portwing",
   heroDescription: (
     <p>
       Arcane v2.5 is a broad Docker management platform with direct and edge agents, polling,
-      automated mTLS, RBAC, GitOps, scanning, and Swarm. Portwing v0.9.2 is a narrower access agent
-      for Drydock, focused on{" "}
+      automated mTLS, RBAC, GitOps, scanning, and Swarm. Portwing v{SITE_CONFIG.version} is a
+      narrower access agent for Drydock, focused on{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
         replay-resistant signed requests, transparent Docker compatibility, Sockguard policy, and
         mediation-point audit
@@ -65,6 +64,5 @@ bot|Read-Only MCP|Portwing exposes five read-only host and container inspection 
   migrationDescription:
     "Choose the controller first. Arcane Agent belongs to Arcane's integrated UI and fleet model; Portwing belongs to Drydock and can also expose a generic REST or transparent Docker API. If moving to Portwing, use the matching Sockguard preset and Ed25519 keys, then validate every required Arcane workflow against Drydock rather than assuming controller-level parity.",
   jsonLdName: "Arcane Agent vs Portwing — Remote Docker Agent Comparison",
-  jsonLdDescription:
-    "Evidence-backed comparison of Arcane Agent v2.5 and Portwing v0.9.2 for remote Docker access.",
+  jsonLdDescription: `Evidence-backed comparison of Arcane Agent v2.5 and Portwing v${SITE_CONFIG.version} for remote Docker access.`,
 } satisfies ComparisonRouteRawConfig;
