@@ -7,7 +7,7 @@ export const faqItems: Array<{ question: string; answer: string }> = [
   {
     question: "What are standard mode and edge mode, and which should I use?",
     answer:
-      "Standard mode runs an HTTP/SSE server on port 3000. The Drydock controller connects inbound, calls the agent's inventory endpoints, and holds a long-lived SSE stream for real-time events. Use it when the host is reachable from your Drydock instance. Edge mode flips the control direction: the agent dials out to Drydock over the stable portwing/1.0 WebSocket tunnel, so no inbound control port is published. Its unauthenticated local operations listener must remain private. Use Drydock v1.6.0-rc.11+ with Portwing v0.9.0 for the complete controller-owned watcher/update feature path.",
+      "Standard mode runs an HTTP/SSE server on port 3000. The Drydock controller connects inbound, calls the agent's inventory endpoints, and holds a long-lived SSE stream for real-time events. Use it when the host is reachable from your Drydock instance. Edge mode flips the control direction: the agent dials out to Drydock over the stable portwing/1.0 WebSocket tunnel, so no inbound control port is published. Its unauthenticated local operations listener must remain private. Use Drydock v1.6.0-rc.11+ with Portwing v0.9.0 or later for the complete controller-owned watcher/update feature path.",
   },
   {
     question: "How does Ed25519 authentication work and why use it over a shared token?",
