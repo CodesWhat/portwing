@@ -95,6 +95,7 @@ sequenceDiagram
     "dockerVersion": "27.0.3",
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
+                      "edge-response-body-b64",
                       "dd:container-sync", "dd:logs"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
@@ -108,6 +109,14 @@ absent. Discovery uses the Docker watcher descriptor (`execution: controller`)
 and an empty trigger list; the corresponding wire message types remain reserved
 for compatibility but are not advertised.
 
+`edge-response-body-b64` is negotiated rather than just advertised: a
+controller that supports it echoes the value in `welcome.capabilities`, and the
+agent then carries every non-streaming Docker API response body as standard
+base64 in the response message's `bodyBase64` field (legacy `body` left unset),
+which lets non-JSON bodies such as the plain-text `OK` from `GET /_ping` cross
+the wire. A welcome without the value keeps the legacy `body` encoding, so
+older controllers interoperate without a protocol-version bump.
+
 All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
@@ -119,7 +128,7 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 | Type | Direction | Purpose |
 |------|-----------|---------|
 | `hello` | Agent -> Server | Auth + capability exchange |
-| `welcome` | Server -> Agent | Connection accepted |
+| `welcome` | Server -> Agent | Connection accepted; carries `capabilities` on controllers that negotiate them |
 | `request` | Server -> Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls |
 | `response` | Agent -> Server | Docker API response (correlated by `requestId`) |
 | `stream` | Bidirectional | Streaming data (logs, exec, build) |

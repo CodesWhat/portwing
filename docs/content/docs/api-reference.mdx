@@ -358,6 +358,12 @@ Execute Docker Compose sub-commands within the managed stacks directory (`STACKS
 
 `operation` is required and must be one of: `up`, `down`, `pull`, `ps`, `logs`, `restart`, `stop`, `start`. `stackName` is required.
 
+For the `logs` operation, `tail` defaults to 100 lines and is clamped to a
+maximum of 500 — the agent always passes an explicit `--tail`, so an unbounded
+dump is never the default. Combined stdout and stderr from any compose
+operation is capped at 10 MB; output past the cap is dropped and the captured
+output ends with an `[output truncated: ...]` marker.
+
 ### Response
 
 ```json

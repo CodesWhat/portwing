@@ -968,6 +968,7 @@ dropping records. The sink and export schemas are stable from v0.8.0.
 | `rate_limited` | An IP is blocked by the rate limiter |
 | `compose_op` | A Docker Compose operation runs |
 | `exec_start` | An interactive exec tunnel opens |
+| `enrollment` | An Ed25519 key is enrolled via `/api/portwing/enroll` |
 
 ### Sample JSON lines
 
