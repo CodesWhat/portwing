@@ -260,7 +260,10 @@ while bad enrollment credentials use the authentication-failure window.
 | Edge outbound queue | 256 frames | Evict and reconnect a stalled controller instead of growing memory without limit |
 | Legacy edge follow-log window | ~7s | Bound a non-streaming `follow=true` request so it can't hold a message-handler slot indefinitely |
 | Exec request body | 10 MB | Limit exec payload size |
+| Compose logs tail | 500 lines | Clamp the `logs` operation's `--tail`, which is otherwise unbounded |
+| Compose combined output | 10 MB | Bound buffered stdout+stderr from a compose subprocess |
 | Ed25519 signed-request body | 1 MB | Bound body buffering before signature verification |
+| Ed25519 auth body read | 10 s deadline | Stop a slow-trickled body from holding a handler slot before authentication |
 | Enrollment request body | 64 KiB | Bound unauthenticated JSON parsing |
 | Cold Argon2id derivations | 2 | Bound memory-hard verification across the agent |
 | Concurrent exec sessions | 100 | Prevent unbounded goroutine growth |

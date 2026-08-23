@@ -243,7 +243,9 @@ Handshake sequence:
 
 1. Portwing connects via WSS to `/api/portwing/ws`.
 2. Portwing sends a `hello` message (see payload below).
-3. Controller responds with `welcome` containing the poll interval.
+3. Controller responds with `welcome` containing the poll interval and, on
+   controllers that support it, a `capabilities` array the agent negotiates
+   against (see below).
 4. Portwing sends `dd:component_sync` (watcher/trigger descriptors) before
    `dd:container_sync` (full container inventory), then sends an initial
    `metrics` payload. The ordering lets Drydock establish controller-owned
@@ -267,6 +269,7 @@ Handshake sequence:
     "hostname": "my-server",
     "capabilities": [
       "compose", "exec", "metrics", "events",
+      "edge-response-body-b64",
       "dd:container-sync", "dd:logs"
     ],
     "drydockCompat": "1.4.0",
@@ -280,6 +283,18 @@ All Edge Mode JSON application messages are wrapped in an `Envelope` (`{"type": 
 
 When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `nonce`, and `signature` fields shown above, and Drydock verifies the signature against the agent's registered public key. The `tokenHash` field (SHA-256 of the shared token) is only a fallback for non-edge endpoints — the Drydock `/api/portwing/ws` endpoint rejects token-hash hellos with `ed25519-required`.
 
+### Capability negotiation
+
+The `edge-response-body-b64` value in `hello.capabilities` is negotiated, not
+just advertised. A controller that supports it echoes the same value in
+`welcome.capabilities`; the agent then carries every non-streaming Docker API
+response body as standard base64 in the response message's `bodyBase64` field
+(with the legacy `body` field left unset), which is what lets a non-JSON body
+such as the plain-text `OK` from `GET /_ping` cross the wire. When the welcome
+carries no `capabilities` — any controller before Drydock support landed — the
+agent keeps the legacy `body` encoding, so the capability degrades gracefully
+without a `portwing/1.0` protocol-version bump.
+
 ### Edge Mode Message Types
 
 **Core protocol:**
@@ -287,7 +302,7 @@ When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `
 | Type | Direction | Purpose |
 |---|---|---|
 | `hello` | Agent → Controller | Auth + capability exchange |
-| `welcome` | Controller → Agent | Connection accepted |
+| `welcome` | Controller → Agent | Connection accepted; carries `capabilities` on controllers that negotiate them |
 | `request` | Controller → Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls |
 | `response` | Agent → Controller | Docker API response (correlated by `requestId`) |
 | `stream` | Bidirectional | Streaming data (logs, exec, build) |

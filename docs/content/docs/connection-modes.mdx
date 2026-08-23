@@ -95,7 +95,8 @@ Setting `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is rejected at startup with a f
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DRYDOCK_URL` | — | Controller base URL, e.g. `https://drydock.example.com` |
+| `DRYDOCK_URL` | — | Controller base URL, e.g. `https://drydock.example.com`. Plaintext `http://`/`ws://` schemes are rejected at startup unless `ALLOW_INSECURE_EDGE_URL=true` |
+| `ALLOW_INSECURE_EDGE_URL` | `false` | Opt-in to a plaintext controller URL. Trusted local testing only — without TLS the controller's identity is unverified |
 | `PRIVATE_KEY_FILE` | — | **Required.** Ed25519 private key (PEM PKCS#8); the hello message is signed with this key |
 | `TOKEN` | — | Not accepted for edge mode — startup fails if set with `DRYDOCK_URL` and no `PRIVATE_KEY_FILE` |
 | `AUTHORIZED_KEYS` | — | Not accepted for edge mode |
