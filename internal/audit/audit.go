@@ -28,6 +28,10 @@
 //	"container": "<exec path or container ID>",
 //	"exec_id":   "<exec resource ID>"
 //
+// Enrollment events add:
+//
+//	"key_id": "<enrolled key ID>"
+//
 // # Configuration
 //
 // Set AUDIT_LOG to one of:
