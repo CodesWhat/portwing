@@ -47,6 +47,20 @@ type EventBroadcaster struct {
 	// guarded by mu like the clients map, since both change together at
 	// the first-join/last-leave edges.
 	upstreamCancel context.CancelFunc
+
+	// newEventStream constructs the shared upstream subscriber. Defaults to
+	// a real *docker.EventStream; overridable per-instance in tests to reach
+	// the defensive Subscribe-error branch in startUpstreamLocked that a
+	// live *docker.EventStream never triggers today. Instance-scoped (not a
+	// package var) so overriding it in one test can't race with another
+	// test's broadcaster instance under -race.
+	newEventStream func(client *docker.Client) eventSubscriber
+
+	// marshalEvent serializes a genericEvent for the SSE wire. Defaults to
+	// json.Marshal; overridable per-instance in tests to reach the marshal-
+	// error branch in pumpUpstream, which genericEvent's plain string/map
+	// fields can't trigger in practice.
+	marshalEvent func(v any) ([]byte, error)
 }
 
 // NewEventBroadcaster creates an EventBroadcaster.
@@ -54,6 +68,10 @@ func NewEventBroadcaster(dockerClient *docker.Client) *EventBroadcaster {
 	return &EventBroadcaster{
 		dockerClient: dockerClient,
 		clients:      make(map[string]*sseClient),
+		newEventStream: func(client *docker.Client) eventSubscriber {
+			return docker.NewEventStream(client)
+		},
+		marshalEvent: json.Marshal,
 	}
 }
 
@@ -142,13 +160,21 @@ func (b *EventBroadcaster) removeClient(id string) {
 	slog.Info("generic SSE client removed", "clientId", id)
 }
 
+// eventSubscriber is the subset of *docker.EventStream that
+// startUpstreamLocked needs. It exists so tests can substitute a stub whose
+// Subscribe returns an error, exercising the defensive branch below that a
+// live *docker.EventStream never triggers today.
+type eventSubscriber interface {
+	Subscribe(ctx context.Context) (<-chan docker.DockerEvent, error)
+}
+
 // startUpstreamLocked opens the shared docker.EventStream subscription and
 // starts the goroutine that fans its events out to every registered client.
 // Callers must hold mu.
 func (b *EventBroadcaster) startUpstreamLocked() {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	stream := docker.NewEventStream(b.dockerClient)
+	stream := b.newEventStream(b.dockerClient)
 	eventCh, err := stream.Subscribe(ctx)
 	if err != nil {
 		// EventStream.Subscribe's current implementation never fails
@@ -189,7 +215,7 @@ func (b *EventBroadcaster) pumpUpstream(eventCh <-chan docker.DockerEvent) {
 			Labels:      filterLabels(de.Actor.Attributes),
 		}
 
-		data, err := json.Marshal(ge)
+		data, err := b.marshalEvent(ge)
 		if err != nil {
 			slog.Error("failed to marshal generic event", "error", err)
 			continue

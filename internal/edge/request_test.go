@@ -355,3 +355,30 @@ func TestHandleRequestRoutesComposeToComposeManager(t *testing.T) {
 		t.Errorf("Docker calls = %d, want 0 — compose requests must not reach dockerd", len(fd.doCalls))
 	}
 }
+
+// A compose request whose body isn't valid JSON must surface as a TypeError
+// envelope carrying the RequestID (handleComposeRequest's decode-failure
+// branch), not silently drop the request or hang the controller waiting for a
+// response that will never arrive.
+func TestHandleComposeRequestInvalidBodyReturnsTypeError(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	c.compose = docker.NewComposeManager(t.TempDir(), "1.44", "")
+
+	c.handleComposeRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "compose-bad-json",
+		Method:    http.MethodPost,
+		Path:      "/_portwing/compose",
+		Body:      json.RawMessage(`{not valid json`),
+	})
+
+	var em protocol.ErrorMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeError), &em)
+	if em.RequestID != "compose-bad-json" {
+		t.Errorf("RequestID = %q, want compose-bad-json", em.RequestID)
+	}
+	if !strings.Contains(em.Message, "invalid compose request") {
+		t.Errorf("Message = %q, want it to mention invalid compose request", em.Message)
+	}
+}
