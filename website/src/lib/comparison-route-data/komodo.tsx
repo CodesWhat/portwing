@@ -1,5 +1,6 @@
 import { Activity, Bot, KeyRound, Network, ShieldCheck, Terminal } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
+import { SITE_CONFIG } from "@/lib/site-config";
 
 export const komodoComparisonRouteData = {
   slug: "komodo",
@@ -33,8 +34,7 @@ bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes
     bot: Bot,
   },
   metadataTitle: "Komodo Periphery vs Portwing — Remote Docker Agent Comparison",
-  metadataDescription:
-    "Compare Komodo Periphery v2.2 and Portwing v0.9.2 across outbound agents, public-key authentication, Docker API compatibility, socket policy, audit, metrics, and product scope.",
+  metadataDescription: `Compare Komodo Periphery v2.2 and Portwing v${SITE_CONFIG.version} across outbound agents, public-key authentication, Docker API compatibility, socket policy, audit, metrics, and product scope.`,
   metadataKeywords: [
     "komodo periphery vs portwing",
     "komodo alternative",
@@ -45,15 +45,14 @@ bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes
   ],
   openGraphDescription:
     "Komodo v2 and Portwing both support outbound public-key-authenticated agents. Compare transparent Docker access, socket policy, audit placement, and controller scope.",
-  twitterDescription:
-    "Komodo Periphery v2.2 vs Portwing v0.9.2: outbound transport, key auth, audit, and socket containment.",
+  twitterDescription: `Komodo Periphery v2.2 vs Portwing v${SITE_CONFIG.version}: outbound transport, key auth, audit, and socket containment.`,
   competitorName: "Komodo",
   heroTitle: "Komodo vs Portwing",
   heroDescription: (
     <p>
       Komodo v2.2 is a full build, deployment, automation, and Swarm platform. Its Periphery agent
       now supports outbound WebSockets, public-key authentication, and automatic key rotation.
-      Portwing v0.9.2 is narrower and pairs with Drydock, emphasizing{" "}
+      Portwing v{SITE_CONFIG.version} is narrower and pairs with Drydock, emphasizing{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
         per-request verification, transparent Docker compatibility, Sockguard containment, and
         agent-level audit export
@@ -66,6 +65,5 @@ bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes
   migrationDescription:
     "Treat this as a controller migration, not an agent image swap. Inventory Komodo builds, procedures, host terminals, Swarm resources, secrets, and Git-backed stacks; map controller responsibilities to Drydock first. Then deploy Portwing with Ed25519 keys and the narrowest Sockguard preset that covers the required Docker operations.",
   jsonLdName: "Komodo Periphery vs Portwing — Remote Docker Agent Comparison",
-  jsonLdDescription:
-    "Evidence-backed comparison of Komodo Periphery v2.2 and Portwing v0.9.2 for remote Docker access.",
+  jsonLdDescription: `Evidence-backed comparison of Komodo Periphery v2.2 and Portwing v${SITE_CONFIG.version} for remote Docker access.`,
 } satisfies ComparisonRouteRawConfig;
