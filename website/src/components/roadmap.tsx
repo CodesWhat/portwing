@@ -1,7 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { type Milestone, roadmap } from "@/app/data/roadmap";
-import { SITE_CONFIG } from "@/lib/site-config";
 import { SectionHeading } from "@/components/section-heading";
+import { SITE_CONFIG } from "@/lib/site-config";
 
 // Roadmap = git-graph timeline (newest-first, planned on top).
 // Released = filled node, HEAD highlighted, planned = hollow dashed node.
