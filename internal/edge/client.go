@@ -786,7 +786,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 		}
 
 		if err := c.sendTypedMessage(protocol.TypeResponse, respMsg); err != nil {
-			slog.Warn("failed to encode Docker response envelope", "requestId", req.RequestID, "path", req.Path, "error", err)
+			slog.Warn("failed to encode Docker response envelope", "requestId", applog.Sanitize(req.RequestID), "path", applog.Sanitize(req.Path), "error", err)
 			// Best-effort error reply; connection loss will surface on the read pump.
 			_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("encoding response: %v", err),
