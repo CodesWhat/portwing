@@ -56,7 +56,7 @@ export type CtaPlacement = "header" | "hero" | "comparison" | "get_started" | "f
 type EventProperties = Record<string, unknown>;
 
 export type AnalyticsEvent = {
-  event: "$pageview" | "$web_vitals" | "cta activated";
+  event: "$pageview" | "$pageleave" | "$web_vitals" | "cta activated";
   properties: EventProperties;
 };
 
@@ -66,7 +66,7 @@ export type PostHogOptions = {
   autocapture: false;
   rageclick: false;
   capture_pageview: false;
-  capture_pageleave: false;
+  capture_pageleave: true;
   capture_heatmaps: false;
   capture_dead_clicks: false;
   capture_exceptions: false;
@@ -151,8 +151,26 @@ function baseProperties(rawPath: string) {
   } as const;
 }
 
+// PostHog's Web analytics scene keys its Page / Entry page / Exit page tables
+// off $pathname, so without it those tables return no rows at all. Send the
+// canonicalized path rather than the raw one: `path` has already been reduced
+// to the MARKETING_PATHS/DOCS_PATHS allowlist with `/_other` as the catch-all,
+// so $pathname carries nothing the event was not already sending.
+function navigationProperties(rawPath: string) {
+  const base = baseProperties(rawPath);
+  return { ...base, $pathname: base.path } as const;
+}
+
 export function buildPageviewEvent(rawPath: string): AnalyticsEvent {
-  return { event: "$pageview", properties: baseProperties(rawPath) };
+  return { event: "$pageview", properties: navigationProperties(rawPath) };
+}
+
+// posthog-js emits $pageleave itself once capture_pageleave is true; nothing
+// calls this directly. Without the pair, a session's last recorded timestamp is
+// its last pageview, so a long read of a single page scores as zero duration
+// and counts as a bounce.
+export function buildPageleaveEvent(rawPath: string): AnalyticsEvent {
+  return { event: "$pageleave", properties: navigationProperties(rawPath) };
 }
 
 export function buildCtaEvent(
@@ -234,6 +252,8 @@ export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
   let sanitized: AnalyticsEvent | null;
   if (envelope.event === "$pageview") {
     sanitized = buildPageviewEvent(rawPath);
+  } else if (envelope.event === "$pageleave") {
+    sanitized = buildPageleaveEvent(rawPath);
   } else if (envelope.event === "cta activated") {
     const ctaId = envelope.properties.cta_id;
     const placement = envelope.properties.placement;
@@ -293,7 +313,7 @@ export function createPostHogOptions(
     autocapture: false,
     rageclick: false,
     capture_pageview: false,
-    capture_pageleave: false,
+    capture_pageleave: true,
     capture_heatmaps: false,
     capture_dead_clicks: false,
     capture_exceptions: false,
