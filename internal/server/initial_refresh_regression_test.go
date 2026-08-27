@@ -133,6 +133,29 @@ func TestPollContainersDeliversSuccessfulInitialDiffBeforeTicker(t *testing.T) {
 	}
 }
 
+func TestPollContainersSkipsRefreshWhenAlreadyCanceled(t *testing.T) {
+	t.Parallel()
+
+	a := &initialRefreshAdapter{notified: make(chan initialRefreshNotification, 1)}
+	s := &Server{cfg: &config.Config{DDPollInterval: 300}, adapter: a}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s.pollContainers(ctx)
+
+	a.mu.Lock()
+	refreshed := a.refreshed
+	a.mu.Unlock()
+	if refreshed {
+		t.Fatal("pollContainers refreshed inventory after cancellation")
+	}
+	select {
+	case notification := <-a.notified:
+		t.Fatalf("pollContainers notified after cancellation: %+v", notification)
+	default:
+	}
+}
+
 func TestPollContainersDoesNotNotifyInitialDiffAfterCancellation(t *testing.T) {
 	t.Parallel()
 

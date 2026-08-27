@@ -433,6 +433,31 @@ func TestShutdownIsSafeWhenCalledConcurrently(t *testing.T) {
 	}
 }
 
+func TestShutdownContextCanExpireWhileWaitingForTrackedHandler(t *testing.T) {
+	t.Parallel()
+
+	dockerClient, stopDocker := newStubDockerClient(t)
+	defer stopDocker()
+	s, err := NewServer(minimalConfig(), dockerClient, &stubServerAdapter{})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	s.handlerWG.Add(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Shutdown(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Shutdown error = %v, want context canceled", err)
+	}
+
+	s.handlerWG.Done()
+	finalCtx, cancelFinal := context.WithTimeout(context.Background(), time.Second)
+	defer cancelFinal()
+	if err := s.Shutdown(finalCtx); err != nil {
+		t.Fatalf("second Shutdown: %v", err)
+	}
+}
+
 func containsAuditRecord(t *testing.T, data []byte, event, stack, path string) bool {
 	t.Helper()
 	for _, line := range splitNonEmptyLines(data) {

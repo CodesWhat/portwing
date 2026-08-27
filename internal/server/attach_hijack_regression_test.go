@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -257,6 +258,8 @@ func TestDockerHijackPathMatchesOnlyDockerExecAndAttachRoutes(t *testing.T) {
 		{path: "/v1.44/proxy/exec/abc123/start", want: false},
 		{path: "/proxy/containers/abc123/attach", want: false},
 		{path: "/v1/containers/abc123/attach", want: false},
+		{path: "/v.44/containers/abc123/attach", want: false},
+		{path: "/v1.x/containers/abc123/attach", want: false},
 		{path: "/v1.44/containers//attach", want: false},
 		{path: "/v1.44/containers/abc123/attach/", want: false},
 		{path: "/v1.44/containers/abc123/attach/extra", want: false},
@@ -269,6 +272,48 @@ func TestDockerHijackPathMatchesOnlyDockerExecAndAttachRoutes(t *testing.T) {
 				t.Fatalf("isDockerHijackPath(%q) = %t, want %t", tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAttachBodyReadFailureIsRejectedBeforeHijack(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{}
+	req := httptest.NewRequest(http.MethodPost, "/v1.44/containers/abc123/attach", nil)
+	req.Body = io.NopCloser(failingReader{err: errors.New("read failed")})
+	rec := httptest.NewRecorder()
+
+	s.handleDockerHijack(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("body read failure status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "reading upgrade request body: read failed") {
+		t.Fatalf("body read failure response = %q", rec.Body.String())
+	}
+}
+
+func TestDockerHijackRejectsConnectionAfterShutdownStarts(t *testing.T) {
+	t.Parallel()
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+
+	s := &Server{shuttingDown: true}
+	w := &hijackableResponseWriter{
+		conn: serverConn,
+		buf:  bufio.NewReadWriter(bufio.NewReader(serverConn), bufio.NewWriter(serverConn)),
+		hdr:  make(http.Header),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1.44/containers/abc123/attach", nil)
+	if err := clientConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set client read deadline: %v", err)
+	}
+
+	s.handleDockerHijack(w, req)
+
+	if _, err := clientConn.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("client read after rejected hijack = %v, want EOF", err)
 	}
 }
 
@@ -344,4 +389,12 @@ func (zeroReader) Read(p []byte) (int, error) {
 		p[i] = 0
 	}
 	return len(p), nil
+}
+
+type failingReader struct {
+	err error
+}
+
+func (r failingReader) Read([]byte) (int, error) {
+	return 0, r.err
 }
