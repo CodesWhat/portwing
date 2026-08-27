@@ -97,6 +97,28 @@ func (c *errObservedContext) Err() error {
 	return c.Context.Err()
 }
 
+type nthErrObservedContext struct {
+	context.Context
+	mu          sync.Mutex
+	calls       int
+	observeCall int
+	observed    chan struct{}
+	resume      chan struct{}
+}
+
+func (c *nthErrObservedContext) Err() error {
+	c.mu.Lock()
+	c.calls++
+	observe := c.calls == c.observeCall
+	c.mu.Unlock()
+
+	if observe {
+		close(c.observed)
+		<-c.resume
+	}
+	return c.Context.Err()
+}
+
 func TestContainerLogStreamPreservesStdoutStderrAndEnds(t *testing.T) {
 	t.Parallel()
 
@@ -512,6 +534,43 @@ func TestLegacyContainerLogAdmissionReleasedWhenHandlerPoolCanceled(t *testing.T
 	}
 	if got := len(a.getLegacyLogSemaphore()); got != 0 {
 		t.Fatalf("legacy admission reservations = %d after cancellation, want 0", got)
+	}
+}
+
+func TestLegacyContainerLogAdmissionReleasedWhenSpawnedHandlerIsCanceled(t *testing.T) {
+	t.Parallel()
+
+	a := NewAdapter(nil, "test-agent", AgentInfo{})
+	baseCtx, cancel := context.WithCancel(context.Background())
+	ctx := &nthErrObservedContext{
+		Context:     baseCtx,
+		observeCall: 2,
+		observed:    make(chan struct{}),
+		resume:      make(chan struct{}),
+	}
+
+	if !a.HandleMessage(
+		ctx,
+		newLogStreamTestSender(),
+		protocol.TypeDDContainerLogRequest,
+		json.RawMessage(`{"requestId":"spawned","containerId":"container-1"}`),
+	) {
+		t.Fatal("legacy log request was not recognized")
+	}
+
+	select {
+	case <-ctx.observed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("spawned handler did not reach its cancellation check")
+	}
+	cancel()
+	close(ctx.resume)
+
+	waitForLogCondition(t, "message handler admission release", func() bool {
+		return len(a.getMessageSemaphore()) == 0
+	})
+	if got := len(a.getLegacyLogSemaphore()); got != 0 {
+		t.Fatalf("legacy admission reservations = %d after spawned handler cancellation, want 0", got)
 	}
 }
 

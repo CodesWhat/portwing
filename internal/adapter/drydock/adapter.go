@@ -223,10 +223,10 @@ func (a *Adapter) HandleMessage(ctx context.Context, sender adapter.MessageSende
 			})
 			return true
 		}
-		if !a.spawnMessageHandler(ctx, msgType, func() {
+		if !a.spawnMessageHandlerWithCancelCleanup(ctx, msgType, func() {
 			defer func() { <-legacyLogSem }()
 			a.handleContainerLogRequest(ctx, sender, msg)
-		}) {
+		}, func() { <-legacyLogSem }) {
 			<-legacyLogSem
 		}
 		return true
@@ -685,6 +685,10 @@ func (a *Adapter) sendTypedMessage(sender adapter.MessageSender, msgType string,
 }
 
 func (a *Adapter) spawnMessageHandler(ctx context.Context, msgType string, fn func()) bool {
+	return a.spawnMessageHandlerWithCancelCleanup(ctx, msgType, fn, nil)
+}
+
+func (a *Adapter) spawnMessageHandlerWithCancelCleanup(ctx context.Context, msgType string, fn, cancelCleanup func()) bool {
 	sem := a.getMessageSemaphore()
 
 	select {
@@ -698,6 +702,9 @@ func (a *Adapter) spawnMessageHandler(ctx context.Context, msgType string, fn fu
 		defer func() { <-sem }()
 
 		if ctx.Err() != nil {
+			if cancelCleanup != nil {
+				cancelCleanup()
+			}
 			return
 		}
 

@@ -169,7 +169,8 @@ func TestStartExecRejectsDuplicateWithoutReplacingOriginal(t *testing.T) {
 	c, ctrl := newTestClient(t)
 	fd := &fakeDocker{createExecErr: errors.New("duplicate exec ID reached Docker")}
 	c.dockerClient = fd
-	original := newExecSession(c, "duplicate", &fakeConn{})
+	originalConn := &fakeConn{}
+	original := newReadySession(c, "duplicate", originalConn)
 	t.Cleanup(original.Close)
 
 	c.StartExec(context.Background(), protocol.ExecStartMessage{
@@ -178,10 +179,10 @@ func TestStartExecRejectsDuplicateWithoutReplacingOriginal(t *testing.T) {
 		Cmd:         []string{"sh"},
 	})
 
-	var end protocol.ExecEndMessage
-	decodeData(t, expectType(t, ctrl, protocol.TypeExecEnd), &end)
-	if end.Reason == "" {
-		t.Fatal("duplicate exec ID rejection did not include a reason")
+	var rejection protocol.ErrorMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeError), &rejection)
+	if rejection.RequestID != "duplicate" || rejection.Code != "duplicate-exec-id" || rejection.Message == "" {
+		t.Fatalf("duplicate exec ID rejection = %+v, want correlated non-terminal error", rejection)
 	}
 
 	got, ok := c.execSessions.Load("duplicate")
@@ -197,11 +198,96 @@ func TestStartExecRejectsDuplicateWithoutReplacingOriginal(t *testing.T) {
 	default:
 	}
 
+	payload := []byte("original session still accepts input")
+	c.HandleInput(protocol.ExecInputMessage{
+		ExecID: "duplicate",
+		Data:   base64.StdEncoding.EncodeToString(payload),
+	})
+	waitFor(t, "input on original session after duplicate rejection", func() bool {
+		return string(originalConn.written()) == string(payload)
+	})
+
 	fd.mu.Lock()
 	createCalls := len(fd.createCalls)
 	fd.mu.Unlock()
 	if createCalls != 0 {
 		t.Fatalf("Docker CreateExec calls = %d, want 0 for a duplicate exec ID", createCalls)
+	}
+}
+
+func TestBringUpExecSkipsDockerForClosedSession(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	fd := &fakeDocker{createExecErr: errors.New("closed session reached Docker")}
+	c.dockerClient = fd
+	session := newExecSession(c, "already-closed", &fakeConn{})
+	session.Close()
+
+	c.bringUpExec(context.Background(), protocol.ExecStartMessage{
+		ExecID:      "already-closed",
+		ContainerID: "container-1",
+	}, session)
+
+	fd.mu.Lock()
+	createCalls := len(fd.createCalls)
+	fd.mu.Unlock()
+	if createCalls != 0 {
+		t.Fatalf("Docker CreateExec calls = %d, want 0 for an already-closed session", createCalls)
+	}
+}
+
+func TestBringUpExecDoesNotStartDockerExecClosedDuringCreate(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	session := newExecSession(c, "closed-during-create", &fakeConn{})
+	fd := &fakeDocker{
+		createExecID: "docker-created",
+		startConn:    &fakeConn{},
+		createHook:   session.Close,
+	}
+	c.dockerClient = fd
+
+	c.bringUpExec(context.Background(), protocol.ExecStartMessage{
+		ExecID:      "closed-during-create",
+		ContainerID: "container-1",
+	}, session)
+
+	fd.mu.Lock()
+	startCalls := len(fd.startCalls)
+	fd.mu.Unlock()
+	if startCalls != 0 {
+		t.Fatalf("Docker StartExec calls = %d, want 0 after the session closed during CreateExec", startCalls)
+	}
+}
+
+func TestDelayedExecFailureCannotReachReplacementConnection(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	oldCh := make(chan protocol.Envelope, 1)
+	oldState := &outboundQueueState{}
+	c.connMu.Lock()
+	c.sendCh = oldCh
+	c.sendState = oldState
+	c.connMu.Unlock()
+	session := newExecSession(c, "old-exec", &fakeConn{})
+
+	newAgent, _ := newWSPair(t)
+	newCh := make(chan protocol.Envelope, 1)
+	newState := &outboundQueueState{}
+	c.connMu.Lock()
+	c.conn = newAgent
+	c.sendCh = newCh
+	c.sendState = newState
+	c.connMu.Unlock()
+	oldState.closeAndDiscard(oldCh)
+
+	session.failStart("late old-generation failure")
+
+	if got := len(newCh); got != 0 {
+		t.Fatalf("replacement connection received %d delayed old-generation exec failures, want 0", got)
 	}
 }
 

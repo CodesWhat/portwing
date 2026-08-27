@@ -140,6 +140,7 @@ func newExecSession(c *Client, execID string, conn net.Conn) *ExecSession {
 		execID:    execID,
 		conn:      conn,
 		client:    c,
+		target:    c.currentOutboundTarget(),
 		connReady: make(chan struct{}),
 		inbox:     make(chan execItem, execInputQueue),
 		done:      make(chan struct{}),
@@ -270,13 +271,15 @@ type fakeDocker struct {
 	createExecID  string
 	createExecErr error
 	createCalls   []createExecCall
+	createHook    func()
 
-	startConn    net.Conn
-	startExecErr error
-	startCalls   []string // exec ids passed to StartExec
+	startConn     net.Conn
+	startExecErr  error
+	startCalls    []string // exec ids passed to StartExec
+	startReturned chan struct{}
 	// startGate, when non-nil, blocks StartExec until the channel is closed or
-	// receives — lets a test hold the exec bring-up open while it sends input
-	// that must be buffered in order rather than dropped.
+	// the request context is canceled. It lets a test hold exec bring-up open
+	// while it sends input that must be buffered in order rather than dropped.
 	startGate chan struct{}
 
 	// resizeFailFirst makes the first N ResizeExec calls fail before succeeding,
@@ -291,6 +294,8 @@ type fakeDocker struct {
 	streamResp *http.Response
 	streamErr  error
 	doCalls    []doCall
+	doEntered  chan struct{}
+	doGate     chan struct{}
 
 	metricContainers []docker.ContainerJSON
 	metricStats      map[string]*docker.ContainerStatsResponse
@@ -324,21 +329,35 @@ func (f *fakeDocker) GetVersion(context.Context) (string, error) {
 
 func (f *fakeDocker) CreateExec(_ context.Context, containerID string, cmd []string, user string, _ bool) (string, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.createCalls = append(f.createCalls, createExecCall{containerID, cmd, user})
-	return f.createExecID, f.createExecErr
+	hook := f.createHook
+	execID := f.createExecID
+	err := f.createExecErr
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return execID, err
 }
 
-func (f *fakeDocker) StartExec(_ context.Context, execID string, _ bool) (net.Conn, error) {
+func (f *fakeDocker) StartExec(ctx context.Context, execID string, _ bool) (net.Conn, error) {
 	f.mu.Lock()
 	f.startCalls = append(f.startCalls, execID)
 	gate := f.startGate
+	returned := f.startReturned
 	startErr := f.startExecErr
 	conn := f.startConn
 	f.mu.Unlock()
+	if returned != nil {
+		defer close(returned)
+	}
 
 	if gate != nil {
-		<-gate
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	if startErr != nil {
 		return nil, startErr
@@ -367,8 +386,18 @@ func (f *fakeDocker) Do(_ context.Context, method, path string, _ io.Reader) (*h
 func (f *fakeDocker) DoWithHeaders(_ context.Context, method, path string, headers http.Header, _ io.Reader) (*http.Response, error) {
 	f.mu.Lock()
 	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: false, headers: headers.Clone()})
+	entered := f.doEntered
+	gate := f.doGate
+	resp := f.doResp
+	err := f.doErr
 	f.mu.Unlock()
-	return f.doResp, f.doErr
+	if entered != nil {
+		close(entered)
+	}
+	if gate != nil {
+		<-gate
+	}
+	return resp, err
 }
 
 func (f *fakeDocker) DoStream(_ context.Context, method, path string, _ io.Reader) (*http.Response, error) {

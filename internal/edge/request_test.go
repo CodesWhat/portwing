@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -128,6 +129,63 @@ func TestHandleRequestError(t *testing.T) {
 	}
 	if em.Message != "dial fail" {
 		t.Errorf("error Message = %q, want dial fail", em.Message)
+	}
+}
+
+func TestDelayedRequestResponseCannotReachReplacementConnection(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	oldCh := make(chan protocol.Envelope, 1)
+	oldState := &outboundQueueState{}
+	c.connMu.Lock()
+	c.sendCh = oldCh
+	c.sendState = oldState
+	c.connMu.Unlock()
+
+	entered := make(chan struct{})
+	gate := make(chan struct{})
+	//nolint:bodyclose // the response body is consumed and closed by the handler goroutine.
+	fd := &fakeDocker{
+		doResp:    mkResp(http.StatusOK, "application/json", `{"old":true}`),
+		doEntered: entered,
+		doGate:    gate,
+	}
+	c.dockerClient = fd
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.handleRequest(context.Background(), protocol.RequestMessage{
+			RequestID: "old-request",
+			Method:    http.MethodGet,
+			Path:      "/info",
+		})
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(readTimeout):
+		t.Fatal("old request did not reach Docker")
+	}
+
+	newAgent, _ := newWSPair(t)
+	newCh := make(chan protocol.Envelope, 1)
+	newState := &outboundQueueState{}
+	c.connMu.Lock()
+	c.conn = newAgent
+	c.sendCh = newCh
+	c.sendState = newState
+	c.connMu.Unlock()
+	oldState.closeAndDiscard(oldCh)
+	close(gate)
+
+	select {
+	case <-done:
+	case <-time.After(readTimeout):
+		t.Fatal("old request did not finish")
+	}
+	if got := len(newCh); got != 0 {
+		t.Fatalf("replacement connection received %d delayed old-generation responses, want 0", got)
 	}
 }
 

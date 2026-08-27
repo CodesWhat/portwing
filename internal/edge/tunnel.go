@@ -54,6 +54,7 @@ type ExecSession struct {
 	execID      string // controller-assigned exec ID (used on the wire)
 	containerID string
 	client      *Client
+	target      outboundTarget
 
 	// dockerExecID is the Docker-assigned exec instance ID returned by
 	// CreateExec. It differs from execID (which is the controller's ID) and is
@@ -72,8 +73,9 @@ type ExecSession struct {
 	// to drain.
 	inbox chan execItem
 
-	done chan struct{}
-	once sync.Once
+	done   chan struct{}
+	once   sync.Once
+	cancel context.CancelFunc
 
 	mu               sync.Mutex
 	closed           bool
@@ -85,21 +87,31 @@ type ExecSession struct {
 // exec_input that arrives immediately after exec_start finds the session and is
 // queued, instead of racing the bring-up and being dropped.
 func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
+	target := c.currentOutboundTarget()
 	if msg.ExecID == "" {
-		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
 			Reason: "exec ID is required",
 		})
 		return
 	}
 
+	sessionCtx, sessionCancel := context.WithCancel(ctx)
 	session := &ExecSession{
 		execID:      msg.ExecID,
 		containerID: msg.ContainerID,
 		client:      c,
+		target:      target,
 		connReady:   make(chan struct{}),
 		inbox:       make(chan execItem, execInputQueue),
 		done:        make(chan struct{}),
+		cancel:      sessionCancel,
 	}
+	admitted := false
+	defer func() {
+		if !admitted {
+			sessionCancel()
+		}
+	}()
 
 	c.execAdmissionMu.Lock()
 	defer c.execAdmissionMu.Unlock()
@@ -113,7 +125,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	if count >= maxExecSessions {
 		slog.Warn("exec session limit reached", "max", maxExecSessions)
 		// Best-effort error reply; connection loss will surface on the read pump.
-		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
 			ExecID: msg.ExecID,
 			Reason: "session limit reached",
 		})
@@ -121,21 +133,29 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	}
 
 	if _, loaded := c.execSessions.LoadOrStore(msg.ExecID, session); loaded {
-		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
-			ExecID: msg.ExecID,
-			Reason: "duplicate exec ID",
+		// Error is the only existing non-terminal rejection shape. Correlation is
+		// controller-dependent; exec_end would incorrectly close the live session.
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "duplicate exec ID",
+			Code:      "duplicate-exec-id",
+			RequestID: msg.ExecID,
 		})
 		return
 	}
+	admitted = true
 
-	go session.inputWriter(ctx)
-	go c.bringUpExec(ctx, msg, session)
+	go session.inputWriter(sessionCtx)
+	go c.bringUpExec(sessionCtx, msg, session)
 }
 
 // bringUpExec performs the Docker round-trips for an already-registered session
 // and, on success, wires the live connection and starts streaming.
 func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage, session *ExecSession) {
 	defer recoverSession("bringUpExec", msg.ExecID)
+	if ctx.Err() != nil || session.isClosed() {
+		session.Close()
+		return
+	}
 
 	// tty defaults to true when the field is absent (nil), preserving the
 	// prior hardcoded behavior. Explicit false disables PTY allocation.
@@ -146,6 +166,10 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	if err != nil {
 		slog.Error("failed to create exec", "container", applog.Sanitize(msg.ContainerID), "error", applog.Sanitize(err.Error()))
 		session.failStart(fmt.Sprintf("create exec failed: %v", err))
+		return
+	}
+	if ctx.Err() != nil || session.isClosed() {
+		session.Close()
 		return
 	}
 
@@ -177,7 +201,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	}
 
 	// Announce readiness; best-effort — connection loss surfaces on the read pump.
-	_ = c.sendTypedMessage(protocol.TypeExecReady, protocol.ExecReadyMessage{
+	_ = c.sendTypedMessageTo(session.target, protocol.TypeExecReady, protocol.ExecReadyMessage{
 		ExecID: msg.ExecID,
 	})
 
@@ -395,12 +419,18 @@ func (s *ExecSession) activate(conn net.Conn) bool {
 	return true
 }
 
+func (s *ExecSession) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 // failStart tears the session down and reports a terminal exec_end. It closes
 // first so the session is deregistered before the controller sees the failure.
 func (s *ExecSession) failStart(reason string) {
 	s.Close()
 	// Best-effort error reply; connection loss will surface on the read pump.
-	_ = s.client.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
 		ExecID: s.execID,
 		Reason: reason,
 	})
@@ -424,7 +454,7 @@ func (s *ExecSession) readLoop() {
 				Data:   encoded,
 			})
 			if marshalErr == nil {
-				s.client.sendMessage(protocol.Envelope{
+				s.client.sendMessageTo(s.target, protocol.Envelope{
 					Type: protocol.TypeExecOutput,
 					Data: json.RawMessage(data),
 				})
@@ -447,7 +477,7 @@ func (s *ExecSession) readLoop() {
 				Reason: reason,
 			})
 			if marshalErr == nil {
-				s.client.sendMessage(protocol.Envelope{
+				s.client.sendMessageTo(s.target, protocol.Envelope{
 					Type: protocol.TypeExecEnd,
 					Data: json.RawMessage(endData),
 				})
@@ -463,6 +493,9 @@ func (s *ExecSession) readLoop() {
 // live).
 func (s *ExecSession) Close() {
 	s.once.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
 		s.mu.Lock()
 		s.closed = true
 		conn := s.conn

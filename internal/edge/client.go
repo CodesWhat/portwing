@@ -64,6 +64,12 @@ type outboundQueueState struct {
 	closed bool
 }
 
+type outboundTarget struct {
+	conn  *websocket.Conn
+	ch    chan protocol.Envelope
+	state *outboundQueueState
+}
+
 type outboundEnqueueResult uint8
 
 const (
@@ -91,10 +97,19 @@ type dockerAPI interface {
 // edgeMessageSender wraps the edge Client to implement adapter.MessageSender.
 type edgeMessageSender struct {
 	client *Client
+	target *outboundTarget
 }
 
 func (s *edgeMessageSender) SendTypedMessage(msgType string, data any) error {
+	if s.target != nil {
+		return s.client.sendTypedMessageTo(*s.target, msgType, data)
+	}
 	return s.client.sendTypedMessage(msgType, data)
+}
+
+func (c *Client) currentMessageSender() *edgeMessageSender {
+	target := c.currentOutboundTarget()
+	return &edgeMessageSender{client: c, target: &target}
 }
 
 // Client is the edge-mode WebSocket client that connects to a controller
@@ -411,7 +426,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	}()
 
 	// Let adapter handle initial sync (container sync, component sync, etc.).
-	sender := &edgeMessageSender{client: c}
+	sender := c.currentMessageSender()
 	if err := c.adapter.OnConnect(ctx, sender); err != nil {
 		slog.Warn("adapter OnConnect failed", "error", err)
 	}
@@ -571,7 +586,7 @@ func (c *Client) signHello(_ context.Context, hello *protocol.HelloMessage) erro
 
 // readPump reads messages from the WebSocket and dispatches them.
 func (c *Client) readPump(ctx context.Context) error {
-	sender := &edgeMessageSender{client: c}
+	sender := c.currentMessageSender()
 
 	for {
 		if ctx.Err() != nil {
@@ -607,9 +622,10 @@ func (c *Client) readPump(ctx context.Context) error {
 			// block the read loop, which must keep servicing pings and exec I/O.
 			select {
 			case c.streamSem <- struct{}{}:
+				target := c.currentOutboundTarget()
 				go func() {
 					defer func() { <-c.streamSem }()
-					c.handleRequest(ctx, req)
+					c.handleRequestTo(ctx, req, target)
 				}()
 			default:
 				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
@@ -695,8 +711,12 @@ const composeRequestPrefix = "/_portwing/compose"
 // handleRequest executes a Docker API request locally and sends the response
 // back over the WebSocket.
 func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage) {
+	c.handleRequestTo(ctx, req, c.currentOutboundTarget())
+}
+
+func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessage, target outboundTarget) {
 	if strings.HasPrefix(req.Path, composeRequestPrefix) {
-		c.handleComposeRequest(ctx, req)
+		c.handleComposeRequestTo(ctx, req, target)
 		return
 	}
 
@@ -721,7 +741,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 	if err != nil {
 		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, 0, msEdge(start))
 		// Best-effort error reply; connection loss will surface on the read pump.
-		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
 		})
@@ -738,7 +758,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 
 	if isStream {
 		// Send initial response header; best-effort — connection loss surfaces on the read pump.
-		_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeResponse, protocol.ResponseMessage{
 			RequestID:   req.RequestID,
 			StatusCode:  resp.StatusCode,
 			Headers:     headers,
@@ -753,7 +773,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			n, readErr := resp.Body.Read(buf)
 			if n > 0 {
 				encoded := base64.StdEncoding.EncodeToString(buf[:n])
-				_ = c.sendTypedMessage(protocol.TypeStream, protocol.StreamMessage{
+				_ = c.sendTypedMessageTo(target, protocol.TypeStream, protocol.StreamMessage{
 					RequestID: req.RequestID,
 					Data:      encoded,
 				})
@@ -764,7 +784,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 		}
 		pool.PutStreamBuffer(buf)
 
-		_ = c.sendTypedMessage(protocol.TypeStreamEnd, protocol.StreamEndMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeStreamEnd, protocol.StreamEndMessage{
 			RequestID: req.RequestID,
 			Reason:    "complete",
 		})
@@ -806,10 +826,10 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 			respMsg.Body = json.RawMessage(body)
 		}
 
-		if err := c.sendTypedMessage(protocol.TypeResponse, respMsg); err != nil {
+		if err := c.sendTypedMessageTo(target, protocol.TypeResponse, respMsg); err != nil {
 			slog.Warn("failed to encode Docker response envelope", "requestId", applog.Sanitize(req.RequestID), "path", applog.Sanitize(req.Path), "error", err)
 			// Best-effort error reply; connection loss will surface on the read pump.
-			_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("encoding response: %v", err),
 				RequestID: req.RequestID,
 			})
@@ -824,9 +844,13 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 // compose manager rather than fall through to the dockerd proxy above, which
 // has no such route and would 404.
 func (c *Client) handleComposeRequest(ctx context.Context, req protocol.RequestMessage) {
+	c.handleComposeRequestTo(ctx, req, c.currentOutboundTarget())
+}
+
+func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.RequestMessage, target outboundTarget) {
 	var composeReq docker.ComposeRequest
 	if err := json.Unmarshal(req.Body, &composeReq); err != nil {
-		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   fmt.Sprintf("invalid compose request: %v", err),
 			RequestID: req.RequestID,
 		})
@@ -836,7 +860,7 @@ func (c *Client) handleComposeRequest(ctx context.Context, req protocol.RequestM
 	resp, err := c.compose.Execute(ctx, composeReq)
 	if err != nil {
 		c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, audit.OutcomeError)
-		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
 		})
@@ -855,14 +879,14 @@ func (c *Client) handleComposeRequest(ctx context.Context, req protocol.RequestM
 		// marshals cleanly; this guards against a future field change
 		// introducing something that doesn't, surfacing it as an error
 		// envelope instead of silently dropping the response.
-		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   fmt.Sprintf("encoding compose response: %v", err),
 			RequestID: req.RequestID,
 		})
 		return
 	}
 
-	_ = c.sendTypedMessage(protocol.TypeResponse, protocol.ResponseMessage{
+	_ = c.sendTypedMessageTo(target, protocol.TypeResponse, protocol.ResponseMessage{
 		RequestID:   req.RequestID,
 		StatusCode:  http.StatusOK,
 		Body:        json.RawMessage(body),
@@ -915,7 +939,7 @@ func (c *Client) writePump(ctx context.Context) {
 	pollTicker := time.NewTicker(pollDuration)
 	defer pollTicker.Stop()
 
-	sender := &edgeMessageSender{client: c}
+	sender := c.currentMessageSender()
 
 	for {
 		select {
@@ -958,6 +982,10 @@ func (c *Client) sendMetrics() {
 
 // sendTypedMessage wraps data in an Envelope and sends it over the WebSocket.
 func (c *Client) sendTypedMessage(msgType string, data any) error {
+	return c.sendTypedMessageTo(c.currentOutboundTarget(), msgType, data)
+}
+
+func (c *Client) sendTypedMessageTo(target outboundTarget, msgType string, data any) error {
 	rawData, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshaling %s: %w", msgType, err)
@@ -968,7 +996,7 @@ func (c *Client) sendTypedMessage(msgType string, data any) error {
 		Data: json.RawMessage(rawData),
 	}
 
-	c.sendMessage(env)
+	c.sendMessageTo(target, env)
 	return nil
 }
 
@@ -981,6 +1009,10 @@ func (c *Client) sendTypedMessage(msgType string, data any) error {
 // Before the send path is up (the hello/welcome handshake), sendCh is nil and
 // the frame is written directly — no concurrent writer exists yet.
 func (c *Client) sendMessage(env protocol.Envelope) {
+	c.sendMessageTo(c.currentOutboundTarget(), env)
+}
+
+func (c *Client) currentOutboundTarget() outboundTarget {
 	c.connMu.Lock()
 	ch := c.sendCh
 	conn := c.conn
@@ -992,34 +1024,37 @@ func (c *Client) sendMessage(env protocol.Envelope) {
 		c.sendState = state
 	}
 	c.connMu.Unlock()
+	return outboundTarget{conn: conn, ch: ch, state: state}
+}
 
-	if ch == nil {
+func (c *Client) sendMessageTo(target outboundTarget, env protocol.Envelope) {
+	if target.ch == nil {
 		// Handshake phase: synchronous direct write, provably single-writer.
-		if conn == nil {
+		if target.conn == nil {
 			return
 		}
-		_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
-		if err := conn.WriteJSON(env); err != nil {
+		_ = target.conn.SetWriteDeadline(time.Now().Add(writeWait))
+		if err := target.conn.WriteJSON(env); err != nil {
 			slog.Warn("websocket write failed", "type", env.Type, "error", err)
 		}
 		return
 	}
 
-	switch state.enqueue(ch, env) {
+	switch target.state.enqueue(target.ch, env) {
 	case outboundEnqueued:
 		return
 	case outboundQueueClosed:
-		c.failConn(conn, "send queue closed")
+		c.failConn(target.conn, "send queue closed")
 	case outboundByteLimitExceeded:
 		if c.metrics != nil {
 			c.metrics.IncBackpressure()
 		}
-		c.failConn(conn, "send queue byte limit exceeded")
+		c.failConn(target.conn, "send queue byte limit exceeded")
 	case outboundFrameLimitExceeded:
 		if c.metrics != nil {
 			c.metrics.IncBackpressure()
 		}
-		c.failConn(conn, "send queue full")
+		c.failConn(target.conn, "send queue full")
 	}
 }
 

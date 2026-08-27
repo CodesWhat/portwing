@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/protocol"
 )
@@ -144,24 +145,23 @@ func TestOrderedIOInputAfterCloseIsDropped(t *testing.T) {
 	}
 }
 
-// TestOrderedIOTeardownDuringBringUpClosesOrphanedConn verifies that if a
-// session is torn down while bringUpExec is still in-flight, the hijacked
-// Docker conn returned by StartExec is closed immediately by activate and the
-// readLoop never starts. Uses StartExec/EndExec directly (bypassing the read
-// pump) for deterministic ordering.
-func TestOrderedIOTeardownDuringBringUpClosesOrphanedConn(t *testing.T) {
+// TestOrderedIOTeardownDuringBringUpCancelsStart verifies that tearing down a
+// session cancels an in-flight Docker exec-start request promptly. The start
+// gate is never released during the assertion: StartExec must return because
+// its context was canceled, not because the simulated Docker daemon answered.
+func TestOrderedIOTeardownDuringBringUpCancelsStart(t *testing.T) {
 	t.Parallel()
 
 	c, _ := newTestClient(t)
 
 	gate := make(chan struct{})
-	// orphanConn is the conn that StartExec will return AFTER the gate opens.
-	// activate must close it because the session is already marked closed.
-	orphanConn := &fakeConn{}
+	t.Cleanup(func() { close(gate) })
+	startReturned := make(chan struct{})
 	fd := &fakeDocker{
-		createExecID: "docker-orphan",
-		startConn:    orphanConn,
-		startGate:    gate,
+		createExecID:  "docker-orphan",
+		startConn:     &fakeConn{},
+		startGate:     gate,
+		startReturned: startReturned,
 	}
 	c.dockerClient = fd
 
@@ -172,8 +172,14 @@ func TestOrderedIOTeardownDuringBringUpClosesOrphanedConn(t *testing.T) {
 		ContainerID: "ctr-orphan",
 		Cmd:         []string{"sh"},
 	})
+	waitFor(t, "Docker StartExec to reach its gate", func() bool {
+		fd.mu.Lock()
+		defer fd.mu.Unlock()
+		return len(fd.startCalls) == 1
+	})
 
-	// Tear the session down before releasing the gate.
+	// Tear the session down while Docker is still waiting. Canceling the
+	// session context must release StartExec without the test opening gate.
 	c.EndExec(protocol.ExecEndMessage{ExecID: "ord-orphan"})
 
 	// Confirm the session is deregistered (Close() ran its once.Do, which sets
@@ -182,12 +188,9 @@ func TestOrderedIOTeardownDuringBringUpClosesOrphanedConn(t *testing.T) {
 		t.Fatal("session still registered after EndExec; cannot proceed with gate release")
 	}
 
-	// Release the gate. bringUpExec resumes, gets orphanConn, calls activate.
-	// activate must detect closed=true and close the conn rather than wire it up.
-	close(gate)
-
-	// The orphaned conn must be closed by activate.
-	waitFor(t, "orphaned exec conn to be closed by activate", func() bool {
-		return orphanConn.isClosed()
-	})
+	select {
+	case <-startReturned:
+	case <-time.After(time.Second):
+		t.Fatal("Docker StartExec did not return promptly after session teardown")
+	}
 }
