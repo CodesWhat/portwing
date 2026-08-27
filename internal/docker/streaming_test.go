@@ -66,4 +66,10 @@ func TestIsStreamingRequestContainerArchiveMethod(t *testing.T) {
 	if IsStreamingRequest(http.MethodPut, path) {
 		t.Fatal("PUT container archive upload was classified as a streaming download")
 	}
+	if !IsStreamingRequest(http.MethodGet, "/v1.44/containers/abc/logs?follow=1") {
+		t.Fatal("GET container logs did not delegate to the ordinary streaming-path classifier")
+	}
+	if IsStreamingRequest(http.MethodGet, "/v1.44/containers/json") {
+		t.Fatal("ordinary container list was classified as streaming")
+	}
 }

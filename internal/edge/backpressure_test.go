@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/codeswhat/portwing/internal/metrics"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -29,6 +32,23 @@ func runSendPump(t *testing.T, c *Client) chan protocol.Envelope {
 	go c.sendPump(ctx, conn, ch)
 	t.Cleanup(cancel)
 	return ch
+}
+
+func newEdgeMetricsForBackpressureTest() *metrics.Registry {
+	registry := metrics.NewRegistry()
+	registry.SetEdgeMode(true)
+	return registry
+}
+
+func requireBackpressureCount(t *testing.T, registry *metrics.Registry, want int) {
+	t.Helper()
+
+	var output strings.Builder
+	registry.WritePrometheus(&output, func(value string) string { return value })
+	wantLine := "portwing_edge_backpressure_events_total " + strconv.Itoa(want) + "\n"
+	if !strings.Contains(output.String(), wantLine) {
+		t.Fatalf("metrics missing %q:\n%s", wantLine, output.String())
+	}
 }
 
 // TestSendPumpDeliversQueuedFrame proves that the queued send path (sendCh set)
@@ -62,6 +82,7 @@ func TestSendMessageEvictsConnectionWhenQueueFull(t *testing.T) {
 	t.Parallel()
 
 	c, ctrl := newTestClient(t)
+	c.metrics = newEdgeMetricsForBackpressureTest()
 
 	// Install a capacity-1 queue (no pump running — nobody drains it).
 	c.connMu.Lock()
@@ -83,6 +104,7 @@ func TestSendMessageEvictsConnectionWhenQueueFull(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected read error after eviction, got nil")
 	}
+	requireBackpressureCount(t, c.metrics, 1)
 }
 
 // A frame-count limit alone still permits a blocked writer to retain several
@@ -92,6 +114,7 @@ func TestSendMessageEvictsConnectionWhenQueuedBytesExceedLimit(t *testing.T) {
 	t.Parallel()
 
 	c, _ := newTestClient(t)
+	c.metrics = newEdgeMetricsForBackpressureTest()
 	c.connMu.Lock()
 	c.sendCh = make(chan protocol.Envelope, sendQueueSize)
 	agentConn := c.conn
@@ -105,8 +128,10 @@ func TestSendMessageEvictsConnectionWhenQueuedBytesExceedLimit(t *testing.T) {
 
 	// No sendPump is running, which models a writer blocked indefinitely.
 	// This many frames crosses 128 MiB while remaining far below 256 entries.
-	for i := 0; i <= outboundQueuedByteLimitForTest/frameBytes; i++ {
-		c.sendMessage(protocol.Envelope{Type: protocol.TypeStream, Data: data})
+	env := protocol.Envelope{Type: protocol.TypeStream, Data: data}
+	attempts := int(maxOutboundQueuedBytes/outboundEnvelopeBytes(env)) + 1
+	for i := 0; i < attempts; i++ {
+		c.sendMessage(env)
 	}
 
 	if err := agentConn.WriteControl(
@@ -116,6 +141,7 @@ func TestSendMessageEvictsConnectionWhenQueuedBytesExceedLimit(t *testing.T) {
 	); err == nil {
 		t.Fatal("controller connection remained open after queued outbound bytes exceeded the aggregate limit")
 	}
+	requireBackpressureCount(t, c.metrics, 1)
 }
 
 func TestOutboundByteReservationIncludesDequeuedFrameUntilRelease(t *testing.T) {
@@ -168,6 +194,88 @@ func TestSendMessageCannotResurrectClosedQueueGeneration(t *testing.T) {
 	}
 	if _, _, err := ctrl.ReadMessage(); err == nil {
 		t.Fatal("connection remained open after a late send targeted its closed queue generation")
+	}
+}
+
+func TestOutboundQueueCloseDiscardsReservedAndInjectedFrames(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan protocol.Envelope, 3)
+	state := &outboundQueueState{}
+	for _, env := range []protocol.Envelope{
+		{Type: protocol.TypePing},
+		{Type: protocol.TypePong, Data: json.RawMessage(`{}`)},
+	} {
+		if got := state.enqueue(ch, env); got != outboundEnqueued {
+			t.Fatalf("enqueue = %d, want outboundEnqueued", got)
+		}
+	}
+	ch <- protocol.Envelope{Type: protocol.TypeStream}
+
+	state.closeAndDiscard(ch)
+
+	state.mu.Lock()
+	closed, queuedBytes := state.closed, state.bytes
+	state.mu.Unlock()
+	if !closed || queuedBytes != 0 || len(ch) != 0 {
+		t.Fatalf("discarded queue = closed %v, bytes %d, frames %d; want true, 0, 0", closed, queuedBytes, len(ch))
+	}
+	if got := state.enqueue(ch, protocol.Envelope{Type: protocol.TypePing}); got != outboundQueueClosed {
+		t.Fatalf("enqueue after discard = %d, want outboundQueueClosed", got)
+	}
+}
+
+func TestStaleSendPumpLeavesReplacementQueueStateOpen(t *testing.T) {
+	t.Parallel()
+
+	activeCh := make(chan protocol.Envelope, 1)
+	activeState := &outboundQueueState{}
+	c := &Client{sendCh: activeCh, sendState: activeState}
+	staleCh := make(chan protocol.Envelope, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	c.sendPump(ctx, nil, staleCh)
+
+	activeState.mu.Lock()
+	closed := activeState.closed
+	activeState.mu.Unlock()
+	if closed {
+		t.Fatal("stale send pump closed the replacement queue state")
+	}
+	if got := activeState.enqueue(activeCh, protocol.Envelope{Type: protocol.TypePing}); got != outboundEnqueued {
+		t.Fatalf("replacement queue enqueue = %d, want outboundEnqueued", got)
+	}
+}
+
+func TestSendPumpReleasesReservationWhenConnectionAlreadyClosed(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	c.connMu.Lock()
+	agentConn := c.conn
+	c.connMu.Unlock()
+	if err := agentConn.Close(); err != nil {
+		t.Fatalf("close agent connection: %v", err)
+	}
+
+	ch := make(chan protocol.Envelope, 1)
+	state := &outboundQueueState{}
+	c.connMu.Lock()
+	c.sendCh = ch
+	c.sendState = state
+	c.connMu.Unlock()
+	if got := state.enqueue(ch, protocol.Envelope{Type: protocol.TypePong}); got != outboundEnqueued {
+		t.Fatalf("enqueue = %d, want outboundEnqueued", got)
+	}
+
+	c.sendPump(context.Background(), agentConn, ch)
+
+	state.mu.Lock()
+	closed, queuedBytes := state.closed, state.bytes
+	state.mu.Unlock()
+	if !closed || queuedBytes != 0 {
+		t.Fatalf("failed pump state = closed %v, bytes %d; want true, 0", closed, queuedBytes)
 	}
 }
 
