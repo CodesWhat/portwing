@@ -139,7 +139,7 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keyID := deriveKeyID(rawPub)
+	keyID := KeyIDForPublicKey(ed25519.PublicKey(rawPub))
 	comment := fmt.Sprintf("enrolled:%s", keyID)
 	line := AuthorizedKeyLine(ed25519.PublicKey(rawPub), comment)
 

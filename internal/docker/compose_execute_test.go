@@ -1,11 +1,14 @@
 package docker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // ---- NewComposeManager ----
@@ -248,6 +251,63 @@ func TestExecute_TruncatesOversizedOutput(t *testing.T) {
 }
 
 // ---- Execute: concurrent operations on the same stack serialize ----
+
+func TestComposeManagerLockStackRemovesUnusedEntries(t *testing.T) {
+	t.Parallel()
+	cm := &ComposeManager{}
+
+	for i := 0; i < 1000; i++ {
+		unlock := cm.lockStack(fmt.Sprintf("stack-%d", i))
+		unlock()
+	}
+
+	cm.stackLocksMu.Lock()
+	defer cm.stackLocksMu.Unlock()
+	if got := len(cm.stackLocks); got != 0 {
+		t.Fatalf("retained stack locks = %d, want 0", got)
+	}
+}
+
+func TestComposeManagerLockStackWaiterPreventsEarlyRemoval(t *testing.T) {
+	t.Parallel()
+	cm := &ComposeManager{}
+	unlockFirst := cm.lockStack("app")
+	secondAcquired := make(chan func(), 1)
+	go func() {
+		secondAcquired <- cm.lockStack("app")
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		cm.stackLocksMu.Lock()
+		refs := cm.stackLocks["app"].refs
+		cm.stackLocksMu.Unlock()
+		if refs == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			unlockFirst()
+			t.Fatal("timed out waiting for second lock reference")
+		}
+		runtime.Gosched()
+	}
+	unlockFirst()
+
+	unlockSecond := <-secondAcquired
+	cm.stackLocksMu.Lock()
+	if got := len(cm.stackLocks); got != 1 {
+		cm.stackLocksMu.Unlock()
+		t.Fatalf("stack locks while waiter owns lock = %d, want 1", got)
+	}
+	cm.stackLocksMu.Unlock()
+	unlockSecond()
+
+	cm.stackLocksMu.Lock()
+	defer cm.stackLocksMu.Unlock()
+	if got := len(cm.stackLocks); got != 0 {
+		t.Fatalf("retained stack locks after final release = %d, want 0", got)
+	}
+}
 
 // TestComposeManagerExecute_ConcurrentSameStackSerializes exercises finding
 // C4: without a per-stack lock, two concurrent "up" requests for the same

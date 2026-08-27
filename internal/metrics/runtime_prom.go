@@ -79,44 +79,48 @@ func WriteContainerPrometheus(
 
 	const maxWorkers = 8
 	results := make([]containerResult, len(containers))
-	sem := make(chan struct{}, maxWorkers)
+	workerCount := min(maxWorkers, len(containers))
+	jobs := make(chan int)
 	var wg sync.WaitGroup
-
-	for i, container := range containers {
+	for range workerCount {
 		wg.Add(1)
-		go func(idx int, id, image string, names []string) {
+		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			for idx := range jobs {
+				container := containers[idx]
+				name := container.ID
+				if len(container.Names) > 0 {
+					name = strings.TrimPrefix(container.Names[0], "/")
+				}
+				statsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				stats, err := client.ContainerStats(statsCtx, container.ID)
+				cancel()
+				if err != nil {
+					continue
+				}
 
-			name := id
-			if len(names) > 0 {
-				name = strings.TrimPrefix(names[0], "/")
+				var rxBytes, txBytes uint64
+				for _, network := range stats.Networks {
+					rxBytes += network.RxBytes
+					txBytes += network.TxBytes
+				}
+				results[idx] = containerResult{
+					id:    container.ID,
+					name:  name,
+					image: container.Image,
+					cpu:   float64(stats.CPUStats.CPUUsage.TotalUsage) / 1e9,
+					memU:  stats.MemoryStats.Usage,
+					memL:  stats.MemoryStats.Limit,
+					rxB:   rxBytes,
+					txB:   txBytes,
+				}
 			}
-			statsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-			stats, err := client.ContainerStats(statsCtx, id)
-			if err != nil {
-				return
-			}
-
-			var rxBytes, txBytes uint64
-			for _, network := range stats.Networks {
-				rxBytes += network.RxBytes
-				txBytes += network.TxBytes
-			}
-			results[idx] = containerResult{
-				id:    id,
-				name:  name,
-				image: image,
-				cpu:   float64(stats.CPUStats.CPUUsage.TotalUsage) / 1e9,
-				memU:  stats.MemoryStats.Usage,
-				memL:  stats.MemoryStats.Limit,
-				rxB:   rxBytes,
-				txB:   txBytes,
-			}
-		}(i, container.ID, container.Image, container.Names)
+		}()
 	}
+	for i := range containers {
+		jobs <- i
+	}
+	close(jobs)
 	wg.Wait()
 
 	valid := make([]containerResult, 0, len(results))

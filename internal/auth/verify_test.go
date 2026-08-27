@@ -230,6 +230,44 @@ func TestVerifyRequest_SkewedTimestamp(t *testing.T) {
 	}
 }
 
+func TestVerifyRequest_ExtremeTimestampSkew(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		timestamp int64
+		wantErr   bool
+	}{
+		{name: "extreme future", timestamp: 1 << 62, wantErr: true},
+		{name: "extreme past", timestamp: -(1 << 62), wantErr: true},
+		{name: "ordinary future", timestamp: time.Now().Unix() + 30},
+		{name: "ordinary past", timestamp: time.Now().Unix() - 30},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reg, lru, pub, priv := testSetup(t)
+			nonce := randomNonce(t)
+			req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
+			signRequest(t, req, nil, priv, pub, tt.timestamp, nonce)
+
+			_, err := VerifyRequest(req, nil, reg, lru, 60)
+			if tt.wantErr {
+				if !errors.Is(err, ErrTimestampSkew) {
+					t.Fatalf("VerifyRequest error = %v, want ErrTimestampSkew", err)
+				}
+				if lru.Seen(nonce) {
+					t.Fatal("timestamp-rejected nonce was admitted to replay cache")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("VerifyRequest error = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestVerifyRequest_ReplayedNonce(t *testing.T) {
 	t.Parallel()
 	reg, lru, pub, priv := testSetup(t)

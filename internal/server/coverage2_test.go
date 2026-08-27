@@ -4,7 +4,7 @@ package server
 // Targets: NewServer (Ed25519/enrollment/TLS/SIGHUP/TrustedProxies paths),
 // handleDockerProxy (error paths, streaming), handleExecHijack,
 // pollContainers, ListenAndServe, Shutdown (hupCh path),
-// AuthMiddleware / rateLimitOnly / AuthMiddlewareWithEd25519 (metrics paths),
+// rateLimitOnly / AuthMiddlewareWithEd25519 (metrics paths),
 // statusRecorder Hijack (supported path), clientIP (X-Real-IP / all-trusted XFF),
 // ParseTrustedProxies (IPv6 and bare-IP), argon2 edge cases, handleInfo docker error.
 
@@ -898,7 +898,7 @@ func (e *errorAdapter) RefreshContainers(_ context.Context) ([]adapter.Container
 }
 
 // ---------------------------------------------------------------------------
-// AuthMiddleware: with metrics registry
+// AuthMiddlewareWithEd25519: token path with metrics registry
 // ---------------------------------------------------------------------------
 
 func TestAuthMiddlewareWithMetricsNoAuth(t *testing.T) {
@@ -908,7 +908,7 @@ func TestAuthMiddlewareWithMetricsNoAuth(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 	// nil verifier → no-auth pass-through
-	h := rl.AuthMiddleware(nil, noAudit(t), reg, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(nil, Ed25519Config{}, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/v1.44/containers/json", nil)
 	rec := httptest.NewRecorder()
@@ -926,7 +926,7 @@ func TestAuthMiddlewareWithMetricsRateLimited(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 	verifier := newRawTokenVerifier("correct")
-	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	// Exhaust limit.
 	for i := 0; i < 10; i++ {
@@ -955,7 +955,7 @@ func TestAuthMiddlewareWithMetricsAuthFailure(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 	verifier := newRawTokenVerifier("correct")
-	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerPortwingToken, "bad")
@@ -974,7 +974,7 @@ func TestAuthMiddlewareWithMetricsSuccess(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 	verifier := newRawTokenVerifier("correct")
-	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerPortwingToken, "correct")
