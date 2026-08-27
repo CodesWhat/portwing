@@ -70,6 +70,18 @@ func TestLoadgenProcessRejectsAllErrorRuns(t *testing.T) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(errorServer.Close)
+	truncatedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("short"))
+	}))
+	t.Cleanup(truncatedServer.Close)
+	earlySSEServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {}\n\n"))
+	}))
+	t.Cleanup(earlySSEServer.Close)
 	redirectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/final" {
 			w.WriteHeader(http.StatusOK)
@@ -98,6 +110,16 @@ func TestLoadgenProcessRejectsAllErrorRuns(t *testing.T) {
 			name: "non 2xx",
 			args: []string{"-base", errorServer.URL, "-path", "/", "-concurrency", "1", "-duration", "20ms"},
 			want: "non-2xx",
+		},
+		{
+			name: "truncated response body",
+			args: []string{"-base", truncatedServer.URL, "-path", "/", "-concurrency", "1", "-duration", "20ms"},
+			want: "transport errors",
+		},
+		{
+			name: "SSE stream closes before hold",
+			args: []string{"-base", earlySSEServer.URL, "-path", "/", "-mode", "sse", "-sse-hold", "1s", "-concurrency", "1", "-duration", "20ms"},
+			want: "transport errors",
 		},
 		{
 			name: "redirect",

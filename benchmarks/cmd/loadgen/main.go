@@ -262,8 +262,15 @@ func doReq(client *http.Client, opts options, recordErr func(error), recordOK fu
 		recordErr(err)
 		return
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		_ = resp.Body.Close()
+		recordErr(err)
+		return
+	}
+	if err := resp.Body.Close(); err != nil {
+		recordErr(err)
+		return
+	}
 	recordOK(resp.StatusCode, micros)
 }
 
@@ -287,7 +294,18 @@ func doSSE(client *http.Client, opts options, recordErr func(error), recordOK fu
 	status := resp.StatusCode
 	// Read until the context deadline fires (server holds the stream open),
 	// then close. The copy returns with a context error, which is expected.
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
+	_, copyErr := io.Copy(io.Discard, resp.Body)
+	closeErr := resp.Body.Close()
+	if status >= http.StatusOK && status < http.StatusMultipleChoices && ctx.Err() == nil {
+		switch {
+		case copyErr != nil:
+			recordErr(copyErr)
+		case closeErr != nil:
+			recordErr(closeErr)
+		default:
+			recordErr(errors.New("SSE stream closed before hold elapsed"))
+		}
+		return
+	}
 	recordOK(status, time.Since(t0).Microseconds())
 }
