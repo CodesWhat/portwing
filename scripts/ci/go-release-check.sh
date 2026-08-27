@@ -12,6 +12,8 @@ bash scripts/package-release-config-self-test-test.sh
 bash scripts/package-release-config-self-test-cleanup-test.sh
 bash scripts/package-release-config-test-test.sh
 bash scripts/package-release-config-test.sh
+bash scripts/install-config-permissions-test.sh
+bash scripts/standard-mode-bind-config-test.sh
 bash scripts/setup-go-egress-config-test-test.sh
 bash scripts/setup-go-egress-config-test.sh
 bash scripts/pre-push-config-test-test.sh

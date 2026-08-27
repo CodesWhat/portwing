@@ -52,7 +52,6 @@ main() {
 	url="https://github.com/${REPO}/releases/download/${version}/portwing_${version#v}_${os}_${arch}.tar.gz"
 
 	info "Downloading from ${url}..."
-	local tmpdir
 	tmpdir=$(mktemp -d)
 	trap 'rm -rf "$tmpdir"' EXIT
 
@@ -65,7 +64,11 @@ main() {
 	# Create config directory and template
 	if [ ! -d "$CONFIG_DIR" ]; then
 		info "Creating config directory at ${CONFIG_DIR}..."
-		sudo mkdir -p "$CONFIG_DIR"
+		sudo install -d -m 700 -o root -g root "$CONFIG_DIR"
+	fi
+	if [ ! -f "${CONFIG_DIR}/config" ]; then
+		info "Creating config template at ${CONFIG_DIR}/config..."
+		sudo install -m 600 -o root -g root /dev/null "${CONFIG_DIR}/config"
 		sudo tee "${CONFIG_DIR}/config" >/dev/null <<'CONF'
 # Portwing Configuration
 # See: https://github.com/codeswhat/portwing
@@ -88,7 +91,6 @@ BIND_ADDRESS=0.0.0.0
 # Logging
 LOG_LEVEL=info
 CONF
-		info "Config template created at ${CONFIG_DIR}/config"
 	fi
 
 	# Install systemd service on Linux

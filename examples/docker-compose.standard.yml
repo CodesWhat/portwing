@@ -9,6 +9,9 @@
 #
 # The image ships a built-in HEALTHCHECK against /_portwing/health.
 # See SECURITY.md ("container runtime identity") for why group_add is needed.
+# This plaintext example publishes only on host loopback. For remote access,
+# configure Portwing TLS before changing this bind, or keep the plaintext
+# listener private behind a TLS-terminating reverse proxy.
 
 services:
   portwing:
@@ -25,7 +28,7 @@ services:
     group_add:
       - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks

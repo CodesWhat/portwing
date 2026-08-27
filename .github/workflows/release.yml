@@ -19,10 +19,54 @@ env:
   GRYPE_VERSION: "0.110.0"
 
 jobs:
+  verify-release-source:
+    name: "Verify Release Source"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and verify release target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_sha="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          if ! git merge-base --is-ancestor "${target_sha}" origin/main; then
+            echo "::error::Release target ${target_sha} is not on origin/main."
+            exit 1
+          fi
+          echo "sha=${target_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify successful CI on release target
+        uses: ./.github/actions/verify-ci-success
+        with:
+          workflow-file: ci-verify.yml
+          target-sha: ${{ steps.target.outputs.sha }}
+          github-token: ${{ github.token }}
+
   release:
     name: "GoReleaser + Cosign"
+    needs: verify-release-source
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    environment: Production
     permissions:
       contents: write
       packages: write

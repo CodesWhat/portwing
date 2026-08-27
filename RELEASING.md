@@ -115,6 +115,16 @@ CodesWhat/drydock#759 for the house rationale this repo follows. That ruleset
 is a repo-settings change, not a workflow change, so it lands separately from
 this file.
 
+A second active ruleset restricts creation of `refs/tags/v*` to the maintainer
+identity used by the release-cut workflow. `release.yml` then proves that the
+tag resolves to a commit on `origin/main` and that the exact commit passed
+`ci-verify.yml` before the privileged job can enter the protected `Production`
+environment. Production accepts only `v*` tags, requires approval from the
+separate release-review account, prevents self-review, and must not allow
+administrators to bypass its protection rules. Keep the source-verification job
+read-only and outside the environment so untrusted tag content cannot receive
+publish permissions before those checks pass.
+
 The release job also requires **`HOMEBREW_TAP_TOKEN`**, a fine-grained token
 with Contents read/write access to `CodesWhat/homebrew-tap`. The default
 `GITHUB_TOKEN` cannot publish to a different repository. Prerelease tags render

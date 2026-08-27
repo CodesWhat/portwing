@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Release publishing now verifies provenance before granting write access.**
+  The tag workflow first proves that the tagged commit is on `main` and has a
+  successful `ci-verify.yml` run in a read-only job. The privileged publishing
+  job depends on that result and uses the protected `Production` environment.
+  The release-cut workflow also refuses to create a tag for a commit outside
+  `main`.
+- **Fresh installer configs are private from creation.** The installer creates
+  `/etc/portwing` as root-owned mode `0700` and its generated config as
+  root-owned mode `0600`, including when the directory already exists. Existing
+  operator configs remain untouched.
+- **Plaintext standard-mode examples bind to loopback.** Compose and `docker
+  run` examples now publish port 3000 on `127.0.0.1` and explain that remote
+  access needs Portwing TLS or a private listener behind a TLS-terminating
+  reverse proxy.
+
 ## [v0.9.9] - 2026-08-23
 
 The output of a whole-app audit: five parallel review lanes plus an
