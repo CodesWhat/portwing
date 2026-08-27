@@ -118,7 +118,7 @@ flowchart LR
 
 ### Recommended deployment (hardened)
 
-The strongest posture combines three controls: **sockguard** (socket-level request filtering so Portwing never touches the raw Docker socket directly), **Ed25519 authentication** (signed requests or the required signed edge hello, with replay protection and no shared secret), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted credentials). Use **standard mode behind a TLS reverse proxy** when Drydock can reach the host, or production-supported [edge mode](#connection-modes) when the host must dial out. Use Drydock `v1.6.0-rc.11+` for the complete v0.9 watcher/update contract.
+The strongest posture combines three controls: **sockguard** (socket-level request filtering so Portwing never touches the raw Docker socket directly), **Ed25519 authentication** (signed requests or the required signed edge hello, with replay protection and no shared secret), and a **hardened container runtime** (`read_only`, `cap_drop: ALL`, `no-new-privileges`, secrets-mounted credentials). The plaintext examples publish port 3000 only on host loopback. For remote access, either configure Portwing TLS before widening that bind, or keep the plaintext listener private behind a TLS-terminating reverse proxy. Use production-supported [edge mode](#connection-modes) when the host must dial out. Use Drydock `v1.6.0-rc.11+` for the complete v0.9 watcher/update contract.
 
 **Step 1 — generate a token and pull the example:**
 
@@ -179,6 +179,9 @@ This runs sockguard and Portwing as separate containers sharing a filtered socke
 #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 # Portwing itself needs no group_add here — it talks only to sockguard's
 # filtered socket, which sockguard creates 0600 under the same UID.
+# This plaintext example publishes only on host loopback. For remote access,
+# configure Portwing TLS before changing this bind, or keep the plaintext
+# listener private behind a TLS-terminating reverse proxy.
 
 services:
   sockguard:
@@ -212,7 +215,7 @@ services:
       - /tmp
     user: "65532:65532"  # image default; explicit so it survives image overrides
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
       - portwing-stacks:/data/stacks
@@ -291,7 +294,7 @@ docker run -d \
   --name portwing \
   --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
   ghcr.io/codeswhat/portwing:0.9.9
 ```
@@ -313,6 +316,10 @@ The image runs as the non-root `portwing` user (UID 65532); `--group-add` grants
 ```bash
 curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/install.sh | bash
 ```
+
+The generated standard-mode config binds to `127.0.0.1`. Keep that listener
+private behind a TLS-terminating reverse proxy, or configure Portwing TLS before
+changing the bind for remote access.
 
 </details>
 
@@ -379,7 +386,7 @@ docker run -d --name portwing \
   --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
   ghcr.io/codeswhat/portwing:0.9.9
 ```
 
@@ -414,7 +421,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
   ghcr.io/codeswhat/portwing:0.9.9
 ```
 
@@ -497,7 +504,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
   ghcr.io/codeswhat/portwing:0.9.9
 ```
 
