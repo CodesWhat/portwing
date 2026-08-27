@@ -52,7 +52,7 @@ func TestParseKeyLine_Valid(t *testing.T) {
 		t.Errorf("pubkey length: got %d want 32", len(k.PubKey))
 	}
 	// Key ID must match our derivation.
-	want := deriveKeyID(pub)
+	want := KeyIDForPublicKey(pub)
 	if k.KeyID != want {
 		t.Errorf("key_id: got %q want %q", k.KeyID, want)
 	}
@@ -279,7 +279,7 @@ func TestKeyRegistry_SIGHUPReload(t *testing.T) {
 	if r.Len() != 1 {
 		t.Fatalf("expected 1 key after reload, got %d", r.Len())
 	}
-	keyID1 := deriveKeyID(pub1)
+	keyID1 := KeyIDForPublicKey(pub1)
 	if _, ok := r.LookupByID(keyID1); ok {
 		t.Error("old key should be gone after reload")
 	}

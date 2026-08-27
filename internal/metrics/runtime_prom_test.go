@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/metrics"
@@ -16,6 +20,36 @@ type dockerMetricsFake struct {
 	listErr    error
 	stats      map[string]*docker.ContainerStatsResponse
 	statsErr   map[string]error
+}
+
+type blockingDockerMetricsFake struct {
+	containers []docker.ContainerJSON
+	entered    chan struct{}
+	release    <-chan struct{}
+	active     atomic.Int64
+	maximum    atomic.Int64
+}
+
+func (f *blockingDockerMetricsFake) ListContainers(context.Context, bool) ([]docker.ContainerJSON, error) {
+	return f.containers, nil
+}
+
+func (f *blockingDockerMetricsFake) ContainerStats(ctx context.Context, _ string) (*docker.ContainerStatsResponse, error) {
+	active := f.active.Add(1)
+	defer f.active.Add(-1)
+	for {
+		maximum := f.maximum.Load()
+		if active <= maximum || f.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	f.entered <- struct{}{}
+	select {
+	case <-f.release:
+		return &docker.ContainerStatsResponse{}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (f *dockerMetricsFake) ListContainers(context.Context, bool) ([]docker.ContainerJSON, error) {
@@ -154,5 +188,50 @@ func TestWriteContainerPrometheusNoData(t *testing.T) {
 				t.Fatalf("unexpected metrics without usable data:\n%s", b.String())
 			}
 		})
+	}
+}
+
+func TestWriteContainerPrometheusUsesFixedWorkerPool(t *testing.T) {
+	const containerCount = 512
+	containers := make([]docker.ContainerJSON, containerCount)
+	for i := range containers {
+		containers[i].ID = "container-" + strconv.Itoa(i)
+	}
+	release := make(chan struct{})
+	client := &blockingDockerMetricsFake{
+		containers: containers,
+		entered:    make(chan struct{}, containerCount),
+		release:    release,
+	}
+
+	before := runtime.NumGoroutine()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var b strings.Builder
+		metrics.WriteContainerPrometheus(context.Background(), &b, client, noEscape)
+	}()
+
+	for i := 0; i < 8; i++ {
+		select {
+		case <-client.entered:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for stats workers")
+		}
+	}
+	after := runtime.NumGoroutine()
+	if delta := after - before; delta > 20 {
+		close(release)
+		<-done
+		t.Fatalf("container scrape added %d goroutines, want at most 20", delta)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("container scrape did not finish")
+	}
+	if got := client.maximum.Load(); got > 8 {
+		t.Fatalf("maximum concurrent stats calls = %d, want at most 8", got)
 	}
 }

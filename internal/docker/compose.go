@@ -156,10 +156,15 @@ type ComposeManager struct {
 	apiVersion   string
 	dockerSocket string
 
-	// stackLocks holds one *sync.Mutex per StackName, created lazily. It
-	// serializes writeStackFiles through cmd.Run() (see Execute) for a given
-	// stack while leaving unrelated stacks free to run concurrently.
-	stackLocks sync.Map
+	// stackLocks holds one reference-counted mutex per active StackName. Entries
+	// are removed after the final owner or waiter releases them.
+	stackLocksMu sync.Mutex
+	stackLocks   map[string]*stackLockEntry
+}
+
+type stackLockEntry struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // NewComposeManager creates a ComposeManager. It auto-detects whether the
@@ -199,10 +204,29 @@ func (cm *ComposeManager) detectCompose() {
 // returns a func that releases it. Two requests for different stack names
 // get independent mutexes and never block each other.
 func (cm *ComposeManager) lockStack(stackName string) func() {
-	lockIface, _ := cm.stackLocks.LoadOrStore(stackName, &sync.Mutex{})
-	lock := lockIface.(*sync.Mutex)
-	lock.Lock()
-	return lock.Unlock
+	cm.stackLocksMu.Lock()
+	if cm.stackLocks == nil {
+		cm.stackLocks = make(map[string]*stackLockEntry)
+	}
+	entry := cm.stackLocks[stackName]
+	if entry == nil {
+		entry = &stackLockEntry{}
+		cm.stackLocks[stackName] = entry
+	}
+	entry.refs++
+	cm.stackLocksMu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+
+		cm.stackLocksMu.Lock()
+		entry.refs--
+		if entry.refs == 0 && cm.stackLocks[stackName] == entry {
+			delete(cm.stackLocks, stackName)
+		}
+		cm.stackLocksMu.Unlock()
+	}
 }
 
 // Execute dispatches a compose operation and returns the result.

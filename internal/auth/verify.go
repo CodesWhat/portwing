@@ -157,12 +157,12 @@ func VerifyRequest(
 		return "", ErrTimestampSkew
 	}
 	skew := time.Since(time.Unix(tsUnix, 0))
+	maxSkew := time.Duration(maxSkewSeconds) * time.Second
+	if skew < -maxSkew || skew > maxSkew {
+		return "", ErrTimestampSkew
+	}
 	if skew < 0 {
 		skew = -skew
-	}
-	maxSkew := time.Duration(maxSkewSeconds) * time.Second
-	if skew > maxSkew {
-		return "", ErrTimestampSkew
 	}
 
 	// Warn on large but still-acceptable skew.

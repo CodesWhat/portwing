@@ -529,7 +529,7 @@ func TestEd25519Auth(t *testing.T) {
 		req.Method, auth.CanonicalRequestTarget(req.URL), emptyBodyHash, tsUnix, nonce))
 	sig := ed25519.Sign(priv, msg)
 
-	// Key ID: hex(SHA-256(pubkey)[:8]), matching auth.deriveKeyID.
+	// Key ID: hex(SHA-256(pubkey)[:8]), matching auth.KeyIDForPublicKey.
 	h := sha256.Sum256(pub)
 	keyID := hex.EncodeToString(h[:8])
 

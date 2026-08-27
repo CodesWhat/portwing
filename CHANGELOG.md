@@ -28,12 +28,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enrollment JSON must arrive within 10 seconds, with at most two active
   requests per client and 32 across the agent. Enrollment audit actors now use
   the same validated trusted-proxy client resolution as rate limiting.
+- **Ed25519 timestamp validation handles the full signed range.** Extreme
+  future timestamps can no longer overflow duration negation and bypass the
+  configured clock-skew window.
 
 ### Fixed
 
 - **Standard-mode exec relays terminate when either side closes.** Client EOF
   half-closes Docker input so remaining output can drain, while Docker EOF or a
   fatal copy error closes both connections and unblocks the peer goroutine.
+- **Compose operation locks are reclaimed.** Per-stack serialization now uses
+  reference-counted entries that disappear after the final owner or waiter,
+  instead of retaining every distinct stack name for the agent's lifetime.
+- **Container metric scrapes use a fixed worker pool.** Large container fleets
+  now create at most eight stats workers per scrape instead of one goroutine
+  per container waiting behind a semaphore.
+- **All authentication coverage exercises the production middleware.** The
+  unused duplicate raw-credential wrapper is gone, and token, rate-limit,
+  metrics, audit, streaming-interface, and benchmark paths use the combined
+  credential and Ed25519 middleware.
+- **Ed25519 key IDs have one implementation.** Registry loading, enrollment,
+  and edge hello identity now share `KeyIDForPublicKey`, backed by a generated
+  key registry round-trip regression.
 
 ## [v0.9.9] - 2026-08-23
 
