@@ -2,6 +2,7 @@ package docker
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -59,17 +60,25 @@ func TestIsStreamingPath(t *testing.T) {
 func TestIsStreamingRequestContainerArchiveMethod(t *testing.T) {
 	t.Parallel()
 
-	path := "/v1.44/containers/abc/archive?path=%2Fvar%2Flib%2Fdata"
-	if !IsStreamingRequest(http.MethodGet, path) {
-		t.Fatal("GET container archive was not classified as a streaming download")
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		want   bool
+	}{
+		{name: "GET archive download streams", method: http.MethodGet, path: "/v1.44/containers/abc/archive?path=%2Fvar%2Flib%2Fdata", want: true},
+		{name: "PUT archive upload does not stream", method: http.MethodPut, path: "/v1.44/containers/abc/archive?path=%2Fvar%2Flib%2Fdata", want: false},
+		{name: "GET logs delegates to path classifier", method: http.MethodGet, path: "/v1.44/containers/abc/logs?follow=1", want: true},
+		{name: "GET container list does not stream", method: http.MethodGet, path: "/v1.44/containers/json", want: false},
 	}
-	if IsStreamingRequest(http.MethodPut, path) {
-		t.Fatal("PUT container archive upload was classified as a streaming download")
-	}
-	if !IsStreamingRequest(http.MethodGet, "/v1.44/containers/abc/logs?follow=1") {
-		t.Fatal("GET container logs did not delegate to the ordinary streaming-path classifier")
-	}
-	if IsStreamingRequest(http.MethodGet, "/v1.44/containers/json") {
-		t.Fatal("ordinary container list was classified as streaming")
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			if got := IsStreamingRequest(req.Method, req.URL.RequestURI()); got != tc.want {
+				t.Fatalf("IsStreamingRequest(%q, %q) = %v, want %v", tc.method, tc.path, got, tc.want)
+			}
+		})
 	}
 }
