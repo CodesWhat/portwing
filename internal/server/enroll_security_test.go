@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -207,6 +208,29 @@ func TestRateLimitOnlyCapsEnrollmentBodiesAcrossClients(t *testing.T) {
 			t.Fatalf("admitted request %d did not finish", i+1)
 		}
 	}
+}
+
+func TestEnrollmentAdmissionUsesAgentDefaultWhenLimitIsNonPositive(t *testing.T) {
+	rl := NewRateLimiter()
+	defer rl.Stop()
+	rl.maxEnrollmentInFlight = 0
+
+	for i := range defaultMaxEnrollmentInFlight {
+		ip := fmt.Sprintf("192.0.2.%d", i+1)
+		if !rl.tryBeginEnrollment(ip) {
+			t.Fatalf("default enrollment admission rejected request %d", i+1)
+		}
+	}
+	if rl.tryBeginEnrollment("198.51.100.1") {
+		t.Fatal("default enrollment admission accepted a request above the agent-wide cap")
+	}
+	for i := range defaultMaxEnrollmentInFlight {
+		rl.finishEnrollment(fmt.Sprintf("192.0.2.%d", i+1), true)
+	}
+	if !rl.tryBeginEnrollment("198.51.100.2") {
+		t.Fatal("default enrollment admission did not release capacity")
+	}
+	rl.finishEnrollment("198.51.100.2", true)
 }
 
 func TestRateLimitOnlyReleasesEnrollmentAdmissionAfterPanic(t *testing.T) {

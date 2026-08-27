@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,10 +17,11 @@ import (
 type enrollmentDeadlineWriter struct {
 	*httptest.ResponseRecorder
 
-	mu      sync.Mutex
-	calls   []enrollmentDeadlineCall
-	armed   chan struct{}
-	armOnce sync.Once
+	mu       sync.Mutex
+	calls    []enrollmentDeadlineCall
+	armed    chan struct{}
+	armOnce  sync.Once
+	clearErr error
 }
 
 type enrollmentDeadlineCall struct {
@@ -41,6 +43,8 @@ func (w *enrollmentDeadlineWriter) SetReadDeadline(deadline time.Time) error {
 	w.mu.Unlock()
 	if !deadline.IsZero() {
 		w.armOnce.Do(func() { close(w.armed) })
+	} else if w.clearErr != nil {
+		return w.clearErr
 	}
 	return nil
 }
@@ -132,6 +136,27 @@ func TestEnrollerBodyReadDeadline(t *testing.T) {
 				t.Fatalf("body read deadline was not cleared after decode: %v", clearedAt)
 			}
 		})
+	}
+}
+
+func TestEnrollerBodyReadDeadlineClearFailureDoesNotChangeResponse(t *testing.T) {
+	e, _, _ := setupEnroller(t, "expected")
+	writer := newEnrollmentDeadlineWriter()
+	writer.clearErr = errors.New("simulated clear failure")
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/portwing/enroll",
+		enrollBody(t, "wrong", ""),
+	)
+
+	e.ServeHTTP(writer, req)
+
+	if writer.Code != http.StatusUnauthorized {
+		t.Fatalf("enrollment status = %d, want 401", writer.Code)
+	}
+	calls := writer.recordedDeadlineCalls()
+	if len(calls) != 2 || !calls[1].deadline.IsZero() {
+		t.Fatalf("deadline calls = %v, want one arm followed by one clear attempt", calls)
 	}
 }
 

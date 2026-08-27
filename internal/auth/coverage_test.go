@@ -58,6 +58,26 @@ func TestEnroller_OnResult_Called(t *testing.T) {
 	}
 }
 
+func TestEnroller_OnResult_UsesConfiguredActorResolver(t *testing.T) {
+	t.Parallel()
+	e, _, _ := setupEnroller(t, "tok")
+
+	var gotActor string
+	e.ActorResolver = func(*http.Request) string { return "198.51.100.7" }
+	e.OnResult = func(actor, _, _ string) { gotActor = actor }
+
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", enrollBody(t, "wrong", ""))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	if gotActor != "198.51.100.7" {
+		t.Fatalf("actor = %q, want configured resolver result", gotActor)
+	}
+}
+
 func TestEnroller_OnResult_SuccessCallback(t *testing.T) {
 	t.Parallel()
 	e, _, _ := setupEnroller(t, "tok")
