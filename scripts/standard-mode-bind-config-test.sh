@@ -103,6 +103,13 @@ require_publications "docs/content/docs/getting-started.mdx" "yaml" 2 \
 require_publications "docs/content/docs/getting-started.mdx" "docker run" 1 \
 	"getting-started standard-mode docker run instructions"
 
+if ! grep -Fqx 'BIND_ADDRESS=127.0.0.1' scripts/install.sh; then
+	fail "the generated service config must bind plaintext standard mode to loopback"
+fi
+if grep -Fqx 'BIND_ADDRESS=0.0.0.0' scripts/install.sh; then
+	fail "the generated service config must not bind plaintext standard mode to every interface"
+fi
+
 if [ "$failures" -ne 0 ]; then
 	echo "${failures} standard-mode bind contract check(s) failed" >&2
 	exit 1

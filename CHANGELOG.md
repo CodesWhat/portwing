@@ -17,12 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `main`.
 - **Fresh installer configs are private from creation.** The installer creates
   `/etc/portwing` as root-owned mode `0700` and its generated config as
-  root-owned mode `0600`, including when the directory already exists. Existing
-  operator configs remain untouched.
+  root-owned mode `0600`, including when the directory already exists. It also
+  normalizes existing config ownership and modes without replacing operator
+  content.
 - **Plaintext standard-mode examples bind to loopback.** Compose and `docker
-  run` examples now publish port 3000 on `127.0.0.1` and explain that remote
-  access needs Portwing TLS or a private listener behind a TLS-terminating
-  reverse proxy.
+  run` examples and newly generated service configs now use `127.0.0.1` and
+  explain that remote access needs Portwing TLS or a private listener behind a
+  TLS-terminating reverse proxy.
 
 ## [v0.9.9] - 2026-08-23
 

@@ -89,7 +89,7 @@ install)
 			shift 2
 			;;
 		*)
-			delegated[${#delegated[@]}]="$1"
+			delegated+=("$1")
 			shift
 			;;
 		esac
@@ -106,6 +106,15 @@ install)
 
 	exec /usr/bin/install ${delegated[@]+"${delegated[@]}"}
 	;;
+chown)
+	if [ "$1" = "root:root" ] && [ "$2" = "${INSTALL_TEST_CONFIG_DIR}/config" ]; then
+		printf 'config-file-root\n' >>"${INSTALL_TEST_OWNERSHIP_LOG}"
+		exit 0
+	fi
+	printf 'unexpected chown arguments: %s\n' "$*" >&2
+	exit 1
+	;;
+chmod) exec /bin/chmod "$@" ;;
 mkdir) exec /bin/mkdir "$@" ;;
 tee) exec /usr/bin/tee "$@" ;;
 *)
@@ -169,10 +178,34 @@ mkdir -p "${existing_case}/etc/portwing"
 operator_config='PORT=4187
 BIND_ADDRESS=127.0.0.1'
 printf '%s\n' "${operator_config}" >"${existing_case}/etc/portwing/config"
+chmod 0755 "${existing_case}/etc/portwing"
+chmod 0644 "${existing_case}/etc/portwing/config"
 run_installer "${existing_case}"
 
 if [ "$(<"${existing_case}/etc/portwing/config")" != "${operator_config}" ]; then
 	echo "FAIL: installer overwrote the existing operator config" >&2
+	exit 1
+fi
+
+existing_directory_mode="$(file_mode "${existing_case}/etc/portwing")"
+if [ "${existing_directory_mode}" != "700" ]; then
+	echo "FAIL: existing config directory mode is ${existing_directory_mode}, want 700" >&2
+	exit 1
+fi
+
+existing_config_mode="$(file_mode "${existing_case}/etc/portwing/config")"
+if [ "${existing_config_mode}" != "600" ]; then
+	echo "FAIL: existing config file mode is ${existing_config_mode}, want 600" >&2
+	exit 1
+fi
+
+if ! grep -Fqx 'config-directory-root' "${existing_case}/ownership.log"; then
+	echo "FAIL: existing config directory was not normalized with root owner and group arguments" >&2
+	exit 1
+fi
+
+if ! grep -Fqx 'config-file-root' "${existing_case}/ownership.log"; then
+	echo "FAIL: existing config file was not normalized to root ownership" >&2
 	exit 1
 fi
 

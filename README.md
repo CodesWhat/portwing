@@ -317,6 +317,10 @@ The image runs as the non-root `portwing` user (UID 65532); `--group-add` grants
 curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/install.sh | bash
 ```
 
+The generated standard-mode config binds to `127.0.0.1`. Keep that listener
+private behind a TLS-terminating reverse proxy, or configure Portwing TLS before
+changing the bind for remote access.
+
 </details>
 
 <hr>

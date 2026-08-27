@@ -64,8 +64,8 @@ main() {
 	# Create config directory and template
 	if [ ! -d "$CONFIG_DIR" ]; then
 		info "Creating config directory at ${CONFIG_DIR}..."
-		sudo install -d -m 700 -o root -g root "$CONFIG_DIR"
 	fi
+	sudo install -d -m 700 -o root -g root "$CONFIG_DIR"
 	if [ ! -f "${CONFIG_DIR}/config" ]; then
 		info "Creating config template at ${CONFIG_DIR}/config..."
 		sudo install -m 600 -o root -g root /dev/null "${CONFIG_DIR}/config"
@@ -79,7 +79,7 @@ main() {
 
 # Standard mode settings
 PORT=3000
-BIND_ADDRESS=0.0.0.0
+BIND_ADDRESS=127.0.0.1
 
 # Docker settings
 # DOCKER_SOCKET=/var/run/docker.sock
@@ -92,6 +92,8 @@ BIND_ADDRESS=0.0.0.0
 LOG_LEVEL=info
 CONF
 	fi
+	sudo chown root:root "${CONFIG_DIR}/config"
+	sudo chmod 600 "${CONFIG_DIR}/config"
 
 	# Install systemd service on Linux
 	if [ "$os" = "linux" ] && command -v systemctl &>/dev/null; then
