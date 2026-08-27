@@ -535,8 +535,8 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 
 	// Rebuild the request so Portwing credentials and unrelated hop-by-hop
 	// headers cannot reach Docker. Preserve the requested upgrade protocol and
-	// all end-to-end Docker headers, and derive Content-Length from the bounded
-	// body read above.
+	// end-to-end Docker headers, consume Expect after buffering the body, and
+	// derive Content-Length from the bounded body read above.
 	dockerURL := fmt.Sprintf("http://localhost%s", r.URL.RequestURI())
 	// #nosec G704 -- URL is fixed to localhost for the Docker socket proxy; RequestURI only selects the Docker API path/query.
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, dockerURL, bytes.NewReader(body))
@@ -547,6 +547,7 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	copyHeaders(proxyReq.Header, r.Header)
 	stripPortwingAuthHeaders(proxyReq.Header)
 	proxyReq.Header.Del("Content-Length")
+	proxyReq.Header.Del("Expect")
 	proxyReq.Header.Set("Connection", "Upgrade")
 	upgrade := r.Header.Get("Upgrade")
 	if upgrade == "" {

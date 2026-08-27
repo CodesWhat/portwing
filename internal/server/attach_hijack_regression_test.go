@@ -243,6 +243,132 @@ func TestAuthenticatedAttachUpgradeRelaysBufferedInputBidirectionally(t *testing
 	_ = proxy.Config.Shutdown(ctx)
 }
 
+func TestDockerHijackConsumesExpectContinueBeforeForwarding(t *testing.T) {
+	t.Parallel()
+
+	sockPath, cleanupSocket := shortSocketPath(t)
+	defer cleanupSocket()
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen on Docker socket: %v", err)
+	}
+	defer listener.Close()
+
+	type daemonResult struct {
+		expect string
+		err    error
+	}
+	daemonDone := make(chan daemonResult, 1)
+	go func() {
+		versionConn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			daemonDone <- daemonResult{err: fmt.Errorf("accept version request: %w", acceptErr)}
+			return
+		}
+		versionReq, readErr := http.ReadRequest(bufio.NewReader(versionConn))
+		if readErr != nil {
+			_ = versionConn.Close()
+			daemonDone <- daemonResult{err: fmt.Errorf("read version request: %w", readErr)}
+			return
+		}
+		_ = versionReq.Body.Close()
+		versionBody := `{"Version":"26.0.0","ApiVersion":"1.44"}`
+		_, writeErr := fmt.Fprintf(
+			versionConn,
+			"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+			len(versionBody),
+			versionBody,
+		)
+		_ = versionConn.Close()
+		if writeErr != nil {
+			daemonDone <- daemonResult{err: fmt.Errorf("write version response: %w", writeErr)}
+			return
+		}
+
+		attachConn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			daemonDone <- daemonResult{err: fmt.Errorf("accept attach request: %w", acceptErr)}
+			return
+		}
+		defer attachConn.Close()
+
+		attachReq, readErr := http.ReadRequest(bufio.NewReader(attachConn))
+		if readErr != nil {
+			daemonDone <- daemonResult{err: fmt.Errorf("read attach request: %w", readErr)}
+			return
+		}
+		if _, readErr = io.ReadAll(attachReq.Body); readErr != nil {
+			_ = attachReq.Body.Close()
+			daemonDone <- daemonResult{err: fmt.Errorf("read attach body: %w", readErr)}
+			return
+		}
+		_ = attachReq.Body.Close()
+
+		expect := attachReq.Header.Get("Expect")
+		if expect != "" {
+			if _, writeErr = io.WriteString(attachConn, "HTTP/1.1 100 Continue\r\n\r\n"); writeErr != nil {
+				daemonDone <- daemonResult{expect: expect, err: fmt.Errorf("write continue response: %w", writeErr)}
+				return
+			}
+		}
+		_, writeErr = io.WriteString(attachConn, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: tcp\r\nConnection: Upgrade\r\n\r\n")
+		daemonDone <- daemonResult{expect: expect, err: writeErr}
+	}()
+
+	dockerClient, err := docker.NewClient(sockPath, 5)
+	if err != nil {
+		t.Fatalf("docker.NewClient: %v", err)
+	}
+	s := &Server{dockerClient: dockerClient}
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	writer := &hijackableResponseWriter{
+		conn: serverConn,
+		buf:  bufio.NewReadWriter(bufio.NewReader(serverConn), bufio.NewWriter(serverConn)),
+		hdr:  make(http.Header),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1.44/containers/abc123/attach", strings.NewReader(`{"DetachKeys":"ctrl-x"}`))
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "tcp")
+	req.Header.Set("Expect", "100-continue")
+
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		s.handleDockerHijack(writer, req)
+	}()
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set client read deadline: %v", err)
+	}
+	resp, responseErr := http.ReadResponse(bufio.NewReader(clientConn), nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	result := <-daemonDone
+	if result.err != nil {
+		t.Errorf("Docker daemon: %v", result.err)
+	}
+	if result.expect != "" {
+		t.Errorf("Docker received consumed Expect header %q", result.expect)
+	}
+	if responseErr != nil {
+		t.Errorf("read attach upgrade response: %v", responseErr)
+	} else if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Errorf("attach status = %d, want %d", resp.StatusCode, http.StatusSwitchingProtocols)
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("handleDockerHijack did not return after test cleanup")
+	}
+}
+
 func TestDockerHijackPathMatchesOnlyDockerExecAndAttachRoutes(t *testing.T) {
 	t.Parallel()
 
