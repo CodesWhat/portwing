@@ -154,8 +154,13 @@ run_installer() {
 
 file_mode() {
 	local path="$1"
+	local mode
 
-	stat -f '%Lp' "${path}" 2>/dev/null || stat -c '%a' "${path}"
+	if mode="$(stat -f '%Lp' "${path}" 2>/dev/null)"; then
+		printf '%s\n' "${mode}"
+	else
+		stat -c '%a' "${path}"
+	fi
 }
 
 existing_case="${test_root}/existing"
