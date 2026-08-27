@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -56,6 +57,18 @@ func waitForDockerLogCall(t *testing.T, calls *routeTestDockerCalls) {
 	for calls.logsCalls.Load() == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("timed out waiting for Docker log request")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func waitForLogCondition(t *testing.T, description string, condition func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", description)
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -292,6 +305,108 @@ func TestContainerLogStreamRejectsDuplicateAndCapacity(t *testing.T) {
 				t.Fatalf("message type = %q, want %q", event.msgType, protocol.TypeDDContainerLogError)
 			}
 		})
+	}
+}
+
+// Legacy log requests buffer up to maxContainerLogBytes before sending one
+// response. They need a dedicated single-request admission limit so the broad
+// message-handler pool cannot retain many maximum-sized bodies at once.
+func TestLegacyContainerLogRequestsLimitBufferedConcurrency(t *testing.T) {
+	client, calls, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+	calls.setBlockingLogsResponse("container-1", routeTestDockerLogFrame(1, []byte("live\n")))
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sender := newLogStreamTestSender()
+
+	const attempts = 4
+	ready := make(chan struct{}, attempts)
+	start := make(chan struct{})
+	returned := make(chan struct{}, attempts)
+	for i := range attempts {
+		requestID := fmt.Sprintf("legacy-buffered-%d", i)
+		payload, err := json.Marshal(protocol.DDContainerLogRequestMessage{
+			RequestID:   requestID,
+			ContainerID: "container-1",
+		})
+		if err != nil {
+			t.Fatalf("marshal legacy log request: %v", err)
+		}
+		go func() {
+			ready <- struct{}{}
+			<-start
+			a.HandleMessage(ctx, sender, protocol.TypeDDContainerLogRequest, payload)
+			returned <- struct{}{}
+		}()
+	}
+	for range attempts {
+		<-ready
+	}
+	close(start)
+	waitForDockerLogCall(t, calls)
+
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for calls.logsCalls.Load() == 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := calls.logsCalls.Load(); got != 1 {
+		t.Fatalf("concurrent legacy buffered Docker log requests = %d, want 1", got)
+	}
+
+	for range attempts {
+		select {
+		case <-returned:
+		case <-time.After(2 * time.Second):
+			t.Fatal("legacy log HandleMessage did not return promptly")
+		}
+	}
+
+	// Exactly three requests must have received an explicit overload response;
+	// the admitted request is still blocked in Docker and cannot have replied.
+	for i := 0; i < attempts-1; i++ {
+		event := waitForLogStreamEvent(t, sender)
+		var response protocol.DDContainerLogResponseMessage
+		if err := json.Unmarshal(event.data, &response); err != nil {
+			t.Fatalf("decode overload response: %v", err)
+		}
+		if event.msgType != protocol.TypeDDContainerLogResponse ||
+			!strings.Contains(response.Logs, "another buffered log request is active") {
+			t.Fatalf("overload response = %s %+v", event.msgType, response)
+		}
+	}
+
+	// Cancel the admitted body, observe its partial response, and verify the
+	// dedicated admission slot is released for a later request.
+	cancel()
+	admitted := waitForLogStreamEvent(t, sender)
+	var admittedResponse protocol.DDContainerLogResponseMessage
+	if err := json.Unmarshal(admitted.data, &admittedResponse); err != nil {
+		t.Fatalf("decode admitted response: %v", err)
+	}
+	if strings.Contains(admittedResponse.Logs, "another buffered log request is active") {
+		t.Fatalf("admitted request received overload response: %+v", admittedResponse)
+	}
+
+	waitForLogCondition(t, "legacy buffered log admission release", func() bool {
+		return len(a.getLegacyLogSemaphore()) == 0
+	})
+	calls.setLogsResponse("container-1", routeTestDockerLogFrame(1, []byte("next\n")))
+	nextPayload := json.RawMessage(`{"requestId":"legacy-next","containerId":"container-1"}`)
+	if !a.HandleMessage(context.Background(), sender, protocol.TypeDDContainerLogRequest, nextPayload) {
+		t.Fatal("later legacy log request was not handled")
+	}
+	waitForLogCondition(t, "later legacy Docker log request", func() bool {
+		return calls.logsCalls.Load() == 2
+	})
+	next := waitForLogStreamEvent(t, sender)
+	var nextResponse protocol.DDContainerLogResponseMessage
+	if err := json.Unmarshal(next.data, &nextResponse); err != nil {
+		t.Fatalf("decode later response: %v", err)
+	}
+	if nextResponse.RequestID != "legacy-next" || nextResponse.Logs != "next\n" {
+		t.Fatalf("later response = %+v, want legacy-next / next newline", nextResponse)
 	}
 }
 

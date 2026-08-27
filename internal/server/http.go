@@ -403,7 +403,7 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 // to the local Docker daemon, handling both regular and streaming responses.
 func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	// Determine if this is a streaming endpoint.
-	isStream := docker.IsStreamingPath(r.URL.Path)
+	isStream := docker.IsStreamingRequest(r.Method, r.URL.Path)
 
 	// Check for exec hijack (WebSocket upgrade on /exec/*/start).
 	isExecStart := strings.Contains(r.URL.Path, "/exec/") && strings.HasSuffix(r.URL.Path, "/start")

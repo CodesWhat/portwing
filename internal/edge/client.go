@@ -42,10 +42,11 @@ import (
 var errFatal = errors.New("fatal connection error")
 
 const (
-	maxReadSize     = 16 * 1024 * 1024  // 16 MB — WebSocket read limit
-	maxResponseBody = 100 * 1024 * 1024 // 100 MB — proxied response body cap
-	maxExecSessions = 100               // concurrent exec sessions
-	maxStreams      = 100               // concurrent in-flight tunneled requests
+	maxReadSize            = 16 * 1024 * 1024  // 16 MB — WebSocket read limit
+	maxResponseBody        = 100 * 1024 * 1024 // 100 MB — proxied response body cap
+	maxExecSessions        = 100               // concurrent exec sessions
+	maxStreams             = 100               // concurrent in-flight tunneled requests
+	maxOutboundQueuedBytes = 128 << 20         // aggregate queued and in-flight WebSocket bytes
 
 	// sendQueueSize bounds outbound frames buffered for the sendPump. A full
 	// queue means the controller can't keep up, so the connection is evicted
@@ -55,6 +56,21 @@ const (
 	// a frame within this window is treated as wedged and the connection is
 	// evicted, instead of blocking the writer forever.
 	writeWait = 10 * time.Second
+)
+
+type outboundQueueState struct {
+	mu     sync.Mutex
+	bytes  int64
+	closed bool
+}
+
+type outboundEnqueueResult uint8
+
+const (
+	outboundEnqueued outboundEnqueueResult = iota
+	outboundQueueClosed
+	outboundByteLimitExceeded
+	outboundFrameLimitExceeded
 )
 
 // dockerAPI is the subset of *docker.Client the edge Client depends on. It is
@@ -101,9 +117,11 @@ type Client struct {
 	// sender or stalling the read pump. It is nil outside an active connection;
 	// the hello/welcome handshake writes the conn directly (no concurrent
 	// writer exists yet). Guarded by connMu alongside conn.
-	sendCh chan protocol.Envelope
+	sendCh    chan protocol.Envelope
+	sendState *outboundQueueState
 
-	execSessions sync.Map
+	execSessions    sync.Map
+	execAdmissionMu sync.Mutex
 
 	// streamSem bounds concurrent in-flight request handlers (maxStreams).
 	streamSem chan struct{}
@@ -380,8 +398,10 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	// adapter sync, metrics, and every pump funnel through the single sendPump
 	// (the only writer) instead of writing the conn concurrently.
 	sendCh := make(chan protocol.Envelope, sendQueueSize)
+	sendState := &outboundQueueState{}
 	c.connMu.Lock()
 	c.sendCh = sendCh
+	c.sendState = sendState
 	c.connMu.Unlock()
 
 	wg.Add(1)
@@ -428,6 +448,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		c.conn = nil
 	}
 	c.sendCh = nil
+	c.sendState = nil
 	c.connMu.Unlock()
 
 	// Reaching here means the welcome handshake succeeded, so the connection
@@ -680,7 +701,7 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 	}
 
 	start := time.Now()
-	isStream := docker.IsStreamingPath(req.Path)
+	isStream := docker.IsStreamingRequest(req.Method, req.Path)
 
 	var bodyReader io.Reader
 	if req.Body != nil {
@@ -963,6 +984,13 @@ func (c *Client) sendMessage(env protocol.Envelope) {
 	c.connMu.Lock()
 	ch := c.sendCh
 	conn := c.conn
+	state := c.sendState
+	if ch != nil && state == nil {
+		// Tests and zero-value clients may install a queue directly. Production
+		// connections publish the queue and its state together in connect.
+		state = &outboundQueueState{}
+		c.sendState = state
+	}
 	c.connMu.Unlock()
 
 	if ch == nil {
@@ -977,14 +1005,76 @@ func (c *Client) sendMessage(env protocol.Envelope) {
 		return
 	}
 
-	select {
-	case ch <- env:
-	default:
+	switch state.enqueue(ch, env) {
+	case outboundEnqueued:
+		return
+	case outboundQueueClosed:
+		c.failConn(conn, "send queue closed")
+	case outboundByteLimitExceeded:
 		if c.metrics != nil {
 			c.metrics.IncBackpressure()
 		}
-		c.failConn("send queue full")
+		c.failConn(conn, "send queue byte limit exceeded")
+	case outboundFrameLimitExceeded:
+		if c.metrics != nil {
+			c.metrics.IncBackpressure()
+		}
+		c.failConn(conn, "send queue full")
 	}
+}
+
+func (s *outboundQueueState) enqueue(ch chan protocol.Envelope, env protocol.Envelope) outboundEnqueueResult {
+	size := outboundEnvelopeBytes(env)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return outboundQueueClosed
+	}
+	if size > maxOutboundQueuedBytes-s.bytes {
+		return outboundByteLimitExceeded
+	}
+
+	s.bytes += size
+	select {
+	case ch <- env:
+		return outboundEnqueued
+	default:
+		s.bytes -= size
+		return outboundFrameLimitExceeded
+	}
+}
+
+func (s *outboundQueueState) release(env protocol.Envelope) {
+	s.mu.Lock()
+	s.bytes -= outboundEnvelopeBytes(env)
+	if s.bytes < 0 {
+		// Tests and the handshake may inject unreserved envelopes directly. The
+		// production queue path always reserves through enqueue.
+		s.bytes = 0
+	}
+	s.mu.Unlock()
+}
+
+func (s *outboundQueueState) closeAndDiscard(ch chan protocol.Envelope) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	for {
+		select {
+		case env := <-ch:
+			s.bytes -= outboundEnvelopeBytes(env)
+			if s.bytes < 0 {
+				s.bytes = 0
+			}
+		default:
+			return
+		}
+	}
+}
+
+func outboundEnvelopeBytes(env protocol.Envelope) int64 {
+	return int64(len(env.Type) + len(env.Data))
 }
 
 // sendPump is the sole writer to the WebSocket once a connection is up.
@@ -994,31 +1084,43 @@ func (c *Client) sendMessage(env protocol.Envelope) {
 // that can't complete within writeWait evicts the connection rather than
 // blocking forever.
 func (c *Client) sendPump(ctx context.Context, conn *websocket.Conn, sendCh chan protocol.Envelope) {
+	c.connMu.Lock()
+	state := c.sendState
+	if c.sendCh != sendCh {
+		state = &outboundQueueState{closed: true}
+	} else if state == nil {
+		// Tests may install sendCh directly instead of going through connect.
+		state = &outboundQueueState{}
+		c.sendState = state
+	}
+	c.connMu.Unlock()
+	defer state.closeAndDiscard(sendCh)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case env := <-sendCh:
 			if err := conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
-				c.failConn("set write deadline failed")
+				state.release(env)
+				c.failConn(conn, "set write deadline failed")
 				return
 			}
 			if err := conn.WriteJSON(env); err != nil {
+				state.release(env)
 				slog.Warn("websocket write failed", "type", env.Type, "error", err)
-				c.failConn("write failed")
+				c.failConn(conn, "write failed")
 				return
 			}
+			state.release(env)
 		}
 	}
 }
 
-// failConn evicts the active WebSocket. Closing it unblocks the read pump with
-// an error, which tears the pumps down and lets Run reconnect with backoff.
-// Safe to call from any goroutine and more than once.
-func (c *Client) failConn(reason string) {
-	c.connMu.Lock()
-	conn := c.conn
-	c.connMu.Unlock()
+// failConn evicts the WebSocket generation that encountered backpressure or a
+// write failure. Closing that exact connection avoids a delayed sender from an
+// old queue evicting a replacement connection after reconnect.
+func (c *Client) failConn(conn *websocket.Conn, reason string) {
 	if conn != nil {
 		slog.Warn("evicting controller connection", "reason", reason)
 		closeWebSocket(conn, reason)

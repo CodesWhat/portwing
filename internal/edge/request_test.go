@@ -172,6 +172,58 @@ func TestHandleRequestStream(t *testing.T) {
 	}
 }
 
+// Docker's container archive endpoint returns a potentially large tar stream.
+// Query parameters are part of every real GET archive request, so edge routing
+// must classify the path before choosing the buffered response branch.
+func TestHandleRequestContainerArchiveWithQueryUsesStreamingPath(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	bufferedResp := mkResp(http.StatusOK, "application/json", `{"buffered":true}`)
+	streamResp := mkResp(http.StatusOK, "application/x-tar", "tar-data")
+	t.Cleanup(func() {
+		_ = bufferedResp.Body.Close()
+		_ = streamResp.Body.Close()
+	})
+	fd := &fakeDocker{
+		// Both responses are populated so the assertion reports a routing
+		// failure instead of panicking if the buffered path is selected.
+		doResp:     bufferedResp,
+		streamResp: streamResp,
+	}
+	c.dockerClient = fd
+
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "archive-1",
+		Method:    http.MethodGet,
+		Path:      "/containers/abc/archive?path=%2Fvar%2Flib%2Fdata",
+	})
+
+	var resp protocol.ResponseMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+	if !resp.IsStream {
+		t.Fatal("container archive response used the buffered path, want streaming")
+	}
+
+	fd.mu.Lock()
+	calls := append([]doCall(nil), fd.doCalls...)
+	fd.mu.Unlock()
+	if len(calls) != 1 || !calls[0].stream {
+		t.Fatalf("Docker calls = %+v, want one streaming call", calls)
+	}
+
+	var chunk protocol.StreamMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeStream), &chunk)
+	decoded, err := base64.StdEncoding.DecodeString(chunk.Data)
+	if err != nil {
+		t.Fatalf("decode archive chunk: %v", err)
+	}
+	if string(decoded) != "tar-data" {
+		t.Fatalf("archive stream payload = %q, want %q", decoded, "tar-data")
+	}
+	expectType(t, ctrl, protocol.TypeStreamEnd)
+}
+
 // A non-stream response whose body isn't valid JSON (e.g. the plain-text "OK"
 // from GET /_ping) can't be embedded in ResponseMessage.Body, a json.RawMessage
 // field. Dropping that marshal error used to leave the controller waiting
