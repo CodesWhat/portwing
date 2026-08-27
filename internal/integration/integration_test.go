@@ -411,13 +411,13 @@ func TestSSEEventsFirstEventIsAck(t *testing.T) {
 	// The drydock SSE protocol frames every event as `data: <json>` with no
 	// `event:` line; the discriminator is the JSON payload's "type" field
 	// (so EventSource clients read JSON.parse(e.data).type). Accumulate each
-	// event's data payload and inspect its type. Read until we see dd:ack and
-	// dd:watcher-snapshot, or the context times out.
+	// event's data payload and inspect its type. The initial handshake contract
+	// requires dd:ack first and dd:watcher-snapshot second.
 	scanner := bufio.NewScanner(resp.Body)
 	// Watcher-snapshot payloads carry the full container inventory and can
 	// exceed the scanner's default 64 KiB token cap on busy hosts.
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	var gotAck, gotSnapshot bool
+	var eventTypes []string
 	var data strings.Builder
 
 	for scanner.Scan() {
@@ -431,17 +431,13 @@ func TestSSEEventsFirstEventIsAck(t *testing.T) {
 			var evt struct {
 				Type string `json:"type"`
 			}
-			if err := json.Unmarshal([]byte(strings.TrimSpace(data.String())), &evt); err == nil {
-				switch evt.Type {
-				case "dd:ack":
-					gotAck = true
-				case "dd:watcher-snapshot":
-					gotSnapshot = true
-				}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(data.String())), &evt); err != nil {
+				t.Fatalf("decode SSE event %q: %v", data.String(), err)
 			}
+			eventTypes = append(eventTypes, evt.Type)
 			data.Reset()
 		}
-		if gotAck && gotSnapshot {
+		if len(eventTypes) == 2 {
 			break
 		}
 	}
@@ -450,11 +446,11 @@ func TestSSEEventsFirstEventIsAck(t *testing.T) {
 		t.Errorf("SSE scanner: %v", err)
 	}
 
-	if !gotAck {
-		t.Error("SSE stream: did not receive dd:ack event")
+	if len(eventTypes) < 2 {
+		t.Fatalf("initial SSE events = %v, want [dd:ack dd:watcher-snapshot]", eventTypes)
 	}
-	if !gotSnapshot {
-		t.Error("SSE stream: did not receive dd:watcher-snapshot event")
+	if eventTypes[0] != "dd:ack" || eventTypes[1] != "dd:watcher-snapshot" {
+		t.Fatalf("initial SSE events = %v, want [dd:ack dd:watcher-snapshot]", eventTypes)
 	}
 }
 

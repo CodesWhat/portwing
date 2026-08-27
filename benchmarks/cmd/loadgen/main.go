@@ -20,10 +20,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -64,18 +64,29 @@ type options struct {
 }
 
 func main() {
+	os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func execute(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("loadgen", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 	var (
-		base        = flag.String("base", "http://127.0.0.1:3000", "base URL of the Portwing server")
-		method      = flag.String("method", "GET", "HTTP method")
-		path        = flag.String("path", "/_portwing/health", "request path")
-		auth        = flag.String("auth", "", "bearer token (sent as Authorization: Bearer …)")
-		concurrency = flag.Int("concurrency", 20, "concurrent workers")
-		duration    = flag.Duration("duration", 20*time.Second, "run duration")
-		scenario    = flag.String("scenario", "custom", "label for this run")
-		mode        = flag.String("mode", "req", "req | sse")
-		sseHold     = flag.Duration("sse-hold", time.Second, "how long each sse connection is held before close")
+		base        = flags.String("base", "http://127.0.0.1:3000", "base URL of the Portwing server")
+		method      = flags.String("method", "GET", "HTTP method")
+		path        = flags.String("path", "/_portwing/health", "request path")
+		auth        = flags.String("auth", "", "bearer token (sent as Authorization: Bearer …)")
+		concurrency = flags.Int("concurrency", 20, "concurrent workers")
+		duration    = flags.Duration("duration", 20*time.Second, "run duration")
+		scenario    = flags.String("scenario", "custom", "label for this run")
+		mode        = flags.String("mode", "req", "req | sse")
+		sseHold     = flags.Duration("sse-hold", time.Second, "how long each sse connection is held before close")
 	)
-	flag.Parse()
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
 
 	out := run(options{
 		Base:        *base,
@@ -89,18 +100,43 @@ func main() {
 		SSEHold:     *sseHold,
 	})
 
-	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
-		log.Fatalf("encode: %v", err)
+	if err := json.NewEncoder(stdout).Encode(out); err != nil {
+		fmt.Fprintf(stderr, "loadgen: encode: %v\n", err)
+		return 1
 	}
-	fmt.Fprintf(os.Stderr, "%-18s mode=%-3s conc=%-3d rps=%.0f p50=%dus p99=%dus max=%dus errs=%d\n",
+	fmt.Fprintf(stderr, "%-18s mode=%-3s conc=%-3d rps=%.0f p50=%dus p99=%dus max=%dus errs=%d\n",
 		out.Scenario, out.Mode, out.Concurrency, out.RPS, out.LatencyP50Micros, out.LatencyP99Micros, out.LatencyMaxMicros, out.ErrorRequests)
+	if err := resultFailure(out); err != nil {
+		fmt.Fprintf(stderr, "loadgen: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func resultFailure(out result) error {
+	if out.TotalRequests == 0 {
+		return fmt.Errorf("zero requests completed")
+	}
+	if out.ErrorRequests > 0 {
+		return fmt.Errorf("%d transport errors", out.ErrorRequests)
+	}
+
+	var failed int64
+	for status, count := range out.StatusCodeCounts {
+		if status < http.StatusOK || status >= http.StatusMultipleChoices {
+			failed += count
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d non-2xx responses", failed)
+	}
+	return nil
 }
 
 func run(opts options) result {
 	stop := make(chan struct{})
-	timer := time.NewTimer(opts.Duration)
+	timer := time.AfterFunc(opts.Duration, func() { close(stop) })
 	defer timer.Stop()
-	go func() { <-timer.C; close(stop) }()
 
 	transport := &http.Transport{
 		MaxIdleConns:        opts.Concurrency * 2,
@@ -139,7 +175,12 @@ func run(opts options) result {
 	for i := 0; i < opts.Concurrency; i++ {
 		go func() {
 			defer wg.Done()
-			client := &http.Client{Transport: transport}
+			client := &http.Client{
+				Transport: transport,
+				CheckRedirect: func(*http.Request, []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			}
 			if opts.Mode != "sse" {
 				client.Timeout = 10 * time.Second
 			}
