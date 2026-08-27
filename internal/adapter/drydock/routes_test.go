@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -147,6 +148,30 @@ type routeLogFlushRecorder struct {
 	flushes int
 }
 
+type routeFailingLogWriter struct {
+	header   http.Header
+	attempts int
+	flushes  int
+}
+
+func (w *routeFailingLogWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *routeFailingLogWriter) Write([]byte) (int, error) {
+	w.attempts++
+	return 0, io.ErrClosedPipe
+}
+
+func (w *routeFailingLogWriter) WriteHeader(int) {}
+
+func (w *routeFailingLogWriter) Flush() {
+	w.flushes++
+}
+
 func (r *routeLogFlushRecorder) Flush() {
 	r.flushes++
 	r.ResponseRecorder.Flush()
@@ -187,6 +212,31 @@ func TestHandleContainerLogsDecodesRawAndMultiplexedStreams(t *testing.T) {
 				t.Fatalf("flushes = %d, want at least %d", rec.flushes, tt.minFlush)
 			}
 		})
+	}
+}
+
+func TestHandleContainerLogsStopsAfterResponseWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	client, calls, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+	calls.setLogsResponse("container-1", append(
+		routeTestDockerLogFrame(1, []byte("first\n")),
+		routeTestDockerLogFrame(2, []byte("second\n"))...,
+	))
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs?follow=true", nil)
+	req.SetPathValue("id", "container-1")
+	w := &routeFailingLogWriter{}
+
+	a.handleContainerLogs(w, req)
+
+	if w.attempts != 1 {
+		t.Fatalf("response write attempts = %d, want decoder to stop after first failure", w.attempts)
+	}
+	if w.flushes != 0 {
+		t.Fatalf("flushes = %d, want 0 after failed write", w.flushes)
 	}
 }
 

@@ -78,6 +78,64 @@ func TestDecodeContainerLogStreamEmitsShortRawDataBeforeEOF(t *testing.T) {
 	}
 }
 
+func TestDecodeContainerLogStreamPropagatesRawReaderAndEmitterErrors(t *testing.T) {
+	t.Parallel()
+
+	readErr := errors.New("raw read failed")
+	if err := DecodeContainerLogStream(errReader{err: readErr}, func(ContainerLogStream, []byte) error {
+		t.Fatal("emit called for a failed raw read")
+		return nil
+	}); !errors.Is(err, readErr) {
+		t.Fatalf("DecodeContainerLogStream error = %v, want %v", err, readErr)
+	}
+
+	emitErr := errors.New("raw emit failed")
+	var calls int
+	err := DecodeContainerLogStream(strings.NewReader("raw tty log\n"), func(stream ContainerLogStream, payload []byte) error {
+		calls++
+		if stream != ContainerLogStdout {
+			t.Fatalf("stream = %d, want stdout", stream)
+		}
+		if got := string(payload); got != "raw tty log\n" {
+			t.Fatalf("payload = %q, want raw TTY log", got)
+		}
+		return emitErr
+	})
+	if !errors.Is(err, emitErr) {
+		t.Fatalf("DecodeContainerLogStream error = %v, want %v", err, emitErr)
+	}
+	if calls != 1 {
+		t.Fatalf("emit calls = %d, want 1", calls)
+	}
+}
+
+func TestDecodeContainerLogStreamPropagatesMultiplexedEmitterError(t *testing.T) {
+	t.Parallel()
+
+	emitErr := errors.New("multiplexed emit failed")
+	input := append(
+		dockerLogFrame(byte(ContainerLogStderr), []byte("first\n")),
+		dockerLogFrame(byte(ContainerLogStdout), []byte("must not be emitted\n"))...,
+	)
+	var calls int
+	err := DecodeContainerLogStream(bytes.NewReader(input), func(stream ContainerLogStream, payload []byte) error {
+		calls++
+		if stream != ContainerLogStderr {
+			t.Fatalf("stream = %d, want stderr", stream)
+		}
+		if got := string(payload); got != "first\n" {
+			t.Fatalf("payload = %q, want first frame", got)
+		}
+		return emitErr
+	})
+	if !errors.Is(err, emitErr) {
+		t.Fatalf("DecodeContainerLogStream error = %v, want %v", err, emitErr)
+	}
+	if calls != 1 {
+		t.Fatalf("emit calls = %d, want decoder to stop after first error", calls)
+	}
+}
+
 func dockerLogHeader(streamType byte, size uint32) []byte {
 	header := make([]byte, 8)
 	header[0] = streamType

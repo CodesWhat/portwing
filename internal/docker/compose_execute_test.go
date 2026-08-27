@@ -38,8 +38,9 @@ func TestExecute_ValidationFailure(t *testing.T) {
 	dir := t.TempDir()
 	cm := &ComposeManager{stacksDir: dir, composeBin: "docker", isV2: true}
 
-	// Empty stack name triggers validation failure.
-	resp, err := cm.Execute(t.Context(), ComposeRequest{})
+	// A supported operation reaches request validation, where the empty stack
+	// name is rejected before any filesystem or command side effects.
+	resp, err := cm.Execute(t.Context(), ComposeRequest{Operation: "up"})
 	if err != nil {
 		t.Fatalf("Execute: unexpected error %v", err)
 	}
@@ -48,6 +49,9 @@ func TestExecute_ValidationFailure(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Fatal("Execute: expected non-empty Error for invalid request")
+	}
+	if !strings.Contains(resp.Error, "stack name is required") {
+		t.Fatalf("Execute error = %q, want stack-name validation error", resp.Error)
 	}
 }
 

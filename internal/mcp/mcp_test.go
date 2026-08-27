@@ -709,6 +709,23 @@ func TestDemuxLogs(t *testing.T) {
 	}
 }
 
+func TestDecodeContainerLogLinesFlushesPartialLineWhenStreamChanges(t *testing.T) {
+	t.Parallel()
+
+	input := append(
+		mcpTestLogFrame(1, []byte("partial stdout")),
+		mcpTestLogFrame(2, []byte("stderr line\n"))...,
+	)
+	lines, err := decodeContainerLogLines(bytes.NewReader(input))
+	if err != nil {
+		t.Fatalf("decodeContainerLogLines: %v", err)
+	}
+	want := []string{"stdout: partial stdout", "stderr: stderr line"}
+	if got := strings.Join(lines, "\n"); got != strings.Join(want, "\n") {
+		t.Fatalf("lines = %q, want %q", lines, want)
+	}
+}
+
 type fragmentedLogReader struct {
 	reader *bytes.Reader
 	max    int
