@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.10] - 2026-08-27
+
+### Added
+
+- **Privacy-first web analytics now records page exits and canonical paths.**
+  The shared PostHog contract enables `$pageleave` so single-page reading time
+  and bounce behavior are measurable, and supplies the `$pathname` field used
+  by page, entry-page, and exit-page reports. Both navigation events keep the
+  existing finite route allowlist and collapse unknown paths to `/_other`.
+
 ### Security
 
 - **Release publishing now verifies provenance before granting write access.**
@@ -138,6 +148,9 @@ here is a feature request; each entry below traces to a confirmed defect.
   slow-drip connections each held a goroutine indefinitely. The auth body read
   now carries a 10-second `ResponseController` deadline, cleared before the
   streaming handlers so their unbounded reads are untouched.
+- **Edge response-encoding failures sanitize wire-derived log fields.** Remote
+  request IDs and paths pass through the same log sanitizer as other
+  tunnel-controlled values before an encoding failure is recorded.
 
 ### Fixed
 
