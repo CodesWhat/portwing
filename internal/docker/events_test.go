@@ -51,6 +51,37 @@ func TestAllowedActions_ContainsExpected(t *testing.T) {
 	}
 }
 
+func TestEventStreamReadEventsPreservesHealthStatusAction(t *testing.T) {
+	t.Parallel()
+
+	want := DockerEvent{
+		ID:     "ctr1",
+		Type:   "container",
+		Action: "health_status: healthy",
+		Actor:  Actor{ID: "ctr1"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(want)
+	}))
+	defer srv.Close()
+
+	es := &EventStream{client: newTestClient(srv)}
+	events := make(chan DockerEvent, 1)
+	if err := es.readEvents(t.Context(), events); err != nil {
+		t.Fatalf("readEvents: %v", err)
+	}
+
+	select {
+	case got := <-events:
+		if got.Action != want.Action {
+			t.Fatalf("action = %q, want %q", got.Action, want.Action)
+		}
+	default:
+		t.Fatalf("health event with action %q was filtered", want.Action)
+	}
+}
+
 // ---- Subscribe: events are received and filtered ----
 
 func TestEventStream_Subscribe_ReceivesFilteredEvents(t *testing.T) {

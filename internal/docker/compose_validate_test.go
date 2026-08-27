@@ -265,3 +265,60 @@ func TestValidateRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRequestRegistryServerForms(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		server  string
+		wantErr bool
+	}{
+		{name: "bare hostname", server: "ghcr.io"},
+		{name: "bare hostname and port", server: "registry.example.com:5443"},
+		{name: "bare IPv4 and port", server: "127.0.0.1:5443"},
+		{name: "bare bracketed IPv6", server: "[2001:db8::1]"},
+		{name: "bare bracketed IPv6 and port", server: "[2001:db8::1]:5443"},
+		{name: "explicit https hostname", server: "https://registry.example.com"},
+		{name: "explicit https hostname and port", server: "https://registry.example.com:5443"},
+		{name: "explicit https bracketed IPv6", server: "https://[2001:db8::1]:5443"},
+		{name: "empty", wantErr: true},
+		{name: "empty host", server: "https://", wantErr: true},
+		{name: "http scheme", server: "http://registry.example.com", wantErr: true},
+		{name: "userinfo", server: "https://user@registry.example.com", wantErr: true},
+		{name: "path", server: "https://registry.example.com/v2", wantErr: true},
+		{name: "bare path", server: "registry.example.com/v2", wantErr: true},
+		{name: "query", server: "https://registry.example.com?mirror=1", wantErr: true},
+		{name: "fragment", server: "https://registry.example.com#fragment", wantErr: true},
+		{name: "malformed scheme", server: "://not-a-uri", wantErr: true},
+		{name: "space in hostname", server: "registry example.com", wantErr: true},
+		{name: "invalid port", server: "registry.example.com:not-a-port", wantErr: true},
+		{name: "empty port", server: "registry.example.com:", wantErr: true},
+		{name: "explicit empty port", server: "https://registry.example.com:", wantErr: true},
+		{name: "out of range port", server: "registry.example.com:65536", wantErr: true},
+		{name: "unbracketed IPv6", server: "2001:db8::1", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cm := newTestComposeManager(t)
+			err := cm.validateRequest(ComposeRequest{
+				StackName: "app",
+				Operation: "up",
+				RegistryAuth: &RegistryAuth{
+					Server:   tt.server,
+					Username: "user",
+					Password: "pass",
+				},
+			})
+			if tt.wantErr && err == nil {
+				t.Fatal("validateRequest accepted an invalid registry server")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("validateRequest rejected a valid registry server: %v", err)
+			}
+		})
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -231,6 +232,9 @@ func (cm *ComposeManager) lockStack(stackName string) func() {
 
 // Execute dispatches a compose operation and returns the result.
 func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*ComposeResponse, error) {
+	if err := validateComposeOperation(req.Operation); err != nil {
+		return &ComposeResponse{Success: false, Error: err.Error()}, nil
+	}
 	if err := cm.validateRequest(req); err != nil {
 		return &ComposeResponse{Success: false, Error: err.Error()}, nil
 	}
@@ -304,6 +308,11 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) error {
 	if req.StackName == "" {
 		return fmt.Errorf("stack name is required")
 	}
+	if req.Operation != "" {
+		if err := validateComposeOperation(req.Operation); err != nil {
+			return err
+		}
+	}
 
 	// Validate env var keys and values.
 	for key, val := range req.EnvVars {
@@ -326,16 +335,10 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) error {
 	}
 
 	// Validate registry auth server if present.
-	if req.RegistryAuth != nil && req.RegistryAuth.Server != "" {
-		u, err := url.ParseRequestURI(req.RegistryAuth.Server)
-		if err != nil {
-			return fmt.Errorf("registryAuth.server is not a valid URI: %w", err)
+	if req.RegistryAuth != nil {
+		if err := validateRegistryServer(req.RegistryAuth.Server); err != nil {
+			return err
 		}
-		if u.Scheme != "https" {
-			return fmt.Errorf("registryAuth.server must use https scheme, got %q", u.Scheme)
-		}
-	} else if req.RegistryAuth != nil {
-		return fmt.Errorf("registryAuth.server is required and must be an https URI")
 	}
 
 	// Validate stack path is within stacksDir.
@@ -352,6 +355,58 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) error {
 		}
 	}
 
+	return nil
+}
+
+func validateComposeOperation(operation string) error {
+	switch operation {
+	case "up", "down", "pull", "ps", "logs", "restart", "stop", "start":
+		return nil
+	default:
+		return fmt.Errorf("unsupported compose operation: %q", operation)
+	}
+}
+
+func validateRegistryServer(server string) error {
+	if server == "" {
+		return fmt.Errorf("registryAuth.server is required and must be an https URI or bare registry host")
+	}
+
+	effectiveURI := server
+	if !strings.Contains(server, "://") {
+		effectiveURI = "https://" + server
+	}
+	u, err := url.ParseRequestURI(effectiveURI)
+	if err != nil {
+		return fmt.Errorf("registryAuth.server is not valid: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return fmt.Errorf("registryAuth.server must use https scheme, got %q", u.Scheme)
+	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("registryAuth.server must include a host")
+	}
+	if u.User != nil {
+		return fmt.Errorf("registryAuth.server must not include user info")
+	}
+	if u.Path != "" || u.RawPath != "" {
+		return fmt.Errorf("registryAuth.server must not include a path")
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("registryAuth.server must not include a query")
+	}
+	if u.Fragment != "" {
+		return fmt.Errorf("registryAuth.server must not include a fragment")
+	}
+	if strings.HasSuffix(u.Host, ":") {
+		return fmt.Errorf("registryAuth.server has an invalid port")
+	}
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("registryAuth.server has an invalid port")
+		}
+	}
 	return nil
 }
 
@@ -529,6 +584,10 @@ func (cm *ComposeManager) statRootedEnvFile(stackDir string) (string, error) {
 
 // buildCommand constructs the exec.Cmd for the requested compose operation.
 func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) (*exec.Cmd, error) {
+	if err := validateComposeOperation(req.Operation); err != nil {
+		return nil, err
+	}
+
 	stackDir := req.StackDir
 	if stackDir == "" {
 		stackDir = req.StackName

@@ -13,9 +13,7 @@ package mcp
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -367,9 +365,9 @@ func (h *Handler) toolContainerLogs(ctx context.Context, w http.ResponseWriter, 
 	}
 	defer rc.Close()
 
-	lines, err := demuxLogs(rc)
+	lines, err := decodeContainerLogLines(rc)
 	if err != nil {
-		writeToolError(w, id, fmt.Sprintf("demux logs: %v", err))
+		writeToolError(w, id, fmt.Sprintf("decode logs: %v", err))
 		return
 	}
 
@@ -434,59 +432,50 @@ func (h *Handler) toolContainerStats(ctx context.Context, w http.ResponseWriter,
 	writeToolResult(w, id, out)
 }
 
-// maxLogFrameSize is the maximum per-frame payload we'll allocate from the
-// Docker log stream header. Frames larger than this are skipped rather than
-// causing an unbounded allocation.
-const maxLogFrameSize = 256 << 10 // 256 KiB
-
-// demuxLogs reads the Docker multiplexed log stream format and returns
-// a slice of log line strings with a "stdout:" / "stderr:" prefix.
-// Docker log multiplexing: 8-byte header per frame: [stream_type, 0, 0, 0, size(4)]
-// stream_type: 1 = stdout, 2 = stderr.
-func demuxLogs(r io.Reader) ([]string, error) {
+func decodeContainerLogLines(r io.Reader) ([]string, error) {
 	var lines []string
+	var pending strings.Builder
+	var pendingStream docker.ContainerLogStream
+	hasPending := false
 
-	hdr := make([]byte, 8)
-	for {
-		_, err := io.ReadFull(r, hdr)
-		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				break
-			}
-			return nil, err
-		}
-
-		streamType := hdr[0]
-		size := binary.BigEndian.Uint32(hdr[4:8])
-		if size == 0 {
-			continue
-		}
-
-		if size > maxLogFrameSize {
-			// Skip the oversized frame rather than allocating an attacker-controlled buffer.
-			if _, err := io.CopyN(io.Discard, r, int64(size)); err != nil {
-				return nil, fmt.Errorf("skipping oversized log frame (%d bytes): %w", size, err)
-			}
-			continue
-		}
-
-		payload := make([]byte, size)
-		if _, err := io.ReadFull(r, payload); err != nil {
-			return nil, err
-		}
-
-		text := strings.TrimRight(string(payload), "\n")
+	appendLine := func(stream docker.ContainerLogStream, line string) {
 		prefix := "stdout"
-		if streamType == 2 {
+		if stream == docker.ContainerLogStderr {
 			prefix = "stderr"
 		}
-
-		for _, line := range strings.Split(text, "\n") {
-			lines = append(lines, prefix+": "+line)
-		}
+		lines = append(lines, prefix+": "+line)
 	}
 
-	return lines, nil
+	err := docker.DecodeContainerLogStream(r, func(stream docker.ContainerLogStream, payload []byte) error {
+		if hasPending && stream != pendingStream {
+			if pending.Len() > 0 {
+				appendLine(pendingStream, pending.String())
+				pending.Reset()
+			}
+			hasPending = false
+		}
+		if !hasPending {
+			pendingStream = stream
+			hasPending = true
+		}
+
+		text := string(payload)
+		for {
+			newline := strings.IndexByte(text, '\n')
+			if newline < 0 {
+				pending.WriteString(text)
+				return nil
+			}
+			pending.WriteString(text[:newline])
+			appendLine(stream, pending.String())
+			pending.Reset()
+			text = text[newline+1:]
+		}
+	})
+	if hasPending && pending.Len() > 0 {
+		appendLine(pendingStream, pending.String())
+	}
+	return lines, err
 }
 
 // writeResult encodes a successful JSON-RPC response.

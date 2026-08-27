@@ -140,7 +140,7 @@ func (m *ContainerManager) Refresh(ctx context.Context) (added, updated, removed
 
 	for id, c := range newMap {
 		if old, exists := oldMap[id]; exists {
-			if old.Status != c.Status {
+			if old.Status != c.Status || containerHealth(old) != containerHealth(c) {
 				updated = append(updated, c)
 			}
 		} else {
@@ -158,6 +158,13 @@ func (m *ContainerManager) Refresh(ctx context.Context) (added, updated, removed
 	m.containers = newMap
 	m.containersMu.Unlock()
 	return added, updated, removed, nil
+}
+
+func containerHealth(container Container) string {
+	if container.Details == nil {
+		return ""
+	}
+	return container.Details.Health
 }
 
 // snapshotContainers returns a copy of the current container map.

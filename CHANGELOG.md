@@ -71,6 +71,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The first container refresh is published immediately.** Standard-mode SSE
   clients connected during startup now receive the initial inventory correction
   instead of waiting for the first polling interval.
+- **Container logs preserve both Docker stream formats.** Drydock REST, the
+  generic API, and MCP now share one decoder for raw TTY output and multiplexed
+  stdout/stderr frames, including short live output and fragmented lines.
+- **Compose rejects unsupported operations before any side effect.** Invalid
+  operations no longer create stack locks, replace stack files, or attempt a
+  registry login. Registry authentication now accepts documented bare hosts and
+  host-and-port forms while continuing to reject unsafe URI components.
+- **Health-only container changes reach polling and event consumers.** Refresh
+  diffs compare health details nil-safely, and Docker `health_status: ...`
+  actions are forwarded without losing the reported value.
 
 ## [v0.9.9] - 2026-08-23
 

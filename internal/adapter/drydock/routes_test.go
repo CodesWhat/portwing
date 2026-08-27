@@ -142,6 +142,54 @@ func TestHandleContainerLogsAcceptsPositiveTail(t *testing.T) {
 	}
 }
 
+type routeLogFlushRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+}
+
+func (r *routeLogFlushRecorder) Flush() {
+	r.flushes++
+	r.ResponseRecorder.Flush()
+}
+
+func TestHandleContainerLogsDecodesRawAndMultiplexedStreams(t *testing.T) {
+	t.Parallel()
+
+	stdout := routeTestDockerLogFrame(1, []byte("stdout line\n"))
+	stderr := routeTestDockerLogFrame(2, []byte("stderr line\n"))
+	tests := []struct {
+		name     string
+		body     []byte
+		want     string
+		minFlush int
+	}{
+		{name: "short raw TTY", body: []byte("tty\n"), want: "tty\n", minFlush: 1},
+		{name: "multiplexed stdout and stderr", body: append(stdout, stderr...), want: "stdout line\nstderr line\n", minFlush: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, calls, shutdown := newRouteTestDockerClient(t)
+			defer shutdown()
+			calls.setLogsResponse("container-1", tt.body)
+
+			a := NewAdapter(client, "test-agent", AgentInfo{})
+			req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs?follow=true", nil)
+			req.SetPathValue("id", "container-1")
+			rec := &routeLogFlushRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+			a.handleContainerLogs(rec, req)
+
+			if got := rec.Body.String(); got != tt.want {
+				t.Fatalf("logs body = %q, want %q", got, tt.want)
+			}
+			if rec.flushes < tt.minFlush {
+				t.Fatalf("flushes = %d, want at least %d", rec.flushes, tt.minFlush)
+			}
+		})
+	}
+}
+
 func TestHandleWatcherGetReturnsKnownWatcher(t *testing.T) {
 	t.Parallel()
 
