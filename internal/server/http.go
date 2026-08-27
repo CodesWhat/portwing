@@ -470,16 +470,26 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("hijack failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer clientConn.Close()
+
+	var dockerConn net.Conn
+	var closeOnce sync.Once
+	closeConnections := func() {
+		closeOnce.Do(func() {
+			_ = clientConn.Close()
+			if dockerConn != nil {
+				_ = dockerConn.Close()
+			}
+		})
+	}
+	defer closeConnections()
 
 	// Connect to Docker daemon.
-	dockerConn, err := net.Dial("unix", s.dockerClient.GetSocketPath())
+	dockerConn, err = net.Dial("unix", s.dockerClient.GetSocketPath())
 	if err != nil {
 		// Best-effort 502 write; client may have already gone.
 		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
-	defer dockerConn.Close()
 
 	// Forward the original request to Docker.
 	rawReq := fmt.Sprintf(
@@ -515,12 +525,23 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(dockerConn, clientBuf)
+		if _, err := io.Copy(dockerConn, clientBuf); err != nil {
+			closeConnections()
+			return
+		}
+		if closeWriter, ok := dockerConn.(interface{ CloseWrite() error }); ok {
+			if err := closeWriter.CloseWrite(); err != nil {
+				closeConnections()
+			}
+			return
+		}
+		closeConnections()
 	}()
 
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(clientConn, dockerBuf)
+		closeConnections()
 	}()
 
 	wg.Wait()
