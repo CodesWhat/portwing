@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -131,6 +132,63 @@ func TestHandleRequestError(t *testing.T) {
 	}
 }
 
+func TestDelayedRequestResponseCannotReachReplacementConnection(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	oldCh := make(chan protocol.Envelope, 1)
+	oldState := &outboundQueueState{}
+	c.connMu.Lock()
+	c.sendCh = oldCh
+	c.sendState = oldState
+	c.connMu.Unlock()
+
+	entered := make(chan struct{})
+	gate := make(chan struct{})
+	//nolint:bodyclose // the response body is consumed and closed by the handler goroutine.
+	fd := &fakeDocker{
+		doResp:    mkResp(http.StatusOK, "application/json", `{"old":true}`),
+		doEntered: entered,
+		doGate:    gate,
+	}
+	c.dockerClient = fd
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.handleRequest(context.Background(), protocol.RequestMessage{
+			RequestID: "old-request",
+			Method:    http.MethodGet,
+			Path:      "/info",
+		})
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(readTimeout):
+		t.Fatal("old request did not reach Docker")
+	}
+
+	newAgent, _ := newWSPair(t)
+	newCh := make(chan protocol.Envelope, 1)
+	newState := &outboundQueueState{}
+	c.connMu.Lock()
+	c.conn = newAgent
+	c.sendCh = newCh
+	c.sendState = newState
+	c.connMu.Unlock()
+	oldState.closeAndDiscard(oldCh)
+	close(gate)
+
+	select {
+	case <-done:
+	case <-time.After(readTimeout):
+		t.Fatal("old request did not finish")
+	}
+	if got := len(newCh); got != 0 {
+		t.Fatalf("replacement connection received %d delayed old-generation responses, want 0", got)
+	}
+}
+
 // A streaming request is proxied via DoStream and tunneled as a stream-header
 // response, one or more base64 stream chunks, and a terminal stream_end.
 func TestHandleRequestStream(t *testing.T) {
@@ -170,6 +228,58 @@ func TestHandleRequestStream(t *testing.T) {
 	if end.RequestID != "r3" || end.Reason != "complete" {
 		t.Errorf("stream_end = %+v, want r3 / complete", end)
 	}
+}
+
+// Docker's container archive endpoint returns a potentially large tar stream.
+// Query parameters are part of every real GET archive request, so edge routing
+// must classify the path before choosing the buffered response branch.
+func TestHandleRequestContainerArchiveWithQueryUsesStreamingPath(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	bufferedResp := mkResp(http.StatusOK, "application/json", `{"buffered":true}`)
+	streamResp := mkResp(http.StatusOK, "application/x-tar", "tar-data")
+	t.Cleanup(func() {
+		_ = bufferedResp.Body.Close()
+		_ = streamResp.Body.Close()
+	})
+	fd := &fakeDocker{
+		// Both responses are populated so the assertion reports a routing
+		// failure instead of panicking if the buffered path is selected.
+		doResp:     bufferedResp,
+		streamResp: streamResp,
+	}
+	c.dockerClient = fd
+
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "archive-1",
+		Method:    http.MethodGet,
+		Path:      "/containers/abc/archive?path=%2Fvar%2Flib%2Fdata",
+	})
+
+	var resp protocol.ResponseMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+	if !resp.IsStream {
+		t.Fatal("container archive response used the buffered path, want streaming")
+	}
+
+	fd.mu.Lock()
+	calls := append([]doCall(nil), fd.doCalls...)
+	fd.mu.Unlock()
+	if len(calls) != 1 || !calls[0].stream {
+		t.Fatalf("Docker calls = %+v, want one streaming call", calls)
+	}
+
+	var chunk protocol.StreamMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeStream), &chunk)
+	decoded, err := base64.StdEncoding.DecodeString(chunk.Data)
+	if err != nil {
+		t.Fatalf("decode archive chunk: %v", err)
+	}
+	if string(decoded) != "tar-data" {
+		t.Fatalf("archive stream payload = %q, want %q", decoded, "tar-data")
+	}
+	expectType(t, ctrl, protocol.TypeStreamEnd)
 }
 
 // A non-stream response whose body isn't valid JSON (e.g. the plain-text "OK"

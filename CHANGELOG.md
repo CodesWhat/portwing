@@ -31,9 +31,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ed25519 timestamp validation handles the full signed range.** Extreme
   future timestamps can no longer overflow duration negation and bypass the
   configured clock-skew window.
+- **Edge exec input is byte-bounded and session IDs are unique.** Decoded input
+  frames are capped at 64 KiB, each session retains at most 1 MiB across queued
+  and in-flight writes, and empty or duplicate exec IDs are rejected before
+  Docker work starts.
+- **Edge outbound buffering has a connection-wide byte budget.** Queued and
+  in-flight WebSocket envelopes are capped at 128 MiB, reservations follow the
+  connection generation through write or discard, and legacy buffered Drydock
+  log requests are limited to one at a time.
 
 ### Fixed
 
+- **Container archive downloads stream through standard and edge modes.** GET
+  archive responses, including versioned paths with query strings, no longer
+  take the bounded whole-body proxy path; PUT archive uploads keep their normal
+  non-streaming response handling.
 - **Standard-mode exec relays terminate when either side closes.** Client EOF
   half-closes Docker input so remaining output can drain, while Docker EOF or a
   fatal copy error closes both connections and unblocks the peer goroutine.

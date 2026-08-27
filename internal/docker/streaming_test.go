@@ -1,6 +1,10 @@
 package docker
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestIsStreamingPath(t *testing.T) {
 	t.Parallel()
@@ -35,7 +39,9 @@ func TestIsStreamingPath(t *testing.T) {
 		// above but are not themselves streaming responses.
 		{name: "images json is not an export", path: "/v1.44/images/json", want: false},
 		{name: "image inspect is not an export", path: "/v1.44/images/nginx/json", want: false},
-		{name: "container archive is not an export", path: "/v1.44/containers/abc/archive", want: false},
+		{name: "container archive", path: "/v1.44/containers/abc/archive", want: true},
+		{name: "container archive with query", path: "/v1.44/containers/abc/archive?path=%2Fvar%2Flib%2Fdata", want: true},
+		{name: "archive only in query", path: "/v1.44/containers/json?filter=%2Farchive%3F", want: false},
 		{name: "images load is not an export", path: "/v1.44/images/load", want: false},
 		{name: "bare /get without /images/ does not match", path: "/v1.44/secrets/abc/get", want: false},
 	}
@@ -46,6 +52,32 @@ func TestIsStreamingPath(t *testing.T) {
 			t.Parallel()
 			if got := IsStreamingPath(tt.path); got != tt.want {
 				t.Fatalf("IsStreamingPath(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsStreamingRequestContainerArchiveMethod(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		want   bool
+	}{
+		{name: "GET archive download streams", method: http.MethodGet, path: "/v1.44/containers/abc/archive?path=%2Fvar%2Flib%2Fdata", want: true},
+		{name: "PUT archive upload does not stream", method: http.MethodPut, path: "/v1.44/containers/abc/archive?path=%2Fvar%2Flib%2Fdata", want: false},
+		{name: "GET logs delegates to path classifier", method: http.MethodGet, path: "/v1.44/containers/abc/logs?follow=1", want: true},
+		{name: "GET container list does not stream", method: http.MethodGet, path: "/v1.44/containers/json", want: false},
+	}
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			if got := IsStreamingRequest(req.Method, req.URL.RequestURI()); got != tc.want {
+				t.Fatalf("IsStreamingRequest(%q, %q) = %v, want %v", tc.method, tc.path, got, tc.want)
 			}
 		})
 	}

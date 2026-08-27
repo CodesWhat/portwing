@@ -58,8 +58,10 @@ type Adapter struct {
 	sse          *SSEBroadcaster
 	dockerClient *docker.Client
 
-	messageSem chan struct{}
-	semInit    sync.Once
+	messageSem       chan struct{}
+	semInit          sync.Once
+	legacyLogSem     chan struct{}
+	legacyLogSemInit sync.Once
 
 	logStreamsMu sync.Mutex
 	logStreams   map[string]activeContainerLogStream
@@ -79,6 +81,7 @@ func NewAdapter(dockerClient *docker.Client, agentName string, info AgentInfo) *
 		sse:          NewSSEBroadcaster(cm, protocol.AgentVersion, info),
 		dockerClient: dockerClient,
 		messageSem:   make(chan struct{}, defaultMessageHandlerConcurrency),
+		legacyLogSem: make(chan struct{}, 1),
 		logStreams:   make(map[string]activeContainerLogStream),
 	}
 }
@@ -204,9 +207,28 @@ func (a *Adapter) HandleMessage(ctx context.Context, sender adapter.MessageSende
 			a.startContainerLogStream(ctx, sender, msg)
 			return true
 		}
-		a.spawnMessageHandler(ctx, msgType, func() {
+		if ctx.Err() != nil {
+			return true
+		}
+		legacyLogSem := a.getLegacyLogSemaphore()
+		select {
+		case legacyLogSem <- struct{}{}:
+		case <-ctx.Done():
+			return true
+		default:
+			a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
+				RequestID:   msg.RequestID,
+				ContainerID: msg.ContainerID,
+				Logs:        "error: another buffered log request is active",
+			})
+			return true
+		}
+		if !a.spawnMessageHandlerWithCancelCleanup(ctx, msgType, func() {
+			defer func() { <-legacyLogSem }()
 			a.handleContainerLogRequest(ctx, sender, msg)
-		})
+		}, func() { <-legacyLogSem }) {
+			<-legacyLogSem
+		}
 		return true
 
 	case protocol.TypeDDContainerLogCancel:
@@ -662,25 +684,33 @@ func (a *Adapter) sendTypedMessage(sender adapter.MessageSender, msgType string,
 	}
 }
 
-func (a *Adapter) spawnMessageHandler(ctx context.Context, msgType string, fn func()) {
+func (a *Adapter) spawnMessageHandler(ctx context.Context, msgType string, fn func()) bool {
+	return a.spawnMessageHandlerWithCancelCleanup(ctx, msgType, fn, nil)
+}
+
+func (a *Adapter) spawnMessageHandlerWithCancelCleanup(ctx context.Context, msgType string, fn, cancelCleanup func()) bool {
 	sem := a.getMessageSemaphore()
 
 	select {
 	case sem <- struct{}{}:
 	case <-ctx.Done():
 		slog.Debug("skipping message handler due to canceled context", "type", applog.Sanitize(msgType), "error", applog.Sanitize(ctx.Err().Error()))
-		return
+		return false
 	}
 
 	go func() {
 		defer func() { <-sem }()
 
 		if ctx.Err() != nil {
+			if cancelCleanup != nil {
+				cancelCleanup()
+			}
 			return
 		}
 
 		fn()
 	}()
+	return true
 }
 
 func (a *Adapter) getMessageSemaphore() chan struct{} {
@@ -690,4 +720,13 @@ func (a *Adapter) getMessageSemaphore() chan struct{} {
 		}
 	})
 	return a.messageSem
+}
+
+func (a *Adapter) getLegacyLogSemaphore() chan struct{} {
+	a.legacyLogSemInit.Do(func() {
+		if a.legacyLogSem == nil {
+			a.legacyLogSem = make(chan struct{}, 1)
+		}
+	})
+	return a.legacyLogSem
 }
