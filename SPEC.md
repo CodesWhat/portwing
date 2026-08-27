@@ -503,6 +503,8 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 | WebSocket read | 16 MB |
 | Response body read | 100 MB |
 | Exec request body | 10 MB |
+| Enrollment request body | 64 KiB / 10 seconds |
+| Concurrent enrollment handlers | 32 agent-wide / 2 per client |
 | Concurrent exec sessions | 100 |
 | Concurrent stream sessions | 100 |
 

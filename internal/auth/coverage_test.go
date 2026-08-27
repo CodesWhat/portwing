@@ -39,8 +39,9 @@ func TestEnroller_OnResult_Called(t *testing.T) {
 	t.Parallel()
 	e, _, _ := setupEnroller(t, "tok")
 
-	var calls []string
+	var actors, calls []string
 	e.OnResult = func(actor, keyID, outcome string) {
+		actors = append(actors, actor)
 		calls = append(calls, outcome)
 	}
 
@@ -51,6 +52,9 @@ func TestEnroller_OnResult_Called(t *testing.T) {
 
 	if len(calls) != 1 || calls[0] != "denied" {
 		t.Errorf("expected [denied], got %v", calls)
+	}
+	if len(actors) != 1 || actors[0] != "192.0.2.1" {
+		t.Errorf("expected default actor [192.0.2.1], got %v", actors)
 	}
 }
 

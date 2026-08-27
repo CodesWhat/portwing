@@ -141,6 +141,9 @@ one-minute window:
 - **Enrollment abuse accounting:** malformed and oversized enrollment bodies
   use a separate per-IP failure window, so they cannot evade throttling while
   remaining independent of credential-failure accounting.
+- **Enrollment admission:** request bodies have a 10-second read deadline, with
+  at most two active enrollment handlers per client and 32 across the agent.
+  Excess requests receive HTTP 429 before their bodies are read.
 
 ### 8. TLS 1.2+ AEAD-Only
 
@@ -173,6 +176,8 @@ AEAD suites by design.
 | Exec request body | 10 MB | Limit exec payload size |
 | Ed25519 signed-request body | 1 MB | Bound the request body buffered for signature verification |
 | Enrollment request body | 64 KiB | Bound unauthenticated JSON parsing before enrollment authentication |
+| Enrollment body read | 10 seconds | Stop unauthenticated slow-body handlers |
+| Concurrent enrollment handlers | 32 agent-wide, 2 per client | Bound unauthenticated handlers before body parsing |
 | Cold Argon2id derivations | 2 | Bound memory-hard authentication work across the agent |
 | Concurrent exec sessions | 100 | Prevent unbounded goroutine growth |
 | Concurrent stream sessions | 100 | Prevent unbounded goroutine growth |
