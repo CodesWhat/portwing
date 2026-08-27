@@ -130,6 +130,73 @@ func TestContainerManagerRefreshNoChanges(t *testing.T) {
 	}
 }
 
+func TestContainerManagerRefreshDiffsHealthOnlyTransitions(t *testing.T) {
+	t.Parallel()
+
+	healthy := "healthy"
+	tests := []struct {
+		name       string
+		before     *string
+		after      *string
+		wantHealth string
+	}{
+		{name: "health appears", after: &healthy, wantHealth: "healthy"},
+		{name: "health disappears", before: &healthy},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, fixture, shutdown := newDynamicDockerClient(t)
+			defer shutdown()
+
+			fixture.Set(inventorySnapshotWithHealth("c1", tt.before))
+			manager := NewContainerManager(client, "test-agent", nil)
+			if _, err := manager.BuildInventory(context.Background()); err != nil {
+				t.Fatalf("build inventory: %v", err)
+			}
+			if tt.before == nil {
+				manager.containersMu.Lock()
+				container := manager.containers["c1"]
+				container.Details = nil
+				manager.containers["c1"] = container
+				manager.containersMu.Unlock()
+			}
+
+			fixture.Set(inventorySnapshotWithHealth("c1", tt.after))
+			added, updated, removed, err := manager.Refresh(context.Background())
+			if err != nil {
+				t.Fatalf("refresh: %v", err)
+			}
+			if len(added) != 0 || len(removed) != 0 {
+				t.Fatalf("health-only transition changed membership: added=%d removed=%d", len(added), len(removed))
+			}
+			if len(updated) != 1 {
+				t.Fatalf("health-only transition produced %d updated containers, want 1", len(updated))
+			}
+			if updated[0].Details == nil {
+				t.Fatal("updated container details are nil")
+			}
+			if got := updated[0].Details.Health; got != tt.wantHealth {
+				t.Fatalf("updated health = %q, want %q", got, tt.wantHealth)
+			}
+		})
+	}
+}
+
+func inventorySnapshotWithHealth(id string, health *string) dockerInventorySnapshot {
+	snapshot := buildInventorySnapshot([]fixtureContainer{{id: id, image: "nginx:1.0", state: "running"}})
+	snapshot.listed[0].Status = "Up 5 minutes"
+	inspect := snapshot.inspected[id]
+	if health != nil {
+		inspect.State.Health = &docker.HealthState{Status: *health}
+		snapshot.listed[0].Status += " (" + *health + ")"
+	}
+	snapshot.inspected[id] = inspect
+	return snapshot
+}
+
 func assertContainerIDs(t *testing.T, containers []Container, want []string) {
 	t.Helper()
 

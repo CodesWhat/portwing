@@ -586,7 +586,7 @@ func TestToolContainerStats_WithNetworks(t *testing.T) {
 	}
 }
 
-// ---- demuxLogs edge cases ------------------------------------------------
+// ---- container log decoding edge cases ----------------------------------
 
 func TestDemuxLogs_ZeroSizeFrame(t *testing.T) {
 	// A frame with size=0 should be skipped (continue).
@@ -609,9 +609,9 @@ func TestDemuxLogs_ZeroSizeFrame(t *testing.T) {
 	buf.Write(hdr2)
 	buf.WriteString(line)
 
-	lines, err := demuxLogs(&buf)
+	lines, err := decodeContainerLogLines(&buf)
 	if err != nil {
-		t.Fatalf("demuxLogs error: %v", err)
+		t.Fatalf("decodeContainerLogLines error: %v", err)
 	}
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 line (zero-size skipped), got %d", len(lines))
@@ -628,7 +628,7 @@ func TestDemuxLogs_NonEOFReadError(t *testing.T) {
 		err:  io.ErrNoProgress,
 	}
 
-	_, err := demuxLogs(reader)
+	_, err := decodeContainerLogLines(reader)
 	if err == nil {
 		t.Fatal("expected error for failed header read")
 	}
@@ -655,7 +655,7 @@ func TestDemuxLogs_OversizedFrame(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Write oversized frame header (size > 256KiB).
-	oversizeBytes := uint32(maxLogFrameSize + 1)
+	oversizeBytes := uint32(256<<10 + 1)
 	hdr := make([]byte, 8)
 	hdr[0] = 1
 	binary.BigEndian.PutUint32(hdr[4:8], oversizeBytes)
@@ -673,9 +673,9 @@ func TestDemuxLogs_OversizedFrame(t *testing.T) {
 	buf.Write(hdr2)
 	buf.WriteString(line)
 
-	lines, err := demuxLogs(&buf)
+	lines, err := decodeContainerLogLines(&buf)
 	if err != nil {
-		t.Fatalf("demuxLogs error for oversized frame: %v", err)
+		t.Fatalf("decodeContainerLogLines error for oversized frame: %v", err)
 	}
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 line after oversized frame skip, got %d", len(lines))
@@ -690,7 +690,7 @@ func TestDemuxLogs_OversizedFrameCopyError(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Write oversized frame header but not enough bytes to skip.
-	oversizeBytes := uint32(maxLogFrameSize + 1)
+	oversizeBytes := uint32(256<<10 + 1)
 	hdr := make([]byte, 8)
 	hdr[0] = 1
 	binary.BigEndian.PutUint32(hdr[4:8], oversizeBytes)
@@ -698,7 +698,7 @@ func TestDemuxLogs_OversizedFrameCopyError(t *testing.T) {
 	// Write only 10 bytes of data — not enough to skip the full frame.
 	buf.Write(make([]byte, 10))
 
-	_, err := demuxLogs(&buf)
+	_, err := decodeContainerLogLines(&buf)
 	if err == nil {
 		t.Fatal("expected error when oversized frame data is truncated")
 	}
@@ -719,7 +719,7 @@ func TestDemuxLogs_PayloadReadError(t *testing.T) {
 	// Write only 50 bytes.
 	buf.Write(make([]byte, 50))
 
-	_, err := demuxLogs(&buf)
+	_, err := decodeContainerLogLines(&buf)
 	if err == nil {
 		t.Fatal("expected error when payload is truncated")
 	}

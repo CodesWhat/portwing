@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,22 @@ type testDockerCalls struct {
 	listCalls    atomic.Int64
 	inspectCalls atomic.Int64
 	logsCalls    atomic.Int64
+	logsBody     atomic.Value // []byte
+}
+
+func (c *testDockerCalls) setLogsBody(body []byte) {
+	c.logsBody.Store(append([]byte(nil), body...))
+}
+
+func (c *testDockerCalls) getLogsBody() []byte {
+	if body := c.logsBody.Load(); body != nil {
+		return append([]byte(nil), body.([]byte)...)
+	}
+	payload := []byte("log line\n")
+	header := make([]byte, 8)
+	header[0] = 1
+	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
+	return append(header, payload...)
 }
 
 // newTestDockerClient creates a minimal stub Docker server and returns a
@@ -107,12 +124,7 @@ func newTestDockerClient(t *testing.T) (*docker.Client, *testDockerCalls, func()
 		case strings.HasSuffix(r.URL.Path, "/logs"):
 			calls.logsCalls.Add(1)
 			w.Header().Set("Content-Type", "application/octet-stream")
-			payload := []byte("log line\n")
-			header := make([]byte, 8)
-			header[0] = 1
-			binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
-			_, _ = w.Write(header)
-			_, _ = w.Write(payload)
+			_, _ = w.Write(calls.getLogsBody())
 		default:
 			http.NotFound(w, r)
 		}
@@ -557,6 +569,110 @@ func TestHandleContainerLogsNoTail(t *testing.T) {
 	if calls.logsCalls.Load() == 0 {
 		t.Fatal("expected docker logs to be called")
 	}
+}
+
+type logFlushRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+}
+
+type failingLogWriter struct {
+	header   http.Header
+	attempts int
+	flushes  int
+}
+
+func (w *failingLogWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingLogWriter) Write([]byte) (int, error) {
+	w.attempts++
+	return 0, io.ErrClosedPipe
+}
+
+func (w *failingLogWriter) WriteHeader(int) {}
+
+func (w *failingLogWriter) Flush() {
+	w.flushes++
+}
+
+func (r *logFlushRecorder) Flush() {
+	r.flushes++
+	r.ResponseRecorder.Flush()
+}
+
+func TestHandleContainerLogsDecodesRawAndMultiplexedStreams(t *testing.T) {
+	t.Parallel()
+
+	stdout := genericTestLogFrame(1, []byte("stdout line\n"))
+	stderr := genericTestLogFrame(2, []byte("stderr line\n"))
+	tests := []struct {
+		name     string
+		body     []byte
+		want     string
+		minFlush int
+	}{
+		{name: "short raw TTY", body: []byte("tty\n"), want: "tty\n", minFlush: 1},
+		{name: "multiplexed stdout and stderr", body: append(stdout, stderr...), want: "stdout line\nstderr line\n", minFlush: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, calls, shutdown := newTestDockerClient(t)
+			defer shutdown()
+			calls.setLogsBody(tt.body)
+
+			a := New(client, "test-agent")
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/containers/container-1/logs?follow=true", nil)
+			req.SetPathValue("id", "container-1")
+			rec := &logFlushRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+			a.handleContainerLogs(rec, req)
+
+			if got := rec.Body.String(); got != tt.want {
+				t.Fatalf("logs body = %q, want %q", got, tt.want)
+			}
+			if rec.flushes < tt.minFlush {
+				t.Fatalf("flushes = %d, want at least %d", rec.flushes, tt.minFlush)
+			}
+		})
+	}
+}
+
+func TestHandleContainerLogsStopsAfterResponseWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	client, calls, shutdown := newTestDockerClient(t)
+	defer shutdown()
+	calls.setLogsBody(append(
+		genericTestLogFrame(1, []byte("first\n")),
+		genericTestLogFrame(2, []byte("second\n"))...,
+	))
+
+	a := New(client, "test-agent")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/containers/container-1/logs?follow=true", nil)
+	req.SetPathValue("id", "container-1")
+	w := &failingLogWriter{}
+
+	a.handleContainerLogs(w, req)
+
+	if w.attempts != 1 {
+		t.Fatalf("response write attempts = %d, want decoder to stop after first failure", w.attempts)
+	}
+	if w.flushes != 0 {
+		t.Fatalf("flushes = %d, want 0 after failed write", w.flushes)
+	}
+}
+
+func genericTestLogFrame(streamType byte, payload []byte) []byte {
+	header := make([]byte, 8)
+	header[0] = streamType
+	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
+	return append(header, payload...)
 }
 
 // ---------------------------------------------------------------------------

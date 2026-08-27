@@ -1,15 +1,14 @@
 package drydock
 
 import (
-	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 // RegisterRoutes registers Drydock-specific HTTP routes.
@@ -63,34 +62,18 @@ func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Transfer-Encoding", "chunked")
 	}
 
-	// Docker log multiplexing: each frame has an 8-byte header
-	// [stream_type(1), 0(3), size(4 big-endian)].
-	// Strip the header and write only the payload.
-	header := make([]byte, 8)
 	flusher, canFlush := w.(http.Flusher)
-
-	for {
-		_, err := io.ReadFull(body, header)
-		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-				slog.Debug("log stream ended", "error", err)
-			}
-			return
+	err = docker.DecodeContainerLogStream(body, func(_ docker.ContainerLogStream, payload []byte) error {
+		if _, writeErr := w.Write(payload); writeErr != nil {
+			return writeErr
 		}
-
-		frameSize := binary.BigEndian.Uint32(header[4:8])
-		if frameSize == 0 {
-			continue
-		}
-
-		_, err = io.CopyN(w, body, int64(frameSize))
-		if err != nil {
-			return
-		}
-
 		if canFlush {
 			flusher.Flush()
 		}
+		return nil
+	})
+	if err != nil {
+		slog.Debug("log stream ended", "error", err)
 	}
 }
 

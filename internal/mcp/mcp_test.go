@@ -33,6 +33,11 @@ func shortSocketPath(t *testing.T) string {
 // returns a configured docker.Client and a shutdown func.
 func stubDocker(t *testing.T) (*docker.Client, func()) {
 	t.Helper()
+	return stubDockerWithLogs(t, mcpTestLogFrame(1, []byte("hello from nginx\n")))
+}
+
+func stubDockerWithLogs(t *testing.T, logs []byte) (*docker.Client, func()) {
+	t.Helper()
 
 	socketPath := shortSocketPath(t)
 	listener, err := net.Listen("unix", socketPath)
@@ -92,16 +97,7 @@ func stubDocker(t *testing.T) (*docker.Client, func()) {
 	})
 
 	mux.HandleFunc("/v1.44/containers/abc123/logs", func(w http.ResponseWriter, r *http.Request) {
-		// Write two Docker-multiplexed log frames (stdout).
-		line := "hello from nginx\n"
-		frame := make([]byte, 8+len(line))
-		frame[0] = 1 // stdout
-		frame[4] = 0
-		frame[5] = 0
-		frame[6] = 0
-		frame[7] = byte(len(line))
-		copy(frame[8:], line)
-		_, _ = w.Write(frame)
+		_, _ = w.Write(logs)
 	})
 
 	mux.HandleFunc("/v1.44/containers/abc123/stats", func(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +126,17 @@ func stubDocker(t *testing.T) (*docker.Client, func()) {
 	}
 
 	return client, shutdown
+}
+
+func mcpTestLogFrame(streamType byte, payload []byte) []byte {
+	frame := make([]byte, 8+len(payload))
+	frame[0] = streamType
+	frame[4] = byte(uint32(len(payload)) >> 24)
+	frame[5] = byte(uint32(len(payload)) >> 16)
+	frame[6] = byte(uint32(len(payload)) >> 8)
+	frame[7] = byte(len(payload))
+	copy(frame[8:], payload)
+	return frame
 }
 
 func newTestHandler(t *testing.T) (*Handler, func()) {
@@ -513,6 +520,71 @@ func TestToolsCallContainerLogs(t *testing.T) {
 	}
 }
 
+func TestToolsCallContainerLogsDecodesRawAndMultiplexedStreams(t *testing.T) {
+	stdout := mcpTestLogFrame(1, []byte("stdout line\n"))
+	stderr := mcpTestLogFrame(2, []byte("stderr line\n"))
+	tests := []struct {
+		name      string
+		body      []byte
+		wantLines []string
+	}{
+		{name: "short raw TTY", body: []byte("tty\n"), wantLines: []string{"stdout: tty"}},
+		{
+			name:      "multiplexed stdout and stderr",
+			body:      append(stdout, stderr...),
+			wantLines: []string{"stdout: stdout line", "stderr: stderr line"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, shutdown := stubDockerWithLogs(t, tt.body)
+			defer shutdown()
+			h := NewHandler(client, nil)
+
+			rr := postMCP(t, h, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      6,
+				"method":  "tools/call",
+				"params": map[string]any{
+					"name":      "container_logs",
+					"arguments": map[string]any{"id": "abc123", "tail": 50},
+				},
+			})
+
+			resp := decodeResponse(t, rr)
+			result, ok := resp.Result.(map[string]any)
+			if !ok {
+				t.Fatalf("result type = %T, want object", resp.Result)
+			}
+			if isErr, _ := result["isError"].(bool); isErr {
+				t.Fatalf("container_logs returned an error: %+v", result)
+			}
+			content, ok := result["content"].([]any)
+			if !ok || len(content) != 1 {
+				t.Fatalf("content = %+v, want one block", result["content"])
+			}
+			block, ok := content[0].(map[string]any)
+			if !ok {
+				t.Fatalf("content block type = %T, want object", content[0])
+			}
+			text, ok := block["text"].(string)
+			if !ok {
+				t.Fatalf("content text type = %T, want string", block["text"])
+			}
+			var output struct {
+				Lines []string `json:"lines"`
+			}
+			if err := json.Unmarshal([]byte(text), &output); err != nil {
+				t.Fatalf("decode tool output: %v", err)
+			}
+			if got, want := strings.Join(output.Lines, "\n"), strings.Join(tt.wantLines, "\n"); got != want {
+				t.Fatalf("lines = %q, want %q", output.Lines, tt.wantLines)
+			}
+		})
+	}
+}
+
 // TestToolsCallContainerStats verifies container_stats against the stub.
 func TestToolsCallContainerStats(t *testing.T) {
 	h, shutdown := newTestHandler(t)
@@ -621,9 +693,9 @@ func TestDemuxLogs(t *testing.T) {
 	writeFrame(1, line1)
 	writeFrame(2, line2)
 
-	lines, err := demuxLogs(&buf)
+	lines, err := decodeContainerLogLines(&buf)
 	if err != nil {
-		t.Fatalf("demuxLogs error: %v", err)
+		t.Fatalf("decodeContainerLogLines error: %v", err)
 	}
 
 	if len(lines) != 2 {
@@ -634,6 +706,77 @@ func TestDemuxLogs(t *testing.T) {
 	}
 	if !strings.HasPrefix(lines[1], "stderr:") {
 		t.Errorf("line[1] = %q, want stderr: prefix", lines[1])
+	}
+}
+
+func TestDecodeContainerLogLinesFlushesPartialLineWhenStreamChanges(t *testing.T) {
+	t.Parallel()
+
+	input := append(
+		mcpTestLogFrame(1, []byte("partial stdout")),
+		mcpTestLogFrame(2, []byte("stderr line\n"))...,
+	)
+	lines, err := decodeContainerLogLines(bytes.NewReader(input))
+	if err != nil {
+		t.Fatalf("decodeContainerLogLines: %v", err)
+	}
+	want := []string{"stdout: partial stdout", "stderr: stderr line"}
+	if got := strings.Join(lines, "\n"); got != strings.Join(want, "\n") {
+		t.Fatalf("lines = %q, want %q", lines, want)
+	}
+}
+
+type fragmentedLogReader struct {
+	reader *bytes.Reader
+	max    int
+}
+
+func (r *fragmentedLogReader) Read(p []byte) (int, error) {
+	if len(p) > r.max {
+		p = p[:r.max]
+	}
+	return r.reader.Read(p)
+}
+
+func TestDecodeContainerLogLinesPreservesLinesAcrossReadBoundaries(t *testing.T) {
+	t.Parallel()
+
+	longLine := strings.Repeat("x", 40<<10)
+	stdout := mcpTestLogFrame(1, []byte("stdout line\n"))
+	stderr := mcpTestLogFrame(2, []byte("stderr line\n"))
+	tests := []struct {
+		name      string
+		body      []byte
+		fragment  int
+		wantLines []string
+	}{
+		{
+			name:      "long raw line",
+			body:      []byte(longLine),
+			fragment:  3,
+			wantLines: []string{"stdout: " + longLine},
+		},
+		{
+			name:      "fragmented multiplexed headers and payloads",
+			body:      append(stdout, stderr...),
+			fragment:  1,
+			wantLines: []string{"stdout: stdout line", "stderr: stderr line"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			reader := &fragmentedLogReader{reader: bytes.NewReader(tt.body), max: tt.fragment}
+			lines, err := decodeContainerLogLines(reader)
+			if err != nil {
+				t.Fatalf("decodeContainerLogLines: %v", err)
+			}
+			if got, want := strings.Join(lines, "\n"), strings.Join(tt.wantLines, "\n"); got != want {
+				t.Fatalf("lines = %q, want %q", lines, tt.wantLines)
+			}
+		})
 	}
 }
 
