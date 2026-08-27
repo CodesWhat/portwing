@@ -204,6 +204,9 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		}
 		s.rateLimiter.SetTrustedProxies(nets)
 	}
+	if s.enroller != nil {
+		s.enroller.ActorResolver = s.rateLimiter.clientIP
+	}
 
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)

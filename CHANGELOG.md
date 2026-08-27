@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run` examples and newly generated service configs now use `127.0.0.1` and
   explain that remote access needs Portwing TLS or a private listener behind a
   TLS-terminating reverse proxy.
+- **Enrollment bodies are time- and concurrency-bounded.** Unauthenticated
+  enrollment JSON must arrive within 10 seconds, with at most two active
+  requests per client and 32 across the agent. Enrollment audit actors now use
+  the same validated trusted-proxy client resolution as rate limiting.
 
 ### Fixed
 

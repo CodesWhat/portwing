@@ -59,7 +59,8 @@ const (
 	// #nosec G101 -- header name constant; not a credential.
 	headerPortwingToken = "X-Portwing-Token"
 	// #nosec G101 -- header name constant; not a credential.
-	headerDrydockAgentSecret = "X-Dd-Agent-Secret"
+	headerDrydockAgentSecret     = "X-Dd-Agent-Secret"
+	defaultMaxEnrollmentInFlight = 32
 )
 
 // RateLimiter tracks failed authentication attempts by IP address and blocks
@@ -74,6 +75,10 @@ type RateLimiter struct {
 	// maxInFlight bounds concurrent credential checks from one source before
 	// any expensive verifier work begins.
 	maxInFlight int
+	// maxEnrollmentInFlight bounds unauthenticated enrollment handlers across
+	// all sources, including addresses that cannot be added to attempts.
+	maxEnrollmentInFlight int
+	enrollmentInFlight    int
 
 	trustedProxies []*net.IPNet
 
@@ -91,13 +96,14 @@ type ipAttempts struct {
 // five minutes.
 func NewRateLimiter() *RateLimiter {
 	rl := &RateLimiter{
-		attempts:    make(map[string]*ipAttempts),
-		abuse:       make(map[string]*ipAttempts),
-		maxFails:    10,
-		window:      time.Minute,
-		maxIPs:      10000,
-		maxInFlight: 2,
-		done:        make(chan struct{}),
+		attempts:              make(map[string]*ipAttempts),
+		abuse:                 make(map[string]*ipAttempts),
+		maxFails:              10,
+		window:                time.Minute,
+		maxIPs:                10000,
+		maxInFlight:           2,
+		maxEnrollmentInFlight: defaultMaxEnrollmentInFlight,
+		done:                  make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
@@ -219,7 +225,10 @@ func (rl *RateLimiter) IsRateLimited(ip string) bool {
 func (rl *RateLimiter) tryBeginAuth(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	return rl.tryBeginAuthLocked(ip)
+}
 
+func (rl *RateLimiter) tryBeginAuthLocked(ip string) bool {
 	a, ok := rl.attempts[ip]
 	if ok && !a.firstFail.IsZero() && time.Since(a.firstFail) > rl.window {
 		a.count = 0
@@ -252,7 +261,10 @@ func (rl *RateLimiter) tryBeginAuth(ip string) bool {
 func (rl *RateLimiter) finishAuth(ip string, success bool) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	rl.finishAuthLocked(ip, success)
+}
 
+func (rl *RateLimiter) finishAuthLocked(ip string, success bool) {
 	a, ok := rl.attempts[ip]
 	if !ok {
 		return
@@ -274,6 +286,31 @@ func (rl *RateLimiter) finishAuth(ip string, success bool) {
 		return
 	}
 	a.count++
+}
+
+func (rl *RateLimiter) tryBeginEnrollment(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	maxInFlight := rl.maxEnrollmentInFlight
+	if maxInFlight <= 0 {
+		maxInFlight = defaultMaxEnrollmentInFlight
+	}
+	if rl.enrollmentInFlight >= maxInFlight || !rl.tryBeginAuthLocked(ip) {
+		return false
+	}
+	rl.enrollmentInFlight++
+	return true
+}
+
+func (rl *RateLimiter) finishEnrollment(ip string, success bool) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	if rl.enrollmentInFlight > 0 {
+		rl.enrollmentInFlight--
+	}
+	rl.finishAuthLocked(ip, success)
 }
 
 // RecordFailure records a failed authentication attempt for the given IP.
@@ -400,7 +437,7 @@ func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) h
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		clientIP := rl.clientIP(r)
-		if rl.IsRateLimited(clientIP) || rl.isAbuseRateLimited(clientIP) {
+		if rl.isAbuseRateLimited(clientIP) || !rl.tryBeginEnrollment(clientIP) {
 			if reg != nil {
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
 				reg.IncRateLimited()
@@ -409,15 +446,16 @@ func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) h
 			return
 		}
 		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		defer func() {
+			rl.finishEnrollment(clientIP, rw.code != http.StatusUnauthorized)
+		}()
 		if reg != nil {
 			reg.IncInFlight()
 			defer reg.DecInFlight()
 		}
 		next.ServeHTTP(rw, r)
 		switch rw.code {
-		case http.StatusUnauthorized:
-			rl.RecordFailure(clientIP)
-		case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
+		case http.StatusBadRequest, http.StatusRequestTimeout, http.StatusRequestEntityTooLarge:
 			rl.recordAbuse(clientIP)
 		}
 		if reg != nil {
