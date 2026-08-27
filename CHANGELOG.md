@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explain that remote access needs Portwing TLS or a private listener behind a
   TLS-terminating reverse proxy.
 
+### Fixed
+
+- **Standard-mode exec relays terminate when either side closes.** Client EOF
+  half-closes Docker input so remaining output can drain, while Docker EOF or a
+  fatal copy error closes both connections and unblocks the peer goroutine.
+
 ## [v0.9.9] - 2026-08-23
 
 The output of a whole-app audit: five parallel review lanes plus an
