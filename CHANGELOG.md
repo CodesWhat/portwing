@@ -62,6 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ed25519 key IDs have one implementation.** Registry loading, enrollment,
   and edge hello identity now share `KeyIDForPublicKey`, backed by a generated
   key registry round-trip regression.
+- **Interactive Docker attach works through standard mode.** Exact exec-start
+  and container-attach upgrades now share a bounded, credential-stripping Unix
+  socket relay that preserves buffered client input and bidirectional traffic.
+- **Shutdown retains final audit records.** Active HTTP and hijacked handlers
+  drain before the audit sink closes, including successful retries after a
+  timed-out shutdown.
+- **The first container refresh is published immediately.** Standard-mode SSE
+  clients connected during startup now receive the initial inventory correction
+  instead of waiting for the first polling interval.
 
 ## [v0.9.9] - 2026-08-23
 
