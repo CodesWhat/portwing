@@ -2,8 +2,8 @@
 // the Streamable HTTP transport (protocol revision 2025-11-25). It exposes
 // Docker container state to AI assistants over a single POST endpoint.
 //
-// Transport: stateless single-request mode — every POST returns
-// Content-Type: application/json with one JSON-RPC response object.
+// Transport: stateless single-request mode. Requests return one JSON-RPC
+// response object; notifications return 202 Accepted with no body.
 // Session IDs are not assigned; clients operate without Mcp-Session-Id.
 // This is compliant: the spec makes session management optional ("MAY").
 //
@@ -12,6 +12,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -91,14 +92,77 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req rpcRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	if !json.Valid(body) {
 		writeError(w, nil, errParseError, "parse error")
 		return
 	}
 
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+		writeError(w, nil, errInvalidRequest, "request must be an object")
+		return
+	}
+
+	rawMethod, hasMethod := fields["method"]
+	_, hasResult := fields["result"]
+	_, hasError := fields["error"]
+	if !hasMethod && (hasResult || hasError) {
+		if validRPCResponse(fields) {
+			w.WriteHeader(http.StatusAccepted)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		return
+	}
+
+	var req rpcRequest
+	if rawID, ok := fields["id"]; ok {
+		req.ID = rawID
+		if !validRequestID(rawID) {
+			writeError(w, nil, errInvalidRequest, "id must be a string or number")
+			return
+		}
+	}
+
+	if rawVersion, ok := fields["jsonrpc"]; ok {
+		_ = json.Unmarshal(rawVersion, &req.JSONRPC)
+	}
 	if req.JSONRPC != "2.0" {
 		writeError(w, req.ID, errInvalidRequest, "jsonrpc must be \"2.0\"")
+		return
+	}
+
+	if hasResult || hasError {
+		writeError(w, req.ID, errInvalidRequest, "request must not contain result or error")
+		return
+	}
+	if !hasMethod {
+		writeError(w, req.ID, errInvalidRequest, "method must be a string")
+		return
+	}
+	var method any
+	_ = json.Unmarshal(rawMethod, &method)
+	methodName, ok := method.(string)
+	if !ok {
+		writeError(w, req.ID, errInvalidRequest, "method must be a string")
+		return
+	}
+	req.Method = methodName
+	if rawParams, ok := fields["params"]; ok {
+		var params map[string]json.RawMessage
+		if err := json.Unmarshal(rawParams, &params); err != nil || params == nil {
+			if req.ID == nil {
+				w.WriteHeader(http.StatusBadRequest)
+			} else {
+				writeError(w, req.ID, errInvalidParams, "params must be an object")
+			}
+			return
+		}
+		req.Params = rawParams
+	}
+
+	if req.ID == nil {
+		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 
@@ -108,8 +172,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "initialize":
 		h.handleInitialize(w, req)
 	case "notifications/initialized":
-		// One-way notification — acknowledge with 202 and no body.
-		w.WriteHeader(http.StatusAccepted)
+		writeError(w, req.ID, errInvalidRequest, "notifications must not include an id")
 	case "ping":
 		writeResult(w, req.ID, map[string]any{})
 	case "tools/list":
@@ -118,6 +181,74 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleToolsCall(ctx, w, req)
 	default:
 		writeError(w, req.ID, errMethodNotFound, fmt.Sprintf("method not found: %s", req.Method))
+	}
+}
+
+func validRPCResponse(fields map[string]json.RawMessage) bool {
+	var version string
+	if err := json.Unmarshal(fields["jsonrpc"], &version); err != nil || version != "2.0" {
+		return false
+	}
+	if rawID, ok := fields["id"]; !ok || !validRequestID(rawID) {
+		return false
+	}
+
+	rawResult, hasResult := fields["result"]
+	rawError, hasError := fields["error"]
+	if hasResult == hasError {
+		return false
+	}
+	if hasResult {
+		var result map[string]json.RawMessage
+		if err := json.Unmarshal(rawResult, &result); err != nil || result == nil {
+			return false
+		}
+	}
+	if hasError && !validRPCError(rawError) {
+		return false
+	}
+	return true
+}
+
+func validRPCError(raw json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return false
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(fields["code"]))
+	decoder.UseNumber()
+	var code json.Number
+	if err := decoder.Decode(&code); err != nil {
+		return false
+	}
+	if _, err := code.Int64(); err != nil {
+		return false
+	}
+
+	var message any
+	if err := json.Unmarshal(fields["message"], &message); err != nil {
+		return false
+	}
+	_, ok := message.(string)
+	return ok
+}
+
+func validRequestID(raw json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var id any
+	if err := decoder.Decode(&id); err != nil {
+		return false
+	}
+
+	switch id.(type) {
+	case string:
+		return true
+	case json.Number:
+		return true
+	default:
+		return false
 	}
 }
 
