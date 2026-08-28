@@ -20,6 +20,8 @@ restore_release_workflows() {
 
 git archive HEAD | tar -x -C "${fixture}"
 cp scripts/package-release-config-test.sh "${fixture}/scripts/"
+cp scripts/verify-scanner-exclusions.sh "${fixture}/scripts/"
+cp .grype.yaml "${fixture}/"
 cp api/openapi.yaml "${fixture}/api/"
 cp docs/content/docs/api-reference.mdx "${fixture}/docs/content/docs/"
 cp docs/content/docs/standalone-mode.mdx "${fixture}/docs/content/docs/"
@@ -142,6 +144,41 @@ expect_release_contract_failure \
 	"FAIL: release-cut.yml must prove TARGET_SHA is on origin/main before creating the release tag" \
 	"the package release contract must reject a release cut that can tag a commit outside origin/main"
 restore_release_workflows
+
+for advisory_id in GHSA-pxq6-2prw-chj9 GO-2026-4883 GHSA-x744-4wpc-v9h2 GO-2026-4887; do
+	awk -v advisory_id="${advisory_id}" '
+		$1 == "-" && $2 == "vulnerability:" { skip = ($3 == advisory_id) }
+		!skip { print }
+	' "${fixture}/.grype.yaml" >"${fixture}/.grype.yaml.tmp"
+	mv "${fixture}/.grype.yaml.tmp" "${fixture}/.grype.yaml"
+	expect_release_contract_failure \
+		"FAIL: .grype.yaml must contain exactly one ${advisory_id} ignore scoped to github.com/docker/docker v28.5.2+incompatible at **/usr/bin/docker-compose" \
+		"the package release contract must reject removal of ${advisory_id} from the scoped Docker Compose advisory aliases"
+	cp .grype.yaml "${fixture}/"
+done
+
+while IFS='|' read -r scope_field replacement; do
+	awk -v scope_field="${scope_field}:" -v replacement="${replacement}" '
+		$1 == "-" && $2 == "vulnerability:" { target = ($3 == "GO-2026-4887") }
+		target && $1 == scope_field && !changed {
+			print "      " scope_field " " replacement
+			changed = 1
+			next
+		}
+		{ print }
+		END { if (!changed) exit 1 }
+	' "${fixture}/.grype.yaml" >"${fixture}/.grype.yaml.tmp"
+	mv "${fixture}/.grype.yaml.tmp" "${fixture}/.grype.yaml"
+	expect_release_contract_failure \
+		"FAIL: .grype.yaml must contain exactly one GO-2026-4887 ignore scoped to github.com/docker/docker v28.5.2+incompatible at **/usr/bin/docker-compose" \
+		"the package release contract must reject changing the GO-2026-4887 ${scope_field} scope"
+	cp .grype.yaml "${fixture}/"
+done <<'EOF'
+name|github.com/docker/other
+version|v28.5.3+incompatible
+type|unknown
+location|"**/usr/bin/*"
+EOF
 
 prefix_version="${release_version}0"
 
