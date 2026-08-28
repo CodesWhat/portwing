@@ -162,6 +162,32 @@ func TestKeyIDForPublicKey_Deterministic(t *testing.T) {
 	}
 }
 
+func TestGeneratedKeyIDMatchesLoadedRegistry(t *testing.T) {
+	t.Parallel()
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	pub := priv.Public().(ed25519.PublicKey)
+	path := filepath.Join(t.TempDir(), "authorized_keys")
+	if err := os.WriteFile(path, []byte(AuthorizedKeyLine(pub, "round-trip")+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	registry := NewKeyRegistry(path)
+	if err := registry.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	keyID := KeyIDForPublicKey(pub)
+	loaded, ok := registry.LookupByID(keyID)
+	if !ok {
+		t.Fatalf("generated key ID %q was not present after registry load", keyID)
+	}
+	if !ed25519.PublicKey(loaded.PubKey).Equal(pub) {
+		t.Fatal("loaded public key does not match generated public key")
+	}
+}
+
 func TestNewNonce_Format(t *testing.T) {
 	t.Parallel()
 	n, err := NewNonce()

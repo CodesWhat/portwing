@@ -5,9 +5,8 @@ package auth
 
 import (
 	"bufio"
-	"crypto/sha256"
+	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -165,19 +164,13 @@ func parseKeyLine(line string) (*AuthorizedKey, error) {
 		comment = strings.Join(parts[2:], " ")
 	}
 
-	keyID := deriveKeyID(raw)
+	keyID := KeyIDForPublicKey(ed25519.PublicKey(raw))
 
 	return &AuthorizedKey{
 		KeyID:   keyID,
 		PubKey:  raw,
 		Comment: comment,
 	}, nil
-}
-
-// deriveKeyID computes hex(SHA-256(raw 32-byte pubkey)[:8]).
-func deriveKeyID(pubKey []byte) string {
-	h := sha256.Sum256(pubKey)
-	return hex.EncodeToString(h[:8])
 }
 
 // checkFilePermissions validates the opened file rather than a prior path stat,

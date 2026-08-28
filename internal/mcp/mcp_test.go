@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,11 @@ func shortSocketPath(t *testing.T) string {
 // stubDocker starts a minimal stub Docker HTTP server on a Unix socket and
 // returns a configured docker.Client and a shutdown func.
 func stubDocker(t *testing.T) (*docker.Client, func()) {
+	t.Helper()
+	return stubDockerWithLogs(t, mcpTestLogFrame(1, []byte("hello from nginx\n")))
+}
+
+func stubDockerWithLogs(t *testing.T, logs []byte) (*docker.Client, func()) {
 	t.Helper()
 
 	socketPath := shortSocketPath(t)
@@ -92,16 +98,7 @@ func stubDocker(t *testing.T) (*docker.Client, func()) {
 	})
 
 	mux.HandleFunc("/v1.44/containers/abc123/logs", func(w http.ResponseWriter, r *http.Request) {
-		// Write two Docker-multiplexed log frames (stdout).
-		line := "hello from nginx\n"
-		frame := make([]byte, 8+len(line))
-		frame[0] = 1 // stdout
-		frame[4] = 0
-		frame[5] = 0
-		frame[6] = 0
-		frame[7] = byte(len(line))
-		copy(frame[8:], line)
-		_, _ = w.Write(frame)
+		_, _ = w.Write(logs)
 	})
 
 	mux.HandleFunc("/v1.44/containers/abc123/stats", func(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +129,17 @@ func stubDocker(t *testing.T) (*docker.Client, func()) {
 	return client, shutdown
 }
 
+func mcpTestLogFrame(streamType byte, payload []byte) []byte {
+	frame := make([]byte, 8+len(payload))
+	frame[0] = streamType
+	frame[4] = byte(uint32(len(payload)) >> 24)
+	frame[5] = byte(uint32(len(payload)) >> 16)
+	frame[6] = byte(uint32(len(payload)) >> 8)
+	frame[7] = byte(len(payload))
+	copy(frame[8:], payload)
+	return frame
+}
+
 func newTestHandler(t *testing.T) (*Handler, func()) {
 	t.Helper()
 	client, shutdown := stubDocker(t)
@@ -146,6 +154,14 @@ func postMCP(t *testing.T, h *Handler, body any) *httptest.ResponseRecorder {
 		t.Fatalf("marshal: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/_portwing/mcp", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+func postMCPRaw(h *Handler, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/_portwing/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -444,7 +460,8 @@ func TestGetMethodNotAllowed(t *testing.T) {
 	}
 }
 
-// TestNotificationsInitialized verifies that notifications/initialized returns 202.
+// TestNotificationsInitialized verifies that notifications/initialized returns
+// 202 with no response body.
 func TestNotificationsInitialized(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
@@ -457,6 +474,236 @@ func TestNotificationsInitialized(t *testing.T) {
 	if rr.Code != http.StatusAccepted {
 		t.Errorf("status %d, want 202", rr.Code)
 	}
+	if rr.Body.Len() != 0 {
+		t.Errorf("body = %q, want empty", rr.Body.String())
+	}
+}
+
+func TestMCPRequestIDValidation(t *testing.T) {
+	h := NewHandler(nil, nil)
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{name: "null", id: "null"},
+		{name: "boolean", id: "true"},
+		{name: "object", id: `{}`},
+		{name: "array", id: `[]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := postMCPRaw(h, `{"jsonrpc":"2.0","id":`+tt.id+`,"method":"ping"}`)
+			resp := decodeResponse(t, rr)
+			if resp.Error == nil || resp.Error.Code != errInvalidRequest {
+				t.Fatalf("error = %+v, want code %d", resp.Error, errInvalidRequest)
+			}
+			if string(resp.ID) != "null" {
+				t.Errorf("response id = %s, want null", resp.ID)
+			}
+		})
+	}
+}
+
+func TestMCPRequestIDPreservesValidValues(t *testing.T) {
+	h := NewHandler(nil, nil)
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{name: "escaped string", id: `"\u0026"`},
+		{name: "large integer", id: "1e700"},
+		{name: "integral decimal", id: "1.0"},
+		{name: "fractional number", id: "1.5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := postMCPRaw(h, `{"jsonrpc":"2.0","id":`+tt.id+`,"method":"ping"}`)
+			resp := decodeResponse(t, rr)
+			if resp.Error != nil {
+				t.Fatalf("unexpected error: %+v", resp.Error)
+			}
+			want, err := decodeJSONValue(json.RawMessage(tt.id))
+			if err != nil {
+				t.Fatalf("decode request id: %v", err)
+			}
+			got, err := decodeJSONValue(resp.ID)
+			if err != nil {
+				t.Fatalf("decode response id: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("response id = %s, want value of %s", resp.ID, tt.id)
+			}
+		})
+	}
+}
+
+func TestMCPInvalidIDIsNullWhenVersionIsAlsoInvalid(t *testing.T) {
+	h := NewHandler(nil, nil)
+	rr := postMCPRaw(h, `{"jsonrpc":"1.0","id":{},"method":"ping"}`)
+	resp := decodeResponse(t, rr)
+	if resp.Error == nil || resp.Error.Code != errInvalidRequest {
+		t.Fatalf("error = %+v, want code %d", resp.Error, errInvalidRequest)
+	}
+	if string(resp.ID) != "null" {
+		t.Errorf("response id = %s, want null", resp.ID)
+	}
+}
+
+func TestMCPRejectsMissingOrNonStringMethod(t *testing.T) {
+	h := NewHandler(nil, nil)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing", body: `{"jsonrpc":"2.0"}`},
+		{name: "null", body: `{"jsonrpc":"2.0","method":null}`},
+		{name: "number", body: `{"jsonrpc":"2.0","method":7}`},
+		{name: "top-level null", body: `null`},
+		{name: "top-level array", body: `[]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := postMCPRaw(h, tt.body)
+			resp := decodeResponse(t, rr)
+			if resp.Error == nil || resp.Error.Code != errInvalidRequest {
+				t.Fatalf("error = %+v, want code %d", resp.Error, errInvalidRequest)
+			}
+			if string(resp.ID) != "null" {
+				t.Errorf("response id = %s, want null", resp.ID)
+			}
+		})
+	}
+}
+
+func TestMCPAcceptsResponsesWithoutResponding(t *testing.T) {
+	h := NewHandler(nil, nil)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "result", body: `{"jsonrpc":"2.0","id":1,"result":{}}`},
+		{name: "error", body: `{"jsonrpc":"2.0","id":"request-1","error":{"code":-32601,"message":"not found"}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := postMCPRaw(h, tt.body)
+			if rr.Code != http.StatusAccepted {
+				t.Errorf("status = %d, want %d", rr.Code, http.StatusAccepted)
+			}
+			if rr.Body.Len() != 0 {
+				t.Errorf("body = %q, want empty", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestMCPRejectsInvalidResponsesWithoutResponding(t *testing.T) {
+	h := NewHandler(nil, nil)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "null result", body: `{"jsonrpc":"2.0","id":1,"result":null}`},
+		{name: "array result", body: `{"jsonrpc":"2.0","id":1,"result":[]}`},
+		{name: "scalar result", body: `{"jsonrpc":"2.0","id":1,"result":"value"}`},
+		{name: "result and error", body: `{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":-32601,"message":"not found"}}`},
+		{name: "missing id", body: `{"jsonrpc":"2.0","result":{}}`},
+		{name: "invalid id", body: `{"jsonrpc":"2.0","id":{},"result":{}}`},
+		{name: "invalid version", body: `{"jsonrpc":"1.0","id":1,"result":{}}`},
+		{name: "non-object error", body: `{"jsonrpc":"2.0","id":1,"error":true}`},
+		{name: "missing error code", body: `{"jsonrpc":"2.0","id":1,"error":{"message":"bad"}}`},
+		{name: "fractional error code", body: `{"jsonrpc":"2.0","id":1,"error":{"code":1.5,"message":"bad"}}`},
+		{name: "missing error message", body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32601}}`},
+		{name: "non-string error message", body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":null}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := postMCPRaw(h, tt.body)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+			}
+			if rr.Body.Len() != 0 {
+				t.Errorf("body = %q, want empty", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestMCPRejectsRequestWithResponseFields(t *testing.T) {
+	h := NewHandler(nil, nil)
+	rr := postMCPRaw(h, `{"jsonrpc":"2.0","id":1,"method":"ping","result":{}}`)
+	resp := decodeResponse(t, rr)
+	if resp.Error == nil || resp.Error.Code != errInvalidRequest {
+		t.Fatalf("error = %+v, want code %d", resp.Error, errInvalidRequest)
+	}
+}
+
+func TestValidRequestIDRejectsMalformedJSON(t *testing.T) {
+	if validRequestID(json.RawMessage(`{"unterminated"`)) {
+		t.Error("malformed JSON accepted as a request id")
+	}
+}
+
+func TestMCPRejectsNonObjectParams(t *testing.T) {
+	h := NewHandler(nil, nil)
+	tests := []struct {
+		name   string
+		params string
+	}{
+		{name: "null", params: "null"},
+		{name: "boolean", params: "true"},
+		{name: "string", params: `"value"`},
+		{name: "array", params: `[]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := postMCPRaw(h, `{"jsonrpc":"2.0","id":1,"method":"ping","params":`+tt.params+`}`)
+			resp := decodeResponse(t, rr)
+			if resp.Error == nil || resp.Error.Code != errInvalidParams {
+				t.Fatalf("error = %+v, want code %d", resp.Error, errInvalidParams)
+			}
+		})
+	}
+
+	t.Run("notification uses HTTP rejection without response body", func(t *testing.T) {
+		rr := postMCPRaw(h, `{"jsonrpc":"2.0","method":"ping","params":true}`)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+		}
+		if rr.Body.Len() != 0 {
+			t.Errorf("body = %q, want empty", rr.Body.String())
+		}
+	})
+}
+
+func TestMCPNotificationHandling(t *testing.T) {
+	h := NewHandler(nil, nil)
+	t.Run("request cannot use notification method", func(t *testing.T) {
+		rr := postMCPRaw(h, `{"jsonrpc":"2.0","id":"request-1","method":"notifications/initialized"}`)
+		resp := decodeResponse(t, rr)
+		if resp.Error == nil || resp.Error.Code != errInvalidRequest {
+			t.Fatalf("error = %+v, want code %d", resp.Error, errInvalidRequest)
+		}
+		if string(resp.ID) != `"request-1"` {
+			t.Errorf("response id = %s, want %q", resp.ID, "request-1")
+		}
+	})
+
+	t.Run("notification never receives response", func(t *testing.T) {
+		rr := postMCPRaw(h, `{"jsonrpc":"2.0","method":"ping"}`)
+		if rr.Code != http.StatusAccepted {
+			t.Errorf("status = %d, want %d", rr.Code, http.StatusAccepted)
+		}
+		if rr.Body.Len() != 0 {
+			t.Errorf("body = %q, want empty", rr.Body.String())
+		}
+	})
 }
 
 // TestToolsCallContainerLogs verifies container_logs against the stub.
@@ -510,6 +757,71 @@ func TestToolsCallContainerLogs(t *testing.T) {
 	}
 	if out["id"] != "abc123" {
 		t.Errorf("id = %v, want abc123", out["id"])
+	}
+}
+
+func TestToolsCallContainerLogsDecodesRawAndMultiplexedStreams(t *testing.T) {
+	stdout := mcpTestLogFrame(1, []byte("stdout line\n"))
+	stderr := mcpTestLogFrame(2, []byte("stderr line\n"))
+	tests := []struct {
+		name      string
+		body      []byte
+		wantLines []string
+	}{
+		{name: "short raw TTY", body: []byte("tty\n"), wantLines: []string{"stdout: tty"}},
+		{
+			name:      "multiplexed stdout and stderr",
+			body:      append(stdout, stderr...),
+			wantLines: []string{"stdout: stdout line", "stderr: stderr line"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, shutdown := stubDockerWithLogs(t, tt.body)
+			defer shutdown()
+			h := NewHandler(client, nil)
+
+			rr := postMCP(t, h, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      6,
+				"method":  "tools/call",
+				"params": map[string]any{
+					"name":      "container_logs",
+					"arguments": map[string]any{"id": "abc123", "tail": 50},
+				},
+			})
+
+			resp := decodeResponse(t, rr)
+			result, ok := resp.Result.(map[string]any)
+			if !ok {
+				t.Fatalf("result type = %T, want object", resp.Result)
+			}
+			if isErr, _ := result["isError"].(bool); isErr {
+				t.Fatalf("container_logs returned an error: %+v", result)
+			}
+			content, ok := result["content"].([]any)
+			if !ok || len(content) != 1 {
+				t.Fatalf("content = %+v, want one block", result["content"])
+			}
+			block, ok := content[0].(map[string]any)
+			if !ok {
+				t.Fatalf("content block type = %T, want object", content[0])
+			}
+			text, ok := block["text"].(string)
+			if !ok {
+				t.Fatalf("content text type = %T, want string", block["text"])
+			}
+			var output struct {
+				Lines []string `json:"lines"`
+			}
+			if err := json.Unmarshal([]byte(text), &output); err != nil {
+				t.Fatalf("decode tool output: %v", err)
+			}
+			if got, want := strings.Join(output.Lines, "\n"), strings.Join(tt.wantLines, "\n"); got != want {
+				t.Fatalf("lines = %q, want %q", output.Lines, tt.wantLines)
+			}
+		})
 	}
 }
 
@@ -621,9 +933,9 @@ func TestDemuxLogs(t *testing.T) {
 	writeFrame(1, line1)
 	writeFrame(2, line2)
 
-	lines, err := demuxLogs(&buf)
+	lines, err := decodeContainerLogLines(&buf)
 	if err != nil {
-		t.Fatalf("demuxLogs error: %v", err)
+		t.Fatalf("decodeContainerLogLines error: %v", err)
 	}
 
 	if len(lines) != 2 {
@@ -634,6 +946,77 @@ func TestDemuxLogs(t *testing.T) {
 	}
 	if !strings.HasPrefix(lines[1], "stderr:") {
 		t.Errorf("line[1] = %q, want stderr: prefix", lines[1])
+	}
+}
+
+func TestDecodeContainerLogLinesFlushesPartialLineWhenStreamChanges(t *testing.T) {
+	t.Parallel()
+
+	input := append(
+		mcpTestLogFrame(1, []byte("partial stdout")),
+		mcpTestLogFrame(2, []byte("stderr line\n"))...,
+	)
+	lines, err := decodeContainerLogLines(bytes.NewReader(input))
+	if err != nil {
+		t.Fatalf("decodeContainerLogLines: %v", err)
+	}
+	want := []string{"stdout: partial stdout", "stderr: stderr line"}
+	if got := strings.Join(lines, "\n"); got != strings.Join(want, "\n") {
+		t.Fatalf("lines = %q, want %q", lines, want)
+	}
+}
+
+type fragmentedLogReader struct {
+	reader *bytes.Reader
+	max    int
+}
+
+func (r *fragmentedLogReader) Read(p []byte) (int, error) {
+	if len(p) > r.max {
+		p = p[:r.max]
+	}
+	return r.reader.Read(p)
+}
+
+func TestDecodeContainerLogLinesPreservesLinesAcrossReadBoundaries(t *testing.T) {
+	t.Parallel()
+
+	longLine := strings.Repeat("x", 40<<10)
+	stdout := mcpTestLogFrame(1, []byte("stdout line\n"))
+	stderr := mcpTestLogFrame(2, []byte("stderr line\n"))
+	tests := []struct {
+		name      string
+		body      []byte
+		fragment  int
+		wantLines []string
+	}{
+		{
+			name:      "long raw line",
+			body:      []byte(longLine),
+			fragment:  3,
+			wantLines: []string{"stdout: " + longLine},
+		},
+		{
+			name:      "fragmented multiplexed headers and payloads",
+			body:      append(stdout, stderr...),
+			fragment:  1,
+			wantLines: []string{"stdout: stdout line", "stderr: stderr line"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			reader := &fragmentedLogReader{reader: bytes.NewReader(tt.body), max: tt.fragment}
+			lines, err := decodeContainerLogLines(reader)
+			if err != nil {
+				t.Fatalf("decodeContainerLogLines: %v", err)
+			}
+			if got, want := strings.Join(lines, "\n"), strings.Join(tt.wantLines, "\n"); got != want {
+				t.Fatalf("lines = %q, want %q", lines, tt.wantLines)
+			}
+		})
 	}
 }
 

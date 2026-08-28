@@ -4,7 +4,7 @@ package server
 // Targets: NewServer (Ed25519/enrollment/TLS/SIGHUP/TrustedProxies paths),
 // handleDockerProxy (error paths, streaming), handleExecHijack,
 // pollContainers, ListenAndServe, Shutdown (hupCh path),
-// AuthMiddleware / rateLimitOnly / AuthMiddlewareWithEd25519 (metrics paths),
+// rateLimitOnly / AuthMiddlewareWithEd25519 (metrics paths),
 // statusRecorder Hijack (supported path), clientIP (X-Real-IP / all-trusted XFF),
 // ParseTrustedProxies (IPv6 and bare-IP), argon2 edge cases, handleInfo docker error.
 
@@ -616,6 +616,36 @@ type hijackableResponseWriter struct {
 	code int
 }
 
+type hijackedRead struct {
+	data []byte
+	err  error
+}
+
+func captureHijackedResponse(conn net.Conn) <-chan hijackedRead {
+	result := make(chan hijackedRead, 1)
+	go func() {
+		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			result <- hijackedRead{err: err}
+			return
+		}
+		data, err := io.ReadAll(conn)
+		result <- hijackedRead{data: data, err: err}
+	}()
+	return result
+}
+
+func requireBadGatewayResponse(t *testing.T, result <-chan hijackedRead) {
+	t.Helper()
+	read := <-result
+	if read.err != nil {
+		t.Fatalf("read hijacked response: %v", read.err)
+	}
+	const want = "HTTP/1.1 502 Bad Gateway\r\n\r\n"
+	if string(read.data) != want {
+		t.Fatalf("hijacked response = %q, want %q", read.data, want)
+	}
+}
+
 func (h *hijackableResponseWriter) Header() http.Header { return h.hdr }
 func (h *hijackableResponseWriter) WriteHeader(code int) {
 	h.code = code
@@ -695,24 +725,12 @@ func TestHandleExecHijackDockerDialFails(t *testing.T) {
 		hdr:  make(http.Header),
 	}
 
-	// Read whatever the server writes to the hijacked connection in background.
-	done := make(chan []byte, 1)
-	go func() {
-		b, _ := io.ReadAll(clientConn)
-		done <- b
-	}()
+	response := captureHijackedResponse(clientConn)
 
 	req := httptest.NewRequest(http.MethodPost, "/exec/abc123/start", strings.NewReader(`{}`))
 	s.handleExecHijack(hrw, req)
 
-	// Close server side so the reader goroutine unblocks.
-	serverConn.Close()
-	resp := <-done
-	// 502 Bad Gateway should have been written to the client connection.
-	if !strings.Contains(string(resp), "502") {
-		t.Logf("response bytes: %q", string(resp))
-		// The write may or may not succeed on a pipe; just ensure no panic.
-	}
+	requireBadGatewayResponse(t, response)
 }
 
 // TestHandleExecHijackFullProxy tests the exec hijack against a real stub
@@ -898,7 +916,7 @@ func (e *errorAdapter) RefreshContainers(_ context.Context) ([]adapter.Container
 }
 
 // ---------------------------------------------------------------------------
-// AuthMiddleware: with metrics registry
+// AuthMiddlewareWithEd25519: token path with metrics registry
 // ---------------------------------------------------------------------------
 
 func TestAuthMiddlewareWithMetricsNoAuth(t *testing.T) {
@@ -908,7 +926,7 @@ func TestAuthMiddlewareWithMetricsNoAuth(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 	// nil verifier → no-auth pass-through
-	h := rl.AuthMiddleware(nil, noAudit(t), reg, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(nil, Ed25519Config{}, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/v1.44/containers/json", nil)
 	rec := httptest.NewRecorder()
@@ -926,7 +944,7 @@ func TestAuthMiddlewareWithMetricsRateLimited(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 	verifier := newRawTokenVerifier("correct")
-	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	// Exhaust limit.
 	for i := 0; i < 10; i++ {
@@ -955,7 +973,7 @@ func TestAuthMiddlewareWithMetricsAuthFailure(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 	verifier := newRawTokenVerifier("correct")
-	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerPortwingToken, "bad")
@@ -974,7 +992,7 @@ func TestAuthMiddlewareWithMetricsSuccess(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 	verifier := newRawTokenVerifier("correct")
-	h := rl.AuthMiddleware(verifier, noAudit(t), reg, http.HandlerFunc(okHandler))
+	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set(headerPortwingToken, "correct")

@@ -571,6 +571,17 @@ func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Co
 	if err != nil {
 		return nil, fmt.Errorf("dial docker socket: %w", err)
 	}
+	cancelWatchDone := make(chan struct{})
+	stopCancelWatch := context.AfterFunc(ctx, func() {
+		defer close(cancelWatchDone)
+		closeConn(conn, "exec start context canceled")
+	})
+	cancelWatchActive := true
+	defer func() {
+		if cancelWatchActive && !stopCancelWatch() {
+			<-cancelWatchDone
+		}
+	}()
 
 	// Bound the write and the 101 read with the same deadline: dockerd can
 	// accept a connection and then never answer (a wedged daemon, or its exec
@@ -591,6 +602,9 @@ func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Co
 	)
 
 	if _, err := conn.Write([]byte(raw)); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("writing exec start request: %w", ctxErr)
+		}
 		closeConn(conn, "exec start write failure")
 		return nil, fmt.Errorf("writing exec start request: %w", err)
 	}
@@ -598,6 +612,9 @@ func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Co
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("reading exec start response: %w", ctxErr)
+		}
 		closeConn(conn, "exec start response failure")
 		return nil, fmt.Errorf("reading exec start response: %w", err)
 	}
@@ -617,6 +634,12 @@ func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Co
 		closeConn(conn, "exec start deadline clear failure")
 		return nil, fmt.Errorf("clearing exec start deadline: %w", err)
 	}
+	if !stopCancelWatch() {
+		<-cancelWatchDone
+		cancelWatchActive = false
+		return nil, fmt.Errorf("completing exec start: %w", context.Cause(ctx))
+	}
+	cancelWatchActive = false
 
 	// If the bufio reader has consumed bytes past the HTTP response, wrap
 	// the connection so those bytes are not lost.

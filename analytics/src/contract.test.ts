@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildCtaEvent,
+  buildPageleaveEvent,
   buildPageviewEvent,
   buildWebVitalsEvent,
   canonicalizeAnalyticsRoute,
@@ -24,6 +25,7 @@ test("pageviews canonicalize known routes and collapse unknown routes", () => {
       ...BASE_PROPERTIES,
       surface: "marketing",
       path: "/",
+      $pathname: "/",
     },
   });
   assert.deepEqual(buildPageviewEvent("/docs/security-model?token=secret#threats"), {
@@ -32,6 +34,7 @@ test("pageviews canonicalize known routes and collapse unknown routes", () => {
       ...BASE_PROPERTIES,
       surface: "docs",
       path: "/docs/security-model",
+      $pathname: "/docs/security-model",
     },
   });
   assert.deepEqual(buildPageviewEvent("/private/customer/acme?token=secret"), {
@@ -40,6 +43,7 @@ test("pageviews canonicalize known routes and collapse unknown routes", () => {
       ...BASE_PROPERTIES,
       surface: "marketing",
       path: "/_other",
+      $pathname: "/_other",
     },
   });
   assert.deepEqual(buildPageviewEvent("/docs/private/customer/acme"), {
@@ -48,6 +52,7 @@ test("pageviews canonicalize known routes and collapse unknown routes", () => {
       ...BASE_PROPERTIES,
       surface: "docs",
       path: "/_other",
+      $pathname: "/_other",
     },
   });
 });
@@ -114,6 +119,7 @@ test("before_send reconstructs a strict event and property allowlist", () => {
         ...BASE_PROPERTIES,
         surface: "docs",
         path: "/docs",
+        $pathname: "/docs",
         token: "phc_project-token",
         $cookieless_mode: true,
         $process_person_profile: false,
@@ -460,6 +466,7 @@ test("web vitals reporters stay page-load scoped across navigation and revisits"
       ...BASE_PROPERTIES,
       surface: "marketing",
       path: "/compare",
+      $pathname: "/compare",
     },
   });
   assert.equal(emitted.length, 0);
@@ -527,7 +534,7 @@ test("PostHog initializes only with the exact production proxy contract", () => 
       autocapture: false,
       rageclick: false,
       capture_pageview: false,
-      capture_pageleave: false,
+      capture_pageleave: true,
       capture_heatmaps: false,
       capture_dead_clicks: false,
       capture_exceptions: false,
@@ -554,4 +561,76 @@ test("PostHog initializes only with the exact production proxy contract", () => 
   );
   assert.equal("disable_external_dependency_loading" in options, false);
   assert.equal(options.before_send, sanitizeEvent);
+});
+
+test("pageleave mirrors the pageview contract and canonicalizes the same way", () => {
+  assert.deepEqual(buildPageleaveEvent("/docs/security-model?token=secret#threats"), {
+    event: "$pageleave",
+    properties: {
+      ...BASE_PROPERTIES,
+      surface: "docs",
+      path: "/docs/security-model",
+      $pathname: "/docs/security-model",
+    },
+  });
+
+  // posthog-js emits $pageleave itself once capture_pageleave is true, so it
+  // reaches before_send carrying PostHog's own properties rather than ours.
+  // The sanitizer has to rebuild it from $current_url like any other envelope;
+  // before this branch existed it returned null and every $pageleave was
+  // dropped silently, which is why flipping the option alone fixes nothing.
+  assert.deepEqual(
+    sanitizeEvent({
+      event: "$pageleave",
+      uuid: "internal-posthog-id",
+      properties: {
+        ...COOKIELESS_HASH_PROPERTIES,
+        $current_url: "https://portwing.codeswhat.com/compare?token=secret#private",
+        token: "phc_project-token",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+        $referrer: "https://search.example/private",
+        title: "customer private title",
+      },
+    }),
+    {
+      event: "$pageleave",
+      uuid: "internal-posthog-id",
+      properties: {
+        ...BASE_PROPERTIES,
+        surface: "marketing",
+        path: "/compare",
+        $pathname: "/compare",
+        token: "phc_project-token",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+        ...COOKIELESS_HASH_PROPERTIES,
+      },
+    },
+  );
+});
+
+test("$pathname never diverges from the allowlisted path", () => {
+  // $pathname exists so PostHog's Web analytics Page / Entry page / Exit page
+  // tables resolve at all; they read that property and nothing else. It must
+  // stay bound to the canonicalized path: if it ever carries the raw pathname,
+  // every unlisted route starts leaking into the analytics project, which is
+  // exactly what the MARKETING_PATHS/DOCS_PATHS allowlist exists to prevent.
+  for (const rawPath of [
+    "/",
+    "/compare/watchtower",
+    "/docs/security-model",
+    "/private/customer/acme",
+    "/docs/private/customer/acme?token=secret#fragment",
+  ]) {
+    for (const build of [buildPageviewEvent, buildPageleaveEvent]) {
+      const { properties } = build(rawPath);
+      assert.equal(properties.$pathname, properties.path);
+      assert.equal(
+        String(properties.$pathname).includes("customer"),
+        false,
+        `unlisted route leaked into $pathname for ${rawPath}`,
+      );
+    }
+  }
 });

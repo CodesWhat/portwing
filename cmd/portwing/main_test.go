@@ -796,6 +796,10 @@ func TestRun_StandardMode_DrainsInFlightRequestOnShutdown(t *testing.T) {
 	setenv(t, "ADAPTER", "drydock")
 
 	base := "http://127.0.0.1:" + port
+	httpClient := &http.Client{
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+	t.Cleanup(httpClient.CloseIdleConnections)
 
 	// runResult carries the return time captured inside the goroutine, at the
 	// moment run() actually returns — NOT the time the test later happens to
@@ -817,7 +821,7 @@ func TestRun_StandardMode_DrainsInFlightRequestOnShutdown(t *testing.T) {
 	// endpoint, doesn't touch docker).
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		resp, err := http.Get(base + "/health")
+		resp, err := httpClient.Get(base + "/health")
 		if err == nil {
 			resp.Body.Close()
 			break
@@ -837,7 +841,7 @@ func TestRun_StandardMode_DrainsInFlightRequestOnShutdown(t *testing.T) {
 	}
 	reqDone := make(chan reqResult, 1)
 	go func() {
-		resp, err := http.Get(base + "/_portwing/health")
+		resp, err := httpClient.Get(base + "/_portwing/health")
 		res := reqResult{err: err, done: time.Now()}
 		if err == nil {
 			res.status = resp.StatusCode

@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { type Milestone, roadmap } from "@/app/data/roadmap";
 import { SectionHeading } from "@/components/section-heading";
+import { SITE_CONFIG } from "@/lib/site-config";
 
 // Roadmap = git-graph timeline (newest-first, planned on top).
 // Released = filled node, HEAD highlighted, planned = hollow dashed node.
@@ -34,7 +35,7 @@ function GitLogRow({ milestone }: { milestone: Milestone }) {
     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
       {isHead ? (
         <span className="rounded bg-violet-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-violet-600 dark:bg-violet-500/20 dark:text-violet-400">
-          HEAD -&gt; {milestone.version}
+          HEAD -&gt; v{SITE_CONFIG.version}
         </span>
       ) : (
         <span

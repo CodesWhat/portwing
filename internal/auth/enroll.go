@@ -14,9 +14,15 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 )
 
 const maxEnrollmentBodyBytes int64 = 64 * 1024
+
+// enrollmentBodyReadDeadline bounds how long an unauthenticated enrollment
+// request may occupy a handler while supplying its body. A var, not a const,
+// lets tests exercise the timeout without waiting for the production value.
+var enrollmentBodyReadDeadline = 10 * time.Second
 
 // enrollRequest is the JSON body for POST /api/portwing/enroll.
 type enrollRequest struct {
@@ -43,6 +49,10 @@ type Enroller struct {
 	// the client address, the derived key ID ("" when unavailable), and the
 	// outcome ("allowed" or "denied"). Used for audit logging.
 	OnResult func(actor, keyID, outcome string)
+
+	// ActorResolver, when non-nil, resolves the client recorded in enrollment
+	// audit events. The default uses the direct peer from RemoteAddr.
+	ActorResolver func(*http.Request) string
 }
 
 // NewEnroller creates an Enroller. token is the pre-configured enrollment
@@ -69,24 +79,33 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rc := http.NewResponseController(w)
+	if err := rc.SetReadDeadline(time.Now().Add(enrollmentBodyReadDeadline)); err != nil {
+		slog.Warn("setting enrollment body read deadline", "error", err)
+	} else {
+		defer func() {
+			if err := rc.SetReadDeadline(time.Time{}); err != nil {
+				slog.Warn("clearing enrollment body read deadline", "error", err)
+			}
+		}()
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxEnrollmentBodyBytes)
 	decoder := json.NewDecoder(r.Body)
 	var req enrollRequest
 	if err := decoder.Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeEnrollmentDecodeError(w, err)
 		return
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeEnrollmentDecodeError(w, err)
 		return
 	}
 
 	actor := remoteHost(r)
+	if e.ActorResolver != nil {
+		actor = e.ActorResolver(r)
+	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -120,7 +139,7 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keyID := deriveKeyID(rawPub)
+	keyID := KeyIDForPublicKey(ed25519.PublicKey(rawPub))
 	comment := fmt.Sprintf("enrolled:%s", keyID)
 	line := AuthorizedKeyLine(ed25519.PublicKey(rawPub), comment)
 
@@ -151,6 +170,19 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		KeyID:   keyID,
 		Comment: comment,
 	})
+}
+
+func writeEnrollmentDecodeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		http.Error(w, "request body read timed out", http.StatusRequestTimeout)
+		return
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, "invalid JSON", http.StatusBadRequest)
 }
 
 // notify invokes the OnResult callback if configured.

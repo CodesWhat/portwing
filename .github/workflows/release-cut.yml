@@ -58,6 +58,16 @@ jobs:
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
           echo "Target SHA: ${sha}"
 
+      - name: Require target SHA on main
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "${TARGET_SHA}" origin/main; then
+            echo "::error::Release target ${TARGET_SHA} is not on origin/main."
+            exit 1
+          fi
+
       - name: Verify successful CI on target SHA
         uses: ./.github/actions/verify-ci-success
         with:

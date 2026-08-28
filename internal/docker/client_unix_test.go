@@ -409,6 +409,94 @@ func TestStartExec_WedgedDaemon(t *testing.T) {
 	wg.Wait()
 }
 
+func TestStartExec_CancelInterruptsUpgrade(t *testing.T) {
+	t.Parallel()
+
+	dir := shortTempDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	accepted := make(chan net.Conn, 1)
+	requestRead := make(chan struct{})
+	peerClosed := make(chan struct{})
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		accepted <- conn
+
+		buf := make([]byte, 4096)
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if _, readErr := conn.Read(buf); readErr != nil {
+			return
+		}
+		close(requestRead)
+
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, _ = conn.Read(buf)
+		close(peerClosed)
+	}()
+
+	c := &Client{socketPath: sockPath, apiVersion: "v1.44", dialTimeout: 5 * time.Second}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	result := make(chan error, 1)
+	go func() {
+		_, startErr := c.StartExec(ctx, "exec-canceled", false)
+		result <- startErr
+	}()
+
+	var serverConn net.Conn
+	select {
+	case serverConn = <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Docker exec start connection was not accepted")
+	}
+	select {
+	case <-requestRead:
+	case <-time.After(2 * time.Second):
+		_ = serverConn.Close()
+		<-result
+		<-serverDone
+		t.Fatal("Docker exec start request was not received")
+	}
+
+	started := time.Now()
+	cancel()
+	select {
+	case startErr := <-result:
+		if !errors.Is(startErr, context.Canceled) {
+			t.Fatalf("StartExec error = %v, want context canceled", startErr)
+		}
+		if elapsed := time.Since(started); elapsed > time.Second {
+			t.Fatalf("StartExec took %v to return after cancellation", elapsed)
+		}
+	case <-time.After(time.Second):
+		_ = serverConn.Close()
+		startErr := <-result
+		<-serverDone
+		t.Fatalf("StartExec did not return promptly after cancellation; eventual error: %v", startErr)
+	}
+
+	select {
+	case <-peerClosed:
+	case <-time.After(time.Second):
+		_ = serverConn.Close()
+		<-serverDone
+		t.Fatal("StartExec did not close the raw Unix socket after cancellation")
+	}
+	<-serverDone
+}
+
 // ---- closeConn ----
 
 // errCloseConn is a net.Conn whose Close always returns an error, so we can

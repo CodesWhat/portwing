@@ -88,6 +88,60 @@ reject_text_ci() {
 	fi
 }
 
+validate_current_release_example_values() {
+	local file="$1"
+	local matches="$2"
+	local description="$3"
+	local stale_matches
+
+	if [ -z "${matches}" ]; then
+		echo "FAIL: ${description} (${file} has no recognized active release example)" >&2
+		failures=$((failures + 1))
+		return
+	fi
+
+	stale_matches="$(printf '%s\n' "${matches}" |
+		grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' |
+		grep -Fvx -- "${release_version}" || true)"
+	if [ -n "${stale_matches}" ]; then
+		echo "FAIL: active release examples must use ${release_version} (${file} contains:)" >&2
+		echo "${stale_matches}" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_current_release_examples() {
+	local file="$1"
+	local pattern="$2"
+	local description="$3"
+	local matches
+
+	matches="$(grep -Eo -- "${pattern}" "${file}" || true)"
+	validate_current_release_example_values "${file}" "${matches}" "${description}"
+}
+
+workflow_job_block() {
+	local file="$1"
+	local job="$2"
+
+	awk -v job="${job}" '
+		$0 == "  " job ":" { in_job = 1 }
+		in_job && $0 != "  " job ":" && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }
+		in_job { print }
+	' "${file}"
+}
+
+require_block_text() {
+	local block="$1"
+	local text="$2"
+	local description="$3"
+
+	if ! grep -Fq -- "$text" <<<"${block}"; then
+		echo "FAIL: ${description} (workflow job must contain: ${text})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
 require_text ".goreleaser.yml" "nfpms:" "GoReleaser must define native Linux packages"
 require_text ".goreleaser.yml" "formats: [deb, rpm]" "GoReleaser must build deb and rpm packages"
 require_text ".goreleaser.yml" "src: scripts/portwing.service" "native packages must include the systemd unit"
@@ -169,6 +223,36 @@ require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must 
 require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`" "the compatibility matrix must identify the current release"
 require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
 require_text "examples/observability/docker-compose.yml" "ghcr.io/codeswhat/portwing:${release_version}" "the observability example must pin the current release"
+openapi_agent_version_examples="$(awk '
+	/^        (version|agentVersion):[[:space:]]*$/ { in_agent_version = 1; next }
+	in_agent_version && /^[[:space:]]+example: "[0-9]+\.[0-9]+\.[0-9]+"$/ {
+		print
+		in_agent_version = 0
+		next
+	}
+	in_agent_version && /^        [A-Za-z][A-Za-z0-9]*:/ { in_agent_version = 0 }
+' api/openapi.yaml)"
+validate_current_release_example_values "api/openapi.yaml" \
+	"${openapi_agent_version_examples}" \
+	"OpenAPI agent-version examples must identify the current release"
+require_current_release_examples "api/openapi.yaml" \
+	'"type":"dd:ack".*"version":"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"OpenAPI Drydock handshake examples must identify the current release"
+require_current_release_examples "docs/content/docs/api-reference.mdx" \
+	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"API reference response examples must identify the current release"
+require_current_release_examples "docs/content/docs/standalone-mode.mdx" \
+	'"agentVersion"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"standalone-mode response examples must identify the current release"
+require_current_release_examples "docs/content/docs/observability.mdx" \
+	'"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"observability response examples must identify the current release"
+require_current_release_examples "docs/content/docs/observability.mdx" \
+	'portwing_build_info\{version="[0-9]+\.[0-9]+\.[0-9]+"\}' \
+	"observability build metadata examples must identify the current release"
+require_current_release_examples "docs/content/docs/security-model.mdx" \
+	'^VERSION=[0-9]+\.[0-9]+\.[0-9]+$' \
+	"security verification examples must identify the current release"
 
 # The checks above assert the new version is present on each surface they name.
 # This asserts the previous one is gone everywhere else, which is what actually
@@ -201,6 +285,94 @@ require_text ".github/workflows/release.yml" "fedora:42@sha256:" "the rpm smoke 
 # shellcheck disable=SC2016 # The workflow expands GITHUB_REF_NAME.
 require_text ".github/workflows/release.yml" 'release.yml@refs/tags/${GITHUB_REF_NAME}' "release verification must bind the signer identity to the exact release tag"
 reject_text ".github/workflows/release.yml" "certificate-identity-regexp" "release verification must not accept an unanchored signer identity"
+
+# Publishing holds contents, packages, identity, and attestation write access.
+# Keep all provenance checks in a separate read-only job, then make the
+# privileged job depend on it. Checking these strings file-wide would let the
+# publish job run independently while an unrelated job carried the right text.
+release_job="$(workflow_job_block ".github/workflows/release.yml" "release")"
+require_block_text "${release_job}" "environment: Production" \
+	"the privileged release job must use the Production environment"
+
+release_prerequisite_job="$({
+	awk '
+		$0 == "jobs:" { in_jobs = 1; next }
+		in_jobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+			if (job != "" && checks_main && checks_ci && found == "") found = job
+			job = $1
+			sub(/:$/, "", job)
+			checks_main = 0
+			checks_ci = 0
+			next
+		}
+		in_jobs && /git merge-base --is-ancestor/ && /origin\/main/ { checks_main = 1 }
+		in_jobs && /uses: \.\/\.github\/actions\/verify-ci-success/ { checks_ci = 1 }
+		END {
+			if (job != "" && checks_main && checks_ci && found == "") found = job
+			print found
+		}
+	' .github/workflows/release.yml
+} || true)"
+
+if [ -z "${release_prerequisite_job}" ]; then
+	echo "FAIL: release.yml must have a read-only prerequisite job that proves the tag commit is on origin/main and passed ci-verify.yml" >&2
+	failures=$((failures + 1))
+else
+	release_prerequisite_block="$(workflow_job_block ".github/workflows/release.yml" "${release_prerequisite_job}")"
+	require_block_text "${release_prerequisite_block}" "actions: read" \
+		"the release prerequisite must have only the read access needed to inspect CI"
+	require_block_text "${release_prerequisite_block}" "contents: read" \
+		"the release prerequisite must have only the read access needed to inspect the tag and main"
+	if grep -Eq '^[[:space:]]+[A-Za-z0-9_-]+:[[:space:]]*write[[:space:]]*$' <<<"${release_prerequisite_block}"; then
+		echo "FAIL: the release prerequisite must be unprivileged (its job permissions must not grant write access)" >&2
+		failures=$((failures + 1))
+	fi
+	if ! grep -Eq 'target_sha="\$\(git rev-parse[[:space:]]+"?\$\{GITHUB_REF(_NAME)?\}\^\{commit\}"?\)"' <<<"${release_prerequisite_block}"; then
+		# shellcheck disable=SC2016 # The diagnostic names the literal workflow expression.
+		echo 'FAIL: the release prerequisite must resolve the pushed tag to a commit with git rev-parse "${GITHUB_REF}^{commit}"' >&2
+		failures=$((failures + 1))
+	fi
+	if ! grep -Eq 'git merge-base --is-ancestor[[:space:]]+"?\$\{target_sha\}"?[[:space:]]+origin/main' <<<"${release_prerequisite_block}"; then
+		echo "FAIL: the release prerequisite must prove the resolved tag commit is an ancestor of origin/main" >&2
+		failures=$((failures + 1))
+	fi
+	# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+	require_block_text "${release_prerequisite_block}" 'echo "sha=${target_sha}" >> "$GITHUB_OUTPUT"' \
+		"the release prerequisite must expose the resolved tag commit to the CI check"
+	require_block_text "${release_prerequisite_block}" "workflow-file: ci-verify.yml" \
+		"the release prerequisite must query ci-verify.yml"
+	if ! grep -Eq 'target-sha:[[:space:]]+\$\{\{[[:space:]]*steps\.target\.outputs\.sha[[:space:]]*\}\}' <<<"${release_prerequisite_block}"; then
+		echo "FAIL: the release prerequisite must query CI for the exact commit resolved from the pushed tag" >&2
+		failures=$((failures + 1))
+	fi
+
+	release_needs="$(awk '
+		$1 == "needs:" {
+			field_count = NF
+			$1 = ""
+			gsub(/[\[\],]/, " ")
+			print
+			if (field_count == 1) collecting = 1
+			next
+		}
+		collecting && $1 == "-" { print $2; next }
+		collecting { exit }
+	' <<<"${release_job}" | tr ' ' '\n' | sed '/^$/d')"
+	if ! grep -Fxq -- "${release_prerequisite_job}" <<<"${release_needs}"; then
+		echo "FAIL: the privileged release job must depend on the read-only release prerequisite" >&2
+		failures=$((failures + 1))
+	fi
+fi
+
+release_cut_main_line="$(grep -nE 'git merge-base --is-ancestor[[:space:]]+"?\$\{TARGET_SHA\}"?[[:space:]]+origin/main' \
+	.github/workflows/release-cut.yml | sed -n '1s/:.*//p' || true)"
+release_cut_tag_line="$(grep -nF -- '- name: Create and push release tag' \
+	.github/workflows/release-cut.yml | sed -n '1s/:.*//p' || true)"
+if [ -z "${release_cut_main_line}" ] || [ -z "${release_cut_tag_line}" ] ||
+	[ "${release_cut_main_line:-0}" -ge "${release_cut_tag_line:-0}" ]; then
+	echo "FAIL: release-cut.yml must prove TARGET_SHA is on origin/main before creating the release tag" >&2
+	failures=$((failures + 1))
+fi
 
 # The published image is the only artifact users actually pull, and until this
 # job existed nothing scanned it: security-grype.yml's container scan builds its
@@ -469,6 +641,8 @@ require_text "website/src/components/get-started.tsx" "codeswhat/tap/portwing" "
 require_text "website/src/components/get-started.tsx" "apt install ./portwing_" "the website must advertise the deb package"
 
 require_text "scripts/ci/go-release-check.sh" "bash scripts/package-release-config-test.sh" "CI release adapter must enforce the package release contract"
+require_text "scripts/ci/go-release-check.sh" "bash scripts/install-config-permissions-test.sh" "CI release adapter must enforce installer config permissions"
+require_text "scripts/ci/go-release-check.sh" "bash scripts/standard-mode-bind-config-test.sh" "CI release adapter must enforce safe standard-mode publication"
 
 required_ci_contexts=(
 	"Go CI / Build & Test"

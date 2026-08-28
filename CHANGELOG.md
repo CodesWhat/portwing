@@ -5,6 +5,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [v0.9.10] - 2026-08-27
+
+### Added
+
+- **Privacy-first web analytics now records page exits and canonical paths.**
+  The shared PostHog contract enables `$pageleave` so single-page reading time
+  and bounce behavior are measurable, and supplies the `$pathname` field used
+  by page, entry-page, and exit-page reports. Both navigation events keep the
+  existing finite route allowlist and collapse unknown paths to `/_other`.
+
+### Security
+
+- **Release publishing now verifies provenance before granting write access.**
+  The tag workflow first proves that the tagged commit is on `main` and has a
+  successful `ci-verify.yml` run in a read-only job. The privileged publishing
+  job depends on that result and uses the protected `Production` environment.
+  The release-cut workflow also refuses to create a tag for a commit outside
+  `main`.
+- **Fresh installer configs are private from creation.** The installer creates
+  `/etc/portwing` as root-owned mode `0700` and its generated config as
+  root-owned mode `0600`, including when the directory already exists. It also
+  normalizes existing config ownership and modes without replacing operator
+  content.
+- **Plaintext standard-mode examples bind to loopback.** Compose and `docker
+  run` examples and newly generated service configs now use `127.0.0.1` and
+  explain that remote access needs Portwing TLS or a private listener behind a
+  TLS-terminating reverse proxy.
+- **Enrollment bodies are time- and concurrency-bounded.** Unauthenticated
+  enrollment JSON must arrive within 10 seconds, with at most two active
+  requests per client and 32 across the agent. Enrollment audit actors now use
+  the same validated trusted-proxy client resolution as rate limiting.
+- **Ed25519 timestamp validation handles the full signed range.** Extreme
+  future timestamps can no longer overflow duration negation and bypass the
+  configured clock-skew window.
+- **Edge exec input is byte-bounded and session IDs are unique.** Decoded input
+  frames are capped at 64 KiB, each session retains at most 1 MiB across queued
+  and in-flight writes, and empty or duplicate exec IDs are rejected before
+  Docker work starts.
+- **Edge outbound buffering has a connection-wide byte budget.** Queued and
+  in-flight WebSocket envelopes are capped at 128 MiB, reservations follow the
+  connection generation through write or discard, and legacy buffered Drydock
+  log requests are limited to one at a time.
+
+### Fixed
+
+- **Container archive downloads stream through standard and edge modes.** GET
+  archive responses, including versioned paths with query strings, no longer
+  take the bounded whole-body proxy path; PUT archive uploads keep their normal
+  non-streaming response handling.
+- **Load tests fail closed.** The load generator exits unsuccessfully when it
+  completes no requests, encounters a transport error, or receives any non-2xx
+  response, so soak runs can no longer report success without exercising a
+  healthy agent.
+- **Compatibility contracts are enforced at their real boundaries.** CI now
+  drives interactive edge exec against dockerd and requires exact hijack 502
+  responses, generic log query forwarding, and ack-before-snapshot SSE order.
+- **Standard-mode exec relays terminate when either side closes.** Client EOF
+  half-closes Docker input so remaining output can drain, while Docker EOF or a
+  fatal copy error closes both connections and unblocks the peer goroutine.
+- **Compose operation locks are reclaimed.** Per-stack serialization now uses
+  reference-counted entries that disappear after the final owner or waiter,
+  instead of retaining every distinct stack name for the agent's lifetime.
+- **Container metric scrapes use a fixed worker pool.** Large container fleets
+  now create at most eight stats workers per scrape instead of one goroutine
+  per container waiting behind a semaphore.
+- **All authentication coverage exercises the production middleware.** The
+  unused duplicate raw-credential wrapper is gone, and token, rate-limit,
+  metrics, audit, streaming-interface, and benchmark paths use the combined
+  credential and Ed25519 middleware.
+- **Ed25519 key IDs have one implementation.** Registry loading, enrollment,
+  and edge hello identity now share `KeyIDForPublicKey`, backed by a generated
+  key registry round-trip regression.
+- **Interactive Docker attach works through standard mode.** Exact exec-start
+  and container-attach upgrades now share a bounded, credential-stripping Unix
+  socket relay that preserves buffered client input and bidirectional traffic.
+- **Shutdown retains final audit records.** Active HTTP and hijacked handlers
+  drain before the audit sink closes, including successful retries after a
+  timed-out shutdown.
+- **The first container refresh is published immediately.** Standard-mode SSE
+  clients connected during startup now receive the initial inventory correction
+  instead of waiting for the first polling interval.
+- **Container logs preserve both Docker stream formats.** Drydock REST, the
+  generic API, and MCP now share one decoder for raw TTY output and multiplexed
+  stdout/stderr frames, including short live output and fragmented lines.
+- **Compose rejects unsupported operations before any side effect.** Invalid
+  operations no longer create stack locks, replace stack files, or attempt a
+  registry login. Registry authentication now accepts documented bare hosts and
+  host-and-port forms while continuing to reject unsafe URI components.
+- **Health-only container changes reach polling and event consumers.** Refresh
+  diffs compare health details nil-safely, and Docker `health_status: ...`
+  actions are forwarded without losing the reported value.
+
 ## [v0.9.9] - 2026-08-23
 
 The output of a whole-app audit: five parallel review lanes plus an
@@ -54,6 +148,9 @@ here is a feature request; each entry below traces to a confirmed defect.
   slow-drip connections each held a goroutine indefinitely. The auth body read
   now carries a 10-second `ResponseController` deadline, cleared before the
   streaming handlers so their unbounded reads are untouched.
+- **Edge response-encoding failures sanitize wire-derived log fields.** Remote
+  request IDs and paths pass through the same log sanitizer as other
+  tunnel-controlled values before an encoding failure is recorded.
 
 ### Fixed
 

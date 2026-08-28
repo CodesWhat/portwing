@@ -23,6 +23,9 @@
 #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 # Portwing itself needs no group_add here — it talks only to sockguard's
 # filtered socket, which sockguard creates 0600 under the same UID.
+# This plaintext example publishes only on host loopback. For remote access,
+# configure Portwing TLS before changing this bind, or keep the plaintext
+# listener private behind a TLS-terminating reverse proxy.
 
 services:
   sockguard:
@@ -56,7 +59,7 @@ services:
       - /tmp
     user: "65532:65532"  # image default; explicit so it survives image overrides
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
       - portwing-stacks:/data/stacks

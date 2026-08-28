@@ -1,11 +1,14 @@
 package docker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // ---- NewComposeManager ----
@@ -35,8 +38,9 @@ func TestExecute_ValidationFailure(t *testing.T) {
 	dir := t.TempDir()
 	cm := &ComposeManager{stacksDir: dir, composeBin: "docker", isV2: true}
 
-	// Empty stack name triggers validation failure.
-	resp, err := cm.Execute(t.Context(), ComposeRequest{})
+	// A supported operation reaches request validation, where the empty stack
+	// name is rejected before any filesystem or command side effects.
+	resp, err := cm.Execute(t.Context(), ComposeRequest{Operation: "up"})
 	if err != nil {
 		t.Fatalf("Execute: unexpected error %v", err)
 	}
@@ -45,6 +49,9 @@ func TestExecute_ValidationFailure(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Fatal("Execute: expected non-empty Error for invalid request")
+	}
+	if !strings.Contains(resp.Error, "stack name is required") {
+		t.Fatalf("Execute error = %q, want stack-name validation error", resp.Error)
 	}
 }
 
@@ -95,6 +102,70 @@ func TestExecute_BuildCommandError(t *testing.T) {
 	}
 	if resp.Success {
 		t.Fatal("Execute: expected Success=false for unsupported operation")
+	}
+}
+
+func TestExecuteRejectsUnsupportedOperationBeforeSideEffects(t *testing.T) {
+	dir := t.TempDir()
+	stackDir := filepath.Join(dir, "app")
+	if err := os.MkdirAll(stackDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	composePath := filepath.Join(stackDir, "docker-compose.yml")
+	const original = "services:\n  web:\n    image: nginx:stable\n"
+	if err := os.WriteFile(composePath, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	callsPath := filepath.Join(binDir, "calls")
+	fakeDocker := filepath.Join(binDir, "docker")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PORTWING_TEST_CALLS\"\n"
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PORTWING_TEST_CALLS", callsPath)
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	cm := &ComposeManager{stacksDir: dir, composeBin: fakeDocker}
+	req := ComposeRequest{
+		StackName: "app",
+		Operation: "nuke",
+		Files: map[string]string{
+			"docker-compose.yml": "services:\n  web:\n    image: attacker.invalid/replacement\n",
+		},
+		RegistryAuth: &RegistryAuth{
+			Server:   "https://registry.example.com",
+			Username: "user",
+			Password: "pass",
+		},
+	}
+
+	if err := cm.validateRequest(req); err == nil {
+		t.Error("validateRequest accepted an unsupported compose operation")
+	}
+	resp, err := cm.Execute(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resp.Success || !strings.Contains(resp.Error, "unsupported compose operation") {
+		t.Errorf("response = %+v, want an unsupported-operation error", resp)
+	}
+	cm.stackLocksMu.Lock()
+	_, loaded := cm.stackLocks[req.StackName]
+	cm.stackLocksMu.Unlock()
+	if loaded {
+		t.Error("unsupported operation created a stack lock before rejection")
+	}
+	if got, err := os.ReadFile(composePath); err != nil {
+		t.Errorf("read preexisting compose file: %v", err)
+	} else if string(got) != original {
+		t.Errorf("preexisting compose file was mutated before rejection: got %q", got)
+	}
+	if calls, err := os.ReadFile(callsPath); err == nil {
+		t.Errorf("Docker was invoked before rejection: %q", calls)
+	} else if !os.IsNotExist(err) {
+		t.Errorf("read Docker invocation record: %v", err)
 	}
 }
 
@@ -249,6 +320,63 @@ func TestExecute_TruncatesOversizedOutput(t *testing.T) {
 
 // ---- Execute: concurrent operations on the same stack serialize ----
 
+func TestComposeManagerLockStackRemovesUnusedEntries(t *testing.T) {
+	t.Parallel()
+	cm := &ComposeManager{}
+
+	for i := 0; i < 1000; i++ {
+		unlock := cm.lockStack(fmt.Sprintf("stack-%d", i))
+		unlock()
+	}
+
+	cm.stackLocksMu.Lock()
+	defer cm.stackLocksMu.Unlock()
+	if got := len(cm.stackLocks); got != 0 {
+		t.Fatalf("retained stack locks = %d, want 0", got)
+	}
+}
+
+func TestComposeManagerLockStackWaiterPreventsEarlyRemoval(t *testing.T) {
+	t.Parallel()
+	cm := &ComposeManager{}
+	unlockFirst := cm.lockStack("app")
+	secondAcquired := make(chan func(), 1)
+	go func() {
+		secondAcquired <- cm.lockStack("app")
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		cm.stackLocksMu.Lock()
+		refs := cm.stackLocks["app"].refs
+		cm.stackLocksMu.Unlock()
+		if refs == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			unlockFirst()
+			t.Fatal("timed out waiting for second lock reference")
+		}
+		runtime.Gosched()
+	}
+	unlockFirst()
+
+	unlockSecond := <-secondAcquired
+	cm.stackLocksMu.Lock()
+	if got := len(cm.stackLocks); got != 1 {
+		cm.stackLocksMu.Unlock()
+		t.Fatalf("stack locks while waiter owns lock = %d, want 1", got)
+	}
+	cm.stackLocksMu.Unlock()
+	unlockSecond()
+
+	cm.stackLocksMu.Lock()
+	defer cm.stackLocksMu.Unlock()
+	if got := len(cm.stackLocks); got != 0 {
+		t.Fatalf("retained stack locks after final release = %d, want 0", got)
+	}
+}
+
 // TestComposeManagerExecute_ConcurrentSameStackSerializes exercises finding
 // C4: without a per-stack lock, two concurrent "up" requests for the same
 // StackName can interleave — request B's writeStackFiles can overwrite
@@ -384,6 +512,53 @@ func TestRegistryLogin_Success(t *testing.T) {
 
 	if err := cm.registryLogin(t.Context(), auth); err != nil {
 		t.Fatalf("registryLogin: unexpected error %v", err)
+	}
+}
+
+func TestExecuteRegistryLoginPreservesBareHostname(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "app"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	callsPath := filepath.Join(binDir, "calls")
+	fakeDocker := filepath.Join(binDir, "docker")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PORTWING_TEST_CALLS\"\n"
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PORTWING_TEST_CALLS", callsPath)
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	cm := &ComposeManager{stacksDir: dir, composeBin: fakeDocker}
+	resp, err := cm.Execute(t.Context(), ComposeRequest{
+		StackName: "app",
+		Operation: "up",
+		RegistryAuth: &RegistryAuth{
+			Server:   "registry.example.com:5443",
+			Username: "alice",
+			Password: "secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("Execute rejected a documented bare registry hostname: %s", resp.Error)
+	}
+
+	calls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read Docker invocation record: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
+	if len(lines) < 1 {
+		t.Fatal("Docker invocation record is empty")
+	}
+	const wantLogin = "login --username alice --password-stdin registry.example.com:5443"
+	if lines[0] != wantLogin {
+		t.Fatalf("Docker login invocation = %q, want %q", lines[0], wantLogin)
 	}
 }
 

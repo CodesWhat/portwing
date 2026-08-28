@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -62,16 +63,17 @@ func stripPortwingAuthHeaders(h http.Header) {
 	}
 }
 
-// maxExecBodyBytes caps the exec-start request body read during a hijack so a
-// hostile client can't force an unbounded in-memory read. Matches the
-// "exec body (10 MB)" limit documented in SECURITY.md.
-const maxExecBodyBytes = 10 * 1024 * 1024 // 10 MB
+// maxHijackBodyBytes caps the exec-start or attach request body read during a
+// hijack so a hostile client can't force an unbounded in-memory read. Matches
+// the "exec body (10 MB)" limit documented in SECURITY.md.
+const maxHijackBodyBytes = 10 * 1024 * 1024 // 10 MB
 
 // Server is the standard-mode HTTP server that exposes Docker API proxy
 // endpoints, adapter-specific routes, and health checks.
 type Server struct {
 	cfg          *config.Config
 	dockerClient *docker.Client
+	dockerDialer func(network, address string) (net.Conn, error)
 	adapter      adapter.ServerAdapter
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
@@ -94,6 +96,15 @@ type Server struct {
 	// hupCh is the signal channel registered for SIGHUP; kept so Shutdown
 	// can call signal.Stop on it.
 	hupCh chan os.Signal
+
+	shutdownOnce   sync.Once
+	auditCloseOnce sync.Once
+	handlerWG      sync.WaitGroup
+	handlerWait    sync.Once
+	handlerDone    chan struct{}
+	hijackMu       sync.Mutex
+	hijackConns    map[net.Conn]struct{}
+	shuttingDown   bool
 }
 
 // NewServer creates and configures a new standard-mode Server.
@@ -168,6 +179,8 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		auditor:      auditor,
 		startTime:    time.Now(),
 		hupDone:      make(chan struct{}),
+		handlerDone:  make(chan struct{}),
+		hijackConns:  make(map[net.Conn]struct{}),
 	}
 	s.pollCtx, s.pollCancel = context.WithCancel(context.Background())
 
@@ -204,6 +217,9 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		}
 		s.rateLimiter.SetTrustedProxies(nets)
 	}
+	if s.enroller != nil {
+		s.enroller.ActorResolver = s.rateLimiter.clientIP
+	}
 
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
@@ -212,7 +228,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 
 	s.httpServer = &http.Server{
 		Addr:    cfg.BindAddress + ":" + cfg.Port,
-		Handler: handler,
+		Handler: s.trackActiveHandler(handler),
 		// Bound the request-header read to mitigate slow-header (Slowloris)
 		// attacks. ReadTimeout/WriteTimeout are deliberately left zero so the
 		// streaming endpoints (logs, events, stats, exec) are not cut off;
@@ -400,12 +416,12 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 // to the local Docker daemon, handling both regular and streaming responses.
 func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	// Determine if this is a streaming endpoint.
-	isStream := docker.IsStreamingPath(r.URL.Path)
+	isStream := docker.IsStreamingRequest(r.Method, r.URL.Path)
 
-	// Check for exec hijack (WebSocket upgrade on /exec/*/start).
-	isExecStart := strings.Contains(r.URL.Path, "/exec/") && strings.HasSuffix(r.URL.Path, "/start")
-	if isExecStart && isWebSocketUpgrade(r) {
-		s.handleExecHijack(w, r)
+	// Docker exec and attach upgrade requests need a bidirectional raw
+	// connection. The regular HTTP transport cannot proxy the upgraded stream.
+	if isDockerHijackPath(r.URL.Path) && isWebSocketUpgrade(r) {
+		s.handleDockerHijack(w, r)
 		return
 	}
 
@@ -448,16 +464,35 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleExecHijack handles WebSocket-upgraded exec connections by hijacking
-// the HTTP connection and proxying bidirectionally to the Docker daemon.
+// handleExecHijack retains the exec-specific entry point used by focused tests.
+// Actual routing for exec and attach upgrades goes through handleDockerHijack.
 func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
-	actor := s.rateLimiter.clientIP(r)
-	// Extract exec resource ID from the path: /exec/<id>/start
-	execID := ""
-	if parts := strings.Split(r.URL.Path, "/"); len(parts) >= 3 {
-		execID = parts[len(parts)-2]
+	s.handleDockerHijack(w, r)
+}
+
+// handleDockerHijack proxies an upgraded Docker exec or attach request over a
+// raw Unix socket connection. Bytes already buffered by net/http after the
+// request are relayed through clientBuf once the upgrade succeeds.
+func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
+	if isExecStartPath(r.URL.Path) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		execID := parts[len(parts)-2]
+		s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID)
 	}
-	s.auditor.ExecStart(actor, r.URL.Path, execID)
+
+	var body []byte
+	if r.Body != nil {
+		var err error
+		body, err = io.ReadAll(io.LimitReader(r.Body, maxHijackBodyBytes+1))
+		if err != nil {
+			http.Error(w, fmt.Sprintf("reading upgrade request body: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+	if len(body) > maxHijackBodyBytes {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
@@ -470,40 +505,78 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("hijack failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer clientConn.Close()
+	if !s.trackHijackedConnection(clientConn) {
+		return
+	}
+	defer s.untrackHijackedConnection(clientConn)
+
+	var dockerConn net.Conn
+	var closeOnce sync.Once
+	closeConnections := func() {
+		closeOnce.Do(func() {
+			_ = clientConn.Close()
+			if dockerConn != nil {
+				_ = dockerConn.Close()
+			}
+		})
+	}
+	defer closeConnections()
 
 	// Connect to Docker daemon.
-	dockerConn, err := net.Dial("unix", s.dockerClient.GetSocketPath())
+	dialer := s.dockerDialer
+	if dialer == nil {
+		dialer = net.Dial
+	}
+	dockerConn, err = dialer("unix", s.dockerClient.GetSocketPath())
 	if err != nil {
 		// Best-effort 502 write; client may have already gone.
 		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
-	defer dockerConn.Close()
+	if !s.trackHijackedConnection(dockerConn) {
+		return
+	}
+	defer s.untrackHijackedConnection(dockerConn)
 
-	// Forward the original request to Docker.
-	rawReq := fmt.Sprintf(
-		"%s %s HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Type: application/json\r\n",
-		r.Method, r.URL.RequestURI(),
-	)
-	body, _ := io.ReadAll(io.LimitReader(r.Body, maxExecBodyBytes))
-	rawReq += fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), string(body))
+	// Rebuild the request so Portwing credentials and unrelated hop-by-hop
+	// headers cannot reach Docker. Preserve the requested upgrade protocol and
+	// end-to-end Docker headers, consume Expect after buffering the body, and
+	// derive Content-Length from the bounded body read above.
+	dockerURL := fmt.Sprintf("http://localhost%s", r.URL.RequestURI())
+	// #nosec G704 -- URL is fixed to localhost for the Docker socket proxy; RequestURI only selects the Docker API path/query.
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, dockerURL, bytes.NewReader(body))
+	if err != nil {
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		return
+	}
+	copyHeaders(proxyReq.Header, r.Header)
+	stripPortwingAuthHeaders(proxyReq.Header)
+	proxyReq.Header.Del("Content-Length")
+	proxyReq.Header.Del("Expect")
+	proxyReq.Header.Set("Connection", "Upgrade")
+	upgrade := r.Header.Get("Upgrade")
+	if upgrade == "" {
+		upgrade = "tcp"
+	}
+	proxyReq.Header.Set("Upgrade", upgrade)
 
-	if _, err := dockerConn.Write([]byte(rawReq)); err != nil {
+	if err := proxyReq.Write(dockerConn); err != nil {
 		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 
 	// Read Docker response.
 	dockerBuf := bufio.NewReader(dockerConn)
-	resp, err := http.ReadResponse(dockerBuf, nil)
+	resp, err := http.ReadResponse(dockerBuf, proxyReq)
 	if err != nil {
 		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 
 	// Forward the response status to the client.
-	_ = resp.Write(clientConn)
+	if err := resp.Write(clientConn); err != nil {
+		return
+	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		return
@@ -515,15 +588,77 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(dockerConn, clientBuf)
+		if _, err := io.Copy(dockerConn, clientBuf); err != nil {
+			closeConnections()
+			return
+		}
+		if closeWriter, ok := dockerConn.(interface{ CloseWrite() error }); ok {
+			if err := closeWriter.CloseWrite(); err != nil {
+				closeConnections()
+			}
+			return
+		}
+		closeConnections()
 	}()
 
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(clientConn, dockerBuf)
+		closeConnections()
 	}()
 
 	wg.Wait()
+}
+
+func isDockerHijackPath(path string) bool {
+	return isExecStartPath(path) || isContainerAttachPath(path)
+}
+
+func isExecStartPath(path string) bool {
+	return isDockerResourceAction(path, "exec", "start")
+}
+
+func isContainerAttachPath(path string) bool {
+	return isDockerResourceAction(path, "containers", "attach")
+}
+
+func isDockerResourceAction(path, resource, action string) bool {
+	if path == "" || path[0] != '/' || strings.HasSuffix(path, "/") {
+		return false
+	}
+	parts := strings.Split(path[1:], "/")
+	switch len(parts) {
+	case 3:
+	case 4:
+		if !isDockerAPIVersion(parts[0]) {
+			return false
+		}
+		parts = parts[1:]
+	default:
+		return false
+	}
+	return parts[0] == resource && parts[1] != "" && parts[2] == action
+}
+
+func isDockerAPIVersion(segment string) bool {
+	version, ok := strings.CutPrefix(segment, "v")
+	if !ok {
+		return false
+	}
+	major, minor, ok := strings.Cut(version, ".")
+	return ok && isASCIIDigits(major) && isASCIIDigits(minor)
+}
+
+func isASCIIDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := range len(value) {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // isWebSocketUpgrade checks if the request is a WebSocket upgrade request.
@@ -535,8 +670,18 @@ func isWebSocketUpgrade(r *http.Request) bool {
 
 // copyHeaders copies headers from src to dst, stripping hop-by-hop headers.
 func copyHeaders(dst, src http.Header) {
+	connectionHeaders := make(map[string]bool)
+	for _, value := range src.Values("Connection") {
+		for name := range strings.SplitSeq(value, ",") {
+			name = http.CanonicalHeaderKey(strings.TrimSpace(name))
+			if name != "" {
+				connectionHeaders[name] = true
+			}
+		}
+	}
 	for key, values := range src {
-		if hopByHopHeaders[http.CanonicalHeaderKey(key)] {
+		canonicalKey := http.CanonicalHeaderKey(key)
+		if hopByHopHeaders[canonicalKey] || connectionHeaders[canonicalKey] {
 			continue
 		}
 		for _, v := range values {
@@ -566,6 +711,65 @@ func (s *Server) streamResponse(w http.ResponseWriter, body io.Reader) {
 	}
 }
 
+func (s *Server) trackActiveHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.handlerWG.Add(1)
+		defer s.handlerWG.Done()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) trackHijackedConnection(conn net.Conn) bool {
+	s.hijackMu.Lock()
+	defer s.hijackMu.Unlock()
+	if s.shuttingDown {
+		_ = conn.Close()
+		return false
+	}
+	if s.hijackConns == nil {
+		s.hijackConns = make(map[net.Conn]struct{})
+	}
+	s.hijackConns[conn] = struct{}{}
+	return true
+}
+
+func (s *Server) untrackHijackedConnection(conn net.Conn) {
+	s.hijackMu.Lock()
+	delete(s.hijackConns, conn)
+	s.hijackMu.Unlock()
+}
+
+func (s *Server) closeHijackedConnections() {
+	s.hijackMu.Lock()
+	s.shuttingDown = true
+	connections := make([]net.Conn, 0, len(s.hijackConns))
+	for conn := range s.hijackConns {
+		connections = append(connections, conn)
+	}
+	s.hijackMu.Unlock()
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
+}
+
+func (s *Server) waitForActiveHandlers(ctx context.Context) error {
+	if s.handlerDone == nil {
+		return nil
+	}
+	s.handlerWait.Do(func() {
+		go func() {
+			s.handlerWG.Wait()
+			close(s.handlerDone)
+		}()
+	})
+	select {
+	case <-s.handlerDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // ListenAndServe starts the HTTP server. It launches background container
 // polling and uses TLS if certificates are configured.
 func (s *Server) ListenAndServe() error {
@@ -579,41 +783,72 @@ func (s *Server) ListenAndServe() error {
 
 // Shutdown gracefully shuts down the HTTP server and stops background goroutines.
 func (s *Server) Shutdown(ctx context.Context) error {
-	// Stop the pollContainers goroutine.
-	if s.pollCancel != nil {
-		s.pollCancel()
+	s.shutdownOnce.Do(func() {
+		// Stop the pollContainers goroutine.
+		if s.pollCancel != nil {
+			s.pollCancel()
+		}
+
+		// Stop the SIGHUP reload goroutine.
+		if s.hupCh != nil {
+			signal.Stop(s.hupCh)
+		}
+		if s.hupDone != nil {
+			select {
+			case <-s.hupDone:
+			default:
+				close(s.hupDone)
+			}
+		}
+
+		// Stop the rate limiter cleanup goroutine.
+		s.rateLimiter.Stop()
+
+		// Stop the nonce LRU cleanup goroutine.
+		if s.ed25519.Nonces != nil {
+			s.ed25519.Nonces.Close()
+		}
+
+		// net/http stops tracking a connection once a handler hijacks it, so
+		// close Docker exec/attach relays explicitly before waiting for the
+		// middleware to emit its final audit record.
+		s.closeHijackedConnections()
+	})
+
+	// A context-bounded failure means active handlers may still emit their final
+	// records. Keep the sink open so a later successful Shutdown can drain those
+	// handlers and close it exactly once.
+	err := s.httpServer.Shutdown(ctx)
+	if err != nil {
+		return err
 	}
-
-	// Stop the SIGHUP reload goroutine.
-	if s.hupCh != nil {
-		signal.Stop(s.hupCh)
+	if err := s.waitForActiveHandlers(ctx); err != nil {
+		return err
 	}
-	select {
-	case <-s.hupDone:
-	default:
-		close(s.hupDone)
-	}
-
-	// Stop the rate limiter cleanup goroutine.
-	s.rateLimiter.Stop()
-
-	// Stop the nonce LRU cleanup goroutine.
-	if s.ed25519.Nonces != nil {
-		s.ed25519.Nonces.Close()
-	}
-
-	// Flush and close the audit log.
-	s.auditor.Close()
-
-	return s.httpServer.Shutdown(ctx)
+	s.auditCloseOnce.Do(s.auditor.Close)
+	return nil
 }
 
 // pollContainers periodically refreshes the container inventory via the
 // adapter and lets the adapter broadcast changes. It exits when ctx is cancelled.
 func (s *Server) pollContainers(ctx context.Context) {
-	// Initial refresh (builds inventory).
-	if _, _, _, err := s.adapter.RefreshContainers(ctx); err != nil {
-		slog.Error("initial container inventory failed", "error", err)
+	if ctx.Err() != nil {
+		return
+	}
+	// Build the initial inventory and immediately publish its diff. Waiting for
+	// the first ticker would leave already-connected standard-mode clients with
+	// the empty startup snapshot for an entire poll interval.
+	added, updated, removed, err := s.adapter.RefreshContainers(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Error("initial container inventory failed", "error", err)
+		}
+	} else if ctx.Err() != nil {
+		return
+	} else if err := s.adapter.OnContainerRefresh(ctx, nil, added, updated, removed); err != nil {
+		if ctx.Err() == nil {
+			slog.Error("initial container refresh notify failed", "error", err)
+		}
 	}
 
 	interval := s.adapter.PollInterval()

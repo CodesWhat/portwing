@@ -1,0 +1,14 @@
+# codecov/patch is a required context on main (scripts/apply-branch-protection.sh),
+# so the patch status is declared here explicitly instead of riding Codecov's
+# defaults. target: auto holds new code to the project's current bar; a diff
+# with no coverable lines (docs, config, tests) posts success, so docs-only
+# promotions still merge.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        target: auto
+        informational: false

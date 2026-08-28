@@ -473,3 +473,59 @@ func TestLoadTokenFileEmpty(t *testing.T) {
 		t.Errorf("loadTokenFile empty: got %q want empty string", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// IsLoopbackBind
+// ---------------------------------------------------------------------------
+
+func TestIsLoopbackBind(t *testing.T) {
+	cases := []struct {
+		name    string
+		address string
+		want    bool
+	}{
+		{"localhost lowercase", "localhost", true},
+		{"localhost mixed case", "LocalHost", true},
+		{"ipv4 loopback", "127.0.0.1", true},
+		{"ipv6 loopback", "::1", true},
+		{"ipv6 loopback bracketed", "[::1]", true},
+		{"ipv4 non-loopback", "0.0.0.0", false},
+		{"ipv4 non-loopback other", "192.168.1.1", false},
+		{"not an ip or localhost", "example.com", false},
+		{"empty string", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsLoopbackBind(tc.address)
+			if got != tc.want {
+				t.Errorf("IsLoopbackBind(%q): got %v want %v", tc.address, got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// getURLScheme
+// ---------------------------------------------------------------------------
+
+func TestGetURLScheme(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"https", "https://drydock.example.com", "https"},
+		{"http", "http://drydock.example.com", "http"},
+		{"ws", "ws://drydock.example.com", "ws"},
+		{"wss", "wss://drydock.example.com", "wss"},
+		{"unparseable returns empty", "://bad", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := getURLScheme(tc.url)
+			if got != tc.want {
+				t.Errorf("getURLScheme(%q): got %q want %q", tc.url, got, tc.want)
+			}
+		})
+	}
+}

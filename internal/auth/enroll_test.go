@@ -170,6 +170,19 @@ func TestEnroller_OversizedBodyRejected(t *testing.T) {
 	}
 }
 
+func TestEnroller_OversizedTrailingBodyRejected(t *testing.T) {
+	e, _, _ := setupEnroller(t, "secrettok")
+	firstValue := `{"enrollment_token":"wrong","public_key":""}`
+	body := firstValue + strings.Repeat(" ", int(maxEnrollmentBodyBytes)-len(firstValue)+1)
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized trailing enrollment body, got %d", rec.Code)
+	}
+}
+
 func TestEnrollerStoresFixedLengthTokenDigest(t *testing.T) {
 	e := NewEnroller("a variable-length bootstrap secret", "/unused", nil)
 	if e.tokenDigest == ([32]byte{}) {

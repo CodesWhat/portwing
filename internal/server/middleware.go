@@ -23,7 +23,7 @@ import (
 	"github.com/codeswhat/portwing/internal/metrics"
 )
 
-// tokenVerifier is the interface used by AuthMiddleware to verify a presented
+// tokenVerifier is the interface used by the authentication middleware to verify a presented
 // token. It abstracts over plain-text and Argon2id verification.
 type tokenVerifier interface {
 	Verify(token string) bool
@@ -59,7 +59,8 @@ const (
 	// #nosec G101 -- header name constant; not a credential.
 	headerPortwingToken = "X-Portwing-Token"
 	// #nosec G101 -- header name constant; not a credential.
-	headerDrydockAgentSecret = "X-Dd-Agent-Secret"
+	headerDrydockAgentSecret     = "X-Dd-Agent-Secret"
+	defaultMaxEnrollmentInFlight = 32
 )
 
 // RateLimiter tracks failed authentication attempts by IP address and blocks
@@ -74,6 +75,10 @@ type RateLimiter struct {
 	// maxInFlight bounds concurrent credential checks from one source before
 	// any expensive verifier work begins.
 	maxInFlight int
+	// maxEnrollmentInFlight bounds unauthenticated enrollment handlers across
+	// all sources, including addresses that cannot be added to attempts.
+	maxEnrollmentInFlight int
+	enrollmentInFlight    int
 
 	trustedProxies []*net.IPNet
 
@@ -91,13 +96,14 @@ type ipAttempts struct {
 // five minutes.
 func NewRateLimiter() *RateLimiter {
 	rl := &RateLimiter{
-		attempts:    make(map[string]*ipAttempts),
-		abuse:       make(map[string]*ipAttempts),
-		maxFails:    10,
-		window:      time.Minute,
-		maxIPs:      10000,
-		maxInFlight: 2,
-		done:        make(chan struct{}),
+		attempts:              make(map[string]*ipAttempts),
+		abuse:                 make(map[string]*ipAttempts),
+		maxFails:              10,
+		window:                time.Minute,
+		maxIPs:                10000,
+		maxInFlight:           2,
+		maxEnrollmentInFlight: defaultMaxEnrollmentInFlight,
+		done:                  make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
@@ -219,7 +225,10 @@ func (rl *RateLimiter) IsRateLimited(ip string) bool {
 func (rl *RateLimiter) tryBeginAuth(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	return rl.tryBeginAuthLocked(ip)
+}
 
+func (rl *RateLimiter) tryBeginAuthLocked(ip string) bool {
 	a, ok := rl.attempts[ip]
 	if ok && !a.firstFail.IsZero() && time.Since(a.firstFail) > rl.window {
 		a.count = 0
@@ -252,7 +261,10 @@ func (rl *RateLimiter) tryBeginAuth(ip string) bool {
 func (rl *RateLimiter) finishAuth(ip string, success bool) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	rl.finishAuthLocked(ip, success)
+}
 
+func (rl *RateLimiter) finishAuthLocked(ip string, success bool) {
 	a, ok := rl.attempts[ip]
 	if !ok {
 		return
@@ -274,6 +286,31 @@ func (rl *RateLimiter) finishAuth(ip string, success bool) {
 		return
 	}
 	a.count++
+}
+
+func (rl *RateLimiter) tryBeginEnrollment(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	maxInFlight := rl.maxEnrollmentInFlight
+	if maxInFlight <= 0 {
+		maxInFlight = defaultMaxEnrollmentInFlight
+	}
+	if rl.enrollmentInFlight >= maxInFlight || !rl.tryBeginAuthLocked(ip) {
+		return false
+	}
+	rl.enrollmentInFlight++
+	return true
+}
+
+func (rl *RateLimiter) finishEnrollment(ip string, success bool) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	if rl.enrollmentInFlight > 0 {
+		rl.enrollmentInFlight--
+	}
+	rl.finishAuthLocked(ip, success)
 }
 
 // RecordFailure records a failed authentication attempt for the given IP.
@@ -303,94 +340,6 @@ func (rl *RateLimiter) RecordFailure(ip string) {
 	a.count++
 }
 
-// AuthMiddleware returns an http.Handler that validates the authentication
-// token before calling next. If verifier is nil, authentication is disabled
-// and all requests are passed through.
-//
-// The middleware checks Authorization: Bearer first, then X-Portwing-Token,
-// then X-Dd-Agent-Secret for Drydock compatibility.
-//
-// Rate limiting is applied before verification, so failed attempts are always
-// counted regardless of whether the verifier uses a raw token or Argon2id.
-//
-// auditor receives auth_failure and rate_limited events, and an api_request
-// event (with outcome and duration) for every request that reaches next.
-// reg receives request/auth/rate-limit counters and duration histograms;
-// it may be nil (metrics are skipped in that case).
-func (rl *RateLimiter) AuthMiddleware(verifier tokenVerifier, auditor *audit.Logger, reg *metrics.Registry, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-
-		// No authentication configured - pass through.
-		if verifier == nil {
-			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
-			if reg != nil {
-				reg.IncInFlight()
-				defer reg.DecInFlight()
-			}
-			next.ServeHTTP(rw, r)
-			auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
-			if reg != nil {
-				reg.IncRequest(r.Method, rw.code)
-				reg.ObserveRequestDuration(time.Since(start).Seconds())
-			}
-			return
-		}
-
-		clientIP := rl.clientIP(r)
-
-		// Rate-limit check happens BEFORE verification. This ensures that failed
-		// attempts accumulate in the limiter even for expensive Argon2id paths,
-		// and that blocked IPs never reach the verifier.
-		if !rl.tryBeginAuth(clientIP) {
-			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
-			if reg != nil {
-				reg.IncRequest(r.Method, http.StatusTooManyRequests)
-				reg.IncRateLimited()
-			}
-			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
-			return
-		}
-
-		provided := agentToken(r)
-		valid, attempted := verifyTokenWithCapacity(verifier, provided)
-		if !attempted {
-			rl.finishAuth(clientIP, true)
-			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
-			if reg != nil {
-				reg.IncRequest(r.Method, http.StatusTooManyRequests)
-				reg.IncRateLimited()
-			}
-			http.Error(w, "authentication verification capacity exceeded", http.StatusTooManyRequests)
-			return
-		}
-		rl.finishAuth(clientIP, valid)
-
-		if !valid {
-			slog.Warn("authentication failed", "ip", applog.Sanitize(clientIP))
-			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
-			if reg != nil {
-				reg.IncRequest(r.Method, http.StatusUnauthorized)
-				reg.IncAuthFailure("bad_token")
-			}
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
-		if reg != nil {
-			reg.IncInFlight()
-			defer reg.DecInFlight()
-		}
-		next.ServeHTTP(rw, r)
-		auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
-		if reg != nil {
-			reg.IncRequest(r.Method, rw.code)
-			reg.ObserveRequestDuration(time.Since(start).Seconds())
-		}
-	})
-}
-
 // rateLimitOnly wraps a handler with rate limiting (by IP) but no auth check.
 // This is used for the enrollment endpoint which does its own credential
 // check. Authentication failures and malformed-body abuse are tracked in
@@ -400,7 +349,7 @@ func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) h
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		clientIP := rl.clientIP(r)
-		if rl.IsRateLimited(clientIP) || rl.isAbuseRateLimited(clientIP) {
+		if rl.isAbuseRateLimited(clientIP) || !rl.tryBeginEnrollment(clientIP) {
 			if reg != nil {
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
 				reg.IncRateLimited()
@@ -409,15 +358,16 @@ func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) h
 			return
 		}
 		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		defer func() {
+			rl.finishEnrollment(clientIP, rw.code != http.StatusUnauthorized)
+		}()
 		if reg != nil {
 			reg.IncInFlight()
 			defer reg.DecInFlight()
 		}
 		next.ServeHTTP(rw, r)
 		switch rw.code {
-		case http.StatusUnauthorized:
-			rl.RecordFailure(clientIP)
-		case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
+		case http.StatusBadRequest, http.StatusRequestTimeout, http.StatusRequestEntityTooLarge:
 			rl.recordAbuse(clientIP)
 		}
 		if reg != nil {
@@ -428,8 +378,7 @@ func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) h
 }
 
 // Ed25519Config holds the optional Ed25519 verifier parameters for
-// AuthMiddlewareWithEd25519. When Registry is nil the Ed25519 path is skipped
-// and the middleware behaves identically to AuthMiddleware.
+// AuthMiddlewareWithEd25519. When Registry is nil the Ed25519 path is skipped.
 type Ed25519Config struct {
 	Registry       *auth.KeyRegistry
 	Nonces         *auth.NonceLRU
@@ -455,8 +404,8 @@ func isDeadlineExceeded(err error) bool {
 	return errors.Is(err, os.ErrDeadlineExceeded)
 }
 
-// AuthMiddlewareWithEd25519 is AuthMiddleware extended with an optional Ed25519
-// verification path. When an incoming request carries X-Portwing-Signature,
+// AuthMiddlewareWithEd25519 validates raw or Argon2id credentials and supports
+// an optional Ed25519 verification path. When a request carries X-Portwing-Signature,
 // it is verified via Ed25519;
 // otherwise the request falls through to the token verifier. Either path must
 // succeed for the request to proceed.

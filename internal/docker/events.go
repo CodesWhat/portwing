@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -133,7 +134,7 @@ func (es *EventStream) readEvents(ctx context.Context, ch chan<- DockerEvent) er
 			return err
 		}
 
-		if !allowedActions[event.Action] {
+		if !isAllowedAction(event.Action) {
 			continue
 		}
 
@@ -143,4 +144,8 @@ func (es *EventStream) readEvents(ctx context.Context, ch chan<- DockerEvent) er
 			return ctx.Err()
 		}
 	}
+}
+
+func isAllowedAction(action string) bool {
+	return allowedActions[action] || strings.HasPrefix(action, "health_status: ")
 }

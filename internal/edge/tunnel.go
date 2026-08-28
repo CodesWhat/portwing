@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,15 +22,20 @@ import (
 // decoded on the read loop and handed to a single writer goroutine, so this
 // buffers the burst that can arrive before the Docker exec is live (and any
 // momentary write stall) without ever blocking the read pump.
-const execInputQueue = 256
+const (
+	execInputQueue       = 256
+	execInputFrameLimit  = 64 << 10
+	execInputQueuedLimit = 1 << 20
+)
 
 // execItem is one ordered unit drained by inputWriter: either stdin bytes to
 // write to the exec, or a TTY resize. Routing both through the single drainer
 // keeps them in arrival order and — critically — off the read pump, so a slow
 // or failing resize can never stall ping/exec dispatch.
 type execItem struct {
-	data   []byte    // stdin bytes; nil for a resize
-	resize *resizeOp // non-nil for a resize
+	data          []byte    // stdin bytes; nil for a resize
+	reservedBytes int       // bytes reserved against the per-session input budget
+	resize        *resizeOp // non-nil for a resize
 }
 
 // resizeOp is a pending TTY resize.
@@ -48,6 +54,7 @@ type ExecSession struct {
 	execID      string // controller-assigned exec ID (used on the wire)
 	containerID string
 	client      *Client
+	target      outboundTarget
 
 	// dockerExecID is the Docker-assigned exec instance ID returned by
 	// CreateExec. It differs from execID (which is the controller's ID) and is
@@ -66,11 +73,13 @@ type ExecSession struct {
 	// to drain.
 	inbox chan execItem
 
-	done chan struct{}
-	once sync.Once
+	done   chan struct{}
+	once   sync.Once
+	cancel context.CancelFunc
 
-	mu     sync.Mutex
-	closed bool
+	mu               sync.Mutex
+	closed           bool
+	queuedInputBytes int
 }
 
 // StartExec registers the exec session synchronously, then brings the Docker
@@ -78,6 +87,35 @@ type ExecSession struct {
 // exec_input that arrives immediately after exec_start finds the session and is
 // queued, instead of racing the bring-up and being dropped.
 func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
+	target := c.currentOutboundTarget()
+	if msg.ExecID == "" {
+		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
+			Reason: "exec ID is required",
+		})
+		return
+	}
+
+	sessionCtx, sessionCancel := context.WithCancel(ctx)
+	session := &ExecSession{
+		execID:      msg.ExecID,
+		containerID: msg.ContainerID,
+		client:      c,
+		target:      target,
+		connReady:   make(chan struct{}),
+		inbox:       make(chan execItem, execInputQueue),
+		done:        make(chan struct{}),
+		cancel:      sessionCancel,
+	}
+	admitted := false
+	defer func() {
+		if !admitted {
+			sessionCancel()
+		}
+	}()
+
+	c.execAdmissionMu.Lock()
+	defer c.execAdmissionMu.Unlock()
+
 	// Check concurrent session limit.
 	var count int
 	c.execSessions.Range(func(_, _ any) bool {
@@ -87,31 +125,37 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	if count >= maxExecSessions {
 		slog.Warn("exec session limit reached", "max", maxExecSessions)
 		// Best-effort error reply; connection loss will surface on the read pump.
-		_ = c.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
 			ExecID: msg.ExecID,
 			Reason: "session limit reached",
 		})
 		return
 	}
 
-	session := &ExecSession{
-		execID:      msg.ExecID,
-		containerID: msg.ContainerID,
-		client:      c,
-		connReady:   make(chan struct{}),
-		inbox:       make(chan execItem, execInputQueue),
-		done:        make(chan struct{}),
+	if _, loaded := c.execSessions.LoadOrStore(msg.ExecID, session); loaded {
+		// Error is the only existing non-terminal rejection shape. Correlation is
+		// controller-dependent; exec_end would incorrectly close the live session.
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "duplicate exec ID",
+			Code:      "duplicate-exec-id",
+			RequestID: msg.ExecID,
+		})
+		return
 	}
-	c.execSessions.Store(msg.ExecID, session)
+	admitted = true
 
-	go session.inputWriter(ctx)
-	go c.bringUpExec(ctx, msg, session)
+	go session.inputWriter(sessionCtx)
+	go c.bringUpExec(sessionCtx, msg, session)
 }
 
 // bringUpExec performs the Docker round-trips for an already-registered session
 // and, on success, wires the live connection and starts streaming.
 func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage, session *ExecSession) {
 	defer recoverSession("bringUpExec", msg.ExecID)
+	if ctx.Err() != nil || session.isClosed() {
+		session.Close()
+		return
+	}
 
 	// tty defaults to true when the field is absent (nil), preserving the
 	// prior hardcoded behavior. Explicit false disables PTY allocation.
@@ -122,6 +166,10 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	if err != nil {
 		slog.Error("failed to create exec", "container", applog.Sanitize(msg.ContainerID), "error", applog.Sanitize(err.Error()))
 		session.failStart(fmt.Sprintf("create exec failed: %v", err))
+		return
+	}
+	if ctx.Err() != nil || session.isClosed() {
+		session.Close()
 		return
 	}
 
@@ -153,7 +201,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	}
 
 	// Announce readiness; best-effort — connection loss surfaces on the read pump.
-	_ = c.sendTypedMessage(protocol.TypeExecReady, protocol.ExecReadyMessage{
+	_ = c.sendTypedMessageTo(session.target, protocol.TypeExecReady, protocol.ExecReadyMessage{
 		ExecID: msg.ExecID,
 	})
 
@@ -173,19 +221,74 @@ func (c *Client) HandleInput(msg protocol.ExecInputMessage) {
 
 	session := val.(*ExecSession)
 
+	decodedLen := base64.StdEncoding.DecodedLen(len(msg.Data))
+	if strings.HasSuffix(msg.Data, "=") {
+		decodedLen--
+		if strings.HasSuffix(msg.Data, "==") {
+			decodedLen--
+		}
+	}
+	if decodedLen > execInputFrameLimit {
+		slog.Warn("exec input frame too large", "execID", applog.Sanitize(msg.ExecID), "bytes", decodedLen, "max", execInputFrameLimit)
+		return
+	}
+
 	data, err := base64.StdEncoding.DecodeString(msg.Data)
 	if err != nil {
 		slog.Warn("failed to decode exec input", "execID", applog.Sanitize(msg.ExecID), "error", applog.Sanitize(err.Error()))
 		return
 	}
 
-	select {
-	case session.inbox <- execItem{data: data}:
-	case <-session.done:
+	switch session.enqueueInput(data) {
+	case inputEnqueued:
+	case inputSessionClosed:
 		slog.Debug("exec input for closed session", "execID", applog.Sanitize(msg.ExecID))
-	default:
+	case inputBudgetExceeded:
+		slog.Warn("exec input byte budget exceeded, dropping", "execID", applog.Sanitize(msg.ExecID), "max", execInputQueuedLimit)
+	case inputQueueFull:
 		slog.Warn("exec input queue full, dropping", "execID", applog.Sanitize(msg.ExecID))
 	}
+}
+
+type inputEnqueueResult uint8
+
+const (
+	inputEnqueued inputEnqueueResult = iota
+	inputSessionClosed
+	inputBudgetExceeded
+	inputQueueFull
+)
+
+// enqueueInput atomically reserves decoded bytes and enqueues the frame. The
+// reservation stays live while the frame is queued or being written.
+func (s *ExecSession) enqueueInput(data []byte) inputEnqueueResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return inputSessionClosed
+	}
+	if len(data) > execInputQueuedLimit-s.queuedInputBytes {
+		return inputBudgetExceeded
+	}
+
+	s.queuedInputBytes += len(data)
+	select {
+	case s.inbox <- execItem{data: data, reservedBytes: len(data)}:
+		return inputEnqueued
+	default:
+		s.queuedInputBytes -= len(data)
+		return inputQueueFull
+	}
+}
+
+func (s *ExecSession) releaseInputBytes(n int) {
+	if n == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.queuedInputBytes -= n
+	s.mu.Unlock()
 }
 
 // inputWriter is the session's single input writer. It waits for the exec to go
@@ -206,12 +309,17 @@ func (s *ExecSession) inputWriter(ctx context.Context) {
 			if item.resize != nil {
 				s.doResize(ctx, *item.resize)
 			} else {
-				s.writeInput(item.data)
+				s.writeInputItem(item)
 			}
 		case <-s.done:
 			return
 		}
 	}
+}
+
+func (s *ExecSession) writeInputItem(item execItem) {
+	defer s.releaseInputBytes(item.reservedBytes)
+	s.writeInput(item.data)
 }
 
 // writeInput writes one chunk to the exec connection, retrying transient
@@ -311,12 +419,18 @@ func (s *ExecSession) activate(conn net.Conn) bool {
 	return true
 }
 
+func (s *ExecSession) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 // failStart tears the session down and reports a terminal exec_end. It closes
 // first so the session is deregistered before the controller sees the failure.
 func (s *ExecSession) failStart(reason string) {
 	s.Close()
 	// Best-effort error reply; connection loss will surface on the read pump.
-	_ = s.client.sendTypedMessage(protocol.TypeExecEnd, protocol.ExecEndMessage{
+	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
 		ExecID: s.execID,
 		Reason: reason,
 	})
@@ -340,7 +454,7 @@ func (s *ExecSession) readLoop() {
 				Data:   encoded,
 			})
 			if marshalErr == nil {
-				s.client.sendMessage(protocol.Envelope{
+				s.client.sendMessageTo(s.target, protocol.Envelope{
 					Type: protocol.TypeExecOutput,
 					Data: json.RawMessage(data),
 				})
@@ -363,7 +477,7 @@ func (s *ExecSession) readLoop() {
 				Reason: reason,
 			})
 			if marshalErr == nil {
-				s.client.sendMessage(protocol.Envelope{
+				s.client.sendMessageTo(s.target, protocol.Envelope{
 					Type: protocol.TypeExecEnd,
 					Data: json.RawMessage(endData),
 				})
@@ -379,9 +493,13 @@ func (s *ExecSession) readLoop() {
 // live).
 func (s *ExecSession) Close() {
 	s.once.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
 		s.mu.Lock()
 		s.closed = true
 		conn := s.conn
+		close(s.done)
 		s.mu.Unlock()
 
 		if conn != nil {
@@ -389,8 +507,15 @@ func (s *ExecSession) Close() {
 				slog.Debug("closing exec session", "exec_id", applog.Sanitize(s.execID), "error", applog.Sanitize(err.Error()))
 			}
 		}
-		close(s.done)
-		s.client.execSessions.Delete(s.execID)
+		for {
+			select {
+			case item := <-s.inbox:
+				s.releaseInputBytes(item.reservedBytes)
+			default:
+				s.client.execSessions.CompareAndDelete(s.execID, s)
+				return
+			}
+		}
 	})
 }
 

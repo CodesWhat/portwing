@@ -1190,27 +1190,31 @@ func TestSSEServeHTTP_DeliversInitialAckAndSnapshot(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	seen := map[string]bool{}
+	var eventTypes []string
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.Contains(line, "dd:ack") {
-			seen["ack"] = true
+		if !strings.HasPrefix(line, "data:") {
+			continue
 		}
-		if strings.Contains(line, "dd:watcher-snapshot") {
-			seen["snapshot"] = true
+		var event struct {
+			Type string `json:"type"`
 		}
-		if seen["ack"] && seen["snapshot"] {
-			cancel() // got what we need; cancel to close the stream
+		if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &event); err != nil {
+			t.Fatalf("decode SSE event %q: %v", line, err)
+		}
+		eventTypes = append(eventTypes, event.Type)
+		if len(eventTypes) == 2 {
+			cancel()
 			break
 		}
 	}
 
-	if !seen["ack"] {
-		t.Error("never received dd:ack event")
+	if len(eventTypes) < 2 {
+		t.Fatalf("initial SSE events = %v, want [dd:ack dd:watcher-snapshot]", eventTypes)
 	}
-	if !seen["snapshot"] {
-		t.Error("never received dd:watcher-snapshot event")
+	if eventTypes[0] != "dd:ack" || eventTypes[1] != "dd:watcher-snapshot" {
+		t.Fatalf("initial SSE events = %v, want [dd:ack dd:watcher-snapshot]", eventTypes)
 	}
 }
 
