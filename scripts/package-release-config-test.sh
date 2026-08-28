@@ -88,6 +88,38 @@ reject_text_ci() {
 	fi
 }
 
+validate_current_release_example_values() {
+	local file="$1"
+	local matches="$2"
+	local description="$3"
+	local stale_matches
+
+	if [ -z "${matches}" ]; then
+		echo "FAIL: ${description} (${file} has no recognized active release example)" >&2
+		failures=$((failures + 1))
+		return
+	fi
+
+	stale_matches="$(printf '%s\n' "${matches}" |
+		grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' |
+		grep -Fvx -- "${release_version}" || true)"
+	if [ -n "${stale_matches}" ]; then
+		echo "FAIL: active release examples must use ${release_version} (${file} contains:)" >&2
+		echo "${stale_matches}" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_current_release_examples() {
+	local file="$1"
+	local pattern="$2"
+	local description="$3"
+	local matches
+
+	matches="$(grep -Eo -- "${pattern}" "${file}" || true)"
+	validate_current_release_example_values "${file}" "${matches}" "${description}"
+}
+
 workflow_job_block() {
 	local file="$1"
 	local job="$2"
@@ -191,6 +223,36 @@ require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must 
 require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`" "the compatibility matrix must identify the current release"
 require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
 require_text "examples/observability/docker-compose.yml" "ghcr.io/codeswhat/portwing:${release_version}" "the observability example must pin the current release"
+openapi_agent_version_examples="$(awk '
+	/^        (version|agentVersion):[[:space:]]*$/ { in_agent_version = 1; next }
+	in_agent_version && /^[[:space:]]+example: "[0-9]+\.[0-9]+\.[0-9]+"$/ {
+		print
+		in_agent_version = 0
+		next
+	}
+	in_agent_version && /^        [A-Za-z][A-Za-z0-9]*:/ { in_agent_version = 0 }
+' api/openapi.yaml)"
+validate_current_release_example_values "api/openapi.yaml" \
+	"${openapi_agent_version_examples}" \
+	"OpenAPI agent-version examples must identify the current release"
+require_current_release_examples "api/openapi.yaml" \
+	'"type":"dd:ack".*"version":"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"OpenAPI Drydock handshake examples must identify the current release"
+require_current_release_examples "docs/content/docs/api-reference.mdx" \
+	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"API reference response examples must identify the current release"
+require_current_release_examples "docs/content/docs/standalone-mode.mdx" \
+	'"agentVersion"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"standalone-mode response examples must identify the current release"
+require_current_release_examples "docs/content/docs/observability.mdx" \
+	'"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"observability response examples must identify the current release"
+require_current_release_examples "docs/content/docs/observability.mdx" \
+	'portwing_build_info\{version="[0-9]+\.[0-9]+\.[0-9]+"\}' \
+	"observability build metadata examples must identify the current release"
+require_current_release_examples "docs/content/docs/security-model.mdx" \
+	'^VERSION=[0-9]+\.[0-9]+\.[0-9]+$' \
+	"security verification examples must identify the current release"
 
 # The checks above assert the new version is present on each surface they name.
 # This asserts the previous one is gone everywhere else, which is what actually

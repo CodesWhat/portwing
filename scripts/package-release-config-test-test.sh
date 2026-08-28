@@ -20,6 +20,11 @@ restore_release_workflows() {
 
 git archive HEAD | tar -x -C "${fixture}"
 cp scripts/package-release-config-test.sh "${fixture}/scripts/"
+cp api/openapi.yaml "${fixture}/api/"
+cp docs/content/docs/api-reference.mdx "${fixture}/docs/content/docs/"
+cp docs/content/docs/standalone-mode.mdx "${fixture}/docs/content/docs/"
+cp docs/content/docs/observability.mdx "${fixture}/docs/content/docs/"
+cp docs/content/docs/security-model.mdx "${fixture}/docs/content/docs/"
 mkdir -p "${fixture}/scripts/ci"
 cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/"
 restore_release_workflows
@@ -165,5 +170,25 @@ if ! grep -Fq "${expected_diagnostic}" <<<"${validator_output}"; then
 	echo "${validator_output}" >&2
 	exit 1
 fi
+
+expect_stale_release_example_failure() {
+	local file="$1"
+	local injected_line="$2"
+	local backup="${fixture}/${file}.release-example-backup"
+
+	cp "${fixture}/${file}" "${backup}"
+	printf '%s\n' "${injected_line}" >>"${fixture}/${file}"
+	expect_release_contract_failure \
+		"FAIL: active release examples must use ${release_version}" \
+		"the package release contract must reject a stale release example in ${file}"
+	mv "${backup}" "${fixture}/${file}"
+}
+
+expect_stale_release_example_failure "api/openapi.yaml" $'        agentVersion:\n          example: "0.0.1"'
+expect_stale_release_example_failure "api/openapi.yaml" '        data: {"type":"dd:ack","data":{"version":"0.0.1"}}'
+expect_stale_release_example_failure "docs/content/docs/api-reference.mdx" '{"version":"0.0.1"}'
+expect_stale_release_example_failure "docs/content/docs/standalone-mode.mdx" '{"agentVersion":"0.0.1"}'
+expect_stale_release_example_failure "docs/content/docs/observability.mdx" 'portwing_build_info{version="0.0.1"} 1'
+expect_stale_release_example_failure "docs/content/docs/security-model.mdx" 'VERSION=0.0.1'
 
 echo "Package release contract self-tests passed."
