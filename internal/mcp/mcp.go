@@ -141,10 +141,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var method any
-	if err := json.Unmarshal(rawMethod, &method); err != nil {
-		writeError(w, req.ID, errInvalidRequest, "method must be a string")
-		return
-	}
+	_ = json.Unmarshal(rawMethod, &method)
 	methodName, ok := method.(string)
 	if !ok {
 		writeError(w, req.ID, errInvalidRequest, "method must be a string")
@@ -196,10 +193,16 @@ func validRPCResponse(fields map[string]json.RawMessage) bool {
 		return false
 	}
 
-	_, hasResult := fields["result"]
+	rawResult, hasResult := fields["result"]
 	rawError, hasError := fields["error"]
 	if hasResult == hasError {
 		return false
+	}
+	if hasResult {
+		var result map[string]json.RawMessage
+		if err := json.Unmarshal(rawResult, &result); err != nil || result == nil {
+			return false
+		}
 	}
 	if hasError && !validRPCError(rawError) {
 		return false

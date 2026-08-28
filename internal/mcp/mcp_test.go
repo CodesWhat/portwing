@@ -560,6 +560,8 @@ func TestMCPRejectsMissingOrNonStringMethod(t *testing.T) {
 		{name: "missing", body: `{"jsonrpc":"2.0"}`},
 		{name: "null", body: `{"jsonrpc":"2.0","method":null}`},
 		{name: "number", body: `{"jsonrpc":"2.0","method":7}`},
+		{name: "top-level null", body: `null`},
+		{name: "top-level array", body: `[]`},
 	}
 
 	for _, tt := range tests {
@@ -596,6 +598,54 @@ func TestMCPAcceptsResponsesWithoutResponding(t *testing.T) {
 				t.Errorf("body = %q, want empty", rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestMCPRejectsInvalidResponsesWithoutResponding(t *testing.T) {
+	h := NewHandler(nil, nil)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "null result", body: `{"jsonrpc":"2.0","id":1,"result":null}`},
+		{name: "array result", body: `{"jsonrpc":"2.0","id":1,"result":[]}`},
+		{name: "scalar result", body: `{"jsonrpc":"2.0","id":1,"result":"value"}`},
+		{name: "result and error", body: `{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":-32601,"message":"not found"}}`},
+		{name: "missing id", body: `{"jsonrpc":"2.0","result":{}}`},
+		{name: "invalid id", body: `{"jsonrpc":"2.0","id":{},"result":{}}`},
+		{name: "invalid version", body: `{"jsonrpc":"1.0","id":1,"result":{}}`},
+		{name: "non-object error", body: `{"jsonrpc":"2.0","id":1,"error":true}`},
+		{name: "missing error code", body: `{"jsonrpc":"2.0","id":1,"error":{"message":"bad"}}`},
+		{name: "fractional error code", body: `{"jsonrpc":"2.0","id":1,"error":{"code":1.5,"message":"bad"}}`},
+		{name: "missing error message", body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32601}}`},
+		{name: "non-string error message", body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":null}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := postMCPRaw(h, tt.body)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+			}
+			if rr.Body.Len() != 0 {
+				t.Errorf("body = %q, want empty", rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestMCPRejectsRequestWithResponseFields(t *testing.T) {
+	h := NewHandler(nil, nil)
+	rr := postMCPRaw(h, `{"jsonrpc":"2.0","id":1,"method":"ping","result":{}}`)
+	resp := decodeResponse(t, rr)
+	if resp.Error == nil || resp.Error.Code != errInvalidRequest {
+		t.Fatalf("error = %+v, want code %d", resp.Error, errInvalidRequest)
+	}
+}
+
+func TestValidRequestIDRejectsMalformedJSON(t *testing.T) {
+	if validRequestID(json.RawMessage(`{"unterminated"`)) {
+		t.Error("malformed JSON accepted as a request id")
 	}
 }
 

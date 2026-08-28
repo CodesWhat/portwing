@@ -24,6 +24,9 @@ func FuzzMCPHandler(f *testing.F) {
 	f.Add(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	f.Add(`{"jsonrpc":"2.0","id":1,"result":{}}`)
 	f.Add(`{"jsonrpc":"2.0","id":"request-1","error":{"code":-32601,"message":"not found"}}`)
+	f.Add(`{"jsonrpc":"2.0","id":1,"result":null}`)
+	f.Add(`{"jsonrpc":"2.0","id":1,"result":[]}`)
+	f.Add(`{"jsonrpc":"2.0","id":1,"result":"value"}`)
 	f.Add(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_containers","arguments":{}}}`)
 	f.Add(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"inspect_container","arguments":{"id":"abc"}}}`)
 	f.Add(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"container_logs","arguments":{"id":"abc","tail":100}}}`)
@@ -60,15 +63,19 @@ func FuzzMCPHandler(f *testing.F) {
 		var requestFields map[string]json.RawMessage
 		requestObject := json.Unmarshal([]byte(body), &requestFields) == nil && requestFields != nil
 		requestID, hadID := requestFields["id"]
+		requestIDValue, requestIDErr := decodeJSONValue(requestID)
 		version, versionOK := decodeJSONValue(requestFields["jsonrpc"])
 		_, hasMethod := requestFields["method"]
 		method, methodOK := decodeJSONValue(requestFields["method"])
 		_, methodIsString := method.(string)
 		params, hasParams := requestFields["params"]
 		paramsValid := !hasParams || isFuzzParams(params)
-		_, hasResult := requestFields["result"]
-		_, hasError := requestFields["error"]
+		result, hasResult := requestFields["result"]
+		rpcError, hasError := requestFields["error"]
 		isResponseMessage := requestObject && !hasMethod && (hasResult || hasError)
+		validResponseMessage := isResponseMessage && versionOK == nil && version == "2.0" &&
+			hadID && requestIDErr == nil && isFuzzRequestID(requestIDValue) && hasResult != hasError &&
+			((hasResult && isFuzzParams(result)) || (hasError && isFuzzRPCError(rpcError)))
 		isNotificationMessage := requestObject && versionOK == nil && version == "2.0" &&
 			methodOK == nil && methodIsString && !hadID && !hasResult && !hasError
 		expectsNoBody := isNotificationMessage || isResponseMessage
@@ -92,6 +99,12 @@ func FuzzMCPHandler(f *testing.F) {
 		}
 		if isNotificationMessage && !paramsValid && resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("invalid notification status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+		if isResponseMessage && validResponseMessage && resp.StatusCode != http.StatusAccepted {
+			t.Errorf("valid response message status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+		}
+		if isResponseMessage && !validResponseMessage && resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("invalid response message status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 		}
 
 		// If there's a body, it must be parseable JSON.
@@ -136,9 +149,8 @@ func FuzzMCPHandler(f *testing.F) {
 				t.Errorf("response missing id field for request with id %s", requestID)
 				return
 			}
-			requestIDValue, err := decodeJSONValue(requestID)
-			if err != nil {
-				t.Errorf("decoding request id %s: %v", requestID, err)
+			if requestIDErr != nil {
+				t.Errorf("decoding request id %s: %v", requestID, requestIDErr)
 				return
 			}
 			responseID, err := decodeJSONValue(respID)
@@ -169,6 +181,30 @@ func isFuzzRequestID(value any) bool {
 func isFuzzParams(raw json.RawMessage) bool {
 	var params map[string]json.RawMessage
 	return json.Unmarshal(raw, &params) == nil && params != nil
+}
+
+func isFuzzRPCError(raw json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return false
+	}
+	code, err := decodeJSONValue(fields["code"])
+	if err != nil {
+		return false
+	}
+	number, ok := code.(json.Number)
+	if !ok {
+		return false
+	}
+	if _, err := number.Int64(); err != nil {
+		return false
+	}
+	message, err := decodeJSONValue(fields["message"])
+	if err != nil {
+		return false
+	}
+	_, ok = message.(string)
+	return ok
 }
 
 func decodeJSONValue(raw json.RawMessage) (any, error) {
