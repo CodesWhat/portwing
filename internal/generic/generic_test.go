@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,8 @@ type testDockerCalls struct {
 	inspectCalls atomic.Int64
 	logsCalls    atomic.Int64
 	logsBody     atomic.Value // []byte
+	queriesMu    sync.Mutex
+	logsQueries  []url.Values
 }
 
 func (c *testDockerCalls) setLogsBody(body []byte) {
@@ -56,6 +59,31 @@ func (c *testDockerCalls) getLogsBody() []byte {
 	header[0] = 1
 	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
 	return append(header, payload...)
+}
+
+func (c *testDockerCalls) recordLogsQuery(values url.Values) {
+	c.queriesMu.Lock()
+	defer c.queriesMu.Unlock()
+	c.logsQueries = append(c.logsQueries, cloneQuery(values))
+}
+
+func (c *testDockerCalls) logsQueryClones() []url.Values {
+	c.queriesMu.Lock()
+	defer c.queriesMu.Unlock()
+
+	queries := make([]url.Values, len(c.logsQueries))
+	for i, values := range c.logsQueries {
+		queries[i] = cloneQuery(values)
+	}
+	return queries
+}
+
+func cloneQuery(values url.Values) url.Values {
+	clone := make(url.Values, len(values))
+	for key, entries := range values {
+		clone[key] = append([]string(nil), entries...)
+	}
+	return clone
 }
 
 // newTestDockerClient creates a minimal stub Docker server and returns a
@@ -123,6 +151,7 @@ func newTestDockerClient(t *testing.T) (*docker.Client, *testDockerCalls, func()
 			})
 		case strings.HasSuffix(r.URL.Path, "/logs"):
 			calls.logsCalls.Add(1)
+			calls.recordLogsQuery(r.URL.Query())
 			w.Header().Set("Content-Type", "application/octet-stream")
 			_, _ = w.Write(calls.getLogsBody())
 		default:

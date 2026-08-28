@@ -379,6 +379,58 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	}
 }
 
+func readInitialSSEEventTypes(r io.Reader) ([]string, error) {
+	// The drydock SSE protocol frames every event as `data: <json>` with no
+	// `event:` line; the discriminator is the JSON payload's "type" field
+	// (so EventSource clients read JSON.parse(e.data).type). Accumulate each
+	// event's data payload and inspect its type. The initial handshake contract
+	// requires dd:ack first and dd:watcher-snapshot second.
+	reader := bufio.NewReader(r)
+	var eventTypes []string
+	var data strings.Builder
+
+	for len(eventTypes) < 2 {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return eventTypes, fmt.Errorf("read SSE line: %w", err)
+		}
+		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if strings.HasPrefix(line, "data:") {
+			if data.Len() > 0 {
+				data.WriteByte('\n')
+			}
+			data.WriteString(strings.TrimPrefix(line, "data:"))
+			continue
+		}
+		if line == "" && data.Len() > 0 {
+			// Blank line = end of event: parse the accumulated data payload.
+			var evt struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(data.String())), &evt); err != nil {
+				return nil, fmt.Errorf("decode SSE event: %w", err)
+			}
+			eventTypes = append(eventTypes, evt.Type)
+			data.Reset()
+		}
+	}
+	return eventTypes, nil
+}
+
+func TestReadInitialSSEEventTypesAcceptsLargeSnapshot(t *testing.T) {
+	largeField := strings.Repeat("x", 8*1024*1024)
+	stream := "data: {\"type\":\"dd:ack\"}\n\n" +
+		"data: {\"type\":\"dd:watcher-snapshot\",\"padding\":\"" + largeField + "\"}\n\n"
+
+	eventTypes, err := readInitialSSEEventTypes(strings.NewReader(stream))
+	if err != nil {
+		t.Fatalf("read large SSE snapshot: %v", err)
+	}
+	if len(eventTypes) != 2 || eventTypes[0] != "dd:ack" || eventTypes[1] != "dd:watcher-snapshot" {
+		t.Fatalf("initial SSE events = %v, want [dd:ack dd:watcher-snapshot]", eventTypes)
+	}
+}
+
 func TestSSEEventsFirstEventIsAck(t *testing.T) {
 	base, cleanup := startServer(t)
 	defer cleanup()
@@ -408,53 +460,16 @@ func TestSSEEventsFirstEventIsAck(t *testing.T) {
 		t.Errorf("Content-Type: got %q, want text/event-stream", ct)
 	}
 
-	// The drydock SSE protocol frames every event as `data: <json>` with no
-	// `event:` line; the discriminator is the JSON payload's "type" field
-	// (so EventSource clients read JSON.parse(e.data).type). Accumulate each
-	// event's data payload and inspect its type. Read until we see dd:ack and
-	// dd:watcher-snapshot, or the context times out.
-	scanner := bufio.NewScanner(resp.Body)
-	// Watcher-snapshot payloads carry the full container inventory and can
-	// exceed the scanner's default 64 KiB token cap on busy hosts.
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	var gotAck, gotSnapshot bool
-	var data strings.Builder
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "data:") {
-			data.WriteString(strings.TrimPrefix(line, "data:"))
-			continue
-		}
-		if line == "" && data.Len() > 0 {
-			// Blank line = end of event: parse the accumulated data payload.
-			var evt struct {
-				Type string `json:"type"`
-			}
-			if err := json.Unmarshal([]byte(strings.TrimSpace(data.String())), &evt); err == nil {
-				switch evt.Type {
-				case "dd:ack":
-					gotAck = true
-				case "dd:watcher-snapshot":
-					gotSnapshot = true
-				}
-			}
-			data.Reset()
-		}
-		if gotAck && gotSnapshot {
-			break
-		}
+	eventTypes, err := readInitialSSEEventTypes(resp.Body)
+	if err != nil && ctx.Err() == nil {
+		t.Errorf("read SSE events: %v", err)
 	}
 
-	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		t.Errorf("SSE scanner: %v", err)
+	if len(eventTypes) < 2 {
+		t.Fatalf("initial SSE events = %v, want [dd:ack dd:watcher-snapshot]", eventTypes)
 	}
-
-	if !gotAck {
-		t.Error("SSE stream: did not receive dd:ack event")
-	}
-	if !gotSnapshot {
-		t.Error("SSE stream: did not receive dd:watcher-snapshot event")
+	if eventTypes[0] != "dd:ack" || eventTypes[1] != "dd:watcher-snapshot" {
+		t.Fatalf("initial SSE events = %v, want [dd:ack dd:watcher-snapshot]", eventTypes)
 	}
 }
 

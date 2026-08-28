@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"testing"
 	"time"
 
@@ -270,53 +272,60 @@ func TestServeHTTPHeartbeatDocumented(t *testing.T) {
 	}
 }
 
-// TestHandleContainerLogsSinceUntilParams exercises the since and until query
-// parameters of handleContainerLogs, ensuring they are forwarded to Docker
-// without triggering the tail validation path.
-func TestHandleContainerLogsSinceUntilParams(t *testing.T) {
+func TestHandleContainerLogsForwardsQueryParameters(t *testing.T) {
 	t.Parallel()
 
-	client, calls, shutdown := newTestDockerClient(t)
-	defer shutdown()
-
-	a := New(client, "test-agent")
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/containers/container-1/logs?since=2026-01-01T00:00:00Z&until=2026-12-31T23:59:59Z", nil)
-	req.SetPathValue("id", "container-1")
-	rec := httptest.NewRecorder()
-
-	a.handleContainerLogs(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	base := url.Values{"stderr": {"1"}, "stdout": {"1"}}
+	tests := []struct {
+		name  string
+		query string
+		want  url.Values
+	}{
+		{name: "defaults", want: base},
+		{name: "tail", query: "tail=10", want: url.Values{"stderr": {"1"}, "stdout": {"1"}, "tail": {"10"}}},
+		{name: "since", query: "since=1h", want: url.Values{"since": {"1h"}, "stderr": {"1"}, "stdout": {"1"}}},
+		{name: "until", query: "until=30m", want: url.Values{"stderr": {"1"}, "stdout": {"1"}, "until": {"30m"}}},
+		{
+			name:  "combined",
+			query: "tail=25&since=2026-01-01T00%3A00%3A00Z&until=2026-12-31T23%3A59%3A59Z",
+			want: url.Values{
+				"since":  {"2026-01-01T00:00:00Z"},
+				"stderr": {"1"},
+				"stdout": {"1"},
+				"tail":   {"25"},
+				"until":  {"2026-12-31T23:59:59Z"},
+			},
+		},
+		{name: "minimum tail boundary", query: "tail=1", want: url.Values{"stderr": {"1"}, "stdout": {"1"}, "tail": {"1"}}},
 	}
-	if calls.logsCalls.Load() == 0 {
-		t.Fatal("expected docker logs to be called")
-	}
-}
 
-// TestHandleContainerLogsValidTailBoundary ensures tail=1 (the minimum valid
-// positive integer) is accepted and reaches Docker.
-func TestHandleContainerLogsValidTailBoundary(t *testing.T) {
-	t.Parallel()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client, calls, shutdown := newTestDockerClient(t)
+			defer shutdown()
 
-	client, calls, shutdown := newTestDockerClient(t)
-	defer shutdown()
+			a := New(client, "test-agent")
+			path := "/api/v1/containers/container-1/logs"
+			if tc.query != "" {
+				path += "?" + tc.query
+			}
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.SetPathValue("id", "container-1")
+			rec := httptest.NewRecorder()
 
-	a := New(client, "test-agent")
+			a.handleContainerLogs(rec, req)
 
-	before := calls.logsCalls.Load()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/containers/container-1/logs?tail=1", nil)
-	req.SetPathValue("id", "container-1")
-	rec := httptest.NewRecorder()
-
-	a.handleContainerLogs(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
-	}
-	if calls.logsCalls.Load() == before {
-		t.Fatal("expected docker logs to be called for tail=1")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+			}
+			queries := calls.logsQueryClones()
+			if len(queries) != 1 {
+				t.Fatalf("Docker log queries = %d, want 1", len(queries))
+			}
+			if !reflect.DeepEqual(queries[0], tc.want) {
+				t.Fatalf("Docker log query = %#v, want %#v", queries[0], tc.want)
+			}
+		})
 	}
 }
 

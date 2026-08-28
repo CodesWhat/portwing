@@ -73,6 +73,7 @@ const maxHijackBodyBytes = 10 * 1024 * 1024 // 10 MB
 type Server struct {
 	cfg          *config.Config
 	dockerClient *docker.Client
+	dockerDialer func(network, address string) (net.Conn, error)
 	adapter      adapter.ServerAdapter
 	compose      *docker.ComposeManager
 	collector    *metrics.Collector
@@ -522,7 +523,11 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	defer closeConnections()
 
 	// Connect to Docker daemon.
-	dockerConn, err = net.Dial("unix", s.dockerClient.GetSocketPath())
+	dialer := s.dockerDialer
+	if dialer == nil {
+		dialer = net.Dial
+	}
+	dockerConn, err = dialer("unix", s.dockerClient.GetSocketPath())
 	if err != nil {
 		// Best-effort 502 write; client may have already gone.
 		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))

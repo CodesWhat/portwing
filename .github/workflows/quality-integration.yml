@@ -22,6 +22,7 @@ on:
       - 'internal/server/**'
       - 'internal/auth/**'
       - 'internal/config/**'
+      - 'internal/edge/**'
       - 'internal/integration/**'
       - 'cmd/**'
       - '.github/workflows/quality-integration.yml'
@@ -77,4 +78,4 @@ jobs:
       - name: Run integration suite
         env:
           PORTWING_TEST_DOCKER_SOCKET: /var/run/docker.sock
-        run: go test -tags=integration -count=1 -timeout=10m -race ./internal/integration/
+        run: go test -tags=integration -count=1 -timeout=10m -race ./internal/edge/ ./internal/integration/

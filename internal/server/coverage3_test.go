@@ -36,6 +36,14 @@ type failingHijacker struct {
 	http.ResponseWriter
 }
 
+type writeErrorConn struct {
+	net.Conn
+}
+
+func (writeErrorConn) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
+
 func (f *failingHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, http.ErrNotSupported
 }
@@ -87,57 +95,10 @@ func TestHandleExecHijackHijackError(t *testing.T) {
 func TestHandleExecHijackWriteToDockerFails(t *testing.T) {
 	t.Parallel()
 
-	sockPath, cleanup := shortSocketPath(t)
-	defer cleanup()
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-
-	// versionDone signals that the /version request has been served.
-	// Subsequent connections (exec dial) are closed immediately.
-	versionDone := make(chan struct{})
-
-	go func() {
-		first := true
-		for {
-			conn, acceptErr := ln.Accept()
-			if acceptErr != nil {
-				return
-			}
-			isFirst := first
-			first = false
-			go func(c net.Conn, serveVersion bool) {
-				defer c.Close()
-				if serveVersion {
-					// Serve /version response.
-					buf := make([]byte, 4096)
-					c.Read(buf) //nolint:errcheck
-					resp := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" +
-						`{"Version":"26.0.0","ApiVersion":"1.44"}`
-					_, _ = c.Write([]byte(resp))
-					close(versionDone)
-					return
-				}
-				// Close without responding — causes Write to fail.
-			}(conn, isFirst)
-		}
-	}()
-	defer ln.Close()
-
-	// Wait for version to be served before creating the docker client,
-	// so NewClient can negotiate version successfully.
-	client, err := docker.NewClient(sockPath, 5)
-	if err != nil {
-		t.Fatalf("docker.NewClient: %v", err)
-	}
-
-	// Wait until version has been served so next connections go to close-immediately.
-	select {
-	case <-versionDone:
-	case <-time.After(3 * time.Second):
-		t.Fatal("version never served")
-	}
+	client, stopDocker := newStubDockerClient(t)
+	defer stopDocker()
+	dockerConn, dockerPeer := net.Pipe()
+	defer dockerPeer.Close()
 
 	auditor, closeAudit, _ := audit.New("", 0)
 	defer closeAudit()
@@ -146,6 +107,9 @@ func TestHandleExecHijackWriteToDockerFails(t *testing.T) {
 		dockerClient: client,
 		rateLimiter:  NewRateLimiter(),
 		auditor:      auditor,
+		dockerDialer: func(string, string) (net.Conn, error) {
+			return writeErrorConn{Conn: dockerConn}, nil
+		},
 	}
 	defer s.rateLimiter.Stop()
 
@@ -159,35 +123,11 @@ func TestHandleExecHijackWriteToDockerFails(t *testing.T) {
 		hdr:  make(http.Header),
 	}
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		req := httptest.NewRequest(http.MethodPost, "/exec/abc123/start", strings.NewReader(`{}`))
-		s.handleExecHijack(hrw, req)
-	}()
+	response := captureHijackedResponse(clientSide)
+	req := httptest.NewRequest(http.MethodPost, "/exec/abc123/start", strings.NewReader(`{}`))
+	s.handleExecHijack(hrw, req)
 
-	// Drain clientSide so serverSide writes don't block.
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			if _, err := clientSide.Read(buf); err != nil {
-				return
-			}
-		}
-	}()
-
-	select {
-	case <-done:
-		// Success: handleExecHijack exited (write or ReadResponse failed as expected).
-	case <-time.After(5 * time.Second):
-		clientSide.Close()
-		serverSide.Close()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Error("handleExecHijack did not return in time")
-		}
-	}
+	requireBadGatewayResponse(t, response)
 }
 
 // ---------------------------------------------------------------------------
@@ -277,21 +217,14 @@ func TestHandleExecHijackReadResponseFails(t *testing.T) {
 	}
 
 	done := make(chan struct{})
+	response := captureHijackedResponse(clientSide)
 	go func() {
 		defer close(done)
 		req := httptest.NewRequest(http.MethodPost, "/exec/abc123/start", strings.NewReader(`{}`))
 		s.handleExecHijack(hrw, req)
 	}()
 
-	// Drain clientSide so serverSide writes don't block.
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			if _, err := clientSide.Read(buf); err != nil {
-				return
-			}
-		}
-	}()
+	requireBadGatewayResponse(t, response)
 
 	select {
 	case <-done:

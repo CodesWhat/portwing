@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   archive responses, including versioned paths with query strings, no longer
   take the bounded whole-body proxy path; PUT archive uploads keep their normal
   non-streaming response handling.
+- **Load tests fail closed.** The load generator exits unsuccessfully when it
+  completes no requests, encounters a transport error, or receives any non-2xx
+  response, so soak runs can no longer report success without exercising a
+  healthy agent.
+- **Compatibility contracts are enforced at their real boundaries.** CI now
+  drives interactive edge exec against dockerd and requires exact hijack 502
+  responses, generic log query forwarding, and ack-before-snapshot SSE order.
 - **Standard-mode exec relays terminate when either side closes.** Client EOF
   half-closes Docker input so remaining output can drain, while Docker EOF or a
   fatal copy error closes both connections and unblocks the peer goroutine.
