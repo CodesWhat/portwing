@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.11] - 2026-08-27
+
+### Fixed
+
+- **Published-image security gates remain stable across advisory aliases.**
+  The reviewed Grype policy now pairs the Go vulnerability and GitHub advisory
+  IDs for two Docker Engine findings embedded as module metadata in the
+  third-party Docker Compose client. Every exclusion stays pinned to the exact
+  module version and `/usr/bin/docker-compose` path, while source and binary
+  guards fail if either affected daemon package is ever linked. Mutation tests
+  reject a missing alias or any broadened package, version, type, or path scope.
+  This release supersedes v0.9.10, whose published artifacts passed signing,
+  provenance, install, and pull verification before its final published-image
+  scan caught the identifier drift and failed the release run.
+
 ## [v0.9.10] - 2026-08-27
 
 ### Added
