@@ -4,6 +4,8 @@ set -euo pipefail
 readonly -a excluded_packages=(
 	"golang.org/x/crypto/openpgp"
 	"github.com/klauspost/compress/s2"
+	"github.com/docker/docker/daemon/pkg/plugin"
+	"github.com/docker/docker/pkg/authorization"
 )
 
 if [[ $# -eq 0 ]]; then

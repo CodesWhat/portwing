@@ -424,6 +424,44 @@ require_in_grype_command "--config .grype.yaml" \
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 require_in_grype_command '${fail_on[@]+"${fail_on[@]}"}' \
 	"the per-platform gate must actually reach the grype command; the gate map is decoration if the flags never get passed"
+
+# Grype can report either the Go vulnerability ID or the GitHub advisory ID
+# for the same finding as its databases and alias selection change. Both IDs
+# must remain paired and scoped to the exact third-party Compose binary; an
+# unscoped alias suppresses a real future import into Portwing itself, while a
+# missing alias makes the release gate depend on which identifier Grype emits.
+require_scoped_compose_advisory_alias() {
+	local advisory_id="$1"
+	local block
+	local count
+
+	count="$(grep -Fc -- "  - vulnerability: ${advisory_id}" .grype.yaml || true)"
+	block="$(awk -v advisory_id="${advisory_id}" '
+		$1 == "-" && $2 == "vulnerability:" {
+			if (capture) exit
+			capture = ($3 == advisory_id)
+		}
+		capture { print }
+	' .grype.yaml)"
+
+	if [ "${count}" -ne 1 ] ||
+		! grep -Fq 'name: github.com/docker/docker' <<<"${block}" ||
+		! grep -Fq 'version: v28.5.2+incompatible' <<<"${block}" ||
+		! grep -Fq 'type: go-module' <<<"${block}" ||
+		! grep -Fq 'location: "**/usr/bin/docker-compose"' <<<"${block}"; then
+		echo "FAIL: .grype.yaml must contain exactly one ${advisory_id} ignore scoped to github.com/docker/docker v28.5.2+incompatible at **/usr/bin/docker-compose" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_scoped_compose_advisory_alias "GHSA-pxq6-2prw-chj9"
+require_scoped_compose_advisory_alias "GO-2026-4883"
+require_scoped_compose_advisory_alias "GHSA-x744-4wpc-v9h2"
+require_scoped_compose_advisory_alias "GO-2026-4887"
+require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/daemon/pkg/plugin" \
+	"the Compose advisory exclusion must stay guarded against linking Docker Engine's daemon plugin package"
+require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/pkg/authorization" \
+	"the Compose advisory exclusion must stay guarded against linking Docker Engine's authorization package"
 # The per-platform gate is the actual security posture, so assert the whole map
 # rather than the substring "--fail-on high" — that string survives intact even
 # if every leg is flipped to report-only.

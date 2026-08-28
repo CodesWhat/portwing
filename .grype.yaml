@@ -41,15 +41,14 @@ ignore:
   # the v5.1.0 fix line for that same advisory — all now upstream-fixed, so
   # those six x/net entries and the docker/cli entry were dropped as dead
   # config (confirmed zero matches via `grype dir:<extracted docker-compose
-  # binary> --config .grype.yaml`). GO-2026-4883 and GO-2026-4887 were also
-  # dropped: they are the Go-vulndb aliases of GHSA-pxq6-2prw-chj9 and
-  # GHSA-x744-4wpc-v9h2 below — Grype reports the same finding under the
-  # GHSA id, so the GO- id entries never matched anything (confirmed via a
-  # single-rule test config: 0 ignoredMatches). The five GHSA entries below
-  # remain genuinely open: github.com/docker/docker v28.5.2+incompatible is
-  # still vendored, and none of these advisories have a fix on that legacy
-  # import path — only the github.com/moby/moby/v2 rewrite is patched, which
-  # is Wolfi's call, not portwing's.
+  # binary> --config .grype.yaml`). Grype selected the GHSA identifiers for
+  # GO-2026-4883 and GO-2026-4887 through 2026-08-27, then selected the latter's
+  # Go alias on 2026-08-28. Keep both ID pairs scoped below so database alias
+  # selection cannot flip the release gate again. The five GHSA entries remain
+  # genuinely open: github.com/docker/docker
+  # v28.5.2+incompatible is still vendored, and none has a fix on that legacy
+  # import path — only the github.com/moby/moby/v2 rewrite is patched, which is
+  # Wolfi's call, not portwing's.
   #
   # 2026-08-16 audit (code-scanning alert 191): the v5.4.0 compose binary
   # embeds x/crypto v0.54.0, so the GO-2026-5932 ignore above was re-scoped
@@ -59,14 +58,28 @@ ignore:
   # embeds v1.19.1, past the v1.18.7 fix line, so the advisory no longer
   # matches at all.
   - vulnerability: GHSA-pxq6-2prw-chj9
-    reason: "Embedded in Wolfi docker-compose binary (docker/docker v28.5.2+incompatible, legacy import path); no fix exists on that path, only the moby/moby/v2 rewrite (2.0.0-beta.8) is patched. Review by 2026-11-15."
+    reason: "Docker Engine daemon plugin-install advisory; the shipped Docker Compose executable is a client and does not link daemon/pkg/plugin. Wolfi still vendors docker/docker v28.5.2+incompatible. Review by 2026-11-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-4883
+    reason: "Go-vulndb alias of GHSA-pxq6-2prw-chj9; Docker Compose is a client and does not link the affected Docker Engine daemon/pkg/plugin package. Wolfi still vendors docker/docker v28.5.2+incompatible. Review by 2026-11-15."
     package:
       name: github.com/docker/docker
       version: v28.5.2+incompatible
       type: go-module
       location: "**/usr/bin/docker-compose"
   - vulnerability: GHSA-x744-4wpc-v9h2
-    reason: "Embedded in Wolfi docker-compose binary (docker/docker v28.5.2+incompatible, legacy import path); fixed upstream at docker/docker v29.3.1, but Wolfi's docker-compose package still vendors v28.5.2 — no portwing-side bump available. Review by 2026-11-15."
+    reason: "Docker Engine daemon AuthZ-plugin advisory; the shipped Docker Compose executable is a client and cannot host daemon authorization plugins. Wolfi still vendors docker/docker v28.5.2+incompatible. Review by 2026-11-15."
+    package:
+      name: github.com/docker/docker
+      version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+  - vulnerability: GO-2026-4887
+    reason: "Go-vulndb alias of GHSA-x744-4wpc-v9h2; Docker Compose is a client and cannot host the affected Docker Engine daemon AuthZ plugins. Wolfi still vendors docker/docker v28.5.2+incompatible. Review by 2026-11-15."
     package:
       name: github.com/docker/docker
       version: v28.5.2+incompatible
