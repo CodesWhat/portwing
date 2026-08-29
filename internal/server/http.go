@@ -270,9 +270,15 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Enrollment endpoint: reachable WITHOUT auth (it IS the bootstrap), but
 	// rate-limited. Registered only when ENROLLMENT_TOKEN is configured.
+	//
+	// Registered WITHOUT a method prefix so this exact-path pattern also
+	// catches non-POST methods: the bare pattern outranks the "/" catch-all
+	// in ServeMux precedence (exact path beats subtree wildcard), so a
+	// wrong-method request lands here instead of falling through to the
+	// Docker proxy. Enroller.ServeHTTP already replies 405 for non-POST.
 	if s.enroller != nil {
 		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller, s.metrics)
-		mux.Handle("POST /api/portwing/enroll", enrollHandler)
+		mux.Handle("/api/portwing/enroll", enrollHandler)
 	}
 
 	// Auth required - wrap with audit-aware auth middleware (with Ed25519 support).
@@ -289,7 +295,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mcpHandler := authWrap(func(w http.ResponseWriter, r *http.Request) {
 		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
 	})
-	mux.Handle("POST /_portwing/mcp", mcpHandler)
+	// Registered WITHOUT a method prefix (see the enroll route above for
+	// why): mcp.Handler.ServeHTTP already dispatches POST to the JSON-RPC
+	// handler and replies 405 for every other method, but that method
+	// switch was dead code while only "POST /_portwing/mcp" was registered,
+	// letting the "/" catch-all serve wrong-method requests instead.
+	mux.Handle("/_portwing/mcp", mcpHandler)
 
 	// Adapter-specific routes.
 	s.adapter.RegisterRoutes(mux, authWrap)
