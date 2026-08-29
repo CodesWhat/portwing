@@ -379,6 +379,9 @@ test("before_send drops a URL-shaped UTM value rather than forwarding it", () =>
     "//portwing.internal/customer/acme",
     "/account/reset/abc123",
     "portwing.internal/customer/acme?k=v",
+    "campaign?utm_secret=x",
+    "page#fragment",
+    "customer\\acme\\reset",
     "a".repeat(201),
   ];
 

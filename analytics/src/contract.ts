@@ -236,20 +236,22 @@ function isAcceptableReferringDomain(value: unknown): value is string {
   );
 }
 
-// UTM values are campaign labels, not URLs. Any value carrying a path
-// separator is dropped rather than forwarded, so a full private link can never
+// UTM values are campaign labels, not URLs. Any value carrying URL or path
+// structure is dropped rather than forwarded, so a full private link can never
 // ride through under a campaign parameter's name. Testing for "://" alone is
 // not enough: "//host/path" and a bare "/account/reset/abc123" are both
-// URL-shaped and both leak a path. An over-long value is dropped for the same
-// reason, since a campaign label is not that size.
+// URL-shaped and both leak a path; "?" and "#" leak a query string or fragment
+// the same way, and "\" leaks a Windows-style path. An over-long value is
+// dropped for the same reason, since a campaign label is not that size.
 const MAX_UTM_VALUE_LENGTH = 200;
+const UTM_URL_STRUCTURE_PATTERN = /[\\/?#]/u;
 
 function isAcceptableUtmValue(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value !== "" &&
     value.length <= MAX_UTM_VALUE_LENGTH &&
-    !value.includes("/")
+    !UTM_URL_STRUCTURE_PATTERN.test(value)
   );
 }
 
