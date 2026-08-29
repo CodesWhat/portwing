@@ -750,3 +750,296 @@ func TestStreamedBodyBudgetCoversDispatchAndIsReleased(t *testing.T) {
 		t.Errorf("after-release buffered = %d, want %d: a finished dispatch is still being charged", buffered, len(chunk))
 	}
 }
+
+// TestStreamedBodyRejectedWhenStreamSemFullReleasesItsReservation covers the
+// maxStreams admission check dispatchStreamedBody duplicates from readPump's
+// inline-body path. The duplication is what keeps releaseDispatchingBody a
+// single defer with one release site, so the branch that pays for it is the
+// one that has to be proven: a fully reassembled body arriving while
+// maxStreams requests are already in flight is rejected, and — the half that
+// matters — the bytes finishPendingBody charged it are handed back rather
+// than held against maxStreamedRequestBodyBytes for the life of the process.
+func TestStreamedBodyRejectedWhenStreamSemFullReleasesItsReservation(t *testing.T) {
+	// Not t.Parallel(): mutates the package-level maxStreamedRequestBodyBytes
+	// var. 15 is picked so one 10-byte body fits and two do not, which is what
+	// makes the second half a test of the release rather than a restatement of
+	// the first. maxRequestBodyStream stays at its real 512 MB, so nothing here
+	// can be rejected by the per-request cap.
+	orig := maxStreamedRequestBodyBytes
+	maxStreamedRequestBodyBytes = 15
+	t.Cleanup(func() { maxStreamedRequestBodyBytes = orig })
+
+	c, ctrl := newTestClient(t)
+	// The queued send path, not newTestClient's direct-write one: the
+	// rejection is written by the dispatch goroutine while readPump is free to
+	// write a pong, and gorilla panics on a concurrent write.
+	runSendPump(t, c)
+	fd := &fakeDocker{} // no canned response: a call here would mean the admission check didn't hold.
+	c.dockerClient = fd
+
+	// Saturate the same semaphore an inline-body request takes, so the
+	// reassembled body below finds no slot. Filled before the read pump starts,
+	// so nothing races it.
+	for i := 0; i < cap(c.streamSem); i++ {
+		c.streamSem <- struct{}{}
+	}
+
+	runReadPump(t, c)
+
+	const chunk = "0123456789" // 10 bytes, under the 15 byte budget on its own
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "no-slot",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "no-slot",
+		Data:      base64.StdEncoding.EncodeToString([]byte(chunk)),
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStreamEnd, protocol.StreamEndMessage{
+		RequestID: "no-slot",
+		Reason:    "complete",
+	})
+
+	var em protocol.ErrorMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeError), &em)
+	if em.RequestID != "no-slot" {
+		t.Errorf("error RequestID = %q, want no-slot", em.RequestID)
+	}
+	if em.Message != "agent busy: too many concurrent requests" {
+		t.Errorf("error Message = %q, want the concurrent-request rejection", em.Message)
+	}
+
+	fd.mu.Lock()
+	calls := len(fd.doCalls)
+	fd.mu.Unlock()
+	if calls != 0 {
+		t.Errorf("Docker calls = %d, want 0: a body rejected on admission must never reach dockerd", calls)
+	}
+
+	// The release is a defer, so it lands just after the frame above was
+	// enqueued. Poll for it rather than racing it.
+	waitFor(t, "the rejected body's byte reservation to be released", func() bool {
+		c.pendingBodiesMu.Lock()
+		defer c.pendingBodiesMu.Unlock()
+		return c.streamedBodyBytesLocked() == 0
+	})
+
+	// Behavioural half: a leaked reservation still holds 10 of the 15 byte
+	// budget, so this second 10-byte body would be failed by the aggregate cap
+	// instead of buffered. The ping is sent up front so a rejection shows up as
+	// a TypeError arriving where the pong should have been, not as an opaque
+	// read timeout.
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "after-rejection",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "after-rejection",
+		Data:      base64.StdEncoding.EncodeToString([]byte(chunk)),
+	})
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 1})
+
+	env := expectEnvelope(t, ctrl)
+	if env.Type != protocol.TypePong {
+		t.Fatalf("frame after the second chunk = %q (data=%s), want %q: the rejected body's bytes are still charged against the aggregate budget", env.Type, env.Data, protocol.TypePong)
+	}
+
+	c.pendingBodiesMu.Lock()
+	pb, registered := c.pendingBodies["after-rejection"]
+	var buffered int
+	if registered {
+		buffered = pb.buf.Len()
+	}
+	c.pendingBodiesMu.Unlock()
+	if !registered {
+		t.Fatal("after-rejection was dropped, want the freed budget to accept it")
+	}
+	if buffered != len(chunk) {
+		t.Errorf("after-rejection buffered = %d, want %d: a rejected dispatch is still being charged", buffered, len(chunk))
+	}
+}
+
+// TestStreamedBodyDuplicateRequestIDRejectedAndOriginalSurvives covers the
+// duplicate-requestId branch of registerPendingBody. Reassembly is keyed by
+// RequestID alone, so a second bodyStream=true request under an ID that is
+// already filling would otherwise replace the entry and silently truncate a
+// live upload to whatever arrived after it. The rejection has to name the
+// request, and the reassembly already under way has to be left exactly as it
+// was — proven by dispatching it afterwards and comparing the bytes dockerd
+// receives against the chunk sent before the duplicate.
+func TestStreamedBodyDuplicateRequestIDRejectedAndOriginalSurvives(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	//nolint:bodyclose // consumed and closed by handleRequestTo, the code under test.
+	fd := &fakeDocker{doResp: mkResp(http.StatusCreated, "application/json", `{"ok":true}`)}
+	c.dockerClient = fd
+
+	runReadPump(t, c)
+
+	const original = "first-body-bytes"
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "dup",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "dup",
+		Data:      base64.StdEncoding.EncodeToString([]byte(original)),
+	})
+	// Same RequestID, still open. This is the frame under test.
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "dup",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+
+	var em protocol.ErrorMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeError), &em)
+	if em.RequestID != "dup" {
+		t.Errorf("error RequestID = %q, want dup", em.RequestID)
+	}
+	if em.Message != "duplicate requestId for streamed request body" {
+		t.Errorf("error Message = %q, want the duplicate-requestId rejection", em.Message)
+	}
+
+	// The rejection is written by readPump itself, which is a single
+	// goroutine, so reading it is the ordering barrier: the chunk and the
+	// duplicate registration are both fully handled by now.
+	c.pendingBodiesMu.Lock()
+	pb, stillPending := c.pendingBodies["dup"]
+	var buffered string
+	if stillPending {
+		buffered = pb.buf.String()
+	}
+	pending := len(c.pendingBodies)
+	c.pendingBodiesMu.Unlock()
+	if !stillPending {
+		t.Fatal("the original reassembly was removed by the duplicate, want it kept")
+	}
+	if buffered != original {
+		t.Errorf("buffered = %q, want %q: the duplicate clobbered the in-flight reassembly", buffered, original)
+	}
+	if pending != 1 {
+		t.Errorf("pendingBodies = %d, want 1: the duplicate must not add an entry", pending)
+	}
+
+	// End-to-end proof that the surviving entry is the original one and is
+	// still usable: it dispatches with exactly the bytes sent before the
+	// duplicate arrived.
+	sendEnvelope(t, ctrl, protocol.TypeStreamEnd, protocol.StreamEndMessage{
+		RequestID: "dup",
+		Reason:    "complete",
+	})
+
+	var resp protocol.ResponseMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+	if resp.RequestID != "dup" {
+		t.Errorf("RequestID = %q, want dup", resp.RequestID)
+	}
+
+	fd.mu.Lock()
+	calls := append([]doCall(nil), fd.doCalls...)
+	fd.mu.Unlock()
+	if len(calls) != 1 {
+		t.Fatalf("Docker calls = %d, want 1", len(calls))
+	}
+	if string(calls[0].body) != original {
+		t.Errorf("dispatched body = %q, want %q", calls[0].body, original)
+	}
+}
+
+// TestStreamedBodyInvalidBase64ChunkRejectsAndFreesTheRequestID covers the
+// decode-failure branch of appendPendingBody. A chunk that isn't valid base64
+// can't be appended to anything, so the request is failed with a TypeError —
+// but the entry also has to be removed, or the RequestID stays wedged for the
+// idle timeout and every retry under it is answered with a duplicate-requestId
+// rejection instead. The second half is the assertion that proves the cleanup
+// ran: the same RequestID re-registers, uploads, and dispatches normally.
+func TestStreamedBodyInvalidBase64ChunkRejectsAndFreesTheRequestID(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	//nolint:bodyclose // consumed and closed by handleRequestTo, the code under test.
+	fd := &fakeDocker{doResp: mkResp(http.StatusCreated, "application/json", `{"ok":true}`)}
+	c.dockerClient = fd
+
+	runReadPump(t, c)
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "bad-b64",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "bad-b64",
+		Data:      "!!! not base64 !!!",
+	})
+
+	var em protocol.ErrorMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeError), &em)
+	if em.RequestID != "bad-b64" {
+		t.Errorf("error RequestID = %q, want bad-b64", em.RequestID)
+	}
+	if em.Message != "invalid base64 in streamed request body chunk" {
+		t.Errorf("error Message = %q, want the base64 rejection", em.Message)
+	}
+
+	// Written by readPump itself, so reading the frame above is the ordering
+	// barrier for this.
+	c.pendingBodiesMu.Lock()
+	pending := len(c.pendingBodies)
+	c.pendingBodiesMu.Unlock()
+	if pending != 0 {
+		t.Errorf("pendingBodies = %d, want 0: the failed reassembly must be freed", pending)
+	}
+
+	// The half that matters. If the entry were merely failed and left behind,
+	// this re-registration would draw a duplicate-requestId TypeError instead
+	// of completing.
+	const retry = "retried-body-bytes"
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "bad-b64",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "bad-b64",
+		Data:      base64.StdEncoding.EncodeToString([]byte(retry)),
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStreamEnd, protocol.StreamEndMessage{
+		RequestID: "bad-b64",
+		Reason:    "complete",
+	})
+
+	env := expectEnvelope(t, ctrl)
+	if env.Type != protocol.TypeResponse {
+		t.Fatalf("frame after the retry = %q (data=%s), want %q: the RequestID was left wedged by the decode failure", env.Type, env.Data, protocol.TypeResponse)
+	}
+	var resp protocol.ResponseMessage
+	decodeData(t, env.Data, &resp)
+	if resp.RequestID != "bad-b64" {
+		t.Errorf("RequestID = %q, want bad-b64", resp.RequestID)
+	}
+
+	fd.mu.Lock()
+	calls := append([]doCall(nil), fd.doCalls...)
+	fd.mu.Unlock()
+	if len(calls) != 1 {
+		t.Fatalf("Docker calls = %d, want 1: only the retry may dispatch", len(calls))
+	}
+	if string(calls[0].body) != retry {
+		t.Errorf("dispatched body = %q, want %q: the undecodable chunk leaked into the retry", calls[0].body, retry)
+	}
+}

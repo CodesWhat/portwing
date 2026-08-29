@@ -684,6 +684,37 @@ func TestReadPumpSkipsMalformedPing(t *testing.T) {
 	expectType(t, ctrl, protocol.TypePong)
 }
 
+// TestReadPumpSkipsMalformedStreamFrames ensures a badly formed stream or
+// stream_end payload is skipped without crashing, and without being handed to
+// the adapter: a frame that failed to decode has no RequestID to route by, so
+// neither the reassembly path nor an adapter can do anything with it.
+// Liveness confirmed by ping.
+func TestReadPumpSkipsMalformedStreamFrames(t *testing.T) {
+	t.Parallel()
+
+	fa := &fakeAdapter{handleMsgResult: true}
+	c, ctrl := newTestClient(t)
+	c.adapter = fa
+
+	runReadPump(t, c)
+
+	for _, msgType := range []string{protocol.TypeStream, protocol.TypeStreamEnd} {
+		badEnv := protocol.Envelope{Type: msgType, Data: json.RawMessage(`"notanobject"`)}
+		if err := ctrl.WriteJSON(badEnv); err != nil {
+			t.Fatalf("write bad %s: %v", msgType, err)
+		}
+	}
+
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 123})
+	expectType(t, ctrl, protocol.TypePong)
+
+	// The ping/pong above is the ordering barrier: readPump is a single
+	// goroutine, so both frames are fully handled by the time the pong lands.
+	if got := fa.messageTypes(); len(got) != 0 {
+		t.Errorf("adapter.HandleMessage calls = %v, want none: a frame that failed to decode must not fall through", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // closeAllExecSessions
 // ---------------------------------------------------------------------------
