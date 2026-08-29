@@ -97,6 +97,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a byte-for-byte duplicate of `openCredentialFile`'s permission check, which
   callers already use directly), along with the tests that existed solely to
   exercise them.
+- **Moved the Go toolchain to 1.27.0.** `go.mod`'s `toolchain` directive and the
+  digest-pinned `golang:*-alpine` builder images in `Dockerfile`,
+  `Dockerfile.armv7`, and `Dockerfile.dev` now match, as the release contract
+  check requires. The CI lint script also moves to golangci-lint v2.13.2; this
+  part isn't a routine version bump, since v2.12.2's vendored staticcheck
+  panicked on Go 1.27's stdlib (`buildir: package "poll" ... unexpected expr:
+  *ast.KeyValueExpr`) instead of reporting lint errors, and v2.13.2 is the
+  first release built against a staticcheck that parses it.
 
 ## [v0.9.11] - 2026-08-27
 
