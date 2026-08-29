@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +48,12 @@ type fakeAdapter struct {
 	onConnectErr    error
 	handleMsgResult bool
 	pollInterval    int
+
+	// mu guards handleMsgTypes, which records every msgType passed to
+	// HandleMessage. readPump calls HandleMessage on its own goroutine, so
+	// tests that assert delegation must read this under the lock.
+	mu             sync.Mutex
+	handleMsgTypes []string
 }
 
 func (a *fakeAdapter) Name() string                            { return "fake" }
@@ -62,8 +69,19 @@ func (a *fakeAdapter) OnContainerRefresh(_ context.Context, _ adapter.MessageSen
 	return nil
 }
 func (a *fakeAdapter) PollInterval() int { return a.pollInterval }
-func (a *fakeAdapter) HandleMessage(_ context.Context, _ adapter.MessageSender, _ string, _ json.RawMessage) bool {
+func (a *fakeAdapter) HandleMessage(_ context.Context, _ adapter.MessageSender, msgType string, _ json.RawMessage) bool {
+	a.mu.Lock()
+	a.handleMsgTypes = append(a.handleMsgTypes, msgType)
+	a.mu.Unlock()
 	return a.handleMsgResult
+}
+
+// messageTypes returns a copy of the msgTypes HandleMessage has been called
+// with, in order.
+func (a *fakeAdapter) messageTypes() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.handleMsgTypes...)
 }
 
 // ---------------------------------------------------------------------------

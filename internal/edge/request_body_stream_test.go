@@ -99,6 +99,19 @@ func TestReadPumpStreamFrameForUnknownRequestIDFallsThroughToAdapter(t *testing.
 	// lock or a blocked send) before this ping's pong arrives.
 	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 99})
 	expectType(t, ctrl, protocol.TypePong)
+
+	// The ping/pong above is the ordering barrier: readPump is a single
+	// goroutine, so both frames are fully handled by the time the pong lands.
+	got := fa.messageTypes()
+	want := []string{protocol.TypeStream, protocol.TypeStreamEnd}
+	if len(got) != len(want) {
+		t.Fatalf("adapter.HandleMessage calls = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("adapter.HandleMessage call %d = %q, want %q", i, got[i], want[i])
+		}
+	}
 }
 
 // TestReadPumpStreamedBodyExceedsCapRejectsAndCleansUp confirms that
