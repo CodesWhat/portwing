@@ -54,9 +54,11 @@ calendar date:
   authentication primitive that requires new Portwing code for v1.0.
 - **Completed for v0.8 — Edge-mode graduation.** Drydock 1.6 enables
   `/api/portwing/ws` by default, with `DD_EXPERIMENTAL_PORTWING=false` retained
-  as an emergency disable. A real cross-repo multi-agent soak covers reconnect
-  storms, sustained exec sessions, continuous logs, and controller-side
-  backpressure with machine-checked RSS and heap budgets.
+  as an emergency disable. Drydock's `quality-portwing-fleet-soak.yml` runs the
+  real cross-repo multi-agent soak: reconnect storms, sustained exec sessions,
+  continuous logs, and controller-side backpressure with machine-checked RSS
+  and heap budgets. Portwing's own weekly soak separately covers the
+  Standard/generic HTTP path and SSE churn under an RSS-growth budget.
 - **Completed for v0.8 — Published wire/API stability policy.** Semantic-versioning guarantees for
   the HTTP API surface, the environment-variable surface, and the
   MCP tool surface and `DrydockCompat` wire contract are defined in

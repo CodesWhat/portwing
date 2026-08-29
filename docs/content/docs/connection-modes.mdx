@@ -74,8 +74,10 @@ See [Getting Started](/getting-started) for the full Sockguard variant and TLS e
 **Status: production supported with stable `portwing/1.0`; full v0.9 feature compatibility requires Drydock `v1.6.0-rc.11+`.**
 
 <Callout type="info">
-  Edge mode is covered by a real multi-agent reconnect/load soak, including concurrent
-  exec, continuous logs, and controller backpressure. Drydock `v1.6.0-rc.11+`
+  Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers Edge mode with
+  real Portwing processes, multi-agent reconnect load, concurrent exec, continuous logs,
+  and controller backpressure. Portwing's separate `quality-soak-weekly.yml` covers the
+  Standard/generic HTTP path and SSE churn under an RSS-growth budget. Drydock `v1.6.0-rc.11+`
   implements Portwing v0.9.0's controller-owned watcher/update contract; an
   older controller may connect at the wire level without that behavior. The endpoint is
   **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock —

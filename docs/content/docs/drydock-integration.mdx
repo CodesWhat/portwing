@@ -16,7 +16,7 @@ Drydock supports two agent connectivity patterns. Portwing implements both.
 **Edge Mode** (stable `portwing/1.0`): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
 
 <Callout type="info">
-Edge Mode is implemented on both sides and is covered by a real multi-agent reconnect/load soak. Drydock `v1.6.0-rc.11+` is the minimum for Portwing v0.9.0's complete controller-owned watcher/update behavior. Older 1.6 prereleases and Drydock 1.5 may remain wire-compatible, but do not provide that full feature contract.
+Edge Mode is implemented on both sides. Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers it with real Portwing processes under multi-agent reconnect, exec, continuous-log, and controller-backpressure load; Portwing's separate weekly soak covers Standard/generic HTTP and SSE RSS growth. Drydock `v1.6.0-rc.11+` is the minimum for Portwing v0.9.0's complete controller-owned watcher/update behavior. Older 1.6 prereleases and Drydock 1.5 may remain wire-compatible, but do not provide that full feature contract.
 </Callout>
 
 ---
@@ -37,7 +37,7 @@ When a Drydock controller connects to a Portwing agent in Standard Mode, the fol
 
 ## Endpoints Portwing Serves (Standard Mode)
 
-All `/api/*` endpoints require an `X-Dd-Agent-Secret` or `X-Portwing-Token` header. The `/health` endpoint is unauthenticated.
+All `/api/*` endpoints require an `Authorization: Bearer`, `X-Dd-Agent-Secret`, or `X-Portwing-Token` header. The `/health` endpoint is unauthenticated.
 
 | Drydock Call | Portwing Endpoint | Method | Notes |
 |---|---|---|---|
@@ -496,7 +496,7 @@ Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`, `app/agent
 | `GET /api/log/entries` returns `[]` | Compatible | `routes.go:handleLogEntries`; `AgentClient.ts:1503` |
 | `X-Dd-Agent-Secret` authentication | Compatible | `server/http.go` auth middleware; `AgentClient.ts:73` |
 | `/health` unauthenticated | Compatible | `routes.go:handleSimpleHealth`; `AgentClient.ts:152` |
-| Edge Mode WebSocket `/api/portwing/ws` | Stable (`portwing/1.0`) | Ed25519-only; correlated `request`/`response` messages carry controller-owned watcher/update Docker API calls. Continuous logs and the real fleet-soak gate require Portwing 0.8+. |
+| Edge Mode WebSocket `/api/portwing/ws` | Stable (`portwing/1.0`) | Ed25519-only; correlated `request`/`response` messages carry controller-owned watcher/update Docker API calls. Continuous logs require Portwing 0.8+; the real cross-repo gate is Drydock's `quality-portwing-fleet-soak.yml`. |
 
 ---
 

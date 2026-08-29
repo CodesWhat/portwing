@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# soak.sh — RSS + thread-drift soak for the Portwing agent.
+# soak.sh — RSS-growth soak for the Portwing agent.
 #
 # Stands up the long-lived topology the unit/integration tiers don't exercise:
 #
@@ -10,8 +10,8 @@
 # a raw Docker proxy read, and (the leak stressor) a stream of SSE subscribers
 # that connect, hold, and disconnect — for the configured duration. It samples
 # the agent's resident set over the run and fails if working-set growth from
-# the post-warmup baseline exceeds the threshold. That's the "zero RSS/goroutine
-# growth over a long soak" signal you can't get from a short test.
+# the post-warmup baseline exceeds the threshold. That's the bounded RSS-growth
+# signal you can't get from a short test.
 #
 # GitHub-hosted runners cap a job at 6h, so CI soaks for 4h by default — long
 # enough that a per-request allocation/goroutine leak shows up as multi-MiB RSS

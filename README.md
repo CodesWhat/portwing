@@ -241,7 +241,7 @@ By design, the `sockguard.yaml` preset above (a copy of sockguard's `portwing.ya
 <details>
 <summary>Edge mode variant (outbound WebSocket — stable portwing/1.0)</summary>
 
-> **Production supported.** Edge mode uses the stable `portwing/1.0` protocol and is covered by a real multi-agent reconnect, exec, backpressure, and continuous-log soak. Use Drydock `v1.6.0-rc.11+` for full v0.9 watcher/update feature compatibility; older controllers may remain wire-compatible without that behavior.
+> **Production supported.** Edge mode uses the stable `portwing/1.0` protocol and is covered by Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow: real Portwing processes under multi-agent reconnect, exec, backpressure, and continuous-log load. Portwing's separate `quality-soak-weekly.yml` covers the Standard/generic HTTP path and SSE churn under an RSS-growth budget. Use Drydock `v1.6.0-rc.11+` for full v0.9 watcher/update feature compatibility; older controllers may remain wire-compatible without that behavior.
 
 For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](examples/docker-compose.edge.yml) has Portwing dial out to your Drydock controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`); no port is published on the remote host.
 
@@ -463,7 +463,7 @@ Portwing runs an HTTP(S) server; the **Drydock controller connects inbound** and
 
 ### Edge Mode — production supported
 
-Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound control port. The stable `portwing/1.0` path is covered by a real multi-agent reconnect/load soak, including concurrent exec and continuous logs under controller backpressure. Drydock `v1.6.0-rc.11+` provides full v0.9 watcher/update feature compatibility; older compatible controllers can establish the wire connection but lack that coordinated execution model. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
+Portwing initiates an outbound WebSocket to the controller's edge endpoint (`DRYDOCK_URL` + `/api/portwing/ws`) for hosts with no inbound control port. The stable `portwing/1.0` path is covered by Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow, including real Portwing processes, concurrent exec, continuous logs, reconnect storms, and controller backpressure. Portwing's own `quality-soak-weekly.yml` is a separate Standard/generic HTTP and SSE RSS-growth soak. Drydock `v1.6.0-rc.11+` provides full v0.9 watcher/update feature compatibility; older compatible controllers can establish the wire connection but lack that coordinated execution model. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock.
 
 - Set when `DRYDOCK_URL` is configured along with `PRIVATE_KEY_FILE` — mandatory, not optional; Drydock rejects token-only agents, so `TOKEN` or `AUTHORIZED_KEYS` alone are not sufficient
 - Targets hosts behind NAT, firewalls, and dynamic IPs
