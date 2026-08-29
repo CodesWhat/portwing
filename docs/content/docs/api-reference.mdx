@@ -190,6 +190,62 @@ shipping guidance.
 
 ---
 
+## MCP
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/_portwing/mcp` | Required | Read-only Model Context Protocol server (Streamable HTTP, protocol revision `2025-11-25`). Not registered in Edge mode. |
+
+Each POST carries a single JSON-RPC 2.0 request and returns one JSON-RPC 2.0
+response; the server is stateless and assigns no `Mcp-Session-Id`. Supported
+methods: `initialize`, `ping`, `tools/list`, `tools/call`. `GET
+/_portwing/mcp` returns HTTP `405` (no server-initiated SSE stream).
+
+A notification (a request with no `id`) or a JSON-RPC response message sent
+to the server (a `result`/`error` object with no `method`) returns HTTP `202`
+with an empty body. A malformed notification or response message returns
+HTTP `400` with an empty body.
+
+<Callout type="info">
+This section covers the HTTP contract only. See [MCP Server](/mcp-server) for the tool catalog, read-only guarantees, and client configuration for Claude Desktop, Claude Code, Cursor, and Windsurf.
+</Callout>
+
+### Request body
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}
+```
+
+### Response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      { "name": "list_containers", "description": "..." }
+    ]
+  }
+}
+```
+
+### curl example
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  http://localhost:3000/_portwing/mcp | jq .
+```
+
+---
+
 ## Containers and Events (Drydock-compatible)
 
 These endpoints are used by the Drydock controller when Portwing runs in Standard mode. They share the `/api/` prefix and all require authentication.
@@ -202,6 +258,7 @@ These endpoints are used by the Drydock controller when Portwing runs in Standar
 | `GET` | `/api/events` | Required | SSE stream of container lifecycle events in Drydock envelope format. |
 | `GET` | `/api/watchers` | Required | Watcher component descriptors registered with this agent. |
 | `GET` | `/api/triggers` | Required | Trigger component descriptors registered with this agent. |
+| `GET` | `/api/log/entries` | Required | Compatibility stub for Drydock's agent log viewer. Portwing keeps no in-memory log buffer, so it always returns `[]`. |
 | `POST` | `/api/watchers/{type}/{name}` | Required | Trigger watcher poll — **not implemented in v1.0**, returns HTTP 501. |
 | `POST` | `/api/watchers/{type}/{name}/container/{id}` | Required | Check single container — **not implemented in v1.0**, returns HTTP 501. |
 | `POST` | `/api/triggers/{type}/{name}` | Required | Execute trigger — **not implemented in v1.0**, returns HTTP 501. |
@@ -487,6 +544,7 @@ curl -s -X POST \
 | Code | Meaning |
 |------|---------|
 | `200` | Success |
+| `202` | Accepted, no body (MCP notifications and response messages) |
 | `204` | Success, no body (container delete) |
 | `400` | Bad request — invalid body or parameters |
 | `401` | Missing, invalid, or burned token |

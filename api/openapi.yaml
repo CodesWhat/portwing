@@ -949,6 +949,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MCPResponse'
+        "202":
+          description: >
+            Accepted, empty body. Returned for a valid JSON-RPC notification
+            (a request with no `id`) and for a valid JSON-RPC response
+            message sent to the server (a `result`/`error` object with no
+            `method`); the server does not reply to either.
+        "400":
+          description: >
+            Bad request, empty body. Returned only for notification-shaped
+            bodies: a `result`/`error` object with no `method` that fails
+            JSON-RPC response validation, or a notification (no `id`) whose
+            `params` is present but not a JSON object. Requests carrying an
+            `id` report errors inside a 200 JSON-RPC error envelope instead.
         "401":
           description: Missing or invalid token.
         "405":
