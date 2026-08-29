@@ -280,6 +280,6 @@ jobs:
             exit 1
           fi
 
-  # NOTE: testssl job omitted. Portwing does not operate a TLS listener of its own
-  # (TLS is handled by a reverse proxy in front). Re-add if Portwing gains direct
-  # TLS termination.
+  # NOTE: No testssl job is configured here. Standard Mode supports direct TLS
+  # through TLS_CERT/TLS_KEY, while the public site uses Vercel TLS. Add a runtime
+  # TLS scan when CI has a stable agent endpoint to test.

@@ -3,7 +3,7 @@ title: Authentication
 description: Configure token-based or Ed25519 per-client key authentication for the Portwing agent.
 ---
 
-Portwing supports four authentication mechanisms, ordered below from weakest to strongest. All token options and Ed25519 keys can coexist during migration — the middleware checks for an `X-Portwing-Signature` header first and falls back to token verification when that header is absent.
+Portwing supports four authentication mechanisms, ordered below from weakest to strongest. One shared-secret option and Ed25519 keys can coexist during migration — the middleware checks for an `X-Portwing-Signature` header first and falls back to token verification when that header is absent. Plaintext token configuration (`TOKEN` or `TOKEN_FILE`) and hash-at-rest configuration (`TOKEN_HASH` or `TOKEN_HASH_FILE`) are mutually exclusive.
 
 Requests authenticate via `Authorization: Bearer`, `X-Portwing-Token`, or `X-Dd-Agent-Secret` for token-based auth, and via a set of `X-Portwing-*` headers for Ed25519.
 
