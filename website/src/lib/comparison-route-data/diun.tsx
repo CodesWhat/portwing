@@ -53,7 +53,8 @@ activity|Complementary, Not Competing|Diun and Portwing solve different problems
   heroDescription: (
     <p>
       Diun (Docker Image Update Notifier) polls container registries for new tags and fires
-      notifications to 20+ channels. Portwing is a{" "}
+      notifications to 20+ channels. It is a monitoring/notification agent, not a remote Docker
+      control agent — an adjacent product, not a direct general-purpose agent peer. Portwing is a{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">remote access agent</strong> — it
       gives the Drydock controller a secure authenticated foothold on a Docker host. These tools are
       complementary: run Diun for registry monitoring and Portwing for remote Docker control from

@@ -74,10 +74,31 @@ type MessageHandlingAdapter interface {
 	HandleMessage(ctx context.Context, sender MessageSender, msgType string, data json.RawMessage) bool
 }
 
+// StreamAdmitter reports whether a slot is free in the same bound that gates
+// Docker-proxy streaming responses (SPEC 7.3). An adapter must call Admit()
+// once, immediately before starting a long-lived stream, and call the
+// returned release func exactly once when that stream ends. Never wrap the
+// same request in more than one admission check.
+type StreamAdmitter func() (release func(), ok bool)
+
+// Admit calls the underlying admitter, or always admits if it is nil. A nil
+// StreamAdmitter is what every test and caller that doesn't care about the
+// stream limit passes, so treating it as always-admit keeps those callers
+// working without a sentinel value.
+func (f StreamAdmitter) Admit() (func(), bool) {
+	if f == nil {
+		return func() {}, true
+	}
+	return f()
+}
+
 // RouteAdapter registers adapter-specific HTTP routes.
 type RouteAdapter interface {
 	// RegisterRoutes registers adapter-specific HTTP routes on the given mux.
-	RegisterRoutes(mux *http.ServeMux, authMiddleware func(http.HandlerFunc) http.Handler)
+	// admitStream gates long-lived streaming routes (SSE, follow-mode log
+	// streams) against the same concurrency bound as Docker-proxy streaming
+	// responses; see StreamAdmitter.
+	RegisterRoutes(mux *http.ServeMux, authMiddleware func(http.HandlerFunc) http.Handler, admitStream StreamAdmitter)
 }
 
 // EdgeAdapter is the adapter contract required by edge mode.

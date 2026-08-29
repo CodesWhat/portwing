@@ -1,6 +1,6 @@
 # Competitive Landscape
 
-> Research snapshot: 2026-07-28. This document compares published behavior,
+> Research snapshot: 2026-08-29. This document compares published behavior,
 > not private roadmaps. Re-check the linked primary sources before using it for
 > release or purchasing decisions.
 
@@ -20,8 +20,8 @@ agent's privilege and attack surface without improving its core job.
 | Product | Release reviewed | Why it is in scope |
 | --- | --- | --- |
 | Portainer Agent / Edge Agent | Portainer [2.39.5](https://github.com/portainer/portainer/releases/tag/2.39.5) | Mature standard and outbound-edge agents with Docker API proxying, Swarm support, async edge operation, and fleet lifecycle features. |
-| Komodo Periphery | [v2.2.0](https://github.com/moghtech/komodo/releases/tag/v2.2.0) | Remote host agent for containers, Compose, builds, host terminals, automation, and Swarm. Komodo v2 added outbound Periphery and public-key authentication. |
-| Arcane Agent | [v2.5.0](https://github.com/getarcaneapp/arcane/releases/tag/v2.5.0) | Direct and outbound-edge Docker agent with continuous or polling transport, optional mTLS, Swarm, and a broad controller surface. |
+| Komodo Periphery | [v2.3.2](https://github.com/moghtech/komodo/releases/tag/v2.3.2) | Remote host agent for containers, Compose, builds, host terminals, automation, and Swarm. Komodo v2 added outbound Periphery and public-key authentication. |
+| Arcane Agent | [v2.9.0](https://github.com/getarcaneapp/arcane/releases/tag/v2.9.0) | Direct and outbound-edge Docker agent with continuous or polling transport, optional mTLS, Swarm, and a broad controller surface. |
 | Hawser | [v0.2.46](https://github.com/Finsys/hawser/releases/tag/v0.2.46) | The closest scope match: a small Go Docker API proxy for Dockhand with standard and outbound WebSocket modes. |
 
 ### Adjacent products and baselines
@@ -40,7 +40,7 @@ agent's privilege and attack surface without improving its core job.
 “Not documented” means the reviewed primary documentation did not establish
 the capability. It is intentionally different from a definitive “no.”
 
-| Capability | Portwing v0.8.1 | Portainer Agent | Komodo Periphery | Arcane Agent | Hawser |
+| Capability | Portwing v0.9.11 | Portainer Agent | Komodo Periphery | Arcane Agent | Hawser |
 | --- | --- | --- | --- | --- | --- |
 | Inbound mode | HTTP/S with Docker API proxy and higher-level endpoints | Classic Agent | Core-to-Periphery supported | Direct mode on agent port | HTTP/S Docker API proxy |
 | Outbound / NAT mode | Persistent WebSocket to Drydock; no inbound port | Edge Agent reverse tunnel | Bidirectional WebSocket; Periphery can dial Core | Edge mode over gRPC or WebSocket | Persistent WebSocket to Dockhand |
@@ -67,9 +67,11 @@ the capability. It is intentionally different from a definitive “no.”
 The market has closed several gaps that older Portwing material described as
 advantages:
 
-- Komodo v2 now supports outbound Periphery connections and public-key
-  authentication with automatic key rotation. It no longer uses the old
-  passkey-only model.
+- Komodo v2.0.0 shipped outbound Periphery connections and public-key
+  authentication together: Core and Periphery now authenticate with
+  automatically generated public/private key pairs, exchanged over a
+  Noise-protocol handshake, with automatic key rotation. That fully replaced
+  the old passkey-only auth model, not supplemented it.
 - Arcane now supports direct and outbound agents, polling transport, automated
   mTLS enrollment and renewal, optional Docker socket proxying, signed release
   artifacts, and controller-driven upgrades.
@@ -85,6 +87,28 @@ Portwing's defensible agent-level advantages are narrower and more concrete:
 - structured audit records generated at the Docker mediation point;
 - a native Prometheus endpoint and read-only MCP surface; and
 - a deliberately small agent with a three-direct-dependency policy.
+
+## Known caveats in reviewed outbound/edge implementations
+
+Every direct peer reviewed here now supports both inbound and outbound
+connection modes. That is required parity, not a unique claim, and it
+describes direction support only, not equal robustness. Two of the reviewed
+outbound implementations have maintainer-confirmed gaps worth tracking:
+
+- **Hawser's edge mode is not fully outbound-only.** It starts an HTTP server
+  on port 2376 (serving `/_hawser/health` and `/_hawser/info`) bound to all
+  interfaces unless the operator sets `BIND_ADDRESS=127.0.0.1`
+  (maintainer-confirmed: <https://github.com/Finsys/hawser/issues/71>).
+  Portwing's edge mode also runs a local health listener, but it defaults to
+  loopback (`bindAddressDefault = "127.0.0.1"` in `internal/config/config.go`)
+  and the config loader refuses a non-loopback bind unless the operator sets
+  `ALLOW_UNAUTHENTICATED_REMOTE=true`.
+- **Komodo's outbound leg has two open gaps.** It ignores
+  `https_proxy`/`HTTPS_PROXY` for the outbound connection
+  (open since 2026-06-09: <https://github.com/moghtech/komodo/issues/1473>),
+  and a hardcoded 2-second handshake timeout can stall reconnection
+  indefinitely (open since 2026-07-08:
+  <https://github.com/moghtech/komodo/issues/1518>).
 
 ## Decisions
 
@@ -147,7 +171,8 @@ observable primitives the controller needs.
 - Portainer: [Agent repository](https://github.com/portainer/agent), [agent security model](https://docs.portainer.io/faqs/getting-started/how-does-portainer-secure-connectivity-to-and-from-agents-and-edge-agents), [Edge Agent architecture](https://docs.portainer.io/advanced/edge-agent), [Edge features](https://docs.portainer.io/faqs/getting-started/why-do-we-recommend-using-the-edge-agent-instead-of-the-traditional-agent), and [activity logs](https://docs.portainer.io/admin/logs/activity)
 - Komodo: [introduction](https://komo.do/docs/intro), [server onboarding and key lifecycle](https://komo.do/docs/setup/connect-servers), [v2 architecture changes](https://komo.do/docs/releases/v2.0.0), [Compose](https://komo.do/docs/deploy/compose), [builds](https://komo.do/docs/build), and [Swarm](https://komo.do/docs/swarm)
 - Arcane: [remote environments](https://getarcane.app/docs/features/environments), [edge mTLS](https://getarcane.app/docs/security/edge-mtls), [socket proxy](https://getarcane.app/docs/setup/socket-proxy), [artifact verification](https://getarcane.app/docs/security/verify-artifacts), and [RBAC capability list](https://getarcane.app/docs/security/rbac)
-- Hawser: [repository and current feature documentation](https://github.com/Finsys/hawser)
+- Hawser: [repository and current feature documentation](https://github.com/Finsys/hawser) and [edge-mode bind-address issue](https://github.com/Finsys/hawser/issues/71)
+- Komodo outbound-leg issues: [proxy env vars ignored](https://github.com/moghtech/komodo/issues/1473) and [hardcoded handshake timeout](https://github.com/moghtech/komodo/issues/1518)
 - Distr: [Docker Agent](https://distr.sh/docs/agents/docker-agent/) and [logs and metrics](https://distr.sh/docs/agents/logs-and-metrics/)
 - Docker Surgeon: [repository](https://github.com/kRYstall9/docker-surgeon)
 - Socket proxies: [Tecnativa](https://github.com/Tecnativa/docker-socket-proxy), [LinuxServer](https://github.com/linuxserver/docker-socket-proxy), and [Wollomatic](https://github.com/wollomatic/socket-proxy)

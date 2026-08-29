@@ -34,6 +34,22 @@ func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 		tail = strconv.Itoa(n)
 	}
 
+	// Bound concurrent follow-mode log streams against the shared stream
+	// limit (SPEC 7.3), before the daemon call so a rejected follow request
+	// costs nothing. Non-follow requests are a single bounded read and are
+	// never gated.
+	var release func()
+	if follow {
+		var ok bool
+		release, ok = a.admit.Admit()
+		if !ok {
+			slog.Warn("concurrent stream limit reached, rejecting log follow", "containerId", containerID)
+			http.Error(w, streamLimitRejectionMessage, http.StatusServiceUnavailable)
+			return
+		}
+		defer release()
+	}
+
 	body, err := a.dockerClient.GetContainerLogs(r.Context(), containerID, tail, since, until, follow, false)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("getting logs: %v", err), docker.StatusCodeForError(err))
