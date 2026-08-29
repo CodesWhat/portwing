@@ -95,7 +95,7 @@ sequenceDiagram
     "dockerVersion": "27.0.3",
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
-                      "edge-response-body-b64",
+                      "edge-response-body-b64", "edge-request-body-stream",
                       "dd:container-sync", "dd:logs"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
@@ -117,6 +117,25 @@ which lets non-JSON bodies such as the plain-text `OK` from `GET /_ping` cross
 the wire. A welcome without the value keeps the legacy `body` encoding, so
 older controllers interoperate without a protocol-version bump.
 
+`edge-request-body-stream` gates the opposite direction: it tells a
+controller the agent can accept a `request` whose body is not carried inline
+in `body` but instead follows as one or more `stream` frames (each carrying a
+base64 chunk) and a terminal `stream_end`, all sharing the request's
+`requestId`. Set `request.bodyStream: true` and omit `body` to use it; the
+agent reassembles the chunks in memory (bounded per request, in aggregate, and
+by concurrent count, see §7.3 and §11.3) before dispatching the request.
+Sending `bodyStream: true` to an agent whose `hello.capabilities` does not
+contain the `edge-request-body-stream` token is undefined behavior a
+controller must not rely on: that token is the only signal that the agent
+will hold the request open for the follow-up frames rather than dispatch it
+with no body at all. This exists because `request.body` is a JSON
+`RawMessage`: it must be valid JSON to
+marshal, which rules out a binary or otherwise non-JSON request body (a tar
+build context, or any payload too large for a single WebSocket frame). A
+controller that doesn't send `bodyStream: true` is unaffected; this is purely
+additive, gated by the agent's own hello advertisement rather than a version
+bump.
+
 All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
@@ -129,10 +148,10 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 |------|-----------|---------|
 | `hello` | Agent -> Server | Auth + capability exchange |
 | `welcome` | Server -> Agent | Connection accepted; carries `capabilities` on controllers that negotiate them |
-| `request` | Server -> Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls |
+| `request` | Server -> Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls; `bodyStream: true` (see `edge-request-body-stream` above) defers the body to follow-up `stream`/`stream_end` frames instead of inline `body` |
 | `response` | Agent -> Server | Docker API response (correlated by `requestId`) |
-| `stream` | Bidirectional | Streaming data (logs, exec, build) |
-| `stream_end` | Bidirectional | End of stream |
+| `stream` | Bidirectional | Streaming data (logs, exec, build); also carries a chunk of a `bodyStream: true` request body, keyed by that request's `requestId` |
+| `stream_end` | Bidirectional | End of stream; also the terminal frame for a `bodyStream: true` request body |
 | `metrics` | Agent -> Server | Host metrics payload |
 | `container_event` | Agent -> Server | Docker lifecycle event; used instead of a duplicate controller event stream |
 | `ping` / `pong` | Either | Keepalive (30s default) |
@@ -305,6 +324,7 @@ sequenceDiagram
 
 - Max 100 concurrent exec sessions (edge mode: fixed; standard mode: `MAX_EXEC_SESSIONS`, default 100, non-positive disables the bound)
 - Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Covers the streaming Docker proxy responses and the adapter routes that bypass the proxy handler (`/api/events` SSE and follow-mode container logs), which share the same bound. A rejected adapter stream answers `503` with the same body as a rejected proxy stream. Non-follow log reads are a single bounded response and are never gated.
+- Max 100 concurrent streamed request body reassemblies (edge mode, fixed; see `edge-request-body-stream` in §3.2 and the limits in §11.3). A `bodyStream: true` request does not claim a stream session slot until its `stream_end` arrives, so this is a separate bound on the reassembly stage, matched to the stream session limit because every pending reassembly claims one of those slots the moment it completes. Streamed bodies are also capped at 1 GB summed across every one the agent is holding in memory, which is what bounds agent memory: the 512 MB per-request cap multiplies by the number of concurrent requests without it. That sum spans both stages, the buffers still reassembling and the reassembled bodies already dispatched to Docker, which keep their bytes until the round trip ends. Charging only the reassembly stage would let a controller send `stream_end` on every pending request to drop the total to zero and immediately refill it, leaving the real ceiling at the concurrent stream session limit times the per-request cap. Either rejection answers with an `error` frame naming the `requestId`, the same shape as a duplicate-`requestId` rejection.
 - Exec body size limit: 10 MB
 - Retry loop for write/resize (up to 10 attempts, 50ms intervals)
 
@@ -507,6 +527,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 |----------|-------|
 | WebSocket read | 16 MB |
 | Response body read | 100 MB |
+| Streamed request body (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every streamed body held in memory, reassembling and already dispatched alike, the latter until its Docker round trip ends; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |
