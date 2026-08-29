@@ -511,7 +511,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 | Enrollment request body | 64 KiB / 10 seconds |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |
 | Concurrent exec sessions | 100 (edge: fixed; standard: `MAX_EXEC_SESSIONS`, non-positive disables) |
-| Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Excludes adapter `/api/events` and follow-mode logs. |
+| Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Shared by streaming proxy responses and the adapter `/api/events` SSE and follow-mode log routes; a rejected adapter stream answers `503`. Non-follow log reads are not gated. |
 
 ## 12. Configuration
 
