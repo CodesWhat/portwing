@@ -11,6 +11,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -44,20 +45,23 @@ func jsonFieldName(f reflect.StructField) string {
 func TestMetricsMessageMirrorsHostMetrics(t *testing.T) {
 	t.Parallel()
 
-	hostType := reflect.TypeOf(metrics.HostMetrics{})
-	msgType := reflect.TypeOf(MetricsMessage{})
+	for _, err := range metricsFieldParityErrors(reflect.TypeOf(metrics.HostMetrics{}), reflect.TypeOf(MetricsMessage{})) {
+		t.Error(err)
+	}
+}
 
+func metricsFieldParityErrors(hostType, msgType reflect.Type) []string {
 	hostFieldsByJSONName := make(map[string]reflect.StructField)
 	msgFieldsByJSONName := make(map[string]reflect.StructField)
 	for i := 0; i < msgType.NumField(); i++ {
 		f := msgType.Field(i)
 		name := jsonFieldName(f)
-		if name == "" {
-			continue
+		if name != "" {
+			msgFieldsByJSONName[name] = f
 		}
-		msgFieldsByJSONName[name] = f
 	}
 
+	var errs []string
 	for i := 0; i < hostType.NumField(); i++ {
 		hf := hostType.Field(i)
 		name := jsonFieldName(hf)
@@ -67,18 +71,43 @@ func TestMetricsMessageMirrorsHostMetrics(t *testing.T) {
 		hostFieldsByJSONName[name] = hf
 		mf, ok := msgFieldsByJSONName[name]
 		if !ok {
-			t.Errorf("metrics.HostMetrics field %s (json %q) has no counterpart in protocol.MetricsMessage; add it", hf.Name, name)
+			errs = append(errs, fmt.Sprintf("metrics.HostMetrics field %s (json %q) has no counterpart in protocol.MetricsMessage; add it", hf.Name, name))
 			continue
 		}
 		if mf.Type != hf.Type {
-			t.Errorf("field %q: metrics.HostMetrics has type %s, protocol.MetricsMessage has type %s", name, hf.Type, mf.Type)
+			errs = append(errs, fmt.Sprintf("field %q: metrics.HostMetrics has type %s, protocol.MetricsMessage has type %s", name, hf.Type, mf.Type))
+		}
+		if mf.Tag.Get("json") != hf.Tag.Get("json") {
+			errs = append(errs, fmt.Sprintf("field %q: metrics.HostMetrics json tag %q, protocol.MetricsMessage json tag %q", name, hf.Tag.Get("json"), mf.Tag.Get("json")))
 		}
 	}
 
 	for name, mf := range msgFieldsByJSONName {
 		if _, ok := hostFieldsByJSONName[name]; !ok {
-			t.Errorf("protocol.MetricsMessage field %s (json %q) has no counterpart in metrics.HostMetrics; remove it or add it", mf.Name, name)
+			errs = append(errs, fmt.Sprintf("protocol.MetricsMessage field %s (json %q) has no counterpart in metrics.HostMetrics; remove it or add it", mf.Name, name))
 		}
+	}
+	return errs
+}
+
+func structTypeWithJSONTag(original reflect.Type, fieldName, tag string) reflect.Type {
+	fields := make([]reflect.StructField, original.NumField())
+	for i := range fields {
+		fields[i] = original.Field(i)
+		if fields[i].Name == fieldName {
+			fields[i].Tag = reflect.StructTag(tag)
+		}
+	}
+	return reflect.StructOf(fields)
+}
+
+func TestMetricsMessageParityRejectsJSONTagOptionDrift(t *testing.T) {
+	t.Parallel()
+
+	drifted := structTypeWithJSONTag(reflect.TypeOf(MetricsMessage{}), "DiskError", `json:"diskError"`)
+	errs := metricsFieldParityErrors(reflect.TypeOf(metrics.HostMetrics{}), drifted)
+	if len(errs) != 1 || !strings.Contains(errs[0], `json tag "diskError,omitempty"`) {
+		t.Fatalf("removing omitempty should fail parity, got %v", errs)
 	}
 }
 
