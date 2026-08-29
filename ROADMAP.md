@@ -44,7 +44,7 @@ particular:
 The path to `v1.0.0` is gated on concrete, verifiable items rather than a
 calendar date:
 
-- **Competitive review gate.** The 2026-07-28 market audit is published in
+- **Competitive review gate.** The 2026-08-29 market audit is published in
   [COMPETITIVE-LANDSCAPE.md](COMPETITIVE-LANDSCAPE.md). Before v1.0, comparison
   claims must stay tied to primary sources, the tagged Portwing × Drydock ×
   sockguard artifacts must pass the full standard/edge acceptance matrix, and
