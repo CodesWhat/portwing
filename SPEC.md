@@ -28,7 +28,7 @@ Portwing independently — handshake on `/api/containers`, then a long-lived SSE
 stream on `/api/events`. sockguard is the recommended socket filter between
 Portwing and the Docker Engine.
 
-**Language:** Go 1.26+ (module), built with Go 1.26 (CI)
+**Language:** Go 1.26+ (module), built with Go 1.27 (CI)
 **Dependencies:** `gorilla/websocket`, `google/uuid` -- zero Docker SDK dependency (raw HTTP over Unix socket)
 
 ## 2. Connection Modes
