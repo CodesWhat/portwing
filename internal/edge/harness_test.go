@@ -318,6 +318,20 @@ type doCall struct {
 	path    string
 	stream  bool
 	headers http.Header
+	body    []byte
+}
+
+// readBody drains body for a doCall's record. A nil reader (the common case
+// for calls that don't care about the request body) records a nil slice.
+func readBody(body io.Reader) []byte {
+	if body == nil {
+		return nil
+	}
+	b, err := io.ReadAll(body)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 func (f *fakeDocker) GetVersion(context.Context) (string, error) {
@@ -376,16 +390,18 @@ func (f *fakeDocker) ResizeExec(_ context.Context, execID string, cols, rows int
 	return f.resizeErr
 }
 
-func (f *fakeDocker) Do(_ context.Context, method, path string, _ io.Reader) (*http.Response, error) {
+func (f *fakeDocker) Do(_ context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	b := readBody(body)
 	f.mu.Lock()
-	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: false})
+	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: false, body: b})
 	f.mu.Unlock()
 	return f.doResp, f.doErr
 }
 
-func (f *fakeDocker) DoWithHeaders(_ context.Context, method, path string, headers http.Header, _ io.Reader) (*http.Response, error) {
+func (f *fakeDocker) DoWithHeaders(_ context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error) {
+	b := readBody(body)
 	f.mu.Lock()
-	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: false, headers: headers.Clone()})
+	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: false, headers: headers.Clone(), body: b})
 	entered := f.doEntered
 	gate := f.doGate
 	resp := f.doResp
@@ -400,16 +416,18 @@ func (f *fakeDocker) DoWithHeaders(_ context.Context, method, path string, heade
 	return resp, err
 }
 
-func (f *fakeDocker) DoStream(_ context.Context, method, path string, _ io.Reader) (*http.Response, error) {
+func (f *fakeDocker) DoStream(_ context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	b := readBody(body)
 	f.mu.Lock()
-	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: true})
+	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: true, body: b})
 	f.mu.Unlock()
 	return f.streamResp, f.streamErr
 }
 
-func (f *fakeDocker) DoStreamWithHeaders(_ context.Context, method, path string, headers http.Header, _ io.Reader) (*http.Response, error) {
+func (f *fakeDocker) DoStreamWithHeaders(_ context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error) {
+	b := readBody(body)
 	f.mu.Lock()
-	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: true, headers: headers.Clone()})
+	f.doCalls = append(f.doCalls, doCall{method: method, path: path, stream: true, headers: headers.Clone(), body: b})
 	f.mu.Unlock()
 	return f.streamResp, f.streamErr
 }

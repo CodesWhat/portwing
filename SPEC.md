@@ -95,7 +95,7 @@ sequenceDiagram
     "dockerVersion": "27.0.3",
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
-                      "edge-response-body-b64",
+                      "edge-response-body-b64", "edge-request-body-stream",
                       "dd:container-sync", "dd:logs"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
@@ -117,6 +117,22 @@ which lets non-JSON bodies such as the plain-text `OK` from `GET /_ping` cross
 the wire. A welcome without the value keeps the legacy `body` encoding, so
 older controllers interoperate without a protocol-version bump.
 
+`edge-request-body-stream` gates the opposite direction: it tells a
+controller the agent can accept a `request` whose body is not carried inline
+in `body` but instead follows as one or more `stream` frames (each carrying a
+base64 chunk) and a terminal `stream_end`, all sharing the request's
+`requestId`. Set `request.bodyStream: true` and omit `body` to use it; the
+agent reassembles the chunks in memory (bounded, see §11.3) before dispatching
+the request, and reports a `bodyStream=true` request whose `requestId` never
+appears in `hello.capabilities` — i.e. that the agent never advertised this
+token for — as undefined behavior a controller must not rely on. This exists
+because `request.body` is a JSON `RawMessage`: it must be valid JSON to
+marshal, which rules out a binary or otherwise non-JSON request body (a tar
+build context, or any payload too large for a single WebSocket frame). A
+controller that doesn't send `bodyStream: true` is unaffected; this is purely
+additive, gated by the agent's own hello advertisement rather than a version
+bump.
+
 All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
@@ -129,10 +145,10 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 |------|-----------|---------|
 | `hello` | Agent -> Server | Auth + capability exchange |
 | `welcome` | Server -> Agent | Connection accepted; carries `capabilities` on controllers that negotiate them |
-| `request` | Server -> Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls |
+| `request` | Server -> Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls; `bodyStream: true` (see `edge-request-body-stream` above) defers the body to follow-up `stream`/`stream_end` frames instead of inline `body` |
 | `response` | Agent -> Server | Docker API response (correlated by `requestId`) |
-| `stream` | Bidirectional | Streaming data (logs, exec, build) |
-| `stream_end` | Bidirectional | End of stream |
+| `stream` | Bidirectional | Streaming data (logs, exec, build); also carries a chunk of a `bodyStream: true` request body, keyed by that request's `requestId` |
+| `stream_end` | Bidirectional | End of stream; also the terminal frame for a `bodyStream: true` request body |
 | `metrics` | Agent -> Server | Host metrics payload |
 | `container_event` | Agent -> Server | Docker lifecycle event; used instead of a duplicate controller event stream |
 | `ping` / `pong` | Either | Keepalive (30s default) |
@@ -507,6 +523,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 |----------|-------|
 | WebSocket read | 16 MB |
 | Response body read | 100 MB |
+| Streamed request body reassembly (`edge-request-body-stream`) | 512 MB in-memory buffer; 30s idle timeout between chunks |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |

@@ -132,6 +132,15 @@ type RequestMessage struct {
 	Path      string            `json:"path"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	Body      json.RawMessage   `json:"body,omitempty"`
+	// BodyStream, when true, means the request body is not carried inline in
+	// Body but instead follows as one or more StreamMessage frames and a
+	// terminal StreamEndMessage, all keyed by this message's RequestID. It
+	// is set only on a connection that negotiated CapRequestBodyStream (see
+	// version.go) and exists because Body is a json.RawMessage: it must be
+	// valid JSON to marshal, which a binary or non-JSON request body (e.g. a
+	// tar build context, or any payload too large for a single 16 MB
+	// WebSocket frame) is not. When true, Body is left empty.
+	BodyStream bool `json:"bodyStream,omitempty"`
 }
 
 type ResponseMessage struct {
