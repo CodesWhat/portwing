@@ -172,7 +172,7 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 		dockerClient: dockerClient,
 		adapter:      a,
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
-		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
+		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
 		metrics:      registry,
 		auditor:      auditor,
 		startTime:    time.Now(),

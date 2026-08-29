@@ -2,8 +2,10 @@ package metrics
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,21 +14,30 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
+
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 // HostMetrics contains system-level resource metrics.
 type HostMetrics struct {
-	CPUUsage       float64 `json:"cpuUsage"`
-	CPUCores       int     `json:"cpuCores"`
-	MemoryTotal    uint64  `json:"memoryTotal"`
-	MemoryUsed     uint64  `json:"memoryUsed"`
-	MemoryFree     uint64  `json:"memoryFree"`
-	DiskTotal      uint64  `json:"diskTotal"`
-	DiskUsed       uint64  `json:"diskUsed"`
-	DiskFree       uint64  `json:"diskFree"`
-	NetworkRxBytes uint64  `json:"networkRxBytes"`
-	NetworkTxBytes uint64  `json:"networkTxBytes"`
-	Uptime         uint64  `json:"uptime"`
+	CPUUsage    float64 `json:"cpuUsage"`
+	CPUCores    int     `json:"cpuCores"`
+	MemoryTotal uint64  `json:"memoryTotal"`
+	MemoryUsed  uint64  `json:"memoryUsed"`
+	MemoryFree  uint64  `json:"memoryFree"`
+	DiskTotal   uint64  `json:"diskTotal"`
+	DiskUsed    uint64  `json:"diskUsed"`
+	DiskFree    uint64  `json:"diskFree"`
+	// DiskMetricsAvailable reports whether the three counts above were actually
+	// measured. False leaves them at zero, which a consumer must not read as an
+	// empty filesystem. DiskError says why the measurement failed, and stays
+	// empty when disk collection was never attempted (SKIP_DF_COLLECTION).
+	DiskMetricsAvailable bool   `json:"diskMetricsAvailable"`
+	DiskError            string `json:"diskError,omitempty"`
+	NetworkRxBytes       uint64 `json:"networkRxBytes"`
+	NetworkTxBytes       uint64 `json:"networkTxBytes"`
+	Uptime               uint64 `json:"uptime"`
 }
 
 type cpuStats struct {
@@ -48,6 +59,25 @@ func (s *cpuStats) idleTotal() uint64 {
 	return s.idle + s.iowait
 }
 
+// DockerInfoClient is the Docker API subset needed to learn where the daemon
+// actually keeps its data.
+type DockerInfoClient interface {
+	GetDockerInfo(ctx context.Context) (*docker.DockerInfo, error)
+}
+
+// defaultDockerDataRoot is Docker's upstream default data directory, used as
+// the fallback whenever the daemon cannot say where its own data lives.
+const defaultDockerDataRoot = "/var/lib/docker"
+
+const (
+	// dataRootTimeout bounds the /info lookup so a wedged Docker socket cannot
+	// stall a Prometheus scrape or the edge metrics tick.
+	dataRootTimeout = 2 * time.Second
+	// dataRootRetryInterval keeps a daemon that is still starting from costing
+	// a full dataRootTimeout on every subsequent collection.
+	dataRootRetryInterval = 30 * time.Second
+)
+
 // Collector gathers host-level system metrics.
 type Collector struct {
 	mu             sync.Mutex
@@ -58,6 +88,13 @@ type Collector struct {
 	// files. Leave empty to use the default /proc (production behaviour).
 	// Tests inject a temp directory with fixture files here.
 	procRoot string
+
+	// infoClient is nil when dockerDataRoot was pinned by the caller. When set,
+	// dockerDataRoot starts at defaultDockerDataRoot and is replaced by the
+	// daemon's real DockerRootDir the first time /info answers.
+	infoClient      DockerInfoClient
+	dataRootKnown   bool
+	dataRootRetryAt time.Time
 }
 
 // proc returns the effective proc root (defaults to /proc when empty).
@@ -68,13 +105,27 @@ func (c *Collector) proc() string {
 	return "/proc"
 }
 
-// NewCollector creates a new metrics collector.
+// NewCollector creates a new metrics collector against a fixed disk path.
 // dockerDataRoot is the path to the Docker data directory (used for disk metrics).
 // skipDisk disables disk metric collection when true.
 func NewCollector(dockerDataRoot string, skipDisk bool) *Collector {
 	return &Collector{
 		dockerDataRoot: dockerDataRoot,
 		skipDisk:       skipDisk,
+		dataRootKnown:  true,
+	}
+}
+
+// NewDaemonCollector creates a collector that asks the Docker daemon where its
+// data root is instead of assuming /var/lib/docker, which is wrong on any host
+// that moved it. The lookup is deferred to the first collection so agent
+// startup never waits on the daemon, and a daemon that is unreachable then
+// yields the default rather than an error.
+func NewDaemonCollector(info DockerInfoClient, skipDisk bool) *Collector {
+	return &Collector{
+		dockerDataRoot: defaultDockerDataRoot,
+		skipDisk:       skipDisk,
+		infoClient:     info,
 	}
 }
 
@@ -93,6 +144,10 @@ var ErrHostMetricsUnsupported = errors.New("host metrics unavailable: no procfs 
 // as ErrHostMetricsUnsupported instead. The partially populated snapshot is
 // still returned alongside the error, because CPUCores comes from
 // runtime.NumCPU() and is correct on every platform.
+//
+// Disk is the exception to all of that: it comes from statfs rather than /proc,
+// and a failed reading is reported in-band on the snapshot instead of as an
+// error. See collectDisk.
 func (c *Collector) Collect() (*HostMetrics, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -268,16 +323,63 @@ func memoryTotalGB(procRoot string) float64 {
 	return math.Round(gib*10) / 10
 }
 
+// dataRoot returns the path collectDisk should measure, resolving it from the
+// daemon on first use. A failed lookup is retried on a later collection rather
+// than cached, because the common cause is a daemon that has not finished
+// starting; until one succeeds the caller gets defaultDockerDataRoot, which is
+// right for every host that did not move it. The caller holds c.mu.
+func (c *Collector) dataRoot() string {
+	if c.dataRootKnown || c.infoClient == nil {
+		return c.dockerDataRoot
+	}
+	now := time.Now()
+	if now.Before(c.dataRootRetryAt) {
+		return c.dockerDataRoot
+	}
+	c.dataRootRetryAt = now.Add(dataRootRetryInterval)
+
+	ctx, cancel := context.WithTimeout(context.Background(), dataRootTimeout)
+	defer cancel()
+	info, err := c.infoClient.GetDockerInfo(ctx)
+	switch {
+	case err != nil:
+		slog.Debug("docker data root lookup failed, using default",
+			"path", c.dockerDataRoot, "error", err)
+	case info == nil || info.DockerRootDir == "":
+		// The daemon answered and has nothing to report; retrying won't help.
+		c.dataRootKnown = true
+	default:
+		c.dockerDataRoot = info.DockerRootDir
+		c.dataRootKnown = true
+		slog.Debug("resolved docker data root", "path", c.dockerDataRoot)
+	}
+	return c.dockerDataRoot
+}
+
 // collectDisk uses syscall.Statfs on the Docker data root to get disk usage.
+//
+// A failed Statfs leaves the byte counts at zero, which on the wire is
+// indistinguishable from a real reading of an empty filesystem, so the failure
+// is recorded on the snapshot instead of being swallowed. It is deliberately
+// not returned from Collect: unlike a missing procfs it invalidates one metric
+// group rather than all of them, and Collect's callers drop the whole snapshot
+// on error.
 func (c *Collector) collectDisk(m *HostMetrics) {
+	root := c.dataRoot()
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(c.dockerDataRoot, &stat); err != nil {
+	if err := syscall.Statfs(root, &stat); err != nil {
+		m.DiskError = fmt.Sprintf("statfs %s: %v", root, err)
 		return
 	}
 	blockSize := int64(stat.Bsize)
+	if blockSize <= 0 {
+		m.DiskError = fmt.Sprintf("statfs %s: unusable block size %d", root, blockSize)
+		return
+	}
 	m.DiskTotal = statfsBytes(stat.Blocks, blockSize)
 	m.DiskFree = statfsBytes(stat.Bavail, blockSize)
 	m.DiskUsed = m.DiskTotal - m.DiskFree
+	m.DiskMetricsAvailable = true
 }
 
 func statfsBytes(blocks uint64, blockSize int64) uint64 {

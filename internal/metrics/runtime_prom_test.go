@@ -84,11 +84,12 @@ func TestWriteHostPrometheus(t *testing.T) {
 		t.Fatalf("nil collector wrote metrics: %q", b.String())
 	}
 
-	metrics.WriteHostPrometheus(&b, metrics.NewCollector("", true))
-	if !strings.Contains(b.String(), "portwing_host_metrics_supported ") {
-		t.Fatalf("missing support gauge in host metrics:\n%s", b.String())
+	metrics.WriteHostPrometheus(&b, metrics.NewCollector(t.TempDir(), false))
+	body := b.String()
+	if !strings.Contains(body, "portwing_host_metrics_supported ") {
+		t.Fatalf("missing support gauge in host metrics:\n%s", body)
 	}
-	if strings.Contains(b.String(), "portwing_host_metrics_supported 0") {
+	if strings.Contains(body, "portwing_host_metrics_supported 0") {
 		// No procfs on this platform. The resource series are deliberately
 		// absent rather than zero-valued, so there is nothing further to
 		// assert; the support gauge above is the whole contract here.
@@ -98,14 +99,20 @@ func TestWriteHostPrometheus(t *testing.T) {
 		"portwing_host_cpu_usage_percent",
 		"portwing_host_memory_total_bytes",
 		"portwing_host_memory_used_bytes",
-		"portwing_host_disk_total_bytes",
-		"portwing_host_disk_used_bytes",
+		"portwing_host_disk_metrics_available ",
 		"portwing_host_network_receive_bytes_total",
 		"portwing_host_network_transmit_bytes_total",
 	} {
-		if !strings.Contains(b.String(), want) {
-			t.Errorf("missing %q in host metrics:\n%s", want, b.String())
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in host metrics:\n%s", want, body)
 		}
+	}
+	// The disk byte series and the gauge must never disagree: exporting one
+	// without the other is the zero-vs-unmeasured ambiguity this gauge exists
+	// to remove.
+	diskUp := strings.Contains(body, "portwing_host_disk_metrics_available 1")
+	if diskUp != strings.Contains(body, "portwing_host_disk_total_bytes") {
+		t.Errorf("disk availability gauge and disk series disagree:\n%s", body)
 	}
 }
 
@@ -139,7 +146,7 @@ func TestWriteContainerPrometheus(t *testing.T) {
 	}
 
 	var b strings.Builder
-	metrics.WriteContainerPrometheus(context.Background(), &b, client, escapeLabelValue)
+	metrics.WriteContainerPrometheus(context.Background(), &b, client, metrics.EscapeLabelValue)
 	body := b.String()
 	for _, want := range []string{
 		`container_cpu_usage_seconds_total{id="one\"id",name="api\nworker",image="repo\\image:v1"} 2.5`,

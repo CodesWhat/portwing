@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -609,5 +610,100 @@ func TestCollectUnsupportedPlatform(t *testing.T) {
 	if m.MemoryTotal != 0 || m.DiskTotal != 0 || m.Uptime != 0 {
 		t.Errorf("proc-derived fields should stay zero, got mem=%d disk=%d uptime=%d",
 			m.MemoryTotal, m.DiskTotal, m.Uptime)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WriteHostPrometheus disk branches
+// ---------------------------------------------------------------------------
+
+// mkFullProcFixture writes enough of a procfs for Collect() to succeed, so the
+// Prometheus writer tests below reach the disk block on darwin as well as linux.
+func mkFullProcFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	mkProcFixture(t, dir, "stat", "cpu  1000 200 300 8000 100 50 25 10\n")
+	mkProcFixture(t, dir, "meminfo", "MemTotal:       4096000 kB\nMemFree:        1024000 kB\nMemAvailable:   2048000 kB\n")
+	mkProcFixture(t, dir, filepath.Join("net", "dev"),
+		netDevHeader+"  eth0: 1000000  500  0  0  0  0  0  0  500000  250  0  0  0  0  0  0\n")
+	mkProcFixture(t, dir, "uptime", "7200.50 14400.00\n")
+	return dir
+}
+
+// TestWriteHostPrometheusOmitsUnreadableDisk verifies an unreadable Docker data
+// root drops the disk byte series instead of exporting them as zero, keeps the
+// rest of the host series, and leaves portwing_host_metrics_supported at 1 —
+// only disk is broken, and the disk gauge is what says so.
+func TestWriteHostPrometheusOmitsUnreadableDisk(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		root     string
+		skipDisk bool
+	}{
+		{name: "relocated data root", root: filepath.Join(t.TempDir(), "moved")},
+		{name: "collection disabled", root: t.TempDir(), skipDisk: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c := &Collector{
+				procRoot:       mkFullProcFixture(t),
+				dockerDataRoot: tt.root,
+				skipDisk:       tt.skipDisk,
+				dataRootKnown:  true,
+			}
+			var b strings.Builder
+			WriteHostPrometheus(&b, c)
+			body := b.String()
+
+			if !strings.Contains(body, "portwing_host_metrics_supported 1\n") {
+				t.Fatalf("host metrics reported unsupported for a disk-only failure:\n%s", body)
+			}
+			if !strings.Contains(body, "portwing_host_disk_metrics_available 0\n") {
+				t.Errorf("missing portwing_host_disk_metrics_available 0:\n%s", body)
+			}
+			for _, unwanted := range []string{"portwing_host_disk_total_bytes", "portwing_host_disk_used_bytes"} {
+				if strings.Contains(body, unwanted) {
+					t.Errorf("%s exported for an unmeasured disk:\n%s", unwanted, body)
+				}
+			}
+			if !strings.Contains(body, "portwing_host_memory_total_bytes 4194304000\n") {
+				t.Errorf("a disk failure dropped the memory series:\n%s", body)
+			}
+			if !strings.Contains(body, "portwing_host_network_receive_bytes_total 1000000\n") {
+				t.Errorf("a disk failure dropped the network series:\n%s", body)
+			}
+		})
+	}
+}
+
+// TestWriteHostPrometheusEmitsReadableDisk verifies the disk series are exported
+// alongside an availability gauge of 1 when the data root can be measured.
+func TestWriteHostPrometheusEmitsReadableDisk(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	probe := &HostMetrics{}
+	(&Collector{dockerDataRoot: root, dataRootKnown: true}).collectDisk(probe)
+	if !probe.DiskMetricsAvailable {
+		t.Skipf("statfs on a temp dir is unavailable here (%s); nothing to assert", probe.DiskError)
+	}
+
+	c := &Collector{procRoot: mkFullProcFixture(t), dockerDataRoot: root, dataRootKnown: true}
+	var b strings.Builder
+	WriteHostPrometheus(&b, c)
+	body := b.String()
+
+	for _, want := range []string{
+		"portwing_host_disk_metrics_available 1\n",
+		"portwing_host_disk_total_bytes ",
+		"portwing_host_disk_used_bytes ",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in host metrics:\n%s", want, body)
+		}
 	}
 }

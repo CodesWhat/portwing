@@ -170,7 +170,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		dockerClient: dockerClient,
 		adapter:      a,
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
-		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
+		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
 		metrics:      metrics.NewRegistry(),
 		rateLimiter:  NewRateLimiter(),
 		verifier:     verifier,
