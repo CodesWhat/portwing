@@ -117,6 +117,61 @@ func TestReadPumpStreamFrameForUnknownRequestIDFallsThroughToAdapter(t *testing.
 	}
 }
 
+// TestReadPumpRejectsEmptyRequestIDBodyStreamWithoutClaimingAdapterFrames
+// guards the request-id key boundary: an empty bodyStream request cannot be
+// correlated with a later stream frame, so it must not reserve pendingBodies
+// under the empty key. The following empty-key stream frame remains available
+// for an adapter that uses session-keyed frames.
+func TestReadPumpRejectsEmptyRequestIDBodyStreamWithoutClaimingAdapterFrames(t *testing.T) {
+	t.Parallel()
+
+	fa := &fakeAdapter{handleMsgResult: true}
+	c, ctrl := newTestClient(t)
+	c.adapter = fa
+
+	runReadPump(t, c)
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		Method:     http.MethodPost,
+		Path:       "/build",
+		BodyStream: true,
+	})
+
+	var em protocol.ErrorMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeError), &em)
+	if em.RequestID != "" {
+		t.Errorf("error RequestID = %q, want empty request ID", em.RequestID)
+	}
+	if em.Message != "streamed request body requires requestId" {
+		t.Errorf("error Message = %q, want the empty-request-ID rejection", em.Message)
+	}
+
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "",
+		Data:      base64.StdEncoding.EncodeToString([]byte("session-frame")),
+	})
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 100})
+	expectType(t, ctrl, protocol.TypePong)
+
+	got := fa.messageTypes()
+	want := []string{protocol.TypeStream}
+	if len(got) != len(want) {
+		t.Fatalf("adapter.HandleMessage calls = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("adapter.HandleMessage call %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	c.pendingBodiesMu.Lock()
+	_, registered := c.pendingBodies[""]
+	c.pendingBodiesMu.Unlock()
+	if registered {
+		t.Fatal("empty request ID was inserted into pendingBodies")
+	}
+}
+
 // TestReadPumpStreamedBodyExceedsCapRejectsAndCleansUp confirms that
 // reassembly exceeding maxRequestBodyStream is rejected with a TypeError
 // naming the requestId, and that the pending state is actually freed: a

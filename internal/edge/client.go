@@ -846,6 +846,14 @@ func (c *Client) readPump(ctx context.Context) error {
 // rejected with a TypeError instead of silently clobbering the in-flight
 // reassembly or growing the map without bound.
 func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboundTarget) {
+	if req.RequestID == "" {
+		slog.Warn("streamed request body missing requestId, rejecting")
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message: "streamed request body requires requestId",
+		})
+		return
+	}
+
 	c.pendingBodiesMu.Lock()
 	if c.pendingBodies == nil {
 		c.pendingBodies = make(map[string]*pendingRequestBody)
