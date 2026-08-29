@@ -46,7 +46,7 @@ func (a *failedInitialRefreshAdapter) HelloExtension() *adapter.HelloExtension {
 	return nil
 }
 func (a *failedInitialRefreshAdapter) PollInterval() int { return 300 }
-func (a *failedInitialRefreshAdapter) RegisterRoutes(*http.ServeMux, func(http.HandlerFunc) http.Handler) {
+func (a *failedInitialRefreshAdapter) RegisterRoutes(*http.ServeMux, func(http.HandlerFunc) http.Handler, adapter.StreamAdmitter) {
 }
 func (a *failedInitialRefreshAdapter) OnConnect(context.Context, adapter.MessageSender) error {
 	return nil
@@ -66,7 +66,7 @@ func (a *canceledInitialRefreshAdapter) HelloExtension() *adapter.HelloExtension
 	return nil
 }
 func (a *canceledInitialRefreshAdapter) PollInterval() int { return 300 }
-func (a *canceledInitialRefreshAdapter) RegisterRoutes(*http.ServeMux, func(http.HandlerFunc) http.Handler) {
+func (a *canceledInitialRefreshAdapter) RegisterRoutes(*http.ServeMux, func(http.HandlerFunc) http.Handler, adapter.StreamAdmitter) {
 }
 func (a *canceledInitialRefreshAdapter) OnConnect(context.Context, adapter.MessageSender) error {
 	return nil
@@ -85,7 +85,7 @@ func (a *initialRefreshAdapter) Name() string                            { retur
 func (a *initialRefreshAdapter) Capabilities() []string                  { return nil }
 func (a *initialRefreshAdapter) HelloExtension() *adapter.HelloExtension { return nil }
 func (a *initialRefreshAdapter) PollInterval() int                       { return 300 }
-func (a *initialRefreshAdapter) RegisterRoutes(*http.ServeMux, func(http.HandlerFunc) http.Handler) {
+func (a *initialRefreshAdapter) RegisterRoutes(*http.ServeMux, func(http.HandlerFunc) http.Handler, adapter.StreamAdmitter) {
 }
 func (a *initialRefreshAdapter) OnConnect(context.Context, adapter.MessageSender) error { return nil }
 func (a *initialRefreshAdapter) RefreshContainers(context.Context) ([]adapter.Container, []adapter.Container, []adapter.Container, error) {
@@ -275,7 +275,7 @@ func TestInitialDrydockRefreshCorrectsAlreadyConnectedEmptySnapshot(t *testing.T
 	}
 	drydockAdapter := drydock.NewAdapter(dockerClient, "startup-agent", drydock.AgentInfo{})
 	eventsMux := http.NewServeMux()
-	drydockAdapter.RegisterRoutes(eventsMux, func(handler http.HandlerFunc) http.Handler { return handler })
+	drydockAdapter.RegisterRoutes(eventsMux, func(handler http.HandlerFunc) http.Handler { return handler }, nil)
 	eventsServer := httptest.NewServer(eventsMux)
 	defer eventsServer.Close()
 
