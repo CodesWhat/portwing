@@ -208,17 +208,19 @@ type ExecEndMessage struct {
 }
 
 type MetricsMessage struct {
-	CPUUsage       float64 `json:"cpuUsage"`
-	CPUCores       int     `json:"cpuCores"`
-	MemoryTotal    uint64  `json:"memoryTotal"`
-	MemoryUsed     uint64  `json:"memoryUsed"`
-	MemoryFree     uint64  `json:"memoryFree"`
-	DiskTotal      uint64  `json:"diskTotal"`
-	DiskUsed       uint64  `json:"diskUsed"`
-	DiskFree       uint64  `json:"diskFree"`
-	NetworkRxBytes uint64  `json:"networkRxBytes"`
-	NetworkTxBytes uint64  `json:"networkTxBytes"`
-	Uptime         uint64  `json:"uptime"`
+	CPUUsage             float64 `json:"cpuUsage"`
+	CPUCores             int     `json:"cpuCores"`
+	MemoryTotal          uint64  `json:"memoryTotal"`
+	MemoryUsed           uint64  `json:"memoryUsed"`
+	MemoryFree           uint64  `json:"memoryFree"`
+	DiskTotal            uint64  `json:"diskTotal"`
+	DiskUsed             uint64  `json:"diskUsed"`
+	DiskFree             uint64  `json:"diskFree"`
+	DiskMetricsAvailable bool    `json:"diskMetricsAvailable"`
+	DiskError            string  `json:"diskError,omitempty"`
+	NetworkRxBytes       uint64  `json:"networkRxBytes"`
+	NetworkTxBytes       uint64  `json:"networkTxBytes"`
+	Uptime               uint64  `json:"uptime"`
 }
 
 type ContainerEventMessage struct {

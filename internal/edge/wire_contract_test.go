@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1167,5 +1168,45 @@ func TestNewClientInitialisesFields(t *testing.T) {
 	}
 	if cap(c.streamSem) != maxStreams {
 		t.Errorf("streamSem cap = %d, want %d", cap(c.streamSem), maxStreams)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sendMetrics — disk-unavailable signal reaches the wire
+// ---------------------------------------------------------------------------
+
+// TestSendMetricsCarriesDiskUnavailability locks in that sendMetrics puts the
+// disk-availability signal on the wire today: it marshals the raw
+// *metrics.HostMetrics value (see client.go's sendMetrics), and HostMetrics
+// already carries diskMetricsAvailable/diskError, so a controller decoding the
+// envelope as protocol.MetricsMessage sees them. A future refactor that
+// switches sendMetrics to build an explicit protocol.MetricsMessage must keep
+// this test passing.
+//
+// Requires a real /proc (Collect returns ErrHostMetricsUnsupported without
+// one, before disk collection ever runs), so this only runs on Linux — same
+// convention as the other real-collector tests in internal/metrics.
+func TestSendMetricsCarriesDiskUnavailability(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires a real /proc; only runs on Linux")
+	}
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	// A path that can't exist forces collectDisk's statfs to fail, so
+	// DiskMetricsAvailable comes back false with a non-empty DiskError.
+	c.collector = metrics.NewCollector("/definitely-does-not-exist-portwing-test", false)
+
+	c.sendMetrics()
+
+	data := expectType(t, ctrl, protocol.TypeMetrics)
+	var msg protocol.MetricsMessage
+	decodeData(t, data, &msg)
+
+	if msg.DiskMetricsAvailable {
+		t.Error("DiskMetricsAvailable = true, want false for a nonexistent data root")
+	}
+	if msg.DiskError == "" {
+		t.Error("DiskError is empty, want the statfs failure reason")
 	}
 }

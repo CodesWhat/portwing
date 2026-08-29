@@ -17,7 +17,7 @@ func FuzzEnvelope(f *testing.F) {
 	f.Add([]byte(`{"type":"exec_resize","data":{"execId":"e1","cols":120,"rows":40}}`))
 	f.Add([]byte(`{"type":"exec_end","data":{"execId":"e1","reason":"done"}}`))
 	f.Add([]byte(`{"type":"ping","data":{"timestamp":1700000000}}`))
-	f.Add([]byte(`{"type":"metrics","data":{"cpuUsage":0.5,"cpuCores":4,"memoryTotal":8589934592,"memoryUsed":4294967296,"memoryFree":4294967296,"diskTotal":107374182400,"diskUsed":53687091200,"diskFree":53687091200,"networkRxBytes":1024,"networkTxBytes":512,"uptime":3600}}`))
+	f.Add([]byte(`{"type":"metrics","data":{"cpuUsage":0.5,"cpuCores":4,"memoryTotal":8589934592,"memoryUsed":4294967296,"memoryFree":4294967296,"diskTotal":107374182400,"diskUsed":53687091200,"diskFree":53687091200,"diskMetricsAvailable":true,"diskError":"","networkRxBytes":1024,"networkTxBytes":512,"uptime":3600}}`))
 	f.Add([]byte(`{"type":"hello","data":{"version":"1.0","protocol":"portwing/1.0","agentId":"a1","agentName":"test","dockerVersion":"24.0","hostname":"host","capabilities":["exec"]}}`))
 	f.Add([]byte(`{"type":"response","data":{"requestId":"r1","statusCode":200}}`))
 	f.Add([]byte(`{"type":"stream","data":{"requestId":"r1","data":"aGVsbG8="}}`))
