@@ -10,6 +10,14 @@ const withMDX = createMDX();
 export default withMDX({
   transpilePackages: ["@codeswhat/public-analytics"],
   output: "export",
+  // Baked once at build time so the exported HTML and the client bundle carry
+  // the same literal. Calling new Date().getFullYear() in the footer component
+  // instead runs it a second time during hydration, so a visitor whose local
+  // clock has crossed into January while the export still says the build year
+  // renders different text than the server did (React hydration error #418).
+  env: {
+    NEXT_PUBLIC_COPYRIGHT_YEAR: String(new Date().getFullYear()),
+  },
   // Keep the exported inline bootstrap deterministic for the website's
   // route-specific CSP hash generation. Static assets remain content-hashed.
   generateBuildId: async () => "portwing-docs-static",
