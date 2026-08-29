@@ -81,8 +81,8 @@ export type PostHogOptions = {
   persistence: "memory";
   disable_persistence: true;
   respect_dnt: true;
-  save_campaign_params: false;
-  save_referrer: false;
+  save_campaign_params: true;
+  save_referrer: true;
   disable_capture_url_hashes: true;
   disable_scroll_properties: true;
   mask_all_element_attributes: true;
@@ -205,6 +205,70 @@ export function buildWebVitalsEvent(
   return metricCount === 0 ? null : { event: "$web_vitals", properties };
 }
 
+// posthog-js populates these straight from the URL query string once
+// save_campaign_params is on (PostHog/posthog-js packages/browser-common/src/
+// utils/event-utils.ts, CAMPAIGN_PARAMS/getCampaignParams()). Only the plain
+// campaign labels are named here; the platform click ids in that same list
+// (gclid, fbclid, msclkid, gad_source, mc_cid, ...) are per-click identifiers
+// a platform can rejoin to a person, not campaign labels we authored, and the
+// allowlist rebuild below never reads them, so they cannot be forwarded.
+const UTM_PARAM_KEYS = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+] as const;
+
+// $referring_domain is either the "$direct" sentinel or `new URL(referrer).host`
+// (PostHog/posthog-js packages/browser-common/src/utils/event-utils.ts,
+// getReferringDomain()), so a bare hostname with an optional port is the only
+// legitimate shape. Anything else is dropped rather than trimmed: an
+// unexpected shape must not leak a path through a routine that did not
+// anticipate it.
+const HOSTNAME_PATTERN =
+  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?$/iu;
+const DIRECT_REFERRING_DOMAIN = "$direct";
+
+function isAcceptableReferringDomain(value: unknown): value is string {
+  return (
+    typeof value === "string" && (value === DIRECT_REFERRING_DOMAIN || HOSTNAME_PATTERN.test(value))
+  );
+}
+
+// UTM values are campaign labels, not URLs. Any value carrying a path
+// separator is dropped rather than forwarded, so a full private link can never
+// ride through under a campaign parameter's name. Testing for "://" alone is
+// not enough: "//host/path" and a bare "/account/reset/abc123" are both
+// URL-shaped and both leak a path. An over-long value is dropped for the same
+// reason, since a campaign label is not that size.
+const MAX_UTM_VALUE_LENGTH = 200;
+
+function isAcceptableUtmValue(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value !== "" &&
+    value.length <= MAX_UTM_VALUE_LENGTH &&
+    !value.includes("/")
+  );
+}
+
+// Forwarded property-by-property, same as the rest of before_send's allowlist
+// rebuild: never widened to a prefix match or a passthrough.
+function acquisitionProperties(properties: EventProperties): EventProperties {
+  const acquisition: EventProperties = {};
+  for (const key of UTM_PARAM_KEYS) {
+    const value = properties[key];
+    if (isAcceptableUtmValue(value)) {
+      acquisition[key] = value;
+    }
+  }
+  if (isAcceptableReferringDomain(properties.$referring_domain)) {
+    acquisition.$referring_domain = properties.$referring_domain;
+  }
+  return acquisition;
+}
+
 function rawPathFromProperties(properties: EventProperties): string | undefined {
   if (typeof properties.path === "string") return properties.path;
   if (typeof properties.$current_url !== "string") return undefined;
@@ -277,6 +341,7 @@ export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
     event: sanitized.event,
     properties: {
       ...sanitized.properties,
+      ...acquisitionProperties(envelope.properties),
       token,
       $cookieless_mode: true,
       $process_person_profile: false,
@@ -328,8 +393,8 @@ export function createPostHogOptions(
     persistence: "memory",
     disable_persistence: true,
     respect_dnt: true,
-    save_campaign_params: false,
-    save_referrer: false,
+    save_campaign_params: true,
+    save_referrer: true,
     disable_capture_url_hashes: true,
     disable_scroll_properties: true,
     mask_all_element_attributes: true,
