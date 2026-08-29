@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -525,13 +527,13 @@ func TestStreamedBodyConcurrencyCapRejectsAndCleansUp(t *testing.T) {
 // the chunk that crosses the line is failed; reassemblies already under way
 // keep going.
 func TestStreamedBodyAggregateCapRejectsOnlyTheOffendingRequest(t *testing.T) {
-	// Not t.Parallel(): mutates the package-level maxPendingRequestBodyBytes
+	// Not t.Parallel(): mutates the package-level maxStreamedRequestBodyBytes
 	// var. maxRequestBodyStream is deliberately left at its real 512 MB, so a
 	// rejection here can only have come from the aggregate branch.
 
-	orig := maxPendingRequestBodyBytes
-	maxPendingRequestBodyBytes = 16
-	t.Cleanup(func() { maxPendingRequestBodyBytes = orig })
+	orig := maxStreamedRequestBodyBytes
+	maxStreamedRequestBodyBytes = 16
+	t.Cleanup(func() { maxStreamedRequestBodyBytes = orig })
 
 	c, ctrl := newTestClient(t)
 	fd := &fakeDocker{}
@@ -589,5 +591,162 @@ func TestStreamedBodyAggregateCapRejectsOnlyTheOffendingRequest(t *testing.T) {
 	fd.mu.Unlock()
 	if calls != 0 {
 		t.Errorf("Docker calls = %d, want 0", calls)
+	}
+}
+
+// TestStreamedBodyBudgetCoversDispatchAndIsReleased is the regression guard
+// for the hole the reassembly-only bound left. finishPendingBody deletes the
+// pendingBodies entry before handleRequestTo runs, so a sum over that map
+// alone stops charging the agent for bytes it still holds in req.Body for the
+// whole Docker round trip. A controller could fill the budget, send
+// stream_end on every request to zero the count, and immediately refill it,
+// making the real ceiling streamSem (100) times the per-request cap instead
+// of the aggregate one.
+//
+// Three bodies are parked inside the Docker call and a fourth chunk that only
+// fits if those three stopped counting has to be rejected. The second half
+// proves the reservation is released rather than merely taken: once the
+// parked calls return, the same budget accepts a new body.
+func TestStreamedBodyBudgetCoversDispatchAndIsReleased(t *testing.T) {
+	// Not t.Parallel(): mutates the package-level maxStreamedRequestBodyBytes
+	// var. maxRequestBodyStream stays at its real 512 MB, so a rejection here
+	// can only have come from the aggregate branch.
+
+	orig := maxStreamedRequestBodyBytes
+	maxStreamedRequestBodyBytes = 35
+	t.Cleanup(func() { maxStreamedRequestBodyBytes = orig })
+
+	c, ctrl := newTestClient(t)
+	// The queued send path, not newTestClient's direct-write one: three
+	// parked handlers answer concurrently at the end, and gorilla panics on a
+	// concurrent write. This is also what production uses.
+	runSendPump(t, c)
+
+	gate := make(chan struct{})
+	var gateOnce sync.Once
+	openGate := func() { gateOnce.Do(func() { close(gate) }) }
+	// doErr plus doGate parks every handler inside DoWithHeaders still
+	// holding its reassembled body, then answers with an error frame when the
+	// gate opens. No canned *http.Response on purpose: three handlers would
+	// share one Body reader. The requests are POST /containers/create rather
+	// than the /build a real streamed body targets because only the
+	// non-streaming fakeDocker method carries the gate; the budget this test
+	// is about is charged before either is picked.
+	fd := &fakeDocker{doErr: errors.New("docker parked"), doGate: gate}
+	c.dockerClient = fd
+
+	runReadPump(t, c)
+	// Registered after the read pump so cleanup runs before it: parked
+	// handlers are freed first, then the pump is cancelled.
+	t.Cleanup(openGate)
+
+	const chunk = "0123456789" // 10 bytes each, 30 across the three
+	for i := 0; i < 3; i++ {
+		id := fmt.Sprintf("parked-%d", i)
+		sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+			RequestID:  id,
+			Method:     http.MethodPost,
+			Path:       "/containers/create",
+			BodyStream: true,
+		})
+		sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+			RequestID: id,
+			Data:      base64.StdEncoding.EncodeToString([]byte(chunk)),
+		})
+		sendEnvelope(t, ctrl, protocol.TypeStreamEnd, protocol.StreamEndMessage{
+			RequestID: id,
+			Reason:    "complete",
+		})
+		want := i + 1
+		waitFor(t, fmt.Sprintf("%s to reach the Docker call", id), func() bool {
+			fd.mu.Lock()
+			defer fd.mu.Unlock()
+			return len(fd.doCalls) == want
+		})
+	}
+
+	// Asserted directly first so a regression names the reservation instead
+	// of surfacing later as an unexplained missing frame.
+	c.pendingBodiesMu.Lock()
+	held := c.streamedBodyBytesLocked()
+	pending := len(c.pendingBodies)
+	c.pendingBodiesMu.Unlock()
+	if pending != 0 {
+		t.Fatalf("pendingBodies = %d, want 0: all three reached stream_end", pending)
+	}
+	if want := int64(3 * len(chunk)); held != want {
+		t.Fatalf("held streamed bytes = %d, want %d: dispatched bodies stopped counting once finishPendingBody removed them", held, want)
+	}
+
+	// 30 parked plus 10 more is 40, over the 35 byte budget, while each body
+	// on its own is nowhere near the 512 MB per-request cap.
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "overflow",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "overflow",
+		Data:      base64.StdEncoding.EncodeToString([]byte(chunk)),
+	})
+	// The ping is sent up front so an accepted chunk shows up as a pong
+	// arriving where the rejection should have been, not as a read timeout.
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 1})
+
+	env := expectEnvelope(t, ctrl)
+	if env.Type != protocol.TypeError {
+		t.Fatalf("first frame = %q, want %q: the budget did not count the three bodies already dispatched to Docker", env.Type, protocol.TypeError)
+	}
+	var em protocol.ErrorMessage
+	decodeData(t, env.Data, &em)
+	if em.RequestID != "overflow" {
+		t.Errorf("error RequestID = %q, want overflow", em.RequestID)
+	}
+	if !strings.Contains(em.Message, "aggregate") {
+		t.Errorf("error Message = %q, want the aggregate limit named", em.Message)
+	}
+	expectType(t, ctrl, protocol.TypePong)
+
+	// Second half: the reservation is released when the round trip ends.
+	openGate()
+	for i := 0; i < 3; i++ {
+		var released protocol.ErrorMessage
+		decodeData(t, expectType(t, ctrl, protocol.TypeError), &released)
+		if !strings.HasPrefix(released.RequestID, "parked-") {
+			t.Errorf("released frame %d RequestID = %q, want a parked-N request", i, released.RequestID)
+		}
+	}
+	waitFor(t, "the dispatch reservations to be released", func() bool {
+		c.pendingBodiesMu.Lock()
+		defer c.pendingBodiesMu.Unlock()
+		return c.streamedBodyBytesLocked() == 0
+	})
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "after-release",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "after-release",
+		Data:      base64.StdEncoding.EncodeToString([]byte(chunk)),
+	})
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 2})
+	expectType(t, ctrl, protocol.TypePong)
+
+	c.pendingBodiesMu.Lock()
+	pb, registered := c.pendingBodies["after-release"]
+	var buffered int
+	if registered {
+		buffered = pb.buf.Len()
+	}
+	c.pendingBodiesMu.Unlock()
+	if !registered {
+		t.Fatal("after-release was rejected, want the freed budget to accept it")
+	}
+	if buffered != len(chunk) {
+		t.Errorf("after-release buffered = %d, want %d: a finished dispatch is still being charged", buffered, len(chunk))
 	}
 }

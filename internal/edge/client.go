@@ -81,13 +81,18 @@ var maxRequestBodyStream int64 = 512 * 1024 * 1024 // 512 MB
 // shrink it.
 var maxPendingRequestBodies = maxStreams
 
-// maxPendingRequestBodyBytes caps the sum of every in-flight reassembly
-// buffer, which is what actually bounds agent memory on this path — a count
-// cap alone would still permit maxStreams * maxRequestBodyStream. Twice
-// maxRequestBodyStream, so a single largest-allowed body is still reachable
-// and a second one can overlap it. A var, not a const, so tests can shrink
-// it.
-var maxPendingRequestBodyBytes int64 = 1024 * 1024 * 1024 // 1 GB
+// maxStreamedRequestBodyBytes caps the sum of every streamed request body
+// the agent is holding in memory, which is what actually bounds agent memory
+// on this path — a count cap alone would still permit maxStreams *
+// maxRequestBodyStream. It spans both stages: the reassembly buffers still
+// filling, and the reassembled bodies already handed to handleRequestTo,
+// which keep their bytes for the whole Docker round trip. Charging only the
+// first stage would let a controller finish every pending body to zero the
+// count and immediately refill it, so the effective ceiling would be
+// maxStreams * maxRequestBodyStream again. Twice maxRequestBodyStream, so a
+// single largest-allowed body is still reachable and a second one can
+// overlap it. A var, not a const, so tests can shrink it.
+var maxStreamedRequestBodyBytes int64 = 1024 * 1024 * 1024 // 1 GB
 
 // requestBodyStreamIdleTimeout bounds how long a pending BodyStream
 // reassembly waits for the next stream frame (or stream_end) before it is
@@ -199,12 +204,25 @@ type Client struct {
 	// (CapRequestBodyStream) awaiting reassembly, keyed by RequestID. An
 	// entry is created when such a request arrives in readPump and removed
 	// exactly once, by whichever of stream_end, the maxRequestBodyStream
-	// or maxPendingRequestBodyBytes caps, or requestBodyStreamIdleTimeout
+	// or maxStreamedRequestBodyBytes caps, or requestBodyStreamIdleTimeout
 	// fires first, so a given RequestID is dispatched or errored exactly
 	// once. Entry count is capped by maxPendingRequestBodies. Guarded by
 	// pendingBodiesMu; nil until the first BodyStream request arrives.
 	pendingBodiesMu sync.Mutex
 	pendingBodies   map[string]*pendingRequestBody
+
+	// dispatchingBodies is the second half of the maxStreamedRequestBodyBytes
+	// budget: the reassembled size of every streamed body that has left
+	// pendingBodies for handleRequestTo but is still held in memory as
+	// req.Body until the Docker round trip finishes. Keyed by a monotonic
+	// sequence from nextDispatchSeq rather than by RequestID, so a controller
+	// that reuses a RequestID while the first dispatch is still running
+	// cannot overwrite a live reservation. Guarded by pendingBodiesMu, the
+	// same lock as pendingBodies, so finishPendingBody's handoff between the
+	// two is atomic and the sum never dips between stages. Nil until the
+	// first streamed body is dispatched.
+	dispatchingBodies map[uint64]int64
+	nextDispatchSeq   uint64
 
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
@@ -776,20 +794,14 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Warn("invalid stream_end message", "error", err)
 				continue
 			}
-			if req, target, ok := c.finishPendingBody(se.RequestID); ok {
-				select {
-				case c.streamSem <- struct{}{}:
-					go func() {
-						defer func() { <-c.streamSem }()
-						c.handleRequestTo(ctx, req, target)
-					}()
-				default:
-					slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
-					_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
-						Message:   "agent busy: too many concurrent requests",
-						RequestID: req.RequestID,
-					})
-				}
+			if req, target, reservation, ok := c.finishPendingBody(se.RequestID); ok {
+				// Everything past this point, including the streamSem
+				// admission check an inline-body request does inline above,
+				// belongs to dispatchStreamedBody, which owns the byte
+				// reservation finishPendingBody just made and releases it on
+				// every exit. Doing the admission check here instead would
+				// need a second release site on the rejection branch.
+				go c.dispatchStreamedBody(ctx, req, target, reservation)
 				continue
 			}
 			if !c.adapter.HandleMessage(ctx, sender, env.Type, env.Data) {
@@ -897,15 +909,17 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 		return true
 	}
 
-	// Two ceilings: this body on its own, and every in-flight reassembly
-	// added together. The aggregate one is what bounds agent memory, since
-	// the per-request cap multiplies by however many requests are pending.
+	// Two ceilings: this body on its own, and every streamed body the agent
+	// is holding added together. The aggregate one is what bounds agent
+	// memory, since the per-request cap multiplies by however many requests
+	// are open, and it counts dispatched bodies too — those bytes are still
+	// resident for the whole Docker round trip.
 	var overflow string
 	switch {
 	case int64(pb.buf.Len()+len(decoded)) > maxRequestBodyStream:
 		overflow = fmt.Sprintf("streamed request body exceeds %d byte limit", maxRequestBodyStream)
-	case c.pendingBodyBytesLocked()+int64(len(decoded)) > maxPendingRequestBodyBytes:
-		overflow = fmt.Sprintf("streamed request bodies exceed the %d byte aggregate reassembly limit", maxPendingRequestBodyBytes)
+	case c.streamedBodyBytesLocked()+int64(len(decoded)) > maxStreamedRequestBodyBytes:
+		overflow = fmt.Sprintf("streamed request bodies exceed the %d byte aggregate in-memory limit", maxStreamedRequestBodyBytes)
 	}
 	if overflow != "" {
 		delete(c.pendingBodies, requestID)
@@ -936,16 +950,35 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 	return true
 }
 
-// pendingBodyBytesLocked sums every in-flight reassembly buffer. The caller
-// must hold pendingBodiesMu, which is also what makes the sum safe to read:
-// every removal path deletes its entry before releasing the lock, so an
-// entry visible here is one nobody else is writing to. O(len(pendingBodies)),
-// bounded by maxPendingRequestBodies, so no separate counter has to be kept
-// in sync across the four removal sites.
-func (c *Client) pendingBodyBytesLocked() int64 {
+// streamedBodyBytesLocked sums every streamed request body the agent is
+// currently holding: the reassembly buffers still filling in pendingBodies,
+// plus the reassembled bodies dispatchingBodies is holding open across their
+// Docker round trip. The caller must hold pendingBodiesMu, which is also what
+// makes the sum safe to read: every removal path deletes its entry before
+// releasing the lock, so an entry visible here is one nobody else is writing
+// to.
+//
+// Summing two maps instead of maintaining one int64 counter is deliberate,
+// and the reason survived adding the dispatch stage. pendingBodies has four
+// removal sites (stream_end, a base64 decode failure, either size cap, and
+// the idle timeout) and every one of them already deletes its entry, so no
+// bookkeeping can drift there however many more get added. Only the dispatch
+// stage needs an explicit reservation, and it has exactly one insert
+// (finishPendingBody, under this lock) and one release (the sole defer in
+// dispatchStreamedBody). Don't "simplify" this back into a counter: that puts
+// a decrement on all five paths, and delete is idempotent where a subtraction
+// is not, so a double release here is a no-op instead of silent negative
+// drift. O(len(pendingBodies) + len(dispatchingBodies)); the first is capped
+// by maxPendingRequestBodies and the second by the streamed requests in
+// flight to Docker (streamSem) plus the short-lived rejections readPump has
+// just spawned.
+func (c *Client) streamedBodyBytesLocked() int64 {
 	var total int64
 	for _, pb := range c.pendingBodies {
 		total += int64(pb.buf.Len())
+	}
+	for _, n := range c.dispatchingBodies {
+		total += n
 	}
 	return total
 }
@@ -954,14 +987,34 @@ func (c *Client) pendingBodyBytesLocked() int64 {
 // requestID, ready for handleRequestTo, when stream_end names a registered
 // pending body. It reports false for an unregistered requestID, so the
 // caller can fall through to adapter.HandleMessage unchanged.
-func (c *Client) finishPendingBody(requestID string) (protocol.RequestMessage, outboundTarget, bool) {
+//
+// The returned reservation is the dispatchingBodies key holding this body's
+// bytes against maxStreamedRequestBodyBytes for as long as the caller keeps
+// req.Body alive. Only dispatchStreamedBody may release it; a caller that
+// takes a reservation and drops it on the floor leaks that many bytes of
+// budget for the life of the process.
+func (c *Client) finishPendingBody(requestID string) (protocol.RequestMessage, outboundTarget, uint64, bool) {
 	c.pendingBodiesMu.Lock()
 	pb, ok := c.pendingBodies[requestID]
 	if !ok {
 		c.pendingBodiesMu.Unlock()
-		return protocol.RequestMessage{}, outboundTarget{}, false
+		return protocol.RequestMessage{}, outboundTarget{}, 0, false
 	}
 	delete(c.pendingBodies, requestID)
+	// Move the reservation from the reassembly stage to the dispatch stage
+	// under the same lock as the delete above, so the aggregate sum never
+	// dips between the two and no concurrent chunk can be admitted into a
+	// gap. buf.Len() is the size the copy below will be, so the charge is
+	// taken without holding this lock across a copy of up to
+	// maxRequestBodyStream bytes. (pb.buf and its copy are both resident for
+	// the length of that copy and the budget charges one, exactly as it did
+	// before the dispatch stage was covered at all.)
+	if c.dispatchingBodies == nil {
+		c.dispatchingBodies = make(map[uint64]int64)
+	}
+	c.nextDispatchSeq++
+	reservation := c.nextDispatchSeq
+	c.dispatchingBodies[reservation] = int64(pb.buf.Len())
 	timer := pb.timer
 	c.pendingBodiesMu.Unlock()
 	timer.Stop()
@@ -971,7 +1024,50 @@ func (c *Client) finishPendingBody(requestID string) (protocol.RequestMessage, o
 	// request body survives independently of pb, which is discarded here.
 	req.Body = append(json.RawMessage(nil), pb.buf.Bytes()...)
 	req.BodyStream = false
-	return req, pb.target, true
+	return req, pb.target, reservation, true
+}
+
+// releaseDispatchingBody drops the reservation finishPendingBody made for one
+// dispatched body, once the bytes are no longer held. Deleting a map key is
+// idempotent, so a double release is a no-op rather than the negative drift a
+// counter decrement would leave behind.
+func (c *Client) releaseDispatchingBody(reservation uint64) {
+	c.pendingBodiesMu.Lock()
+	delete(c.dispatchingBodies, reservation)
+	c.pendingBodiesMu.Unlock()
+}
+
+// dispatchStreamedBody runs the whole post-reassembly path for one streamed
+// request body and owns the maxStreamedRequestBodyBytes reservation
+// finishPendingBody handed over. The release is a single defer on this
+// function, which is what makes it unleakable: a streamSem rejection, a panic
+// inside handleRequestTo, and a normal return all run it exactly once. That
+// is why the streamSem admission check lives here rather than beside the
+// inline-body one in readPump — there, the rejection branch would need its
+// own release call, which is exactly the drift this shape avoids.
+//
+// Run it in its own goroutine: it must not run on the read pump, which has to
+// keep servicing pings and exec I/O while a body is in Docker. One goroutine
+// per stream_end is cheap even on the rejection branch, because the
+// production send path enqueues without blocking.
+func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestMessage, target outboundTarget, reservation uint64) {
+	defer c.releaseDispatchingBody(reservation)
+
+	// Bound concurrent request handlers (maxStreams), the same admission
+	// check an inline-body request gets in readPump. Reject rather than wait:
+	// the reassembled body is already in memory, so queueing here would hold
+	// it against the aggregate budget for as long as the agent stayed busy.
+	select {
+	case c.streamSem <- struct{}{}:
+		defer func() { <-c.streamSem }()
+		c.handleRequestTo(ctx, req, target)
+	default:
+		slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "agent busy: too many concurrent requests",
+			RequestID: req.RequestID,
+		})
+	}
 }
 
 // failPendingBody is the idle-timeout callback for a pending body: it
