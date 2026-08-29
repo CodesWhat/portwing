@@ -94,5 +94,17 @@ test("pre-push mirrors the root web lane", () => {
 });
 
 test("Vercel deploys main while disabling automatic preview deployments", () => {
-  assert.deepEqual(vercelConfig.git?.deploymentEnabled, { "*": false, main: true });
+  const deploymentEnabled = vercelConfig.git?.deploymentEnabled;
+  assert.deepEqual(deploymentEnabled, { "**": false, main: true });
+
+  function settingForBranch(branch) {
+    let setting;
+    for (const [pattern, enabled] of Object.entries(deploymentEnabled)) {
+      if (path.matchesGlob(branch, pattern)) setting = enabled;
+    }
+    return setting;
+  }
+
+  assert.equal(settingForBranch("feature/preview/change"), false);
+  assert.equal(settingForBranch("main"), true);
 });
