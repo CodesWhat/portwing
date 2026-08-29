@@ -41,7 +41,7 @@ function matrixEntries(source) {
       const lines = entry.split("\n");
       const fields = {};
       for (const line of lines) {
-        const match = line.match(/^            ([a-z_]+): (.+)$/u);
+        const match = line.match(/^ {12}([a-z_]+): (.+)$/u);
         if (match) fields[match[1]] = match[2];
       }
       fields.name = lines[0];
@@ -60,21 +60,33 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
     const expectedName = entry.package.slice("./internal/".length).replaceAll("/", "-");
     assert.equal(entry.name, expectedName);
     if (entry.zero_mutants === "true") {
-      assert.equal(entry.name, "log", "only the measured zero-mutant package may use the exception");
+      assert.equal(
+        entry.name,
+        "log",
+        "only the measured zero-mutant package may use the exception",
+      );
       assert.equal(entry.efficacy, undefined);
       assert.equal(entry.mcover, undefined);
     } else {
       for (const field of ["efficacy", "mcover"]) {
-        assert.match(entry[field] ?? "", /^(?:\d+)(?:\.\d+)?$/u, `${entry.name} is missing ${field}`);
+        assert.match(
+          entry[field] ?? "",
+          /^(?:\d+)(?:\.\d+)?$/u,
+          `${entry.name} is missing ${field}`,
+        );
         assert.ok(Number(entry[field]) >= 0 && Number(entry[field]) <= 100);
       }
     }
     if (entry.name === "metrics") assert.equal(entry.workers, "1");
   }
 
-  assert.doesNotMatch(source, /^    continue-on-error:/mu, "mutation failures must block the job");
+  assert.doesNotMatch(source, /^ {4}continue-on-error:/mu, "mutation failures must block the job");
   const runStep = source.slice(source.indexOf("      - name: Run Gremlins mutation testing"));
-  assert.match(runStep, /set -euo pipefail/u, "the report pipeline must preserve Gremlins failures");
+  assert.match(
+    runStep,
+    /set -euo pipefail/u,
+    "the report pipeline must preserve Gremlins failures",
+  );
   assert.match(runStep, /--threshold-efficacy "\$\{\{ matrix\.efficacy \}\}"/u);
   assert.match(runStep, /--threshold-mcover "\$\{\{ matrix\.mcover \}\}"/u);
   assert.match(runStep, /gremlins_args\+=\(--workers "\$\{\{ matrix\.workers \}\}"\)/u);
@@ -91,15 +103,21 @@ test("mutation workflow covers production packages with numeric ratchets", () =>
 });
 
 test("mutation contract rejects a missing package", () => {
-  assert.throws(() => assertMutationWorkflow(workflow.replace("./internal/pool", "./internal/missing")));
+  assert.throws(() =>
+    assertMutationWorkflow(workflow.replace("./internal/pool", "./internal/missing")),
+  );
 });
 
 test("mutation contract rejects an undiscovered production package", () => {
-  assert.throws(() => assertMutationWorkflow(workflow, [...productionPackagePaths(), "internal/future"]));
+  assert.throws(() =>
+    assertMutationWorkflow(workflow, [...productionPackagePaths(), "internal/future"]),
+  );
 });
 
 test("mutation contract rejects a missing numeric floor", () => {
-  assert.throws(() => assertMutationWorkflow(workflow.replace("            efficacy: 79.17\n", "")));
+  assert.throws(() =>
+    assertMutationWorkflow(workflow.replace("            efficacy: 79.17\n", "")),
+  );
 });
 
 test("mutation contract rejects swallowed Gremlins failures", () => {

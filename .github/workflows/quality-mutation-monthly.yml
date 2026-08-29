@@ -81,6 +81,8 @@ jobs:
             mcover: 79.59
           - name: metrics
             package: ./internal/metrics
+            # workers=1 repeats: 91.76/94.44, 92.00/83.33, 91.11/94.74.
+            # Floors retain observed slack for Gremlins run-to-run variance.
             efficacy: 90.00
             mcover: 80.00
             workers: 1
