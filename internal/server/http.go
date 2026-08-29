@@ -68,6 +68,57 @@ func stripPortwingAuthHeaders(h http.Header) {
 // the "exec body (10 MB)" limit documented in SECURITY.md.
 const maxHijackBodyBytes = 10 * 1024 * 1024 // 10 MB
 
+// concurrencyLimiter admits a bounded number of concurrent sessions, mirroring
+// edge mode's maxStreams/maxExecSessions semaphores (internal/edge/client.go).
+//
+// A nil limiter is unbounded. Servers assembled as struct literals rather than
+// through NewServer never allocate one, so failing closed on nil would reject
+// every stream those servers proxy.
+type concurrencyLimiter struct {
+	slots chan struct{}
+}
+
+// newConcurrencyLimiter returns nil for a non-positive limit: an operator whose
+// controller legitimately runs more concurrent streams than the default needs a
+// way to turn the bound off.
+func newConcurrencyLimiter(limit int) *concurrencyLimiter {
+	if limit <= 0 {
+		return nil
+	}
+	return &concurrencyLimiter{slots: make(chan struct{}, limit)}
+}
+
+// acquire takes a slot without blocking and reports whether one was free. The
+// caller rejects rather than queues, so a saturated agent answers immediately
+// instead of holding the connection open.
+func (l *concurrencyLimiter) acquire() bool {
+	if l == nil {
+		return true
+	}
+	select {
+	case l.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// release returns a slot taken by a successful acquire. Calls are paired with a
+// defer at every acquire site.
+func (l *concurrencyLimiter) release() {
+	if l == nil {
+		return
+	}
+	<-l.slots
+}
+
+func (l *concurrencyLimiter) limit() int {
+	if l == nil {
+		return 0
+	}
+	return cap(l.slots)
+}
+
 // Server is the standard-mode HTTP server that exposes Docker API proxy
 // endpoints, adapter-specific routes, and health checks.
 type Server struct {
@@ -85,6 +136,11 @@ type Server struct {
 	auditor      *audit.Logger
 	httpServer   *http.Server
 	startTime    time.Time
+
+	// streamSem bounds concurrent streaming proxy responses; execSem bounds
+	// concurrent hijacked exec/attach sessions. Both are nil when unbounded.
+	streamSem *concurrencyLimiter
+	execSem   *concurrencyLimiter
 
 	// pollCtx bounds the pollContainers goroutine started by ListenAndServe;
 	// pollCancel stops it on Shutdown. Both are set at construction so a
@@ -181,6 +237,8 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		hupDone:      make(chan struct{}),
 		handlerDone:  make(chan struct{}),
 		hijackConns:  make(map[net.Conn]struct{}),
+		streamSem:    newConcurrencyLimiter(cfg.MaxStreamSessions),
+		execSem:      newConcurrencyLimiter(cfg.MaxExecSessions),
 	}
 	s.pollCtx, s.pollCancel = context.WithCancel(context.Background())
 
@@ -436,6 +494,18 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Bound concurrent streams (SPEC 7.3). Checked after the hijack branch so
+	// an upgraded exec takes an exec slot rather than one of each, and only for
+	// streaming paths so a short proxied request is never turned away.
+	if isStream {
+		if !s.streamSem.acquire() {
+			slog.Warn("concurrent stream limit reached, rejecting", "max", s.streamSem.limit())
+			http.Error(w, "agent busy: too many concurrent streams", http.StatusServiceUnavailable)
+			return
+		}
+		defer s.streamSem.release()
+	}
+
 	// Build Docker API request.
 	dockerURL := fmt.Sprintf("http://localhost%s", r.URL.RequestURI())
 	// #nosec G704 -- URL is fixed to localhost for the Docker socket proxy; RequestURI only selects the Docker API path/query.
@@ -490,6 +560,16 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 		execID := parts[len(parts)-2]
 		s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID)
 	}
+
+	// Bound concurrent exec/attach sessions (SPEC 7.3) before the body read and
+	// the hijack, so a rejected session costs nothing and can still be answered
+	// with a normal HTTP response.
+	if !s.execSem.acquire() {
+		slog.Warn("exec session limit reached, rejecting", "max", s.execSem.limit())
+		http.Error(w, "agent busy: exec session limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.execSem.release()
 
 	var body []byte
 	if r.Body != nil {
