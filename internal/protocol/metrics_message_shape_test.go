@@ -38,16 +38,16 @@ func jsonFieldName(f reflect.StructField) string {
 	return name
 }
 
-// TestMetricsMessageMirrorsHostMetrics fails loudly the next time HostMetrics
-// grows a field that MetricsMessage doesn't mirror: every json-tagged,
-// exported field on metrics.HostMetrics must have a same-name, same-type
-// counterpart on MetricsMessage.
+// TestMetricsMessageMirrorsHostMetrics fails loudly when either struct gains a
+// JSON field the other doesn't mirror: every json-tagged, exported field on
+// either type must have a same-name, same-type counterpart on the other.
 func TestMetricsMessageMirrorsHostMetrics(t *testing.T) {
 	t.Parallel()
 
 	hostType := reflect.TypeOf(metrics.HostMetrics{})
 	msgType := reflect.TypeOf(MetricsMessage{})
 
+	hostFieldsByJSONName := make(map[string]reflect.StructField)
 	msgFieldsByJSONName := make(map[string]reflect.StructField)
 	for i := 0; i < msgType.NumField(); i++ {
 		f := msgType.Field(i)
@@ -64,7 +64,7 @@ func TestMetricsMessageMirrorsHostMetrics(t *testing.T) {
 		if name == "" {
 			continue
 		}
-
+		hostFieldsByJSONName[name] = hf
 		mf, ok := msgFieldsByJSONName[name]
 		if !ok {
 			t.Errorf("metrics.HostMetrics field %s (json %q) has no counterpart in protocol.MetricsMessage; add it", hf.Name, name)
@@ -72,6 +72,12 @@ func TestMetricsMessageMirrorsHostMetrics(t *testing.T) {
 		}
 		if mf.Type != hf.Type {
 			t.Errorf("field %q: metrics.HostMetrics has type %s, protocol.MetricsMessage has type %s", name, hf.Type, mf.Type)
+		}
+	}
+
+	for name, mf := range msgFieldsByJSONName {
+		if _, ok := hostFieldsByJSONName[name]; !ok {
+			t.Errorf("protocol.MetricsMessage field %s (json %q) has no counterpart in metrics.HostMetrics; remove it or add it", mf.Name, name)
 		}
 	}
 }
