@@ -36,7 +36,7 @@ func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 
 	body, err := a.dockerClient.GetContainerLogs(r.Context(), containerID, tail, since, until, follow, false)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("getting logs: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("getting logs: %v", err), docker.StatusCodeForError(err))
 		return
 	}
 	defer body.Close()

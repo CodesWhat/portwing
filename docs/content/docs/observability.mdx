@@ -67,16 +67,18 @@ These metrics are always present and use the `portwing_` prefix.
 |--------|------|-------------|
 | `portwing_build_info` | gauge | Always `1`. Carries a `version` label with the agent version string. |
 | `portwing_uptime_seconds` | gauge | Seconds elapsed since the agent process started. |
+| `portwing_host_metrics_supported` | gauge | Whether the `/proc`-backed host fields (CPU, memory, network, uptime) could be read (`1`) or not (`0`, no procfs — e.g. native macOS). When `0`, those series are omitted rather than written as zeros. |
 | `portwing_host_cpu_usage_percent` | gauge | Host CPU usage percentage (delta between consecutive `/proc/stat` samples). Returns `0` on the first scrape — a second sample is needed for a meaningful value. |
 | `portwing_host_memory_total_bytes` | gauge | Total host memory in bytes (from `/proc/meminfo` `MemTotal`). |
 | `portwing_host_memory_used_bytes` | gauge | Used host memory in bytes (`MemTotal` minus available). |
+| `portwing_host_disk_metrics_available` | gauge | Whether host disk usage could be read from the Docker data root (`1`) or not (`0`). Disk reads `statfs` rather than `/proc`, but collection short-circuits when the `/proc` pass fails, so this is never `1` while `portwing_host_metrics_supported` is `0`. When `0`, the disk byte series below are omitted rather than written as zeros. |
 | `portwing_host_disk_total_bytes` | gauge | Total disk capacity in bytes on the Docker data-root filesystem. |
 | `portwing_host_disk_used_bytes` | gauge | Used disk space in bytes on the Docker data-root filesystem. |
 | `portwing_host_network_receive_bytes_total` | counter | Cumulative bytes received across all non-loopback host interfaces (from `/proc/net/dev`). |
 | `portwing_host_network_transmit_bytes_total` | counter | Cumulative bytes transmitted across all non-loopback host interfaces. |
 
 <Callout type="info">
-Disk metrics (`portwing_host_disk_total_bytes`, `portwing_host_disk_used_bytes`) reflect the filesystem that contains the Docker data root — typically `/var/lib/docker`. They are omitted when the agent is started with disk collection disabled.
+Disk metrics (`portwing_host_disk_total_bytes`, `portwing_host_disk_used_bytes`) reflect the filesystem that contains the Docker data root, resolved from the daemon's `/info` rather than assumed to be `/var/lib/docker`. They are omitted when the agent is started with disk collection disabled, when the `statfs` read fails or reports an unusable block size, and when the `/proc` collection pass short-circuits first (`portwing_host_disk_metrics_available 0`).
 </Callout>
 
 ### Per-container metrics
@@ -141,6 +143,9 @@ portwing_build_info{version="0.9.11"} 1
 # HELP portwing_uptime_seconds Seconds since the agent started.
 # TYPE portwing_uptime_seconds gauge
 portwing_uptime_seconds 3842.7
+# HELP portwing_host_metrics_supported Whether host resource metrics are available on this platform (1) or not (0).
+# TYPE portwing_host_metrics_supported gauge
+portwing_host_metrics_supported 1
 # HELP portwing_host_cpu_usage_percent Host CPU usage percentage.
 # TYPE portwing_host_cpu_usage_percent gauge
 portwing_host_cpu_usage_percent 4.2
@@ -150,6 +155,9 @@ portwing_host_memory_total_bytes 8589934592
 # HELP portwing_host_memory_used_bytes Host used memory in bytes.
 # TYPE portwing_host_memory_used_bytes gauge
 portwing_host_memory_used_bytes 3145728000
+# HELP portwing_host_disk_metrics_available Whether host disk usage could be read from the Docker data root (1) or not (0).
+# TYPE portwing_host_disk_metrics_available gauge
+portwing_host_disk_metrics_available 1
 # HELP portwing_host_disk_total_bytes Host total disk space in bytes.
 # TYPE portwing_host_disk_total_bytes gauge
 portwing_host_disk_total_bytes 107374182400

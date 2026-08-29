@@ -42,9 +42,20 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runKeygen(args[2:], stdout, stderr)
 	}
 
-	if len(args) >= 2 && args[1] == "version" {
+	if len(args) >= 2 && (args[1] == "version" || args[1] == "--version" || args[1] == "-V") {
 		fmt.Fprintln(stdout, protocol.AgentVersion)
 		return 0
+	}
+
+	if len(args) >= 2 && (args[1] == "--help" || args[1] == "-h") {
+		printUsage(stdout)
+		return 0
+	}
+
+	if len(args) >= 2 && strings.HasPrefix(args[1], "-") {
+		fmt.Fprintf(stderr, "portwing: unrecognized flag %q\n\n", args[1])
+		printUsage(stderr)
+		return 1
 	}
 
 	cfg, err := config.Load()
@@ -142,6 +153,26 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	slog.Info("portwing stopped")
 	return 0
+}
+
+// printUsage writes top-level CLI usage to w. Portwing is configured
+// entirely through environment variables rather than flags; see
+// docs/content/docs/configuration.mdx for the full reference.
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage: portwing [command]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "With no command, portwing starts the agent, configured entirely through")
+	fmt.Fprintln(w, "environment variables (PORT, TOKEN, DRYDOCK_URL, ...). See")
+	fmt.Fprintln(w, "https://portwing.codeswhat.com/docs/configuration for the full reference.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  hash-token   hash a token from stdin for use as TOKEN_HASH")
+	fmt.Fprintln(w, "  keygen       generate an Ed25519 keypair for AUTHORIZED_KEYS auth")
+	fmt.Fprintln(w, "  version      print the agent version")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Flags:")
+	fmt.Fprintln(w, "  -h, --help      show this help message")
+	fmt.Fprintln(w, "  -V, --version   print the agent version")
 }
 
 func selectAdapter(cfg *config.Config, dockerClient *docker.Client) adapter.Adapter {

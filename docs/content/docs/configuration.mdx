@@ -92,6 +92,8 @@ Portwing talks to the Docker daemon over the Unix socket only — there is no `D
 | `RECONNECT_DELAY` | `1` | Initial reconnect backoff delay in seconds (doubles on each failure, capped at `MAX_RECONNECT_DELAY`, with ±25% jitter). |
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff delay in seconds. |
 | `SKIP_DF_COLLECTION` | `false` | Set to `true` (or `1`/`yes`) to disable disk-usage metric collection. Useful when the host filesystem is inaccessible or collection is slow. |
+| `MAX_STREAM_SESSIONS` | `100` | Standard mode only: maximum concurrent streaming Docker proxy responses. A non-positive value disables the bound. Edge mode enforces the same 100-session limit, but it is fixed and not configurable. |
+| `MAX_EXEC_SESSIONS` | `100` | Standard mode only: maximum concurrent hijacked exec/attach sessions. A non-positive value disables the bound. Edge mode enforces the same 100-session limit, but it is fixed and not configurable. |
 | `AUDIT_LOG` | — | Optional persistent audit destination: `stdout`, `stderr`, or an absolute file path. When unset, only the sink is disabled; `AUDIT_BUFFER_SIZE` still controls in-memory retention. |
 | `AUDIT_BUFFER_SIZE` | `256` | Number of audit records retained in the in-memory ring buffer for pull-based retrieval at `GET /_portwing/audit`. Set to `0` to disable the buffer. Independent of `AUDIT_LOG`. |
 

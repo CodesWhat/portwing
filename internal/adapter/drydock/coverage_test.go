@@ -1323,23 +1323,61 @@ func TestOnConnect_StillSendsComponentSyncWhenContainerSyncFails(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// routes.go — handleContainerLogs: docker error path (500)
+// routes.go — handleContainerLogs: docker error status mapping
+//
+// docker.StatusCodeForError passes 404 and 409 through unchanged and
+// collapses everything else to 500; this table exercises all three outcomes
+// against handleContainerLogs. Each case gets its own fake Docker server and
+// its own ResponseRecorder so the subtests stay isolated under -race.
 // ---------------------------------------------------------------------------
 
-func TestHandleContainerLogs_DockerError(t *testing.T) {
+func TestHandleContainerLogs_DockerErrorStatusMapping(t *testing.T) {
 	t.Parallel()
 
-	client, shutdown := newErrorDockerServer(t, http.StatusInternalServerError, http.StatusNoContent)
-	defer shutdown()
+	tests := []struct {
+		name         string
+		containerID  string
+		dockerStatus int
+		wantStatus   int
+	}{
+		{
+			name:         "docker 404 maps to 404",
+			containerID:  "missing",
+			dockerStatus: http.StatusNotFound,
+			wantStatus:   http.StatusNotFound,
+		},
+		{
+			name:         "docker 409 maps to 409",
+			containerID:  "container-1",
+			dockerStatus: http.StatusConflict,
+			wantStatus:   http.StatusConflict,
+		},
+		{
+			name:         "docker 500 maps to 500",
+			containerID:  "container-1",
+			dockerStatus: http.StatusInternalServerError,
+			wantStatus:   http.StatusInternalServerError,
+		},
+	}
 
-	a := NewAdapter(client, "test-agent", AgentInfo{})
-	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs?tail=5", nil)
-	req.SetPathValue("id", "container-1")
-	rec := httptest.NewRecorder()
-	a.handleContainerLogs(rec, req)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d (body: %s)", rec.Code, rec.Body.String())
+			client, shutdown := newErrorDockerServer(t, tc.dockerStatus, http.StatusNoContent)
+			defer shutdown()
+
+			a := NewAdapter(client, "test-agent", AgentInfo{})
+			req := httptest.NewRequest(http.MethodGet, "/api/containers/"+tc.containerID+"/logs?tail=5", nil)
+			req.SetPathValue("id", tc.containerID)
+			rec := httptest.NewRecorder()
+			a.handleContainerLogs(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("expected %d, got %d (body: %s)", tc.wantStatus, rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

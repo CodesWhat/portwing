@@ -45,6 +45,12 @@ type Config struct {
 	WelcomeTimeout    int
 	LogLevel          string
 	SkipDFCollection  bool
+	// MaxStreamSessions and MaxExecSessions bound standard mode's concurrent
+	// streaming proxies and hijacked exec/attach sessions (SPEC 7.3). A
+	// non-positive value disables the bound, which a controller driving more
+	// than the default 100 concurrent streams needs.
+	MaxStreamSessions int
+	MaxExecSessions   int
 
 	// Adapter
 	Adapter string
@@ -218,6 +224,8 @@ func Load() (*Config, error) {
 		WelcomeTimeout:    getEnvInt("WELCOME_TIMEOUT", 30),
 		LogLevel:          getEnv("LOG_LEVEL", "info"),
 		SkipDFCollection:  getEnvBool("SKIP_DF_COLLECTION", false),
+		MaxStreamSessions: getEnvInt("MAX_STREAM_SESSIONS", 100),
+		MaxExecSessions:   getEnvInt("MAX_EXEC_SESSIONS", 100),
 
 		Adapter: getEnv("ADAPTER", "drydock"),
 

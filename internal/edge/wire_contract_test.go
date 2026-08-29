@@ -842,17 +842,24 @@ func TestStartHealthServerEndpointResponds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read edge metrics: %v", err)
 	}
-	for _, want := range []string{
+	want := []string{
 		`portwing_build_info{version="` + protocol.AgentVersion + `"} 1`,
 		"portwing_uptime_seconds ",
-		"portwing_host_memory_total_bytes ",
+		"portwing_host_metrics_supported ",
 		`container_cpu_usage_seconds_total{id="edge-container",name="edge-workload",image="example/workload:v1"} 2`,
 		"portwing_edge_controller_connected 1",
 		"portwing_edge_reconnects_total 1",
 		"portwing_edge_backpressure_events_total 1",
-	} {
-		if !strings.Contains(string(metricsBody), want) {
-			t.Errorf("missing %q in edge metrics:\n%s", want, metricsBody)
+	}
+	// The host resource series exist only where a procfs does. Off Linux the
+	// support gauge above reads 0 and these are deliberately absent rather
+	// than published as zeros.
+	if !strings.Contains(string(metricsBody), "portwing_host_metrics_supported 0") {
+		want = append(want, "portwing_host_memory_total_bytes ")
+	}
+	for _, w := range want {
+		if !strings.Contains(string(metricsBody), w) {
+			t.Errorf("missing %q in edge metrics:\n%s", w, metricsBody)
 		}
 	}
 }

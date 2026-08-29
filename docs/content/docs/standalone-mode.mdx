@@ -209,7 +209,7 @@ For full details on token options (`TOKEN`, `TOKEN_FILE`, `TOKEN_HASH`) and Ed25
 
 ## MCP server (read-only alternative)
 
-Portwing also exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_portwing/mcp`. It is available in all adapter modes, including `generic`. AI assistants (Claude, Cursor, Windsurf) can query live container state through this endpoint without issuing raw REST calls.
+Portwing also exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_portwing/mcp`. It is available in standard mode with any adapter, including `generic`. Edge mode does not register this route — its WebSocket tunnel to Drydock and local operations listener never wire up the MCP handler. AI assistants (Claude, Cursor, Windsurf) can query live container state through this endpoint without issuing raw REST calls.
 
 Available tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`.
 

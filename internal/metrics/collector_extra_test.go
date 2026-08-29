@@ -1,13 +1,41 @@
 package metrics
 
 import (
+	"context"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/codeswhat/portwing/internal/docker"
 )
+
+// fakeDockerInfo stands in for the Docker daemon's /info endpoint. It records
+// the call count and the caller's deadline so the tests can assert both that
+// the lookup is cached and that it is bounded.
+type fakeDockerInfo struct {
+	info        *docker.DockerInfo
+	err         error
+	calls       int
+	hasDeadline bool
+	deadlineIn  time.Duration
+}
+
+func (f *fakeDockerInfo) GetDockerInfo(ctx context.Context) (*docker.DockerInfo, error) {
+	f.calls++
+	if deadline, ok := ctx.Deadline(); ok {
+		f.hasDeadline = true
+		f.deadlineIn = time.Until(deadline)
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.info, nil
+}
 
 // TestCPUStatsTotal verifies the total() helper sums all fields.
 func TestCPUStatsTotal(t *testing.T) {
@@ -84,14 +112,15 @@ func TestNewCollector(t *testing.T) {
 }
 
 // TestCollectReturnsHostMetrics verifies Collect returns a non-nil *HostMetrics
-// with CPUCores populated (runtime.NumCPU() always > 0) even on platforms
-// where /proc is absent (macOS). The other fields may be zero on non-Linux.
+// with CPUCores populated (runtime.NumCPU() always > 0). On a platform with no
+// procfs it reports ErrHostMetricsUnsupported rather than a zero-filled
+// snapshot, and still fills CPUCores in. The other fields may be zero there.
 func TestCollectReturnsHostMetrics(t *testing.T) {
 	t.Parallel()
 
 	c := NewCollector(".", false)
 	m, err := c.Collect()
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
 		t.Fatalf("Collect() returned error: %v", err)
 	}
 	if m == nil {
@@ -125,18 +154,156 @@ func TestCollectReturnsHostMetrics(t *testing.T) {
 	}
 }
 
-// TestCollectSkipDisk verifies that disk fields remain zero when skipDisk=true.
+// TestCollectSkipDisk verifies that disk fields remain zero when skipDisk=true,
+// and that those zeros are marked unmeasured rather than passed off as a real
+// reading of an empty filesystem.
 func TestCollectSkipDisk(t *testing.T) {
 	t.Parallel()
 
 	c := NewCollector(".", true)
 	m, err := c.Collect()
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
 		t.Fatalf("Collect() returned error: %v", err)
 	}
 	if m.DiskTotal != 0 || m.DiskUsed != 0 || m.DiskFree != 0 {
 		t.Errorf("with skipDisk=true expected zero disk fields, got total=%d used=%d free=%d",
 			m.DiskTotal, m.DiskUsed, m.DiskFree)
+	}
+	if m.DiskMetricsAvailable {
+		t.Error("DiskMetricsAvailable = true with skipDisk=true, want false")
+	}
+	if m.DiskError != "" {
+		t.Errorf("DiskError = %q, want empty when disk collection is disabled", m.DiskError)
+	}
+}
+
+// TestNewDaemonCollectorResolvesDataRoot verifies the collector learns the
+// daemon's real data root instead of assuming /var/lib/docker, asks for it
+// lazily so construction never waits on Docker, bounds the lookup, and asks
+// only once.
+func TestNewDaemonCollectorResolvesDataRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	fake := &fakeDockerInfo{info: &docker.DockerInfo{DockerRootDir: root}}
+	c := NewDaemonCollector(fake, false)
+
+	if fake.calls != 0 {
+		t.Fatalf("NewDaemonCollector made %d /info calls, want 0 (must not block startup)", fake.calls)
+	}
+	if c.dockerDataRoot != defaultDockerDataRoot {
+		t.Errorf("pre-resolution dockerDataRoot = %q, want %q", c.dockerDataRoot, defaultDockerDataRoot)
+	}
+
+	m := &HostMetrics{}
+	c.collectDisk(m)
+
+	if fake.calls != 1 {
+		t.Fatalf("/info calls = %d, want 1", fake.calls)
+	}
+	if !fake.hasDeadline {
+		t.Error("/info was called without a deadline; a wedged socket would stall collection")
+	}
+	if fake.deadlineIn > dataRootTimeout {
+		t.Errorf("/info deadline is %v away, want at most %v", fake.deadlineIn, dataRootTimeout)
+	}
+	if c.dockerDataRoot != root {
+		t.Errorf("dockerDataRoot = %q, want the daemon's %q", c.dockerDataRoot, root)
+	}
+	if !m.DiskMetricsAvailable {
+		t.Errorf("DiskMetricsAvailable = false for a readable data root (DiskError = %q)", m.DiskError)
+	}
+
+	c.collectDisk(&HostMetrics{})
+	if fake.calls != 1 {
+		t.Errorf("/info calls = %d after a second collection, want the answer cached at 1", fake.calls)
+	}
+}
+
+// TestDaemonCollectorFallsBackAndRetries verifies an unreachable daemon yields
+// the default root rather than an error, is not retried on every collection,
+// and is not cached as final either — Docker being down at boot must not pin
+// the wrong path for the process lifetime.
+func TestDaemonCollectorFallsBackAndRetries(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	fake := &fakeDockerInfo{err: errors.New("dial unix /var/run/docker.sock: connect: connection refused")}
+	c := NewDaemonCollector(fake, false)
+
+	if got := c.dataRoot(); got != defaultDockerDataRoot {
+		t.Fatalf("dataRoot() = %q, want the %q fallback", got, defaultDockerDataRoot)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("/info calls = %d, want 1", fake.calls)
+	}
+
+	if got := c.dataRoot(); got != defaultDockerDataRoot {
+		t.Fatalf("second dataRoot() = %q, want the %q fallback", got, defaultDockerDataRoot)
+	}
+	if fake.calls != 1 {
+		t.Errorf("/info calls = %d, want the retry rate-limited to 1", fake.calls)
+	}
+
+	// Age the retry gate instead of sleeping dataRootRetryInterval.
+	c.dataRootRetryAt = time.Now().Add(-time.Second)
+	fake.err = nil
+	fake.info = &docker.DockerInfo{DockerRootDir: root}
+	if got := c.dataRoot(); got != root {
+		t.Errorf("dataRoot() after the daemon came up = %q, want %q", got, root)
+	}
+	if fake.calls != 2 {
+		t.Errorf("/info calls = %d, want 2", fake.calls)
+	}
+}
+
+// TestDaemonCollectorAnsweredButEmpty verifies a daemon that replies without a
+// DockerRootDir stops the lookup: it answered, so retrying costs a round trip
+// per collection and cannot produce a different result.
+func TestDaemonCollectorAnsweredButEmpty(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		info *docker.DockerInfo
+	}{
+		{name: "empty root dir", info: &docker.DockerInfo{}},
+		{name: "nil info", info: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := &fakeDockerInfo{info: tt.info}
+			c := NewDaemonCollector(fake, false)
+
+			if got := c.dataRoot(); got != defaultDockerDataRoot {
+				t.Fatalf("dataRoot() = %q, want %q", got, defaultDockerDataRoot)
+			}
+			if got := c.dataRoot(); got != defaultDockerDataRoot {
+				t.Fatalf("second dataRoot() = %q, want %q", got, defaultDockerDataRoot)
+			}
+			if fake.calls != 1 {
+				t.Errorf("/info calls = %d, want 1", fake.calls)
+			}
+		})
+	}
+}
+
+// TestDaemonCollectorSkipsLookupWhenDiskDisabled verifies SKIP_DF_COLLECTION
+// spends nothing on a data root it will never stat.
+func TestDaemonCollectorSkipsLookupWhenDiskDisabled(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeDockerInfo{info: &docker.DockerInfo{DockerRootDir: t.TempDir()}}
+	c := NewDaemonCollector(fake, true)
+	c.procRoot = t.TempDir()
+
+	if _, err := c.Collect(); err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
+		t.Fatalf("Collect() error: %v", err)
+	}
+	if fake.calls != 0 {
+		t.Errorf("/info calls = %d with disk collection disabled, want 0", fake.calls)
 	}
 }
 
@@ -187,17 +354,26 @@ func TestCollectDiskRealPath(t *testing.T) {
 }
 
 // TestCollectDiskMissingPath verifies collectDisk does not panic and leaves
-// disk fields zero when given a path that does not exist.
+// disk fields zero when given a path that does not exist, and that it marks
+// those zeros unmeasured — a host that relocated Docker's data root would
+// otherwise report an empty disk as though it had measured one.
 func TestCollectDiskMissingPath(t *testing.T) {
 	t.Parallel()
 
-	c := &Collector{dockerDataRoot: "/nonexistent/path/that/does/not/exist/12345"}
+	const missing = "/nonexistent/path/that/does/not/exist/12345"
+	c := &Collector{dockerDataRoot: missing}
 	m := &HostMetrics{}
 	c.collectDisk(m)
 
 	if m.DiskTotal != 0 || m.DiskUsed != 0 || m.DiskFree != 0 {
 		t.Errorf("expected zero disk fields for missing path, got total=%d used=%d free=%d",
 			m.DiskTotal, m.DiskUsed, m.DiskFree)
+	}
+	if m.DiskMetricsAvailable {
+		t.Error("DiskMetricsAvailable = true for a missing path, want false")
+	}
+	if !strings.Contains(m.DiskError, missing) {
+		t.Errorf("DiskError = %q, want it to name the path %q", m.DiskError, missing)
 	}
 }
 
@@ -429,7 +605,7 @@ func TestCollectConcurrency(t *testing.T) {
 		go func() {
 			defer func() { done <- struct{}{} }()
 			m, err := c.Collect()
-			if err != nil {
+			if err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
 				t.Errorf("Collect() error: %v", err)
 			}
 			if m == nil {
@@ -576,7 +752,7 @@ func TestCPUUsageNeverExceeds100(t *testing.T) {
 	c := NewCollector(".", true)
 	for i := range 5 {
 		m, err := c.Collect()
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
 			t.Fatalf("call %d: Collect() error: %v", i, err)
 		}
 		if m.CPUUsage < 0 || m.CPUUsage > 100 {

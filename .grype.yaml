@@ -2,6 +2,17 @@
 # affected package is not linked. Keep those exceptions version- and
 # location-scoped so dependency updates automatically force a new review. CI
 # separately rejects any source dependency or shipped binary that links openpgp.
+#
+# 2026-08-28 audit: x/crypto moved v0.54.0 -> v0.55.0 to clear GO-2026-6303
+# (CVE-2026-56854), which the pre-push qlty gate began failing on. That
+# advisory is scoped to golang.org/x/crypto/ssh (symbols NewServerConn,
+# connection.serverAuthenticate) and portwing imports only x/crypto/argon2, so
+# it was never reachable — source-mode govulncheck reports zero called
+# vulnerabilities — but v0.55.0 is the fix line, so taking it is cheaper than
+# carrying another suppression. The two GO-2026-5932 entries below that track
+# portwing's own module and shipped binary moved to v0.55.0 in lockstep; the
+# third stays pinned to v0.54.0 because it describes the Wolfi-packaged
+# docker-compose binary, whose embedded x/crypto is not ours to bump.
 ignore:
   # GO-2026-5932 affects only golang.org/x/crypto/openpgp. Portwing imports
   # x/crypto/argon2 only (confirmed by source-mode govulncheck), and Docker
@@ -9,17 +20,17 @@ ignore:
   # scripts/verify-scanner-exclusions.sh against the extracted binary). There
   # is no fixed x/crypto version because the advisory deprecates that package.
   - vulnerability: GO-2026-5932
-    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.54.0."
+    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.55.0."
     package:
       name: golang.org/x/crypto
-      version: v0.54.0
+      version: v0.55.0
       type: go-module
       location: "/go.mod"
   - vulnerability: GO-2026-5932
-    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.54.0."
+    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.55.0."
     package:
       name: golang.org/x/crypto
-      version: v0.54.0
+      version: v0.55.0
       type: go-module
       location: "**/usr/bin/portwing"
   - vulnerability: GO-2026-5932

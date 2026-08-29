@@ -100,7 +100,10 @@ func newTestDockerClientWithLogsError(t *testing.T) (*docker.Client, func()) {
 	}
 }
 
-// TestHandleContainerLogsDockerError exercises the Docker error path (lines 39-42).
+// TestHandleContainerLogsDockerError exercises the Docker error path
+// (lines 37-40) for a container that doesn't exist. Docker's 404 must be
+// propagated as a 404, not collapsed into a generic 500, matching the
+// mapping already applied to container deletion.
 func TestHandleContainerLogsDockerError(t *testing.T) {
 	t.Parallel()
 
@@ -115,8 +118,8 @@ func TestHandleContainerLogsDockerError(t *testing.T) {
 
 	a.handleContainerLogs(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("want 500, got %d", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "getting logs") {
 		t.Fatalf("expected 'getting logs' in error body, got: %q", rec.Body.String())

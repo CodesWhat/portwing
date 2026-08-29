@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -326,11 +327,24 @@ const maxDockerErrorBodyBytes = 4 * 1024 // 4 KiB
 // reason like "exec denied: no commands are allowlisted" is surfaced to the
 // caller instead of being discarded. body should already be bounded (e.g.
 // read via maxDockerErrorBodyBytes) by the caller.
-func dockerError(action string, status int, body []byte) error {
-	if msg := extractDockerErrorMessage(body); msg != "" {
-		return fmt.Errorf("%s: docker error (status %d): %s", action, status, msg)
+// APIError is an error response from the Docker Engine API. It carries the HTTP
+// status that produced it so callers can map it to a response status without
+// parsing the message.
+type APIError struct {
+	Action  string
+	Status  int
+	Message string
+}
+
+func (e *APIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("%s: docker error (status %d): %s", e.Action, e.Status, e.Message)
 	}
-	return fmt.Errorf("%s: docker error (status %d)", action, status)
+	return fmt.Sprintf("%s: docker error (status %d)", e.Action, e.Status)
+}
+
+func dockerError(action string, status int, body []byte) error {
+	return &APIError{Action: action, Status: status, Message: extractDockerErrorMessage(body)}
 }
 
 // extractDockerErrorMessage pulls a human-readable message out of a Docker
@@ -364,6 +378,26 @@ func extractDockerErrorMessage(body []byte) string {
 		}
 	}
 	return trimmed
+}
+
+// StatusCodeForError maps a Docker API error (e.g. from RemoveContainer or
+// GetContainerLogs) to the HTTP status a caller should respond with, so a
+// container that doesn't exist reports 404 instead of a generic 500, and a
+// conflicting operation (e.g. removing a running container without force)
+// reports 409. Anything else, including a nil error, collapses to 500.
+//
+// The status is read off *APIError rather than matched in the formatted
+// message, because that message embeds the Docker error body and a
+// caller-supplied container name can appear inside it.
+func StatusCodeForError(err error) int {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.Status {
+		case http.StatusNotFound, http.StatusConflict:
+			return apiErr.Status
+		}
+	}
+	return http.StatusInternalServerError
 }
 
 // ListContainers returns all containers (or only running ones if all is false).

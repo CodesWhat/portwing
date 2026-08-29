@@ -126,6 +126,10 @@ Returns a point-in-time snapshot of host-level resource metrics. No parameters.
 
 **Response:** a metrics snapshot including CPU, memory, disk, network I/O, and uptime. The exact shape matches the Prometheus collector used internally by Portwing.
 
+**Linux only.** Every field except `cpuCores` and the disk fields is read from `/proc`, so this tool works on the container, `.deb` and `.rpm` builds and nowhere else. On a native macOS install it returns an MCP error naming the missing procfs instead of a snapshot of zeros, because a zero-filled snapshot is indistinguishable from a real reading of an idle host. The Prometheus endpoint reports the same thing as `portwing_host_metrics_supported 0`.
+
+Disk usage (`diskTotal`, `diskUsed`, `diskFree`) is measured with `statfs` against the Docker daemon's actual data root, resolved from `/info` rather than assumed to be `/var/lib/docker`. That read can fail independently of the `/proc` fields — for example if the data root is unreadable — in which case `diskMetricsAvailable` is `false`, the disk fields stay `0`, and `diskError` names the failure instead of the response being an MCP error. `/metrics` mirrors this as `portwing_host_disk_metrics_available 0` with the disk byte series omitted.
+
 ---
 
 ### `container_stats`

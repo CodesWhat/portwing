@@ -7,7 +7,7 @@ import { iconButtonCn, navLinkCn } from "@/lib/class-names";
 import { GITHUB_ORG_URL, GITHUB_RELEASES_URL, GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 
 const CODESWHAT = GITHUB_ORG_URL;
-const YEAR = new Date().getFullYear();
+const YEAR = process.env.NEXT_PUBLIC_COPYRIGHT_YEAR;
 const BLURB =
   "Security-first remote Docker agent. Lightweight Go binary, Ed25519 auth, sockguard-ready socket filter, structured audit log.";
 

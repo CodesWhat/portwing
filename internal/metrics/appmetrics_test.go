@@ -12,18 +12,9 @@ import (
 // noEscape is a no-op label escaper used when we want to test raw output.
 func noEscape(s string) string { return s }
 
-// escapeLabelValue mirrors the logic from the server package so tests can
-// produce the same escaped form without importing the server package.
-func escapeLabelValue(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	return s
-}
-
 func output(reg *metrics.Registry) string {
 	var b strings.Builder
-	reg.WritePrometheus(&b, escapeLabelValue)
+	reg.WritePrometheus(&b, metrics.EscapeLabelValue)
 	return b.String()
 }
 

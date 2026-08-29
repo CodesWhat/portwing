@@ -256,6 +256,165 @@ test("before_send requires and forwards the cookieless server-hash fields", () =
   }
 });
 
+test("before_send forwards UTM campaign labels and $referring_domain at hostname granularity", () => {
+  const result = sanitizeEvent({
+    event: "$pageview",
+    uuid: "internal-posthog-id",
+    properties: {
+      ...BASE_PROPERTIES,
+      ...COOKIELESS_HASH_PROPERTIES,
+      surface: "marketing",
+      path: "/",
+      $current_url: "https://portwing.codeswhat.com/",
+      token: "phc_project-token",
+      $cookieless_mode: true,
+      $process_person_profile: false,
+      $referring_domain: "news.ycombinator.com",
+      utm_source: "newsletter",
+      utm_medium: "email",
+      utm_campaign: "launch",
+      utm_content: "footer-link",
+      utm_term: "portwing",
+    },
+  });
+  assert.deepEqual(result?.properties.$referring_domain, "news.ycombinator.com");
+  assert.deepEqual(result?.properties.utm_source, "newsletter");
+  assert.deepEqual(result?.properties.utm_medium, "email");
+  assert.deepEqual(result?.properties.utm_campaign, "launch");
+  assert.deepEqual(result?.properties.utm_content, "footer-link");
+  assert.deepEqual(result?.properties.utm_term, "portwing");
+});
+
+test("before_send drops a non-hostname $referring_domain instead of trimming it", () => {
+  // A full referrer can carry a path from a private page someone was reading
+  // before they clicked; trimming it to a hostname-shaped prefix would still
+  // require parsing an untrusted string. Fail closed instead: an unexpected
+  // shape is dropped whole, never partially forwarded.
+  for (const badReferringDomain of [
+    "https://news.ycombinator.com/item?id=123",
+    "news.ycombinator.com/item?id=123",
+    "javascript:alert(1)",
+    "user:pass@news.ycombinator.com",
+    "",
+  ]) {
+    const result = sanitizeEvent({
+      event: "$pageview",
+      uuid: "internal-posthog-id",
+      properties: {
+        ...BASE_PROPERTIES,
+        ...COOKIELESS_HASH_PROPERTIES,
+        surface: "marketing",
+        path: "/",
+        token: "phc_project-token",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+        $referring_domain: badReferringDomain,
+      },
+    });
+    assert.equal(
+      "$referring_domain" in (result?.properties ?? {}),
+      false,
+      `sanitizeEvent must drop non-hostname $referring_domain ${JSON.stringify(badReferringDomain)}`,
+    );
+  }
+
+  // "$direct" is posthog-js's own sentinel for "no referrer", not a hostname
+  // shape, and is the only non-hostname value that survives.
+  const direct = sanitizeEvent({
+    event: "$pageview",
+    uuid: "internal-posthog-id",
+    properties: {
+      ...BASE_PROPERTIES,
+      ...COOKIELESS_HASH_PROPERTIES,
+      surface: "marketing",
+      path: "/",
+      token: "phc_project-token",
+      $cookieless_mode: true,
+      $process_person_profile: false,
+      $referring_domain: "$direct",
+    },
+  });
+  assert.equal(direct?.properties.$referring_domain, "$direct");
+});
+
+test("before_send never copies $referrer and excludes per-click identifiers", () => {
+  const result = sanitizeEvent({
+    event: "$pageview",
+    uuid: "internal-posthog-id",
+    properties: {
+      ...BASE_PROPERTIES,
+      ...COOKIELESS_HASH_PROPERTIES,
+      surface: "marketing",
+      path: "/",
+      token: "phc_project-token",
+      $cookieless_mode: true,
+      $process_person_profile: false,
+      $referrer: "https://news.ycombinator.com/item?id=123&private=customer-acme",
+      $referring_domain: "news.ycombinator.com",
+      // These arrive automatically alongside campaign params
+      // (save_campaign_params) and are per-click identifiers a platform can
+      // rejoin to a person, not campaign labels we authored.
+      gclid: "Cj0KCQjw-click-id",
+      fbclid: "IwAR-click-id",
+      msclkid: "abc123click",
+      gad_source: "1",
+      mc_cid: "abc123",
+    },
+  });
+  assert.ok(result);
+  assert.equal("$referrer" in result.properties, false);
+  assert.equal("gclid" in result.properties, false);
+  assert.equal("fbclid" in result.properties, false);
+  assert.equal("msclkid" in result.properties, false);
+  assert.equal("gad_source" in result.properties, false);
+  assert.equal("mc_cid" in result.properties, false);
+  assert.equal(result.properties.$referring_domain, "news.ycombinator.com");
+});
+
+test("before_send drops a URL-shaped UTM value rather than forwarding it", () => {
+  // Testing for "://" alone would pass the first of these and forward the
+  // rest, each of which still carries a path.
+  const leaky = [
+    "https://portwing.internal/customer/acme?token=secret",
+    "//portwing.internal/customer/acme",
+    "/account/reset/abc123",
+    "portwing.internal/customer/acme?k=v",
+    "campaign?utm_secret=x",
+    "page#fragment",
+    "customer\\acme\\reset",
+    // Doubly encoded: posthog-js decodes once, so this reaches the sanitizer as
+    // "%2Facme%2Freset" with no literal separator left to match.
+    "customer%252Facme%252Freset",
+    "customer%2Facme%2Freset",
+    "a".repeat(201),
+  ];
+
+  for (const utmContent of leaky) {
+    const result = sanitizeEvent({
+      event: "$pageview",
+      uuid: "internal-posthog-id",
+      properties: {
+        ...BASE_PROPERTIES,
+        ...COOKIELESS_HASH_PROPERTIES,
+        surface: "marketing",
+        path: "/",
+        token: "phc_project-token",
+        $cookieless_mode: true,
+        $process_person_profile: false,
+        utm_source: "newsletter",
+        utm_content: utmContent,
+      },
+    });
+    assert.ok(result);
+    assert.equal(result.properties.utm_source, "newsletter");
+    assert.equal(
+      "utm_content" in result.properties,
+      false,
+      `sanitizeEvent must drop URL-shaped utm_content ${JSON.stringify(utmContent.slice(0, 48))}`,
+    );
+  }
+});
+
 test("before_send keeps one buffered Core Web Vitals envelope", () => {
   const timestamp = new Date("2026-08-14T00:00:00Z");
   assert.deepEqual(
@@ -549,8 +708,8 @@ test("PostHog initializes only with the exact production proxy contract", () => 
       persistence: "memory",
       disable_persistence: true,
       respect_dnt: true,
-      save_campaign_params: false,
-      save_referrer: false,
+      save_campaign_params: true,
+      save_referrer: true,
       disable_capture_url_hashes: true,
       disable_scroll_properties: true,
       mask_all_element_attributes: true,
