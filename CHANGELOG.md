@@ -18,13 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   omitted, followed by one or more `stream` chunks and a terminal
   `stream_end`, all keyed by the request's `requestId`; the agent reassembles
   them before dispatching the request to Docker, bounded three ways: 512 MB
-  per request, 1 GB summed across every in-flight reassembly, and 100
-  concurrent reassemblies. The aggregate byte budget is the one that bounds
-  agent memory, since a per-request cap multiplies by however many requests
-  are open, and a reassembly doesn't claim a stream session slot until its
-  `stream_end` lands. Over either limit, or past the 30s idle timeout between
-  chunks, the agent answers with an `error` frame naming the `requestId`
-  rather than dropping the request silently. Purely additive: a controller
+  per request, 1 GB summed across every streamed body the agent is holding in
+  memory, and 100 concurrent reassemblies. The aggregate byte budget is the
+  one that bounds agent memory, since a per-request cap multiplies by however
+  many requests are open, and it spans both stages: the buffers still
+  reassembling and the reassembled bodies already dispatched, which keep
+  their bytes until the Docker round trip ends. Charging only the reassembly
+  stage would let a controller send `stream_end` on everything pending to
+  drop the total to zero and immediately refill it. A reassembly doesn't
+  claim a stream session slot until its `stream_end` lands. Over either
+  limit, or past the 30s idle timeout between chunks, the agent answers with
+  an `error` frame naming the `requestId` rather than dropping the request
+  silently. Purely additive: a controller
   that never sends `bodyStream: true` is unaffected, and this does not by
   itself fix any controller that doesn't yet send it. Note: the matching
   controller-side chunker this depends on to actually close out #205 lives

@@ -123,11 +123,13 @@ in `body` but instead follows as one or more `stream` frames (each carrying a
 base64 chunk) and a terminal `stream_end`, all sharing the request's
 `requestId`. Set `request.bodyStream: true` and omit `body` to use it; the
 agent reassembles the chunks in memory (bounded per request, in aggregate, and
-by concurrent count — see §7.3 and §11.3) before dispatching the request, and
-reports a `bodyStream=true` request whose `requestId` never
-appears in `hello.capabilities` — i.e. that the agent never advertised this
-token for — as undefined behavior a controller must not rely on. This exists
-because `request.body` is a JSON `RawMessage`: it must be valid JSON to
+by concurrent count, see §7.3 and §11.3) before dispatching the request.
+Sending `bodyStream: true` to an agent whose `hello.capabilities` does not
+contain the `edge-request-body-stream` token is undefined behavior a
+controller must not rely on: that token is the only signal that the agent
+will hold the request open for the follow-up frames rather than dispatch it
+with no body at all. This exists because `request.body` is a JSON
+`RawMessage`: it must be valid JSON to
 marshal, which rules out a binary or otherwise non-JSON request body (a tar
 build context, or any payload too large for a single WebSocket frame). A
 controller that doesn't send `bodyStream: true` is unaffected; this is purely
@@ -322,7 +324,7 @@ sequenceDiagram
 
 - Max 100 concurrent exec sessions (edge mode: fixed; standard mode: `MAX_EXEC_SESSIONS`, default 100, non-positive disables the bound)
 - Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Does not yet cover the adapter routes (`/api/events` SSE and follow-mode container logs), which bypass the Docker proxy handler.
-- Max 100 concurrent streamed request body reassemblies (edge mode, fixed; see `edge-request-body-stream` in §4 and the limits in §11.3). A `bodyStream: true` request does not claim a stream session slot until its `stream_end` arrives, so this is a separate bound on the reassembly stage, matched to the stream session limit because every pending reassembly claims one of those slots the moment it completes. Reassembly is also capped at 1 GB summed across all pending bodies, which is what bounds agent memory: the 512 MB per-request cap multiplies by the number of concurrent requests without it. Either rejection answers with an `error` frame naming the `requestId`, the same shape as a duplicate-`requestId` rejection.
+- Max 100 concurrent streamed request body reassemblies (edge mode, fixed; see `edge-request-body-stream` in §3.2 and the limits in §11.3). A `bodyStream: true` request does not claim a stream session slot until its `stream_end` arrives, so this is a separate bound on the reassembly stage, matched to the stream session limit because every pending reassembly claims one of those slots the moment it completes. Streamed bodies are also capped at 1 GB summed across every one the agent is holding in memory, which is what bounds agent memory: the 512 MB per-request cap multiplies by the number of concurrent requests without it. That sum spans both stages, the buffers still reassembling and the reassembled bodies already dispatched to Docker, which keep their bytes until the round trip ends. Charging only the reassembly stage would let a controller send `stream_end` on every pending request to drop the total to zero and immediately refill it, leaving the real ceiling at the concurrent stream session limit times the per-request cap. Either rejection answers with an `error` frame naming the `requestId`, the same shape as a duplicate-`requestId` rejection.
 - Exec body size limit: 10 MB
 - Retry loop for write/resize (up to 10 attempts, 50ms intervals)
 
@@ -525,7 +527,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 |----------|-------|
 | WebSocket read | 16 MB |
 | Response body read | 100 MB |
-| Streamed request body reassembly (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every in-flight reassembly; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
+| Streamed request body (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every streamed body held in memory, reassembling and already dispatched alike, the latter until its Docker round trip ends; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |
