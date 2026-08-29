@@ -382,6 +382,10 @@ test("before_send drops a URL-shaped UTM value rather than forwarding it", () =>
     "campaign?utm_secret=x",
     "page#fragment",
     "customer\\acme\\reset",
+    // Doubly encoded: posthog-js decodes once, so this reaches the sanitizer as
+    // "%2Facme%2Freset" with no literal separator left to match.
+    "customer%252Facme%252Freset",
+    "customer%2Facme%2Freset",
     "a".repeat(201),
   ];
 

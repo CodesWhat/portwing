@@ -243,15 +243,27 @@ function isAcceptableReferringDomain(value: unknown): value is string {
 // URL-shaped and both leak a path; "?" and "#" leak a query string or fragment
 // the same way, and "\" leaks a Windows-style path. An over-long value is
 // dropped for the same reason, since a campaign label is not that size.
+//
+// Testing those literal characters alone is still not enough. posthog-js
+// decodes a query value exactly once, so a doubly-encoded "%252Facme" arrives
+// here as "%2Facme": no literal separator, yet anything downstream that decodes
+// again reconstructs the path. Rejecting any percent-escape sequence closes
+// that at every nesting depth, since each layer leaves one behind. A bare "%"
+// is left alone so "50% off" still passes as a campaign label. Unicode
+// separator lookalikes (U+2044, U+FF0F, U+2215) are deliberately not rejected:
+// nothing downstream treats them as path separators, so dropping them would
+// cost real labels for no gain.
 const MAX_UTM_VALUE_LENGTH = 200;
 const UTM_URL_STRUCTURE_PATTERN = /[\\/?#]/u;
+const UTM_PERCENT_ESCAPE_PATTERN = /%[0-9a-fA-F]{2}/u;
 
 function isAcceptableUtmValue(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value !== "" &&
     value.length <= MAX_UTM_VALUE_LENGTH &&
-    !UTM_URL_STRUCTURE_PATTERN.test(value)
+    !UTM_URL_STRUCTURE_PATTERN.test(value) &&
+    !UTM_PERCENT_ESCAPE_PATTERN.test(value)
   );
 }
 
