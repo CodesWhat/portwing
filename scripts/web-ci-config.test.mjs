@@ -97,14 +97,17 @@ test("Vercel deploys main while disabling automatic preview deployments", () => 
   const deploymentEnabled = vercelConfig.git?.deploymentEnabled;
   assert.deepEqual(deploymentEnabled, { "**": false, main: true });
 
-  function settingForBranch(branch) {
-    let setting;
-    for (const [pattern, enabled] of Object.entries(deploymentEnabled)) {
-      if (path.matchesGlob(branch, pattern)) setting = enabled;
-    }
-    return setting;
+  function settingForBranch(branch, rules = deploymentEnabled) {
+    const matchingSettings = Object.entries(rules)
+      .filter(([pattern]) => path.matchesGlob(branch, pattern))
+      .map(([, enabled]) => enabled);
+    if (matchingSettings.includes(true)) return true;
+    if (matchingSettings.includes(false)) return false;
+    return true;
   }
 
   assert.equal(settingForBranch("feature/preview/change"), false);
   assert.equal(settingForBranch("main"), true);
+  assert.equal(settingForBranch("main", { main: true, "**": false }), true);
+  assert.equal(settingForBranch("unspecified", { main: false }), true);
 });
