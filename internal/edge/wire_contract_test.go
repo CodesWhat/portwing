@@ -593,6 +593,11 @@ func TestReadPumpDelegatesUnknownTypeToAdapter(t *testing.T) {
 
 	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 77})
 	expectType(t, ctrl, protocol.TypePong)
+
+	got := fa.messageTypes()
+	if len(got) != 1 || got[0] != "custom:thing" {
+		t.Fatalf("adapter.HandleMessage calls = %v, want [custom:thing]", got)
+	}
 }
 
 // TestReadPumpAdapterHandlesCustomMessage covers the adapter returning true
@@ -610,6 +615,11 @@ func TestReadPumpAdapterHandlesCustomMessage(t *testing.T) {
 
 	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 88})
 	expectType(t, ctrl, protocol.TypePong)
+
+	got := fa.messageTypes()
+	if len(got) != 1 || got[0] != "custom:handled" {
+		t.Fatalf("adapter.HandleMessage calls = %v, want [custom:handled]", got)
+	}
 }
 
 // ---------------------------------------------------------------------------
