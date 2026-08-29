@@ -4,31 +4,9 @@ package auth
 // after the initial 95% run.
 
 import (
-	"runtime"
 	"testing"
 	"time"
 )
-
-// ---- checkFilePermissions: host-OS sanity -----------------------------------
-//
-// The windows early-return branch (runtime.GOOS == "windows" → return nil) is
-// a dead branch on a Unix host because GOOS is determined at compile time.
-// We verify the current-host behaviour here. The windows branch itself is
-// documented as a residual (compile-time dead code on this host).
-
-func TestCheckFilePermissions_HostOSSanity(t *testing.T) {
-	t.Parallel()
-	if runtime.GOOS != "windows" {
-		// Already covered by TestCheckFilePermissions_StatError in coverage_test.go.
-		// Nothing new to assert here; this test just documents the intent.
-		t.Skip("windows branch is compile-time dead on this host; documented as residual")
-	}
-	// On Windows: any path must return nil (early-exit).
-	err := checkFilePermissions(`C:\does\not\exist`)
-	if err != nil {
-		t.Errorf("expected nil on Windows, got: %v", err)
-	}
-}
 
 // ---- NonceLRU cleanup goroutine: ticker.C eviction branch ------------------
 //

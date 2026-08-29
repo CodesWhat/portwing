@@ -173,16 +173,6 @@ func parseKeyLine(line string) (*AuthorizedKey, error) {
 	}, nil
 }
 
-// checkFilePermissions validates the opened file rather than a prior path stat,
-// so callers never validate one inode and then read another.
-func checkFilePermissions(path string) error {
-	f, err := openCredentialFile(path, "authorized_keys")
-	if err != nil {
-		return err
-	}
-	return f.Close()
-}
-
 func openCredentialFile(path, kind string) (*os.File, error) {
 	// #nosec G304 -- credential paths are explicit operator configuration.
 	f, err := os.Open(path)

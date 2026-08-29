@@ -272,22 +272,6 @@ func TestMarshalPrivateKeyPEM_RoundTrip(t *testing.T) {
 	}
 }
 
-// ---- checkFilePermissions stat error ------------------------------------
-
-func TestCheckFilePermissions_StatError(t *testing.T) {
-	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("permission check not applicable on Windows")
-	}
-	err := checkFilePermissions("/nonexistent/path/authorized_keys")
-	if err == nil {
-		t.Fatal("expected error for non-existent file")
-	}
-	if !strings.Contains(err.Error(), "opening authorized_keys") {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
 // ---- NewNonceLRU defaults -----------------------------------------------
 
 func TestNewNonceLRU_DefaultsOnZeroValues(t *testing.T) {
