@@ -122,8 +122,9 @@ controller the agent can accept a `request` whose body is not carried inline
 in `body` but instead follows as one or more `stream` frames (each carrying a
 base64 chunk) and a terminal `stream_end`, all sharing the request's
 `requestId`. Set `request.bodyStream: true` and omit `body` to use it; the
-agent reassembles the chunks in memory (bounded, see §11.3) before dispatching
-the request, and reports a `bodyStream=true` request whose `requestId` never
+agent reassembles the chunks in memory (bounded per request, in aggregate, and
+by concurrent count — see §7.3 and §11.3) before dispatching the request, and
+reports a `bodyStream=true` request whose `requestId` never
 appears in `hello.capabilities` — i.e. that the agent never advertised this
 token for — as undefined behavior a controller must not rely on. This exists
 because `request.body` is a JSON `RawMessage`: it must be valid JSON to
@@ -321,6 +322,7 @@ sequenceDiagram
 
 - Max 100 concurrent exec sessions (edge mode: fixed; standard mode: `MAX_EXEC_SESSIONS`, default 100, non-positive disables the bound)
 - Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Does not yet cover the adapter routes (`/api/events` SSE and follow-mode container logs), which bypass the Docker proxy handler.
+- Max 100 concurrent streamed request body reassemblies (edge mode, fixed; see `edge-request-body-stream` in §4 and the limits in §11.3). A `bodyStream: true` request does not claim a stream session slot until its `stream_end` arrives, so this is a separate bound on the reassembly stage, matched to the stream session limit because every pending reassembly claims one of those slots the moment it completes. Reassembly is also capped at 1 GB summed across all pending bodies, which is what bounds agent memory: the 512 MB per-request cap multiplies by the number of concurrent requests without it. Either rejection answers with an `error` frame naming the `requestId`, the same shape as a duplicate-`requestId` rejection.
 - Exec body size limit: 10 MB
 - Retry loop for write/resize (up to 10 attempts, 50ms intervals)
 
@@ -523,7 +525,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 |----------|-------|
 | WebSocket read | 16 MB |
 | Response body read | 100 MB |
-| Streamed request body reassembly (`edge-request-body-stream`) | 512 MB in-memory buffer; 30s idle timeout between chunks |
+| Streamed request body reassembly (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every in-flight reassembly; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |

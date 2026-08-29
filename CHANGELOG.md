@@ -17,8 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hello.capabilities` can now send `request.bodyStream: true` with the body
   omitted, followed by one or more `stream` chunks and a terminal
   `stream_end`, all keyed by the request's `requestId`; the agent reassembles
-  them (bounded to 512 MB in memory, with a 30s idle timeout between chunks)
-  before dispatching the request to Docker. Purely additive: a controller
+  them before dispatching the request to Docker, bounded three ways: 512 MB
+  per request, 1 GB summed across every in-flight reassembly, and 100
+  concurrent reassemblies. The aggregate byte budget is the one that bounds
+  agent memory, since a per-request cap multiplies by however many requests
+  are open, and a reassembly doesn't claim a stream session slot until its
+  `stream_end` lands. Over either limit, or past the 30s idle timeout between
+  chunks, the agent answers with an `error` frame naming the `requestId`
+  rather than dropping the request silently. Purely additive: a controller
   that never sends `bodyStream: true` is unaffected, and this does not by
   itself fix any controller that doesn't yet send it. Note: the matching
   controller-side chunker this depends on to actually close out #205 lives

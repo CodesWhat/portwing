@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -317,5 +318,276 @@ func TestReadPumpConcurrentBodyStreamAndPingDoNotBlock(t *testing.T) {
 		if pong.Timestamp != int64(i) {
 			t.Fatalf("pong timestamp = %d, want %d (a stalled reassembly would starve this ping)", pong.Timestamp, i)
 		}
+	}
+}
+
+// TestStalePendingBodyTimeoutDoesNotAbortProgressingUpload is the regression
+// guard for the idle-timer race: time.Timer.Reset cannot recall an AfterFunc
+// whose deadline has already elapsed, so a timeout callback can already be
+// queued (parked on pendingBodiesMu) when a chunk lands and re-arms the
+// timer. That callback must not fail an upload that was making progress.
+// Calling failPendingBody with the generation the first timer was armed with
+// (0) reproduces exactly that state deterministically, with no sleep and no
+// dependence on when the real timer fires.
+func TestStalePendingBodyTimeoutDoesNotAbortProgressingUpload(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	//nolint:bodyclose // consumed and closed by handleRequestTo, the code under test.
+	fd := &fakeDocker{doResp: mkResp(http.StatusOK, "application/json", `{"ok":true}`)}
+	c.dockerClient = fd
+
+	runReadPump(t, c)
+
+	chunk := []byte("still-uploading")
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "racy",
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "racy",
+		Data:      base64.StdEncoding.EncodeToString(chunk),
+	})
+
+	// Ordering barrier: readPump is one goroutine, so the chunk is fully
+	// appended (and the timer re-armed to gen 1) by the time this pong lands.
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 7})
+	expectType(t, ctrl, protocol.TypePong)
+
+	// The already-fired gen-0 callback finally gets the lock. It lost the
+	// race to the chunk above, so it must drop its firing.
+	c.failPendingBody("racy", 0)
+
+	c.pendingBodiesMu.Lock()
+	_, stillPending := c.pendingBodies["racy"]
+	c.pendingBodiesMu.Unlock()
+	if !stillPending {
+		t.Fatal("pending body was removed by a stale timeout callback, want it kept: the chunk re-armed the timer")
+	}
+
+	sendEnvelope(t, ctrl, protocol.TypeStreamEnd, protocol.StreamEndMessage{
+		RequestID: "racy",
+		Reason:    "complete",
+	})
+
+	// A spurious TypeError would arrive here instead of the response.
+	var resp protocol.ResponseMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+	if resp.RequestID != "racy" {
+		t.Errorf("RequestID = %q, want racy", resp.RequestID)
+	}
+
+	fd.mu.Lock()
+	calls := append([]doCall(nil), fd.doCalls...)
+	fd.mu.Unlock()
+	if len(calls) != 1 {
+		t.Fatalf("Docker calls = %d, want 1", len(calls))
+	}
+	if string(calls[0].body) != string(chunk) {
+		t.Errorf("reassembled body = %q, want %q", calls[0].body, chunk)
+	}
+}
+
+// TestStreamedBodyIdleTimeoutRearmsAfterEachChunk is the other half of the
+// stale-callback guard: dropping a stale firing must not disarm the timeout
+// altogether. After a chunk re-arms the timer, a controller that then stalls
+// must still be timed out and told about it.
+func TestStreamedBodyIdleTimeoutRearmsAfterEachChunk(t *testing.T) {
+	// Not t.Parallel(): mutates the package-level requestBodyStreamIdleTimeout
+	// var, which every other BodyStream test reads.
+
+	origTimeout := requestBodyStreamIdleTimeout
+	requestBodyStreamIdleTimeout = 400 * time.Millisecond
+	t.Cleanup(func() { requestBodyStreamIdleTimeout = origTimeout })
+
+	c, ctrl := newTestClient(t)
+	fd := &fakeDocker{} // no canned response: a call here would mean the timeout didn't hold.
+	c.dockerClient = fd
+
+	runReadPump(t, c)
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  "stalls-after-a-chunk",
+		Method:     http.MethodPost,
+		Path:       "/build",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: "stalls-after-a-chunk",
+		Data:      base64.StdEncoding.EncodeToString([]byte("one chunk, then silence")),
+	})
+	// Barrier, and the guard against passing for the wrong reason: gen 1 means
+	// the chunk was appended and re-armed the timer, so the TypeError below can
+	// only come from that second arming, not from the original one. A ping/pong
+	// barrier can't be used here — this harness has no sendPump, so readPump
+	// and the timeout callback would write the raw conn unserialized.
+	waitFor(t, "the chunk to re-arm the idle timer", func() bool {
+		c.pendingBodiesMu.Lock()
+		defer c.pendingBodiesMu.Unlock()
+		pb, ok := c.pendingBodies["stalls-after-a-chunk"]
+		return ok && pb.gen == 1
+	})
+
+	var em protocol.ErrorMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeError), &em)
+	if em.RequestID != "stalls-after-a-chunk" {
+		t.Errorf("error RequestID = %q, want stalls-after-a-chunk", em.RequestID)
+	}
+
+	c.pendingBodiesMu.Lock()
+	pending := len(c.pendingBodies)
+	c.pendingBodiesMu.Unlock()
+	if pending != 0 {
+		t.Errorf("pendingBodies = %d, want 0 after the re-armed timeout fired", pending)
+	}
+
+	fd.mu.Lock()
+	calls := len(fd.doCalls)
+	fd.mu.Unlock()
+	if calls != 0 {
+		t.Errorf("Docker calls = %d, want 0, a timed-out body must never dispatch", calls)
+	}
+}
+
+// TestStreamedBodyConcurrencyCapRejectsAndCleansUp covers the count half of
+// the reassembly bound: registration defers the streamSem slot until
+// stream_end, so without maxPendingRequestBodies the number of concurrent
+// 512 MB buffers is bounded only by how many requestIds the controller cares
+// to open. The rejection has to look like the duplicate-requestId one — a
+// TypeError naming the request — not a silent drop.
+func TestStreamedBodyConcurrencyCapRejectsAndCleansUp(t *testing.T) {
+	// Not t.Parallel(): mutates the package-level maxPendingRequestBodies var.
+
+	orig := maxPendingRequestBodies
+	maxPendingRequestBodies = 2
+	t.Cleanup(func() { maxPendingRequestBodies = orig })
+
+	c, ctrl := newTestClient(t)
+	fd := &fakeDocker{} // no canned response: a call here would mean the cap didn't hold.
+	c.dockerClient = fd
+
+	runReadPump(t, c)
+
+	for i := 0; i < 3; i++ {
+		sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+			RequestID:  fmt.Sprintf("concurrent-%d", i),
+			Method:     http.MethodPost,
+			Path:       "/build",
+			BodyStream: true,
+		})
+	}
+
+	// The ping is sent up front so an accepted third registration shows up as
+	// a pong arriving where the rejection should have been, rather than as an
+	// opaque read timeout.
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 1})
+
+	env := expectEnvelope(t, ctrl)
+	if env.Type != protocol.TypeError {
+		t.Fatalf("first frame = %q, want %q: the third registration was accepted instead of being rejected by maxPendingRequestBodies", env.Type, protocol.TypeError)
+	}
+	var em protocol.ErrorMessage
+	decodeData(t, env.Data, &em)
+	if em.RequestID != "concurrent-2" {
+		t.Errorf("error RequestID = %q, want concurrent-2 (the first two are under the cap)", em.RequestID)
+	}
+	if em.Message == "" {
+		t.Error("error Message is empty, want an explanation of the concurrency limit")
+	}
+	expectType(t, ctrl, protocol.TypePong)
+
+	c.pendingBodiesMu.Lock()
+	pending := len(c.pendingBodies)
+	_, rejectedRegistered := c.pendingBodies["concurrent-2"]
+	c.pendingBodiesMu.Unlock()
+	if pending != 2 {
+		t.Errorf("pendingBodies = %d, want 2 (the cap)", pending)
+	}
+	if rejectedRegistered {
+		t.Error("the rejected request was registered anyway, want it left out of the map")
+	}
+
+	fd.mu.Lock()
+	calls := len(fd.doCalls)
+	fd.mu.Unlock()
+	if calls != 0 {
+		t.Errorf("Docker calls = %d, want 0, nothing reached stream_end", calls)
+	}
+}
+
+// TestStreamedBodyAggregateCapRejectsOnlyTheOffendingRequest covers the byte
+// half of the reassembly bound, which is the one that actually caps agent
+// memory: maxRequestBodyStream limits one buffer, and multiplying it by the
+// number of concurrent reassemblies is what the aggregate limit stops. Only
+// the chunk that crosses the line is failed; reassemblies already under way
+// keep going.
+func TestStreamedBodyAggregateCapRejectsOnlyTheOffendingRequest(t *testing.T) {
+	// Not t.Parallel(): mutates the package-level maxPendingRequestBodyBytes
+	// var. maxRequestBodyStream is deliberately left at its real 512 MB, so a
+	// rejection here can only have come from the aggregate branch.
+
+	orig := maxPendingRequestBodyBytes
+	maxPendingRequestBodyBytes = 16
+	t.Cleanup(func() { maxPendingRequestBodyBytes = orig })
+
+	c, ctrl := newTestClient(t)
+	fd := &fakeDocker{}
+	c.dockerClient = fd
+
+	runReadPump(t, c)
+
+	for _, id := range []string{"agg-a", "agg-b"} {
+		sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+			RequestID:  id,
+			Method:     http.MethodPost,
+			Path:       "/build",
+			BodyStream: true,
+		})
+		sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+			RequestID: id,
+			Data:      base64.StdEncoding.EncodeToString([]byte("0123456789")), // 10 bytes each
+		})
+	}
+
+	// The ping is sent up front so an unbounded aggregate shows up as a pong
+	// arriving where the rejection should have been, rather than as an opaque
+	// read timeout.
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 1})
+
+	// 10 buffered for agg-a plus 10 more for agg-b is 20, over the 16 byte
+	// aggregate, while each request on its own is nowhere near 512 MB.
+	env := expectEnvelope(t, ctrl)
+	if env.Type != protocol.TypeError {
+		t.Fatalf("first frame = %q, want %q: the aggregate reassembly budget did not reject agg-b", env.Type, protocol.TypeError)
+	}
+	var em protocol.ErrorMessage
+	decodeData(t, env.Data, &em)
+	if em.RequestID != "agg-b" {
+		t.Errorf("error RequestID = %q, want agg-b", em.RequestID)
+	}
+	if !strings.Contains(em.Message, "aggregate") {
+		t.Errorf("error Message = %q, want the aggregate limit named", em.Message)
+	}
+	expectType(t, ctrl, protocol.TypePong)
+
+	c.pendingBodiesMu.Lock()
+	_, aLives := c.pendingBodies["agg-a"]
+	_, bLives := c.pendingBodies["agg-b"]
+	c.pendingBodiesMu.Unlock()
+	if !aLives {
+		t.Error("agg-a was dropped, want the under-budget reassembly left alone")
+	}
+	if bLives {
+		t.Error("agg-b is still registered, want the over-budget reassembly freed")
+	}
+
+	fd.mu.Lock()
+	calls := len(fd.doCalls)
+	fd.mu.Unlock()
+	if calls != 0 {
+		t.Errorf("Docker calls = %d, want 0", calls)
 	}
 }

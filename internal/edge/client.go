@@ -71,6 +71,24 @@ const (
 // filler to exercise the overflow path.
 var maxRequestBodyStream int64 = 512 * 1024 * 1024 // 512 MB
 
+// maxPendingRequestBodies caps how many request.bodyStream=true requests may
+// be reassembling at once. maxRequestBodyStream bounds one buffer; without
+// this the number of buffers is bounded only by how many RequestIDs the
+// controller opens, because registration deliberately defers the streamSem
+// slot until stream_end. Pinned to maxStreams: every pending body is a
+// request that will claim one of those slots the moment its stream_end
+// lands, so the two stages stay symmetric. A var, not a const, so tests can
+// shrink it.
+var maxPendingRequestBodies = maxStreams
+
+// maxPendingRequestBodyBytes caps the sum of every in-flight reassembly
+// buffer, which is what actually bounds agent memory on this path — a count
+// cap alone would still permit maxStreams * maxRequestBodyStream. Twice
+// maxRequestBodyStream, so a single largest-allowed body is still reachable
+// and a second one can overlap it. A var, not a const, so tests can shrink
+// it.
+var maxPendingRequestBodyBytes int64 = 1024 * 1024 * 1024 // 1 GB
+
 // requestBodyStreamIdleTimeout bounds how long a pending BodyStream
 // reassembly waits for the next stream frame (or stream_end) before it is
 // abandoned. Reset on every chunk received, so it only fires against a
@@ -181,8 +199,9 @@ type Client struct {
 	// (CapRequestBodyStream) awaiting reassembly, keyed by RequestID. An
 	// entry is created when such a request arrives in readPump and removed
 	// exactly once, by whichever of stream_end, the maxRequestBodyStream
-	// cap, or requestBodyStreamIdleTimeout fires first, so a given
-	// RequestID is dispatched or errored exactly once. Guarded by
+	// or maxPendingRequestBodyBytes caps, or requestBodyStreamIdleTimeout
+	// fires first, so a given RequestID is dispatched or errored exactly
+	// once. Entry count is capped by maxPendingRequestBodies. Guarded by
 	// pendingBodiesMu; nil until the first BodyStream request arrives.
 	pendingBodiesMu sync.Mutex
 	pendingBodies   map[string]*pendingRequestBody
@@ -199,6 +218,12 @@ type pendingRequestBody struct {
 	target outboundTarget
 	buf    bytes.Buffer
 	timer  *time.Timer
+	// gen counts how many times the idle timer has been armed for this
+	// entry. time.Timer.Reset does not cancel an AfterFunc whose deadline
+	// already elapsed, so a timeout callback can still be in flight when a
+	// chunk re-arms the timer; each callback carries the gen it was armed
+	// with and no-ops when it no longer matches. Guarded by pendingBodiesMu.
+	gen uint64
 }
 
 // NewClient creates a new edge-mode Client.
@@ -804,8 +829,10 @@ func (c *Client) readPump(ctx context.Context) error {
 // registerPendingBody records a request.bodyStream=true request and starts
 // its idle timeout, deferring dispatch until finishPendingBody sees the
 // matching stream_end. A duplicate RequestID (a second bodyStream=true
-// request arriving before the first finished) is rejected with a TypeError
-// instead of silently clobbering the in-flight reassembly.
+// request arriving before the first finished), or a request that would push
+// the agent past maxPendingRequestBodies concurrent reassemblies, is
+// rejected with a TypeError instead of silently clobbering the in-flight
+// reassembly or growing the map without bound.
 func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboundTarget) {
 	c.pendingBodiesMu.Lock()
 	if c.pendingBodies == nil {
@@ -820,9 +847,21 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 		})
 		return
 	}
+	if len(c.pendingBodies) >= maxPendingRequestBodies {
+		c.pendingBodiesMu.Unlock()
+		slog.Warn("concurrent streamed request body limit reached, rejecting", "max", maxPendingRequestBodies, "request_id", applog.Sanitize(req.RequestID))
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "agent busy: too many concurrent streamed request bodies",
+			RequestID: req.RequestID,
+		})
+		return
+	}
 	pb := &pendingRequestBody{req: req, target: target}
+	// gen 0 is the arming generation for this first timer; appendPendingBody
+	// bumps it on every re-arm so a callback that already fired can tell it
+	// lost the race and must not fail a live upload.
 	pb.timer = time.AfterFunc(requestBodyStreamIdleTimeout, func() {
-		c.failPendingBody(req.RequestID, fmt.Sprintf("streamed request body timed out after %s waiting for stream_end", requestBodyStreamIdleTimeout))
+		c.failPendingBody(req.RequestID, 0)
 	})
 	c.pendingBodies[req.RequestID] = pb
 	c.pendingBodiesMu.Unlock()
@@ -834,8 +873,9 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 // race with an already-finished/failed/timed-out one), leaving env.Data
 // untouched so the caller can fall through to adapter.HandleMessage. It
 // reports true for everything else, including a decode failure or a
-// maxRequestBodyStream overflow — both of those fail the request (TypeError)
-// and clean up, but the chunk was still consumed as belonging to this path.
+// per-request/aggregate size overflow — all of those fail the request
+// (TypeError) and clean up, but the chunk was still consumed as belonging to
+// this path.
 func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 	c.pendingBodiesMu.Lock()
 	pb, ok := c.pendingBodies[requestID]
@@ -847,21 +887,33 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 	decoded, err := base64.StdEncoding.DecodeString(encodedChunk)
 	if err != nil {
 		delete(c.pendingBodies, requestID)
+		timer, target := pb.timer, pb.target
 		c.pendingBodiesMu.Unlock()
-		pb.timer.Stop()
-		_ = c.sendTypedMessageTo(pb.target, protocol.TypeError, protocol.ErrorMessage{
+		timer.Stop()
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   "invalid base64 in streamed request body chunk",
 			RequestID: requestID,
 		})
 		return true
 	}
 
-	if int64(pb.buf.Len()+len(decoded)) > maxRequestBodyStream {
+	// Two ceilings: this body on its own, and every in-flight reassembly
+	// added together. The aggregate one is what bounds agent memory, since
+	// the per-request cap multiplies by however many requests are pending.
+	var overflow string
+	switch {
+	case int64(pb.buf.Len()+len(decoded)) > maxRequestBodyStream:
+		overflow = fmt.Sprintf("streamed request body exceeds %d byte limit", maxRequestBodyStream)
+	case c.pendingBodyBytesLocked()+int64(len(decoded)) > maxPendingRequestBodyBytes:
+		overflow = fmt.Sprintf("streamed request bodies exceed the %d byte aggregate reassembly limit", maxPendingRequestBodyBytes)
+	}
+	if overflow != "" {
 		delete(c.pendingBodies, requestID)
+		timer, target := pb.timer, pb.target
 		c.pendingBodiesMu.Unlock()
-		pb.timer.Stop()
-		_ = c.sendTypedMessageTo(pb.target, protocol.TypeError, protocol.ErrorMessage{
-			Message:   fmt.Sprintf("streamed request body exceeds %d byte limit", maxRequestBodyStream),
+		timer.Stop()
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   overflow,
 			RequestID: requestID,
 		})
 		return true
@@ -869,10 +921,33 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 
 	pb.buf.Write(decoded)
 	// Re-arm on forward progress, so a slow-but-steady multi-chunk upload
-	// isn't held to the same deadline as a stalled one.
-	pb.timer.Reset(requestBodyStreamIdleTimeout)
+	// isn't held to the same deadline as a stalled one. Reset alone is not
+	// enough: it cannot recall an AfterFunc whose deadline already elapsed,
+	// so a callback queued while this chunk held the lock would still find
+	// the entry and fail an upload that was making progress. Bump gen and
+	// arm a fresh timer, which leaves any in-flight callback stale.
+	pb.gen++
+	gen := pb.gen
+	pb.timer.Stop()
+	pb.timer = time.AfterFunc(requestBodyStreamIdleTimeout, func() {
+		c.failPendingBody(requestID, gen)
+	})
 	c.pendingBodiesMu.Unlock()
 	return true
+}
+
+// pendingBodyBytesLocked sums every in-flight reassembly buffer. The caller
+// must hold pendingBodiesMu, which is also what makes the sum safe to read:
+// every removal path deletes its entry before releasing the lock, so an
+// entry visible here is one nobody else is writing to. O(len(pendingBodies)),
+// bounded by maxPendingRequestBodies, so no separate counter has to be kept
+// in sync across the four removal sites.
+func (c *Client) pendingBodyBytesLocked() int64 {
+	var total int64
+	for _, pb := range c.pendingBodies {
+		total += int64(pb.buf.Len())
+	}
+	return total
 }
 
 // finishPendingBody removes and returns the reassembled request for
@@ -882,14 +957,14 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 func (c *Client) finishPendingBody(requestID string) (protocol.RequestMessage, outboundTarget, bool) {
 	c.pendingBodiesMu.Lock()
 	pb, ok := c.pendingBodies[requestID]
-	if ok {
-		delete(c.pendingBodies, requestID)
-	}
-	c.pendingBodiesMu.Unlock()
 	if !ok {
+		c.pendingBodiesMu.Unlock()
 		return protocol.RequestMessage{}, outboundTarget{}, false
 	}
-	pb.timer.Stop()
+	delete(c.pendingBodies, requestID)
+	timer := pb.timer
+	c.pendingBodiesMu.Unlock()
+	timer.Stop()
 
 	req := pb.req
 	// pb.buf.Bytes() aliases the buffer's internal array; copy it so the
@@ -899,24 +974,26 @@ func (c *Client) finishPendingBody(requestID string) (protocol.RequestMessage, o
 	return req, pb.target, true
 }
 
-// failPendingBody removes a pending body (if still registered) and reports
-// message to the controller as a TypeError tagged with requestID. It is the
-// shared cleanup path for a size-cap overflow, a decode failure, and the idle
-// timeout, so each of those fires the controller-visible error and frees the
-// map entry exactly once.
-func (c *Client) failPendingBody(requestID, message string) {
+// failPendingBody is the idle-timeout callback for a pending body: it
+// removes the entry and reports the timeout to the controller as a
+// TypeError, but only when gen still matches the generation the firing timer
+// was armed with. A mismatch means a chunk re-armed the timer after this
+// callback had already fired, so the upload is alive and this firing must be
+// dropped. (The size-cap and decode-failure paths clean up inline in
+// appendPendingBody.)
+func (c *Client) failPendingBody(requestID string, gen uint64) {
 	c.pendingBodiesMu.Lock()
 	pb, ok := c.pendingBodies[requestID]
-	if ok {
-		delete(c.pendingBodies, requestID)
-	}
-	c.pendingBodiesMu.Unlock()
-	if !ok {
+	if !ok || pb.gen != gen {
+		c.pendingBodiesMu.Unlock()
 		return
 	}
-	pb.timer.Stop()
-	_ = c.sendTypedMessageTo(pb.target, protocol.TypeError, protocol.ErrorMessage{
-		Message:   message,
+	delete(c.pendingBodies, requestID)
+	timer, target := pb.timer, pb.target
+	c.pendingBodiesMu.Unlock()
+	timer.Stop()
+	_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+		Message:   fmt.Sprintf("streamed request body timed out after %s waiting for stream_end", requestBodyStreamIdleTimeout),
 		RequestID: requestID,
 	})
 }
