@@ -1264,15 +1264,15 @@ func (c *Client) startHealthServer() {
 		var b strings.Builder
 		fmt.Fprintf(&b, "# HELP portwing_build_info Portwing agent build metadata.\n")
 		fmt.Fprintf(&b, "# TYPE portwing_build_info gauge\n")
-		fmt.Fprintf(&b, "portwing_build_info{version=\"%s\"} 1\n", escapePrometheusLabel(protocol.AgentVersion))
+		fmt.Fprintf(&b, "portwing_build_info{version=\"%s\"} 1\n", metrics.EscapeLabelValue(protocol.AgentVersion))
 		fmt.Fprintf(&b, "# HELP portwing_uptime_seconds Seconds since the agent started.\n")
 		fmt.Fprintf(&b, "# TYPE portwing_uptime_seconds gauge\n")
 		fmt.Fprintf(&b, "portwing_uptime_seconds %g\n", time.Since(c.startTime).Seconds())
 		metrics.WriteHostPrometheus(&b, c.collector)
 		if dockerMetrics, ok := c.dockerClient.(metrics.DockerMetricsClient); ok {
-			metrics.WriteContainerPrometheus(r.Context(), &b, dockerMetrics, escapePrometheusLabel)
+			metrics.WriteContainerPrometheus(r.Context(), &b, dockerMetrics, metrics.EscapeLabelValue)
 		}
-		c.metrics.WritePrometheus(&b, escapePrometheusLabel)
+		c.metrics.WritePrometheus(&b, metrics.EscapeLabelValue)
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_, _ = io.WriteString(w, b.String())
 	})
@@ -1330,10 +1330,4 @@ func currentControllerState(connected bool) string {
 		return "connected"
 	}
 	return "disconnected"
-}
-
-func escapePrometheusLabel(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-	return strings.ReplaceAll(value, "\n", `\n`)
 }
