@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codeswhat/portwing/internal/adapter/drydock"
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/docker"
 )
@@ -292,5 +293,145 @@ func TestNewServerAppliesConfiguredConcurrencyLimits(t *testing.T) {
 	}
 	if s.execSem != nil {
 		t.Error("a negative MAX_EXEC_SESSIONS must leave exec sessions unbounded")
+	}
+}
+
+// TestAdapterStreamSharesDockerProxyStreamLimit proves that adapter routes
+// (drydock's GET /api/events here) share the same s.streamSem instance as the
+// Docker-proxy streaming path rather than an independently configured second
+// limiter: with MaxStreamSessions=1, a Docker-proxy log stream holding the
+// sole slot must cause a concurrent /api/events request to be rejected, and
+// /api/events must succeed once the proxy stream's slot is released.
+func TestAdapterStreamSharesDockerProxyStreamLimit(t *testing.T) {
+	t.Parallel()
+
+	client, entered, release := newBlockingStreamDaemon(t)
+
+	cfg := minimalConfig()
+	cfg.MaxStreamSessions = 1
+	a := drydock.NewAdapter(client, "test-agent", drydock.AgentInfo{})
+	s, err := NewServer(cfg, client, a)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	srv := httptest.NewServer(s.httpServer.Handler)
+	defer srv.Close()
+
+	// Saturate the single stream slot with a Docker-proxy follow-mode log
+	// request.
+	proxyDone := make(chan int, 1)
+	go func() {
+		//nolint:bodyclose // Closed in the goroutine after reading the status.
+		resp, err := http.Get(srv.URL + "/v1.44/containers/abc/logs?follow=1")
+		if err != nil {
+			proxyDone <- -1
+			return
+		}
+		defer resp.Body.Close()
+		proxyDone <- resp.StatusCode
+	}()
+	waitForStream(t, entered)
+
+	// The sole stream slot is held by the proxy request; a concurrent
+	// /api/events request must be rejected.
+	eventsResp, err := http.Get(srv.URL + "/api/events")
+	if err != nil {
+		t.Fatalf("GET /api/events while saturated: %v", err)
+	}
+	body, _ := io.ReadAll(eventsResp.Body)
+	eventsResp.Body.Close()
+	if eventsResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("/api/events status while stream slot saturated = %d, want %d", eventsResp.StatusCode, http.StatusServiceUnavailable)
+	}
+	if got := strings.TrimSpace(string(body)); got != "agent busy: too many concurrent streams" {
+		t.Fatalf("/api/events over-limit body = %q", got)
+	}
+
+	// Release the proxy stream's slot.
+	release()
+	select {
+	case code := <-proxyDone:
+		if code != http.StatusOK {
+			t.Fatalf("proxy stream status = %d, want %d", code, http.StatusOK)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("proxy stream did not finish after the daemon released it")
+	}
+
+	// The slot is now free; /api/events must succeed. The SSE handler
+	// streams until the client disconnects, so bound the request with a
+	// context that cancels once the response headers arrive.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatalf("new /api/events request: %v", err)
+	}
+	eventsResp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/events after slot release: %v", err)
+	}
+	defer eventsResp2.Body.Close()
+	if eventsResp2.StatusCode != http.StatusOK {
+		t.Fatalf("/api/events status after slot release = %d, want %d", eventsResp2.StatusCode, http.StatusOK)
+	}
+}
+
+// TestAdapterStreamUnboundedWithoutStreamLimit proves that MAX_STREAM_SESSIONS
+// <= 0 leaves adapter streaming routes unbounded, matching
+// handleDockerProxy's existing nil-limiter behavior: any number of
+// concurrent /api/events connections must be admitted.
+func TestAdapterStreamUnboundedWithoutStreamLimit(t *testing.T) {
+	t.Parallel()
+
+	client, cleanup := newStubDockerClient(t)
+	defer cleanup()
+
+	cfg := minimalConfig()
+	cfg.MaxStreamSessions = 0
+	a := drydock.NewAdapter(client, "test-agent", drydock.AgentInfo{})
+	s, err := NewServer(cfg, client, a)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	if s.streamSem != nil {
+		t.Fatal("MAX_STREAM_SESSIONS=0 must leave streams unbounded")
+	}
+
+	srv := httptest.NewServer(s.httpServer.Handler)
+	defer srv.Close()
+
+	const concurrentClients = 5
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	codes := make(chan int, concurrentClients)
+	for i := 0; i < concurrentClients; i++ {
+		go func() {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/events", nil)
+			if err != nil {
+				codes <- -1
+				return
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				codes <- -1
+				return
+			}
+			defer resp.Body.Close()
+			codes <- resp.StatusCode
+		}()
+	}
+
+	for i := 0; i < concurrentClients; i++ {
+		select {
+		case code := <-codes:
+			if code != http.StatusOK {
+				t.Errorf("client %d status = %d, want %d (unbounded stream limit)", i, code, http.StatusOK)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for a concurrent /api/events client")
+		}
 	}
 }

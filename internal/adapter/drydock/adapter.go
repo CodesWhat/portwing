@@ -58,6 +58,13 @@ type Adapter struct {
 	sse          *SSEBroadcaster
 	dockerClient *docker.Client
 
+	// admit gates long-lived HTTP streams (SSE, follow-mode log tails)
+	// against the server's shared stream concurrency limit. Set by
+	// RegisterRoutes; the nil zero value is legal and always admits, which
+	// keeps every test that builds an Adapter directly (without going
+	// through RegisterRoutes) working unchanged.
+	admit adapter.StreamAdmitter
+
 	messageSem       chan struct{}
 	semInit          sync.Once
 	legacyLogSem     chan struct{}

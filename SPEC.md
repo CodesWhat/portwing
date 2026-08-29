@@ -304,7 +304,7 @@ sequenceDiagram
 ### 7.3 Limits
 
 - Max 100 concurrent exec sessions (edge mode: fixed; standard mode: `MAX_EXEC_SESSIONS`, default 100, non-positive disables the bound)
-- Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Does not yet cover the adapter routes (`/api/events` SSE and follow-mode container logs), which bypass the Docker proxy handler.
+- Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Covers the streaming Docker proxy responses and the adapter routes that bypass the proxy handler (`/api/events` SSE and follow-mode container logs), which share the same bound. A rejected adapter stream answers `503` with the same body as a rejected proxy stream. Non-follow log reads are a single bounded response and are never gated.
 - Exec body size limit: 10 MB
 - Retry loop for write/resize (up to 10 attempts, 50ms intervals)
 

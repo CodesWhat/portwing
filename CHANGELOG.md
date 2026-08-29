@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepting an unbounded number of goroutines. Either variable can be set to a
   non-positive value to disable its bound, for a controller that legitimately
   drives more sessions than the default. `/api/events` SSE and follow-mode
-  container log streaming are not yet covered by either limit.
+  container log streaming share the stream bound too: both adapters check for a
+  free slot before the stream starts, so a rejected SSE client is never
+  registered with the broadcaster and a rejected log follow never reaches the
+  daemon. Non-follow log reads are a single bounded response and stay ungated.
 - **`portwing --help` and `portwing --version` now work at the top level.**
   Previously only the `hash-token`, `keygen`, and `version` subcommands were
   recognized; a bare `--help` or an unrecognized flag started the full agent and

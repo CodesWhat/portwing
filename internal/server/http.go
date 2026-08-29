@@ -360,8 +360,19 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// letting the "/" catch-all serve wrong-method requests instead.
 	mux.Handle("/_portwing/mcp", mcpHandler)
 
-	// Adapter-specific routes.
-	s.adapter.RegisterRoutes(mux, authWrap)
+	// Adapter-specific routes. Long-lived adapter streams (SSE, follow-mode
+	// log tails) share s.streamSem with the Docker-proxy streaming path
+	// (SPEC 7.3) rather than getting their own limiter: Go 1.22+ ServeMux
+	// dispatches each request to exactly one handler, so an adapter route
+	// never also reaches handleDockerProxy and a single request can never be
+	// admitted twice.
+	admitStream := adapter.StreamAdmitter(func() (func(), bool) {
+		if !s.streamSem.acquire() {
+			return nil, false
+		}
+		return s.streamSem.release, true
+	})
+	s.adapter.RegisterRoutes(mux, authWrap, admitStream)
 
 	// Docker API proxy - catch-all (must be last).
 	mux.Handle("/", authWrap(s.handleDockerProxy))

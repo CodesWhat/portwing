@@ -34,7 +34,7 @@ func (s *stubServerAdapter) Name() string                            { return "s
 func (s *stubServerAdapter) Capabilities() []string                  { return []string{"stub"} }
 func (s *stubServerAdapter) HelloExtension() *adapter.HelloExtension { return nil }
 func (s *stubServerAdapter) PollInterval() int                       { return 0 }
-func (s *stubServerAdapter) RegisterRoutes(_ *http.ServeMux, _ func(http.HandlerFunc) http.Handler) {
+func (s *stubServerAdapter) RegisterRoutes(_ *http.ServeMux, _ func(http.HandlerFunc) http.Handler, _ adapter.StreamAdmitter) {
 }
 func (s *stubServerAdapter) OnConnect(_ context.Context, _ adapter.MessageSender) error { return nil }
 func (s *stubServerAdapter) RefreshContainers(_ context.Context) ([]adapter.Container, []adapter.Container, []adapter.Container, error) {

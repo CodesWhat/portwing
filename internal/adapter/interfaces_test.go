@@ -33,7 +33,8 @@ func (fullAdapterStub) HandleMessage(context.Context, adapter.MessageSender, str
 	return false
 }
 
-func (fullAdapterStub) RegisterRoutes(*http.ServeMux, func(http.HandlerFunc) http.Handler) {}
+func (fullAdapterStub) RegisterRoutes(*http.ServeMux, func(http.HandlerFunc) http.Handler, adapter.StreamAdmitter) {
+}
 
 func (fullAdapterStub) PollInterval() int { return 0 }
 
