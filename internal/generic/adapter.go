@@ -3,6 +3,7 @@ package generic
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/codeswhat/portwing/internal/adapter"
@@ -16,6 +17,11 @@ type Adapter struct {
 	containers   *adapter.ContainerManager
 	dockerClient *docker.Client
 	events       *EventBroadcaster
+
+	// admit gates long-lived HTTP streams (SSE, follow-mode log tails)
+	// against the server's shared stream concurrency limit. Set by
+	// RegisterRoutes; the nil zero value is legal and always admits.
+	admit adapter.StreamAdmitter
 }
 
 // New creates a generic adapter wired to the given Docker client.
@@ -57,12 +63,36 @@ func (a *Adapter) HandleMessage(_ context.Context, _ adapter.MessageSender, _ st
 	return false
 }
 
-// RegisterRoutes registers generic REST routes on /api/v1/*.
-func (a *Adapter) RegisterRoutes(mux *http.ServeMux, auth func(http.HandlerFunc) http.Handler) {
+// RegisterRoutes registers generic REST routes on /api/v1/*. admitStream gates
+// the events route and follow-mode container log streaming against the
+// server's shared stream concurrency limit (SPEC 7.3); see
+// adapter.StreamAdmitter.
+func (a *Adapter) RegisterRoutes(mux *http.ServeMux, auth func(http.HandlerFunc) http.Handler, admitStream adapter.StreamAdmitter) {
+	a.admit = admitStream
 	mux.Handle("GET /api/v1/containers", auth(a.handleContainers))
 	mux.Handle("GET /api/v1/containers/{id}/logs", auth(a.handleContainerLogs))
-	mux.Handle("GET /api/v1/events", auth(a.events.ServeHTTP))
+	mux.Handle("GET /api/v1/events", auth(a.serveEvents))
 	mux.Handle("GET /api/v1/version", auth(a.handleVersion))
+}
+
+// streamLimitRejectionMessage is the body returned when a long-lived adapter
+// stream is rejected for want of a free concurrency slot. Matches the
+// Docker-proxy stream rejection in internal/server/http.go so a client (or a
+// test) can't tell the two rejection paths apart.
+const streamLimitRejectionMessage = "agent busy: too many concurrent streams"
+
+// serveEvents wraps the SSE broadcaster with the shared stream-concurrency
+// gate. The admission check happens before the broadcaster registers the
+// client, so a rejected connection never appears in b.clients.
+func (a *Adapter) serveEvents(w http.ResponseWriter, r *http.Request) {
+	release, ok := a.admit.Admit()
+	if !ok {
+		slog.Warn("concurrent stream limit reached, rejecting SSE client")
+		http.Error(w, streamLimitRejectionMessage, http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
+	a.events.ServeHTTP(w, r)
 }
 
 // versionResponse is the payload returned by GET /api/v1/version.

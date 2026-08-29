@@ -10,6 +10,7 @@ Connection modes|Inbound HTTP/S and outbound Dockhand WebSocket|Inbound HTTP/S a
 Container, image, network, volume, logs, and exec|Yes|Yes|tie
 Compose lifecycle|Yes|Yes|tie
 Agent authentication|Bearer token; optional server TLS / WSS|Ed25519 per-request signatures or token in standard mode; signed edge hello|self
+Edge listener bind address|Health/info HTTP server on port 2376 binds all interfaces unless BIND_ADDRESS=127.0.0.1 is set (Finsys/hawser#71)|Defaults to loopback; config loader refuses a non-loopback bind unless ALLOW_UNAUTHENTICATED_REMOTE=true is set|self
 Docker socket policy|Documented deployment mounts the raw socket|Recommended Sockguard path-and-method policy|self
 Host metrics|Forwarded to Dockhand every 30 seconds in edge mode|Prometheus scrape endpoint and edge metrics|tie
 Request audit|Debug request logging|Structured audit records with cursor export|self
@@ -20,7 +21,7 @@ License|MIT|AGPL-3.0|tie
   highlightsTable: `
 network|The Closest Scope Match|Hawser and Portwing are both small Go agents, transparent Docker proxies, Compose runners, metrics collectors, and outbound WebSocket clients. Neither product should pretend the topology itself is unique.
 keyround|No Reusable Edge Token|Hawser authenticates with a bearer token over WSS. Portwing signs the edge hello with an Ed25519 private key and signs individual standard-mode requests with timestamp bounds and nonce replay checks.
-shieldcheck|Default-Deny Socket Boundary|Hawser's documented deployment mounts the Docker socket directly. Portwing's production path uses a separate Sockguard process with method-and-path allowlist rules.
+shieldcheck|Default-Deny Socket Boundary|Hawser's documented deployment mounts the Docker socket directly. Portwing's production path uses a separate Sockguard process with method-and-path allowlist rules. Hawser's edge mode also runs a health/info HTTP server on port 2376 bound to all interfaces unless the operator sets BIND_ADDRESS=127.0.0.1 (maintainer-confirmed, Finsys/hawser#71); Portwing's edge health listener defaults to loopback and its config loader refuses a non-loopback bind without an explicit opt-out.
 activity|Structured Agent Audit|Hawser can log Docker requests at debug level. Portwing emits stable structured events for API access, auth failures, enrollment, Compose, and exec, with cursor-based NDJSON export.
 gauge|Different Metrics Surfaces|Hawser sends host metrics to Dockhand in edge mode. Portwing supports controller metrics and a Prometheus endpoint that can be scraped independently.
 bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container_logs, host_metrics, and container_stats. Hawser does not document an MCP endpoint.
@@ -58,7 +59,7 @@ bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container
         read-only MCP
       </strong>
       . Hawser ships today as a more mature option; Portwing v0.9.x is a supported pre-v1 release.
-      Reviewed July 28, 2026.
+      Reviewed August 29, 2026.
     </p>
   ),
   migrationTitle: "Coming from Hawser?",

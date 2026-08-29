@@ -521,7 +521,7 @@ func TestRegisterRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	// passthrough auth: just calls the handler directly.
 	noAuth := func(h http.HandlerFunc) http.Handler { return h }
-	a.RegisterRoutes(mux, noAuth)
+	a.RegisterRoutes(mux, noAuth, nil)
 
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

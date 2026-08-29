@@ -323,7 +323,7 @@ sequenceDiagram
 ### 7.3 Limits
 
 - Max 100 concurrent exec sessions (edge mode: fixed; standard mode: `MAX_EXEC_SESSIONS`, default 100, non-positive disables the bound)
-- Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Does not yet cover the adapter routes (`/api/events` SSE and follow-mode container logs), which bypass the Docker proxy handler.
+- Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Covers the streaming Docker proxy responses and the adapter routes that bypass the proxy handler (`/api/events` SSE and follow-mode container logs), which share the same bound. A rejected adapter stream answers `503` with the same body as a rejected proxy stream. Non-follow log reads are a single bounded response and are never gated.
 - Max 100 concurrent streamed request body reassemblies (edge mode, fixed; see `edge-request-body-stream` in §3.2 and the limits in §11.3). A `bodyStream: true` request does not claim a stream session slot until its `stream_end` arrives, so this is a separate bound on the reassembly stage, matched to the stream session limit because every pending reassembly claims one of those slots the moment it completes. Streamed bodies are also capped at 1 GB summed across every one the agent is holding in memory, which is what bounds agent memory: the 512 MB per-request cap multiplies by the number of concurrent requests without it. That sum spans both stages, the buffers still reassembling and the reassembled bodies already dispatched to Docker, which keep their bytes until the round trip ends. Charging only the reassembly stage would let a controller send `stream_end` on every pending request to drop the total to zero and immediately refill it, leaving the real ceiling at the concurrent stream session limit times the per-request cap. Either rejection answers with an `error` frame naming the `requestId`, the same shape as a duplicate-`requestId` rejection.
 - Exec body size limit: 10 MB
 - Retry loop for write/resize (up to 10 attempts, 50ms intervals)
@@ -532,7 +532,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 | Enrollment request body | 64 KiB / 10 seconds |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |
 | Concurrent exec sessions | 100 (edge: fixed; standard: `MAX_EXEC_SESSIONS`, non-positive disables) |
-| Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Excludes adapter `/api/events` and follow-mode logs. |
+| Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Shared by streaming proxy responses and the adapter `/api/events` SSE and follow-mode log routes; a rejected adapter stream answers `503`. Non-follow log reads are not gated. |
 
 ## 12. Configuration
 

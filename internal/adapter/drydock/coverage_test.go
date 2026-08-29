@@ -732,7 +732,7 @@ func TestRegisterRoutes_RegistrationCoversKeyPaths(t *testing.T) {
 	a := NewAdapter(client, "test-agent", AgentInfo{})
 	mux := http.NewServeMux()
 	noopAuth := func(h http.HandlerFunc) http.Handler { return h }
-	a.RegisterRoutes(mux, noopAuth)
+	a.RegisterRoutes(mux, noopAuth, nil)
 
 	// Build inventory so GET /api/containers returns something.
 	if _, err := a.containers.BuildInventory(context.Background()); err != nil {
