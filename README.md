@@ -697,8 +697,15 @@ live container state through this endpoint using their standard tool-call flow.
 | `list_containers` | All containers — id, names, image, state, status, labels |
 | `inspect_container(id)` | State, image, env-var count (values never exposed via this MCP tool), mounts, networks, restart policy |
 | `container_logs(id, tail)` | Last N lines of stdout/stderr (max 500) |
-| `host_metrics` | CPU, memory, disk, network, uptime snapshot |
+| `host_metrics` | CPU, memory, disk, network, uptime snapshot (Linux only, see below) |
 | `container_stats(id)` | One-shot CPU/memory/network stats for a container |
+
+**Platform support:** `host_metrics` reads everything except the CPU core count from `/proc`, so
+it works on the Linux container, `.deb` and `.rpm` builds and on no other platform. On a native
+macOS install (including the Homebrew cask) the tool returns an MCP error naming the missing
+procfs rather than a snapshot of zeros, and `/metrics` reports
+`portwing_host_metrics_supported 0` with the host resource series omitted. Every other MCP tool
+is unaffected, since they read from the Docker API rather than the host.
 
 **Credential hygiene:** `inspect_container` returns only the *count* of environment variables —
 values are never transmitted through this MCP tool, preventing accidental secret leakage. This

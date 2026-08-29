@@ -4,8 +4,10 @@
 package metrics
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -583,5 +585,29 @@ Cached:          512000 kB
 	}
 	if m.Uptime != 7200 {
 		t.Errorf("Uptime = %d, want 7200", m.Uptime)
+	}
+}
+
+// TestCollectUnsupportedPlatform verifies a missing procfs is reported as
+// ErrHostMetricsUnsupported instead of a zero-filled snapshot, which on the
+// wire is indistinguishable from a genuinely idle host. Injecting a
+// nonexistent procRoot makes this run identically on linux and darwin.
+func TestCollectUnsupportedPlatform(t *testing.T) {
+	t.Parallel()
+
+	c := &Collector{procRoot: filepath.Join(t.TempDir(), "absent"), skipDisk: true}
+	m, err := c.Collect()
+	if !errors.Is(err, ErrHostMetricsUnsupported) {
+		t.Fatalf("Collect() error = %v, want ErrHostMetricsUnsupported", err)
+	}
+	if m == nil {
+		t.Fatal("Collect() returned nil metrics alongside the error")
+	}
+	if m.CPUCores != runtime.NumCPU() {
+		t.Errorf("CPUCores = %d, want %d (needs no procfs)", m.CPUCores, runtime.NumCPU())
+	}
+	if m.MemoryTotal != 0 || m.DiskTotal != 0 || m.Uptime != 0 {
+		t.Errorf("proc-derived fields should stay zero, got mem=%d disk=%d uptime=%d",
+			m.MemoryTotal, m.DiskTotal, m.Uptime)
 	}
 }

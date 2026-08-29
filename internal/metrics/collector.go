@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -76,13 +78,31 @@ func NewCollector(dockerDataRoot string, skipDisk bool) *Collector {
 	}
 }
 
+// ErrHostMetricsUnsupported is returned by Collect when the host exposes no
+// procfs, which is every platform except Linux. Callers should treat it as
+// "this host cannot report these numbers" rather than as a transient failure.
+var ErrHostMetricsUnsupported = errors.New("host metrics unavailable: no procfs on this platform")
+
 // Collect gathers all host metrics and returns them.
+//
+// Every field except CPUCores is read from /proc. When /proc is absent the
+// individual collect helpers each swallow their open error and leave a zero
+// behind, which on the wire is indistinguishable from a real reading of a
+// completely idle host: a native macOS install would report 0 bytes of memory
+// and 0 bytes of disk as though it had measured them. Collect reports that gap
+// as ErrHostMetricsUnsupported instead. The partially populated snapshot is
+// still returned alongside the error, because CPUCores comes from
+// runtime.NumCPU() and is correct on every platform.
 func (c *Collector) Collect() (*HostMetrics, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	m := &HostMetrics{
 		CPUCores: runtime.NumCPU(),
+	}
+
+	if _, err := os.Stat(c.proc()); err != nil {
+		return m, fmt.Errorf("%w: %s: %w", ErrHostMetricsUnsupported, c.proc(), err)
 	}
 
 	m.CPUUsage = c.collectCPU()

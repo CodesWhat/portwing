@@ -126,6 +126,8 @@ Returns a point-in-time snapshot of host-level resource metrics. No parameters.
 
 **Response:** a metrics snapshot including CPU, memory, disk, network I/O, and uptime. The exact shape matches the Prometheus collector used internally by Portwing.
 
+**Linux only.** Every field except `cpuCores` is read from `/proc`, so this tool works on the container, `.deb` and `.rpm` builds and nowhere else. On a native macOS install it returns an MCP error naming the missing procfs instead of a snapshot of zeros, because a zero-filled snapshot is indistinguishable from a real reading of an idle host. The Prometheus endpoint reports the same thing as `portwing_host_metrics_supported 0`.
+
 ---
 
 ### `container_stats`

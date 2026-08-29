@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -84,14 +85,15 @@ func TestNewCollector(t *testing.T) {
 }
 
 // TestCollectReturnsHostMetrics verifies Collect returns a non-nil *HostMetrics
-// with CPUCores populated (runtime.NumCPU() always > 0) even on platforms
-// where /proc is absent (macOS). The other fields may be zero on non-Linux.
+// with CPUCores populated (runtime.NumCPU() always > 0). On a platform with no
+// procfs it reports ErrHostMetricsUnsupported rather than a zero-filled
+// snapshot, and still fills CPUCores in. The other fields may be zero there.
 func TestCollectReturnsHostMetrics(t *testing.T) {
 	t.Parallel()
 
 	c := NewCollector(".", false)
 	m, err := c.Collect()
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
 		t.Fatalf("Collect() returned error: %v", err)
 	}
 	if m == nil {
@@ -131,7 +133,7 @@ func TestCollectSkipDisk(t *testing.T) {
 
 	c := NewCollector(".", true)
 	m, err := c.Collect()
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
 		t.Fatalf("Collect() returned error: %v", err)
 	}
 	if m.DiskTotal != 0 || m.DiskUsed != 0 || m.DiskFree != 0 {
@@ -429,7 +431,7 @@ func TestCollectConcurrency(t *testing.T) {
 		go func() {
 			defer func() { done <- struct{}{} }()
 			m, err := c.Collect()
-			if err != nil {
+			if err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
 				t.Errorf("Collect() error: %v", err)
 			}
 			if m == nil {
@@ -576,7 +578,7 @@ func TestCPUUsageNeverExceeds100(t *testing.T) {
 	c := NewCollector(".", true)
 	for i := range 5 {
 		m, err := c.Collect()
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrHostMetricsUnsupported) {
 			t.Fatalf("call %d: Collect() error: %v", i, err)
 		}
 		if m.CPUUsage < 0 || m.CPUUsage > 100 {

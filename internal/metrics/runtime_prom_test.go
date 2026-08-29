@@ -85,6 +85,15 @@ func TestWriteHostPrometheus(t *testing.T) {
 	}
 
 	metrics.WriteHostPrometheus(&b, metrics.NewCollector("", true))
+	if !strings.Contains(b.String(), "portwing_host_metrics_supported ") {
+		t.Fatalf("missing support gauge in host metrics:\n%s", b.String())
+	}
+	if strings.Contains(b.String(), "portwing_host_metrics_supported 0") {
+		// No procfs on this platform. The resource series are deliberately
+		// absent rather than zero-valued, so there is nothing further to
+		// assert; the support gauge above is the whole contract here.
+		return
+	}
 	for _, want := range []string{
 		"portwing_host_cpu_usage_percent",
 		"portwing_host_memory_total_bytes",

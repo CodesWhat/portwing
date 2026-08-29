@@ -18,14 +18,24 @@ type DockerMetricsClient interface {
 }
 
 // WriteHostPrometheus appends host resource metrics when collection succeeds.
+//
+// A host with no procfs cannot produce these numbers, so the resource series
+// are omitted there rather than written as zeros, which a scraper could not
+// tell apart from a real reading of a completely idle machine.
+// portwing_host_metrics_supported carries that distinction explicitly, so a
+// dashboard can show "unsupported" instead of a flat zero line.
 func WriteHostPrometheus(b *strings.Builder, collector *Collector) {
 	if collector == nil {
 		return
 	}
 	host, err := collector.Collect()
+	fmt.Fprintf(b, "# HELP portwing_host_metrics_supported Whether host resource metrics are available on this platform (1) or not (0).\n")
+	fmt.Fprintf(b, "# TYPE portwing_host_metrics_supported gauge\n")
 	if err != nil || host == nil {
+		fmt.Fprintf(b, "portwing_host_metrics_supported 0\n")
 		return
 	}
+	fmt.Fprintf(b, "portwing_host_metrics_supported 1\n")
 
 	fmt.Fprintf(b, "# HELP portwing_host_cpu_usage_percent Host CPU usage percentage.\n")
 	fmt.Fprintf(b, "# TYPE portwing_host_cpu_usage_percent gauge\n")
