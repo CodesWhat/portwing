@@ -7,6 +7,10 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const workflow = fs.readFileSync(path.join(ROOT, ".github/workflows/ci-verify.yml"), "utf8");
 const lefthook = fs.readFileSync(path.join(ROOT, "lefthook.yml"), "utf8");
 const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+const vercelConfigPath = path.join(ROOT, "vercel.json");
+const vercelConfig = fs.existsSync(vercelConfigPath)
+  ? JSON.parse(fs.readFileSync(vercelConfigPath, "utf8"))
+  : {};
 const nodeAdapter = fs.readFileSync(path.join(ROOT, "scripts/ci/node-test.sh"), "utf8");
 
 function jobSection(source, jobId) {
@@ -87,4 +91,8 @@ test("pre-push mirrors the root web lane", () => {
   assert.equal(fs.readFileSync(path.join(ROOT, ".node-version"), "utf8").trim(), "24");
   assert.match(packageJson.scripts["check:web"], /^node scripts\/node-version-contract\.mjs && /);
   assert.equal(packageJson.engines.node, ">=24.0.0");
+});
+
+test("Vercel deploys main while disabling automatic preview deployments", () => {
+  assert.deepEqual(vercelConfig.git?.deploymentEnabled, { "*": false, main: true });
 });
