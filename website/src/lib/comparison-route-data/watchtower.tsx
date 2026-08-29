@@ -54,9 +54,9 @@ bot|MCP Server (AI-Native)|Portwing ships five read-only MCP tools for container
   heroDescription: (
     <p>
       Watchtower is an automated container updater — it polls registries and restarts containers
-      when new images are available. It is a local container updater, not a remote access agent —
-      an adjacent product, not a direct general-purpose agent peer — and its upstream repository is
-      now archived. Portwing is a{" "}
+      when new images are available. It is a local container updater, not a remote access agent — an
+      adjacent product, not a direct general-purpose agent peer — and its upstream repository is now
+      archived. Portwing is a{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">remote access agent</strong> — it
       gives the Drydock controller a secure authenticated foothold on a Docker host. These tools
       solve different problems; Drydock can handle centralized update workflows with Portwing as the
