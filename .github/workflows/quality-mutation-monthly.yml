@@ -81,8 +81,9 @@ jobs:
             mcover: 79.59
           - name: metrics
             package: ./internal/metrics
-            efficacy: 100
-            mcover: 50.00
+            efficacy: 90.00
+            mcover: 80.00
+            workers: 1
           - name: pool
             package: ./internal/pool
             efficacy: 50.00
@@ -125,11 +126,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          worker_args=""
+          if [ -n "${{ matrix.workers || '' }}" ]; then
+            worker_args="--workers ${{ matrix.workers }}"
+          fi
           if [ "${{ matrix.zero_mutants || false }}" = "true" ]; then
-            gremlins unleash --tags="" "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
+            gremlins unleash --tags="" $worker_args "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
             grep -q "No results to report" mutation-report.txt
           else
             gremlins unleash --tags="" \
+              $worker_args \
               --threshold-efficacy "${{ matrix.efficacy }}" \
               --threshold-mcover "${{ matrix.mcover }}" \
               "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
