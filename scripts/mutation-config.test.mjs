@@ -77,7 +77,7 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   assert.match(runStep, /set -euo pipefail/u, "the report pipeline must preserve Gremlins failures");
   assert.match(runStep, /--threshold-efficacy "\$\{\{ matrix\.efficacy \}\}"/u);
   assert.match(runStep, /--threshold-mcover "\$\{\{ matrix\.mcover \}\}"/u);
-  assert.match(runStep, /worker_args="--workers \$\{\{ matrix\.workers \}\}"/u);
+  assert.match(runStep, /gremlins_args\+=\(--workers "\$\{\{ matrix\.workers \}\}"\)/u);
   assert.match(runStep, /\| tee mutation-report\.txt/u);
   assert.match(runStep, /grep -q "No results to report" mutation-report\.txt/u);
   assert.match(source, /name: Upload mutation report/u);

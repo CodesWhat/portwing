@@ -126,16 +126,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          worker_args=""
+          gremlins_args=()
           if [ -n "${{ matrix.workers || '' }}" ]; then
-            worker_args="--workers ${{ matrix.workers }}"
+            gremlins_args+=(--workers "${{ matrix.workers }}")
           fi
           if [ "${{ matrix.zero_mutants || false }}" = "true" ]; then
-            gremlins unleash --tags="" $worker_args "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
+            gremlins unleash --tags="" "${gremlins_args[@]+"${gremlins_args[@]}"}" "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
             grep -q "No results to report" mutation-report.txt
           else
             gremlins unleash --tags="" \
-              $worker_args \
+              "${gremlins_args[@]+"${gremlins_args[@]}"}" \
               --threshold-efficacy "${{ matrix.efficacy }}" \
               --threshold-mcover "${{ matrix.mcover }}" \
               "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
