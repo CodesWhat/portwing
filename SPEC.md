@@ -331,7 +331,7 @@ In addition to host/container metrics, the Prometheus endpoints (`/_portwing/met
 }
 ```
 
-`diskMetricsAvailable` is `false` when the `statfs` read on the Docker data root fails or reports an unusable block size, and also when `SKIP_DF_COLLECTION` is set, in which case `diskError` is empty because no read was attempted. Otherwise the disk fields above stay zero and `diskError` carries the path and the failing error.
+`diskMetricsAvailable` is `false` when the `statfs` read on the Docker data root fails or reports an unusable block size, and also when `SKIP_DF_COLLECTION` is set, in which case `diskError` is empty because no read was attempted. On a failed read the disk fields above stay zero and `diskError` carries the path and the failing error; a successful read populates them and leaves `diskError` empty.
 
 Its relationship to `ErrHostMetricsUnsupported`/`portwing_host_metrics_supported` (which cover the `/proc`-derived fields) is one-directional, not independent: a broken data root leaves the `/proc` fields intact, but a missing `/proc` short-circuits collection before `statfs` runs, so no disk figure is reported on a host without procfs even though `statfs` would have worked there.
 
