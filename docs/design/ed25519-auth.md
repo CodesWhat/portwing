@@ -407,7 +407,7 @@ This design is implemented as of Portwing v0.8.1. The canonical cross-product
 review now lives in [`COMPETITIVE-LANDSCAPE.md`](../../COMPETITIVE-LANDSCAPE.md);
 this table retains only the authentication-specific comparison.
 
-| Property | Portwing v0.8.1 | Komodo v2 Periphery | Arcane v2.5 Agent |
+| Property | Portwing v0.8.1 | Komodo v2 Periphery | Arcane v2.9 Agent |
 |----------|-----------------|---------------------|-------------------|
 | Credential | Ed25519 key | Per-server public/private key pair | Environment token plus optional X.509 client certificate |
 | Enrollment | Operator-provisioned `authorized_keys` file or one-time enrollment token | Onboarding key; Periphery generates its key pair | Agent token; optional automatic certificate enrollment |

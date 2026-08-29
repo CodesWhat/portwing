@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   // absolute: this title already carries the brand; opt out of the root template.
   title: { absolute: "Portwing vs Alternatives — Remote Docker Agent Comparisons" },
   description:
-    "Evidence-backed comparisons of Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, and adjacent Docker tools. Reviewed July 28, 2026.",
+    "Evidence-backed comparisons of Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, and adjacent Docker tools. Reviewed August 29, 2026.",
   keywords: [
     "portainer agent alternative",
     "komodo periphery alternative",
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Portwing vs Alternatives — Remote Docker Agent Comparisons",
     description:
-      "Compare Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, and adjacent Docker tools using a July 2026 primary-source review.",
+      "Compare Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, and adjacent Docker tools using an August 2026 primary-source review.",
     url: `${BASE_URL}/compare`,
     siteName: SITE_CONFIG.name,
     locale: SITE_CONFIG.locale,
@@ -113,7 +113,7 @@ export default function ComparePage() {
             </h1>
             <p className="mx-auto max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
               Current agent capabilities, controller tradeoffs, and deliberate non-goals — sourced
-              from published product documentation and reviewed July 28, 2026.
+              from published product documentation and reviewed August 29, 2026.
             </p>
           </div>
         </section>
