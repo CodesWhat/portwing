@@ -52,7 +52,7 @@ func (a *Adapter) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 
 	body, err := a.dockerClient.GetContainerLogs(r.Context(), containerID, tail, since, until, follow, timestamps)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("getting logs: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("getting logs: %v", err), docker.StatusCodeForError(err))
 		return
 	}
 	defer body.Close()
@@ -81,15 +81,7 @@ func (a *Adapter) handleContainerDelete(w http.ResponseWriter, r *http.Request) 
 	containerID := r.PathValue("id")
 
 	if err := a.dockerClient.RemoveContainer(r.Context(), containerID, true); err != nil {
-		msg := err.Error()
-		switch {
-		case strings.Contains(msg, "status 404"):
-			http.Error(w, fmt.Sprintf("removing container: %v", err), http.StatusNotFound)
-		case strings.Contains(msg, "status 409"):
-			http.Error(w, fmt.Sprintf("removing container: %v", err), http.StatusConflict)
-		default:
-			http.Error(w, fmt.Sprintf("removing container: %v", err), http.StatusInternalServerError)
-		}
+		http.Error(w, fmt.Sprintf("removing container: %v", err), docker.StatusCodeForError(err))
 		return
 	}
 

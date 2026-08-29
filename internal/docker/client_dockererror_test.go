@@ -2,6 +2,8 @@ package docker
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -230,5 +232,71 @@ func TestCreateExec_DockerError_BodyTruncated(t *testing.T) {
 	// fixed overhead, so bound the whole error generously above that.
 	if len(err.Error()) > maxDockerErrorBodyBytes+128 {
 		t.Errorf("error length = %d, expected roughly bounded by maxDockerErrorBodyBytes (%d)", len(err.Error()), maxDockerErrorBodyBytes)
+	}
+}
+
+// ---- StatusCodeForError ----
+
+func TestStatusCodeForError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{
+			name: "404 maps to not found",
+			err:  dockerError("remove container", http.StatusNotFound, []byte(`{"message":"No such container: abc"}`)),
+			want: http.StatusNotFound,
+		},
+		{
+			name: "409 maps to conflict",
+			err:  dockerError("remove container", http.StatusConflict, []byte(`{"message":"container is running"}`)),
+			want: http.StatusConflict,
+		},
+		{
+			name: "other docker statuses collapse to 500",
+			err:  dockerError("get logs", http.StatusBadRequest, []byte(`{"message":"bad parameter"}`)),
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "a non-docker error collapses to 500",
+			err:  errors.New("dial unix /var/run/docker.sock: connect: connection refused"),
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "a nil error collapses to 500 without panicking",
+			err:  nil,
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "a wrapped docker error is still resolved",
+			err:  fmt.Errorf("getting logs: %w", dockerError("get logs", http.StatusNotFound, nil)),
+			want: http.StatusNotFound,
+		},
+		{
+			// The status used to be recovered by searching the formatted
+			// message for "status 404". That message embeds the Docker error
+			// body, which echoes the caller-supplied container name, so a
+			// container named "status 404" turned a 500 into a 404.
+			name: "a container name echoed in the body cannot forge the status",
+			err:  dockerError("get logs", http.StatusInternalServerError, []byte(`{"message":"No such container: status 404"}`)),
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "an echoed name cannot forge a conflict either",
+			err:  dockerError("remove container", http.StatusInternalServerError, []byte(`{"message":"No such container: status 409"}`)),
+			want: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := StatusCodeForError(tt.err); got != tt.want {
+				t.Fatalf("StatusCodeForError() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }

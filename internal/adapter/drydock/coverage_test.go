@@ -1343,6 +1343,26 @@ func TestHandleContainerLogs_DockerError(t *testing.T) {
 	}
 }
 
+// TestHandleContainerLogs_NotFound asserts that a Docker 404 (container
+// doesn't exist) is propagated as a 404, matching the mapping already
+// applied by handleContainerDelete, rather than collapsing to a 500.
+func TestHandleContainerLogs_NotFound(t *testing.T) {
+	t.Parallel()
+
+	client, shutdown := newErrorDockerServer(t, http.StatusNotFound, http.StatusNoContent)
+	defer shutdown()
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	req := httptest.NewRequest(http.MethodGet, "/api/containers/missing/logs?tail=5", nil)
+	req.SetPathValue("id", "missing")
+	rec := httptest.NewRecorder()
+	a.handleContainerLogs(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // routes.go — handleContainerDelete: generic 500 path
 // ---------------------------------------------------------------------------
