@@ -40,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0 bytes as though the disk were empty: the snapshot carries
   `diskMetricsAvailable: false` and a `diskError` string, and `/metrics` reports
   `portwing_host_disk_metrics_available 0` with the disk byte series omitted.
-  This is independent of `portwing_host_metrics_supported`, which continues to
-  track only the `/proc`-backed fields (CPU, memory, network, uptime).
+  `portwing_host_metrics_supported` continues to track only the `/proc`-backed
+  fields (CPU, memory, network, uptime); disk collection runs after that pass
+  and is skipped when it fails, so disk is never available while it reports 0.
 - **`host_metrics` reports a missing procfs instead of a zero-filled
   snapshot.** A native macOS install (including the Homebrew cask) previously
   got back `isError:false` with `memoryTotal`, `diskTotal`, and `uptime` all
@@ -97,6 +98,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a byte-for-byte duplicate of `openCredentialFile`'s permission check, which
   callers already use directly), along with the tests that existed solely to
   exercise them.
+- **Competitive claims re-verified against primary sources.** The market audit
+  moved from its 2026-07-28 snapshot to 2026-08-29. Komodo Periphery is repinned
+  to v2.3.2 and Arcane Agent to v2.9.0; Hawser stays at v0.2.46, still its
+  latest release. The Komodo authentication claim is corrected: v2.0.0 replaced
+  passkey auth outright rather than supplementing it, and Core and Periphery now
+  use automatically generated public/private key pairs exchanged over a
+  Noise-protocol handshake. The docs-site table regained the verifiable release
+  artifacts and credential rotation rows it had dropped, and the matrix header
+  now stamps the current v0.9.11 instead of v0.8.1.
+- **Direction parity is scoped to direction support, not robustness.** Every
+  reviewed peer does support both inbound and outbound modes, so that claim
+  stands, but two maintainer-confirmed gaps are now recorded alongside it:
+  Hawser's edge mode still binds an HTTP listener on port 2376 across all
+  interfaces unless `BIND_ADDRESS` is set, and Komodo's outbound leg ignores
+  `https_proxy` and can stall reconnection on a hardcoded handshake timeout.
+  Portwing's own edge listener defaults to loopback and refuses a non-loopback
+  bind unless the operator sets `ALLOW_UNAUTHENTICATED_REMOTE`.
 - **Moved the Go toolchain to 1.27.0.** `go.mod`'s `toolchain` directive and the
   digest-pinned `golang:*-alpine` builder images in `Dockerfile`,
   `Dockerfile.armv7`, and `Dockerfile.dev` now match, as the release contract

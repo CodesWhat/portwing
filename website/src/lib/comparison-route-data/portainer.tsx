@@ -58,7 +58,7 @@ bot|Prometheus and Read-Only MCP|Portwing exposes an agent Prometheus endpoint a
         signed requests, replay defense, Sockguard policy, agent-level audit, Prometheus, and MCP
       </strong>{" "}
       — in the free AGPL-3.0 build, without requiring a Business-tier upgrade. Portwing v0.9.x is a
-      supported pre-v1 release; Portainer is production-mature. Reviewed July 28, 2026.
+      supported pre-v1 release; Portainer is production-mature. Reviewed August 29, 2026.
     </p>
   ),
   migrationTitle: "Coming from Portainer Agent?",
