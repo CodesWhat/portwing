@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { median, verifyLighthouseRuns, withLighthouseResources } from "./lighthouse-budget.mjs";
+import {
+  median,
+  verifyBrowserConsole,
+  verifyLighthouseRuns,
+  withLighthouseResources,
+} from "./lighthouse-budget.mjs";
 
 test("median is stable for unsorted odd and even inputs", () => {
   assert.equal(median([5, 1, 3]), 3);
@@ -31,6 +36,20 @@ test("Lighthouse budgets use the median and fail closed", () => {
     /total byte weight budget exceeded/,
   );
   assert.throws(() => verifyLighthouseRuns(config, []), /expected Lighthouse runs/);
+});
+
+test("browser console verification ignores network misses and rejects runtime errors", () => {
+  const config = { site: "docs" };
+  assert.doesNotThrow(() =>
+    verifyBrowserConsole(config, [{ source: "network", description: "404 Not Found" }]),
+  );
+  assert.throws(
+    () =>
+      verifyBrowserConsole(config, [
+        { source: "exception", description: "Minified React error #418" },
+      ]),
+    /browser console error: Minified React error #418/,
+  );
 });
 
 test("Lighthouse resource cleanup closes the server across setup failures", async () => {

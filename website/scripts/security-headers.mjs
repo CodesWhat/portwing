@@ -100,7 +100,14 @@ function outputRelativePath(outputDir, file) {
 }
 
 export function buildOutputConfig(outputDir) {
-  const routes = [];
+  // Fumadocs derives its active page from the URL. Serving an exported .html
+  // file directly gives the client a different path than the server rendered,
+  // so canonicalize before React hydrates the page.
+  const routes = [
+    { src: "^/index\\.html$", status: 308, headers: { Location: "/" } },
+    { src: "^/(.*)/index\\.html$", status: 308, headers: { Location: "/$1" } },
+    { src: "^/(.*)\\.html$", status: 308, headers: { Location: "/$1" } },
+  ];
   const overrides = {};
   for (const file of htmlFiles(outputDir)) {
     const relative = outputRelativePath(outputDir, file);

@@ -104,6 +104,25 @@ test("build output packages the exact rendered files and per-page CSP", () => {
     assert.equal(config.overrides["index.html"], undefined);
     assert.deepEqual(config.overrides["docs/guide.html"], { path: "docs/guide" });
 
+    const rootHTMLRedirect = config.routes.find((route) => route.src === "^/index\\.html$");
+    const nestedIndexRedirect = config.routes.find((route) => route.src === "^/(.*)/index\\.html$");
+    const pageHTMLRedirect = config.routes.find((route) => route.src === "^/(.*)\\.html$");
+    assert.deepEqual(rootHTMLRedirect, {
+      src: "^/index\\.html$",
+      status: 308,
+      headers: { Location: "/" },
+    });
+    assert.deepEqual(nestedIndexRedirect, {
+      src: "^/(.*)/index\\.html$",
+      status: 308,
+      headers: { Location: "/$1" },
+    });
+    assert.deepEqual(pageHTMLRedirect, {
+      src: "^/(.*)\\.html$",
+      status: 308,
+      headers: { Location: "/$1" },
+    });
+
     const rootRoute = config.routes.find((route) => route.src === "^/$");
     const guideRoute = config.routes.find((route) => route.src === "^/docs/guide/?$");
     const commonRoute = config.routes.find((route) => route.src === "^/.*$");

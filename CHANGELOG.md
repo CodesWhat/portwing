@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Raw `.html` website URLs redirect to their canonical clean routes before
+  the page hydrates.** The static deployment exposed both URL forms, but the
+  docs navigation state is keyed to extensionless paths; loading an exported
+  file directly could therefore make the server and client render different
+  table-of-contents labels and trigger React hydration error 418.
 - **Host disk metrics use the Docker daemon's real data root and report a
   failed reading instead of a fake zero.** `host_metrics` and the Prometheus
   host series previously assumed `/var/lib/docker`; the data root is now

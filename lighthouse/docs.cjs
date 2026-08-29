@@ -3,6 +3,7 @@ module.exports = {
   outputRoot: "docs/out",
   mountPath: "/docs",
   url: "http://127.0.0.1:{PORT}/docs/",
+  consoleRoute: "/docs/installation.html",
   numberOfRuns: 5,
   // Re-recorded 2026-08-19 after the oversized logos came out (#168). The docs
   // site was carrying the same ~980 KB as marketing while sitting just under

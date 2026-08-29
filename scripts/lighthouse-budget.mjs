@@ -41,13 +41,22 @@ export function verifyLighthouseRuns(config, runs) {
   return result;
 }
 
+export function verifyBrowserConsole(config, items) {
+  const errors = items.filter((item) => item.source !== "network");
+  if (errors.length > 0) {
+    throw new Error(`${config.site} logged a browser console error: ${errors[0].description}`);
+  }
+}
+
 function serveStatic(outputRoot, mountPath) {
   const rootPrefix = `${path.resolve(outputRoot)}${path.sep}`;
   const mountPrefix = mountPath === "/" ? "" : mountPath;
   const server = http.createServer((request, response) => {
+    let requestURL;
     let pathname;
     try {
-      pathname = decodeURIComponent(new URL(request.url ?? "/", "http://127.0.0.1").pathname);
+      requestURL = new URL(request.url ?? "/", "http://127.0.0.1");
+      pathname = decodeURIComponent(requestURL.pathname);
     } catch {
       response.writeHead(400).end("bad request");
       return;
@@ -56,13 +65,26 @@ function serveStatic(outputRoot, mountPath) {
       response.writeHead(404).end("not found");
       return;
     }
+    if (pathname.endsWith(".html")) {
+      const cleanPath = pathname.endsWith("/index.html")
+        ? pathname.slice(0, -"/index.html".length) || "/"
+        : pathname.slice(0, -".html".length);
+      response.writeHead(308, { Location: `${cleanPath}${requestURL.search}` }).end();
+      return;
+    }
     const outputPathname = mountPrefix ? pathname.slice(mountPrefix.length) || "/" : pathname;
     let file = path.resolve(outputRoot, `.${outputPathname}`);
     if (file !== path.resolve(outputRoot) && !file.startsWith(rootPrefix)) {
       response.writeHead(403).end("forbidden");
       return;
     }
-    if (pathname.endsWith("/")) file = path.join(file, "index.html");
+    if (pathname.endsWith("/")) {
+      file = path.join(file, "index.html");
+    } else if (fs.existsSync(`${file}.html`)) {
+      file = `${file}.html`;
+    } else if (fs.existsSync(file) && fs.statSync(file).isDirectory()) {
+      file = path.join(file, "index.html");
+    }
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
       response.writeHead(404).end("not found");
       return;
@@ -160,6 +182,19 @@ async function run(configPath) {
         if (!result) throw new Error(`Lighthouse returned no result for run ${index + 1}`);
         fs.writeFileSync(path.join(outputDir, `run-${index + 1}.json`), JSON.stringify(result.lhr));
         completedRuns.push(metrics(result.lhr));
+      }
+      if (config.consoleRoute) {
+        const consoleUrl = new URL(config.consoleRoute, url).href;
+        const result = await lighthouse(consoleUrl, {
+          port: chrome.port,
+          output: "json",
+          logLevel: "error",
+          onlyAudits: ["errors-in-console"],
+        });
+        if (!result) throw new Error("Lighthouse returned no browser console result");
+        const items = result.lhr.audits["errors-in-console"]?.details?.items;
+        if (!Array.isArray(items)) throw new Error("Lighthouse browser console audit is missing");
+        verifyBrowserConsole(config, items);
       }
       return completedRuns;
     },
