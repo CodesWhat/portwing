@@ -609,3 +609,61 @@ func containsAll(slice []string, targets ...string) bool {
 	}
 	return true
 }
+func TestWriteStackFiles_ResolveEnvPathError(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir()}
+
+	// StackDir is absolute → resolveStackRoot returns an error →
+	// resolvePath used to build the file path fails →
+	// writeStackFiles returns the "resolving path" error.
+	req := ComposeRequest{
+		StackName: "ignored",
+		StackDir:  "/absolute/path",
+		Files: map[string]string{
+			// At least one file so we enter the Files loop which will call
+			// resolvePath for the absolute stackDir and error.
+			"docker-compose.yml": "services: {}\n",
+		},
+	}
+
+	if err := cm.writeStackFiles(req); err == nil {
+		t.Fatal("expected error from absolute StackDir in writeStackFiles, got nil")
+	}
+}
+
+// TestWriteStackFiles_ResolveEnvDrydockPathError exercises the specific branch
+// where EnvVars are set but the resolvePath(".env.drydock") call fails.
+// We achieve this by using an absolute StackDir so resolveStackRoot errors
+// when resolvePath is called for .env.drydock.
+func TestWriteStackFiles_EnvVarResolvePathError(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir()}
+
+	// Files is nil so we skip the file-writing loop.
+	// EnvVars is non-empty so we enter the .env.drydock writing branch.
+	// StackDir is absolute → resolvePath(".env.drydock") → resolveStackRoot errors.
+	req := ComposeRequest{
+		StackName: "ignored",
+		StackDir:  "/absolute/path",
+		EnvVars: map[string]string{
+			"MY_VAR": "value",
+		},
+	}
+
+	if err := cm.writeStackFiles(req); err == nil {
+		t.Fatal("expected error from absolute StackDir when writing .env.drydock, got nil")
+	}
+}
+
+// ---- readEvents: ctx.Err() at top of inner decode loop ----
+
+// TestReadEvents_CtxErrAtLoopTop hits the ctx.Err() check at the very top of
+// the inner for-loop in readEvents (before each Decode call).
+//
+// Strategy: the server pre-writes a large batch of non-allowed events into
+// the response buffer before the client begins reading.  While readEvents
+// iterates with `continue` through each non-allowed event, we cancel the
+// context.  Eventually the `ctx.Err() != nil` check at the top of the loop
+// fires before the next Decode call.

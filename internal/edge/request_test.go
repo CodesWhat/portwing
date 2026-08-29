@@ -492,3 +492,36 @@ func TestHandleComposeRequestInvalidBodyReturnsTypeError(t *testing.T) {
 		t.Errorf("Message = %q, want it to mention invalid compose request", em.Message)
 	}
 }
+
+func TestHandleRequestNonStreamWithBody(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	//nolint:bodyclose
+	fd := &fakeDocker{doResp: mkResp(http.StatusOK, "application/json", `{}`)}
+	c.dockerClient = fd
+
+	body := json.RawMessage(`{"image":"nginx"}`)
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "body-1",
+		Method:    "POST",
+		Path:      "/containers/create",
+		Body:      body,
+	})
+
+	var resp protocol.ResponseMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+	if resp.RequestID != "body-1" {
+		t.Errorf("RequestID = %q, want body-1", resp.RequestID)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// connect — welcome with matching compat level (no warning branch)
+// ---------------------------------------------------------------------------
+
+// TestConnectWelcomeCompatMatch covers the welcome.Config["serverCompatLevel"]
+// branch when it matches protocol.DrydockCompat (no warning).
