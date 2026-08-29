@@ -303,8 +303,8 @@ sequenceDiagram
 
 ### 7.3 Limits
 
-- Max 100 concurrent exec sessions
-- Max 100 concurrent stream sessions
+- Max 100 concurrent exec sessions (edge mode: fixed; standard mode: `MAX_EXEC_SESSIONS`, default 100, non-positive disables the bound)
+- Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Does not yet cover the adapter routes (`/api/events` SSE and follow-mode container logs), which bypass the Docker proxy handler.
 - Exec body size limit: 10 MB
 - Retry loop for write/resize (up to 10 attempts, 50ms intervals)
 
@@ -324,11 +324,16 @@ In addition to host/container metrics, the Prometheus endpoints (`/_portwing/met
   "diskTotal": 107374182400,
   "diskUsed": 53687091200,
   "diskFree": 53687091200,
+  "diskMetricsAvailable": true,
   "networkRxBytes": 1048576,
   "networkTxBytes": 524288,
   "uptime": 86400
 }
 ```
+
+`diskMetricsAvailable` is `false` when the `statfs` read on the Docker data root fails or reports an unusable block size, and also when `SKIP_DF_COLLECTION` is set, in which case `diskError` is empty because no read was attempted. Otherwise the disk fields above stay zero and `diskError` carries the path and the failing error.
+
+Its relationship to `ErrHostMetricsUnsupported`/`portwing_host_metrics_supported` (which cover the `/proc`-derived fields) is one-directional, not independent: a broken data root leaves the `/proc` fields intact, but a missing `/proc` short-circuits collection before `statfs` runs, so no disk figure is reported on a host without procfs even though `statfs` would have worked there.
 
 | Metric | Source | Platform |
 |--------|--------|----------|
@@ -339,7 +344,7 @@ In addition to host/container metrics, the Prometheus endpoints (`/_portwing/met
 | Network | `/proc/net/dev` (all non-lo interfaces) | Linux |
 | Uptime | `/proc/uptime` | Linux |
 
-`SKIP_DF_COLLECTION` env var disables disk metrics.
+`dockerDataRoot` is resolved from the Docker daemon's `/info` (`DockerRootDir`) on first collection, bounded by a 2s timeout and retried at most once per 30s on failure; it falls back to `/var/lib/docker` until a lookup succeeds. `SKIP_DF_COLLECTION` env var disables disk metrics entirely, skipping both the lookup and the `statfs` call.
 
 ## 9. Container Event Streaming
 
@@ -505,8 +510,8 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |
-| Concurrent exec sessions | 100 |
-| Concurrent stream sessions | 100 |
+| Concurrent exec sessions | 100 (edge: fixed; standard: `MAX_EXEC_SESSIONS`, non-positive disables) |
+| Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Excludes adapter `/api/events` and follow-mode logs. |
 
 ## 12. Configuration
 

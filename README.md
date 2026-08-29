@@ -624,6 +624,8 @@ Portwing talks to the Docker daemon over the Unix socket only — there is no `D
 | `MAX_RECONNECT_DELAY` | `60` | Max reconnect delay (seconds) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `SKIP_DF_COLLECTION` | -- | Disable disk metrics |
+| `MAX_STREAM_SESSIONS` | `100` | Standard mode: max concurrent streaming proxy responses (SPEC 7.3); non-positive disables the bound. Edge mode's equivalent limit is fixed, not configurable. |
+| `MAX_EXEC_SESSIONS` | `100` | Standard mode: max concurrent hijacked exec/attach sessions (SPEC 7.3); non-positive disables the bound. Edge mode's equivalent limit is fixed, not configurable. |
 | `AUDIT_LOG` | -- | Optional persistent audit sink: `stdout`, `stderr`, or a file path; unset disables only the sink (the in-memory ring is controlled by `AUDIT_BUFFER_SIZE`) |
 | `AUDIT_BUFFER_SIZE` | `256` | In-memory audit records retained for `GET /_portwing/audit`; `0` disables. Independent of `AUDIT_LOG`. |
 
@@ -700,12 +702,20 @@ live container state through this endpoint using their standard tool-call flow.
 | `host_metrics` | CPU, memory, disk, network, uptime snapshot (Linux only, see below) |
 | `container_stats(id)` | One-shot CPU/memory/network stats for a container |
 
-**Platform support:** `host_metrics` reads everything except the CPU core count from `/proc`, so
-it works on the Linux container, `.deb` and `.rpm` builds and on no other platform. On a native
-macOS install (including the Homebrew cask) the tool returns an MCP error naming the missing
-procfs rather than a snapshot of zeros, and `/metrics` reports
+**Platform support:** `host_metrics` reads everything except the CPU core count and disk from
+`/proc`, so it works on the Linux container, `.deb` and `.rpm` builds and on no other platform. On
+a native macOS install (including the Homebrew cask) the tool returns an MCP error naming the
+missing procfs rather than a snapshot of zeros, and `/metrics` reports
 `portwing_host_metrics_supported 0` with the host resource series omitted. Every other MCP tool
 is unaffected, since they read from the Docker API rather than the host.
+
+Disk usage is measured separately with `statfs` against the Docker daemon's actual data root
+(resolved from `/info`, not assumed to be `/var/lib/docker`), so it can fail independently of the
+`/proc`-backed fields even on Linux — for example when the data root is unreadable. That failure
+is reported in-band rather than as a zero: the response carries `diskMetricsAvailable: false` and
+a `diskError` string, and `/metrics` reports `portwing_host_disk_metrics_available 0` with
+`portwing_host_disk_total_bytes`/`portwing_host_disk_used_bytes` omitted, independent of
+`portwing_host_metrics_supported`.
 
 **Credential hygiene:** `inspect_container` returns only the *count* of environment variables —
 values are never transmitted through this MCP tool, preventing accidental secret leakage. This

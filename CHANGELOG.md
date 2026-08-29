@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Standard mode now enforces the concurrent exec and stream session limits
+  that SPEC 7.3 has always documented.** `MAX_STREAM_SESSIONS` and
+  `MAX_EXEC_SESSIONS` (both default `100`, matching edge mode's fixed limits)
+  bound concurrent streaming Docker proxy responses and hijacked exec/attach
+  sessions respectively; a saturated agent answers with `503` instead of
+  accepting an unbounded number of goroutines. Either variable can be set to a
+  non-positive value to disable its bound, for a controller that legitimately
+  drives more sessions than the default. `/api/events` SSE and follow-mode
+  container log streaming are not yet covered by either limit.
+- **`portwing --help` and `portwing --version` now work at the top level.**
+  Previously only the `hash-token`, `keygen`, and `version` subcommands were
+  recognized; a bare `--help` or an unrecognized flag started the full agent and
+  tried to connect to Docker instead of printing usage.
+- **Web analytics captures UTM campaign labels and the referring domain.** The
+  five `utm_*` parameters and `$referring_domain` now pass through the
+  cookieless PostHog pipeline on an explicit allowlist; unrelated click-id
+  parameters (`gclid`, `fbclid`, `msclkid`, ...) remain unreachable rather than
+  filtered, and a `$referring_domain` that isn't a bare hostname or `$direct` is
+  dropped.
+
+### Fixed
+
+- **Host disk metrics use the Docker daemon's real data root and report a
+  failed reading instead of a fake zero.** `host_metrics` and the Prometheus
+  host series previously assumed `/var/lib/docker`; the data root is now
+  resolved from the daemon's `/info` on first collection (2s timeout, retried
+  at most once per 30s on failure, unaffected by `SKIP_DF_COLLECTION`). A
+  `statfs` failure — wrong data root, unreadable filesystem — no longer reports
+  0 bytes as though the disk were empty: the snapshot carries
+  `diskMetricsAvailable: false` and a `diskError` string, and `/metrics` reports
+  `portwing_host_disk_metrics_available 0` with the disk byte series omitted.
+  This is independent of `portwing_host_metrics_supported`, which continues to
+  track only the `/proc`-backed fields (CPU, memory, network, uptime).
+- **`host_metrics` reports a missing procfs instead of a zero-filled
+  snapshot.** A native macOS install (including the Homebrew cask) previously
+  got back `isError:false` with `memoryTotal`, `diskTotal`, and `uptime` all
+  `0` — indistinguishable from a real reading of an idle host. The MCP tool now
+  returns an explicit error, and `/metrics` reports
+  `portwing_host_metrics_supported 0` with the host resource series omitted
+  rather than a flat zero line.
+- **`GET /api/containers/{id}/logs` (both adapters) now maps Docker's 404 and
+  409 through instead of collapsing both to 500.** The sibling delete handler
+  already mapped these correctly; the log handlers didn't share the fix. The status is
+  now carried on a typed Docker API error rather than pattern-matched out of
+  the formatted error message, which a container literally named `status 404`
+  could previously spoof into the wrong HTTP status.
+- **Wrong-method requests to `/_portwing/mcp` and `/api/portwing/enroll` return
+  405 instead of a bare Docker-proxy 404.** Both were registered as exact
+  method+path patterns, which lets Go's `ServeMux` fall through to the
+  Docker-proxy catch-all on any other method instead of reaching the handler's
+  own 405 response.
+- **The docs and marketing site footer copyright year no longer causes a hydration
+  mismatch.** It was computed with `new Date().getFullYear()` at both build
+  time and in the browser, which disagree for a visitor whose local clock
+  crosses into January before the static export is rebuilt. The year is now
+  baked into the build once and shared by server and client output.
+- **UTM values can no longer smuggle a path, query string, fragment, or
+  percent-escaped separator through the analytics allowlist.** The guard
+  missed `?`, `#`, and `\`, and only decoded a value once, so a doubly-encoded
+  separator (e.g. `%252Facme`) reached the sanitizer looking harmless while a
+  downstream decode would have rebuilt the real path. A bare `%` still passes,
+  so values like "50% off" are unaffected.
+
+### Security
+
+- **`golang.org/x/crypto` bumped to v0.55.0**, clearing GO-2026-6303
+  (CVE-2026-56854). The advisory is scoped to `x/crypto/ssh`; portwing imports
+  only `x/crypto/argon2`, and `govulncheck` reported zero called vulnerabilities
+  before and after. The `.grype.yaml` exclusions for portwing's own module and
+  binary move to v0.55.0 in lockstep; the entry covering the Wolfi-packaged
+  `docker-compose` binary's own embedded `x/crypto` is unaffected.
+
+### Changed
+
+- **Documented four real gaps between the API reference/OpenAPI spec and the
+  handlers.** `GET /api/log/entries` and `POST /_portwing/mcp` were live,
+  auth-required routes the reference omitted; the OpenAPI spec was missing the
+  MCP handler's `202`/`400` responses; and the reference wrongly implied the
+  MCP endpoint was available in edge mode, which never registers it.
+- **The Prometheus label escaper has one implementation.** `server.go`,
+  `edge/client.go`, and their tests each carried a copy of the same
+  backslash/quote/newline escape; all now call the single exported
+  `metrics.EscapeLabelValue`. No metric name, label, or value changes.
+- **Removed dead code found with no production callers:** `docker.DemuxLogStream`
+  (superseded by `DecodeContainerLogStream`) and `auth.checkFilePermissions`
+  (a byte-for-byte duplicate of `openCredentialFile`'s permission check, which
+  callers already use directly), along with the tests that existed solely to
+  exercise them.
+
 ## [v0.9.11] - 2026-08-27
 
 ### Fixed
