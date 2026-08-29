@@ -203,8 +203,11 @@ methods: `initialize`, `ping`, `tools/list`, `tools/call`. `GET
 
 A notification (a request with no `id`) or a JSON-RPC response message sent
 to the server (a `result`/`error` object with no `method`) returns HTTP `202`
-with an empty body. A malformed notification or response message returns
-HTTP `400` with an empty body.
+with an empty body. HTTP `400` with an empty body is returned only for two
+notification-shaped cases: a `result`/`error` object with no `method` that
+fails JSON-RPC response validation, or a notification (no `id`) whose
+`params` is present but not a JSON object. Requests carrying an `id`
+report errors inside a `200` JSON-RPC error envelope instead.
 
 <Callout type="info">
 This section covers the HTTP contract only. See [MCP Server](/mcp-server) for the tool catalog, read-only guarantees, and client configuration for Claude Desktop, Claude Code, Cursor, and Windsurf.
