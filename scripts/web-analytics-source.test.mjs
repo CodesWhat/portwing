@@ -24,7 +24,7 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
     .join("\n");
 
   assert.ok(rootPackage.workspaces.includes("analytics"));
-  assert.match(lock, /"posthog-js": "1\.417\.0"/);
+  assert.match(lock, /"posthog-js": "1\.421\.0"/);
   assert.doesNotMatch(lock, /"@vercel\/analytics"/);
   assert.doesNotMatch(sources, /@vercel\/analytics|SpeedInsights|\.identify\s*\(/);
   const analyticsClient = read("analytics/src/client.ts");
@@ -36,7 +36,7 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
   const extensionBundleBytes = fs.statSync(
     path.join(ROOT, "node_modules", "posthog-js", "dist", "extension-bundles.js"),
   ).size;
-  assert.equal(extensionBundleBytes, 138_263);
+  assert.equal(extensionBundleBytes, 148_886);
   assert.ok(extensionBundleBytes > 850_000 - 784_278);
 
   for (const app of ["website", "docs"]) {

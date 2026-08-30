@@ -27,7 +27,9 @@
   },
   "overrides": {
     "postcss": "^8.5.25",
-    "sharp": "^0.35.3"
+    "next": {
+      "sharp": "^0.35.3"
+    }
   },
   "packageManager": "npm@12.0.2",
   "engines": {
