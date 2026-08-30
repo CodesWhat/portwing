@@ -127,8 +127,13 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   );
   assert.match(
     runStep,
-    /^ {12}gremlins unleash --tags="" \\\n+(?:^ {14}[^\n#]*\\\n)*^ {14}--threshold-efficacy "\$\{\{ matrix\.efficacy \}\}" \\\n+^ {14}--threshold-mcover "\$\{\{ matrix\.mcover \}\}" \\\n+^ {14}"\$\{\{ matrix\.package \}\}" 2>&1 \| tee mutation-report\.txt$/mu,
+    /^ {12}gremlins unleash --tags="" \\\n+^ {14}"\$\{gremlins_args\[@\]\+"\$\{gremlins_args\[@\]\}"\}" \\\n+^ {14}--threshold-efficacy "\$\{\{ matrix\.efficacy \}\}" \\\n+^ {14}--threshold-mcover "\$\{\{ matrix\.mcover \}\}" \\\n+^ {14}"\$\{\{ matrix\.package \}\}" 2>&1 \| tee mutation-report\.txt$/mu,
     "Gremlins executable unleash command is malformed",
+  );
+  assert.doesNotMatch(
+    runStep,
+    /^ {10}if false; then$/mu,
+    "Gremlins script must preserve the zero-mutant branch",
   );
   assert.match(runStep, /gremlins_args\+=\(--workers "\$\{\{ matrix\.workers \}\}"\)/u);
   assert.match(runStep, /\| tee mutation-report\.txt/u);
@@ -245,6 +250,14 @@ test("mutation contract rejects threshold strings in printf arguments", () => {
   assertMutationFailure(source, "Gremlins executable unleash command is malformed");
 });
 
+test("mutation contract rejects a shell separator before thresholds", () => {
+  const source = workflow.replace(
+    '            gremlins unleash --tags="" \\\n',
+    '            gremlins unleash --tags="" \\\n              ; printf "%s\\n" \\\n',
+  );
+  assertMutationFailure(source, "Gremlins executable unleash command is malformed");
+});
+
 test("mutation contract rejects threshold strings that only occur in a later step", () => {
   const source = workflow
     .replace(`              --threshold-efficacy "${matrixEfficacy}" \\\n`, "")
@@ -261,5 +274,16 @@ test("mutation contract rejects a dead zero-mutant branch decoy", () => {
     `          if [ "${matrixZeroMutants}" = "true" ]; then`,
     "          if false; then",
   );
+  assertMutationFailure(source, "Gremlins script must preserve the zero-mutant branch");
+});
+
+test("mutation contract rejects an outer dead wrapper", () => {
+  const source = workflow
+    .replace(
+      `          if [ "${matrixZeroMutants}" = "true" ]; then`,
+      `          if false; then
+            if [ "${matrixZeroMutants}" = "true" ]; then`,
+    )
+    .replace("          fi\n        env:", "          fi\n          fi\n        env:");
   assertMutationFailure(source, "Gremlins script must preserve the zero-mutant branch");
 });

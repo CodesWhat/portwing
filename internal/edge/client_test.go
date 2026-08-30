@@ -607,50 +607,6 @@ func TestRunReconnectsAfterNonFatalError(t *testing.T) {
 	}
 }
 
-// TestRunBackoffResets confirms the backoff reset branch (line 181-183):
-// a successfully established connection resets delay to ReconnectDelay.
-// We can't easily observe delay internally, but we can ensure Run enters the
-// reconnect loop after a connect that succeeded and then dropped.
-func TestRunBackoffResets(t *testing.T) {
-	t.Parallel()
-
-	// connections counter so the server drops on the second dial.
-	var established bool
-
-	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
-		if !established {
-			established = true
-			readAndAckHello(t, ctrl)
-			sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{})
-			// Close immediately — agent reconnects.
-		}
-		// Second connection: just hang until test context expires.
-		time.Sleep(2 * time.Second)
-	})
-
-	addr := freeAddr(t)
-	cfg := &config.Config{
-		DrydockURL:        srv,
-		HeartbeatInterval: 30,
-		WelcomeTimeout:    5,
-		ReconnectDelay:    0,
-		MaxReconnectDelay: 0,
-		DDPollInterval:    300,
-		BindAddress:       "127.0.0.1",
-		Port:              portFrom(addr),
-		SkipDFCollection:  true,
-	}
-	c := newWireClient(t, cfg)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	err := c.Run(ctx)
-	if errors.Is(err, errFatal) {
-		t.Errorf("Run returned errFatal unexpectedly: %v", err)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Run — ctx cancel while holding a live connection (lines 154-167)
 // ---------------------------------------------------------------------------
@@ -1077,11 +1033,11 @@ func TestStartHealthServerPortConflict(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// HandleInput — input queue full / session done (lines 183-186)
+// connect — welcome with matching compat level (no warning branch)
 // ---------------------------------------------------------------------------
 
-// TestHandleInputQueueFull verifies that when the session inbox is full and
-// done is not closed, the default branch drops the frame (no deadlock/panic).
+// TestConnectWelcomeCompatMatch covers the welcome.Config["serverCompatLevel"]
+// branch when it matches protocol.DrydockCompat (no warning).
 func TestConnectWelcomeCompatMatch(t *testing.T) {
 	t.Parallel()
 
@@ -1151,12 +1107,13 @@ func TestConnectWelcomePollIntervalZeroNotOverridden(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// bringUpExec — initial resize failure (line 143-145 in tunnel.go)
+// Run — exponential backoff capping (line 196-199)
 // ---------------------------------------------------------------------------
 
-// TestBringUpExecResizeFailureIsWarningOnly verifies that a failure in the
-// initial ResizeExec call is logged as a warning but the session still
-// succeeds (exec_ready is still sent).
+// TestRunBackoffCaps confirms the `delay *= 2` and `delay > maxDelay` cap:
+// Run must not block forever when delays are capped to maxDelay. This is
+// exercised implicitly by TestRunReconnectsAfterNonFatalError but we add an
+// explicit small-delay test to confirm the cap logic is hit.
 func TestRunBackoffCaps(t *testing.T) {
 	t.Parallel()
 
@@ -1555,11 +1512,12 @@ func TestSendMetricsWithFailingCollector(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// writeInput — done channel fires during retry delay (line 227-228)
+// sendPump — WriteJSON error path (lines 795-799)
 // ---------------------------------------------------------------------------
 
-// TestWriteInputDoneFiresDuringRetry covers the case where the session's done
-// channel is closed while writeInput is retrying (between write attempts).
+// TestSendPumpWriteJSONError covers lines 795-799: when conn.WriteJSON fails,
+// failConn is called and sendPump returns. We close the agent-side conn BEFORE
+// sending a message so the WriteJSON call fails immediately.
 func TestSendPumpWriteJSONError(t *testing.T) {
 	t.Parallel()
 

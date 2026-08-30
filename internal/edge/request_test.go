@@ -518,10 +518,3 @@ func TestHandleRequestNonStreamWithBody(t *testing.T) {
 		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// connect — welcome with matching compat level (no warning branch)
-// ---------------------------------------------------------------------------
-
-// TestConnectWelcomeCompatMatch covers the welcome.Config["serverCompatLevel"]
-// branch when it matches protocol.DrydockCompat (no warning).

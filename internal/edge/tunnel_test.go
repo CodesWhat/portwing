@@ -518,11 +518,12 @@ func TestActivateOrphanedConnCloseError(t *testing.T) {
 // custom websocket.Conn.
 
 // ---------------------------------------------------------------------------
-// handleRequest — body reader from req.Body (line 590-592)
+// bringUpExec — initial resize failure (line 143-145 in tunnel.go)
 // ---------------------------------------------------------------------------
 
-// TestHandleRequestNonStreamWithBody verifies the bodyReader branch: when
-// req.Body is non-nil, a bytes.Reader is created and passed to Do.
+// TestBringUpExecResizeFailureIsWarningOnly verifies that a failure in the
+// initial ResizeExec call is logged as a warning but the session still
+// succeeds (exec_ready is still sent).
 func TestBringUpExecResizeFailureIsWarningOnly(t *testing.T) {
 	t.Parallel()
 
@@ -591,13 +592,11 @@ func TestCloseSessionConnCloseError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Run — exponential backoff capping (line 196-199)
+// writeInput — done channel fires during retry delay (line 227-228)
 // ---------------------------------------------------------------------------
 
-// TestRunBackoffCaps confirms the `delay *= 2` and `delay > maxDelay` cap:
-// Run must not block forever when delays are capped to maxDelay. This is
-// exercised implicitly by TestRunReconnectsAfterNonFatalError but we add an
-// explicit small-delay test to confirm the cap logic is hit.
+// TestWriteInputDoneFiresDuringRetry covers the case where the session's done
+// channel is closed while writeInput is retrying (between write attempts).
 func TestWriteInputDoneFiresDuringRetry(t *testing.T) {
 	t.Parallel()
 
@@ -662,14 +661,11 @@ func (c *gatedErrConn) attempts() int {
 // ---------------------------------------------------------------------------
 // HandleResize — done channel fires when inbox is full (line 253-254)
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// sendPump — WriteJSON error path (lines 795-799)
+// HandleResize — done channel fires when inbox is full (line 253-254)
 // ---------------------------------------------------------------------------
 
-// TestSendPumpWriteJSONError covers lines 795-799: when conn.WriteJSON fails,
-// failConn is called and sendPump returns. We close the agent-side conn BEFORE
-// sending a message so the WriteJSON call fails immediately.
+// TestHandleResizeDoneWhenInboxFull covers the done branch in HandleResize
+// when the inbox is already at capacity so the inbox send would block.
 func TestHandleResizeDoneWhenInboxFull(t *testing.T) {
 	t.Parallel()
 

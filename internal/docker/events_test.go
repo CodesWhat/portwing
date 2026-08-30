@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -464,10 +465,10 @@ func TestEventStream_run_ErrorLogging(t *testing.T) {
 func TestEventStream_run_BackoffCapped(t *testing.T) {
 	t.Parallel()
 
-	var callCount atomic.Int32
+	var waits []time.Duration
+	cancelAfterWaits := make(chan struct{})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount.Add(1)
 		// Return 403 every time so each attempt errors and backoff doubles.
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}))
@@ -479,9 +480,18 @@ func TestEventStream_run_BackoffCapped(t *testing.T) {
 		client:       c,
 		initialDelay: 5 * time.Millisecond,
 		maxDelay:     10 * time.Millisecond,
+		after: func(delay time.Duration) <-chan time.Time {
+			waits = append(waits, delay)
+			ready := make(chan time.Time)
+			close(ready)
+			if len(waits) == 4 {
+				close(cancelAfterWaits)
+			}
+			return ready
+		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	ch, err := es.Subscribe(ctx)
@@ -489,15 +499,18 @@ func TestEventStream_run_BackoffCapped(t *testing.T) {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
-	// Let it run for a bit (at least 4 reconnections so doubling → cap is exercised).
-	time.AfterFunc(300*time.Millisecond, cancel)
-
-	// Drain the channel.
+	select {
+	case <-cancelAfterWaits:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("backoff did not request four waits")
+	}
 	for range ch {
 	}
 
-	if n := callCount.Load(); n < 4 {
-		t.Fatalf("expected at least 4 reconnections to exercise backoff cap, got %d", n)
+	want := []time.Duration{5 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond}
+	if !slices.Equal(waits, want) {
+		t.Fatalf("backoff waits = %v, want %v", waits, want)
 	}
 }
 
