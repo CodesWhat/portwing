@@ -52,7 +52,7 @@ calendar date:
 - **Completed 2026-08-29: Tagged acceptance matrix.** Published Portwing
   v0.9.11, Drydock v1.6.0, and Sockguard v2.0.0 artifacts passed the full
   Standard/Edge matrix in the
-  [hosted conformance run](https://github.com/CodesWhat/sockguard/actions/runs/33279617543).
+  [hosted conformance run](https://github.com/CodesWhat/sockguard/actions/runs/33283283870).
   A real Drydock controller exercised enrollment, overlapping-key rotation,
   revocation, two SIGHUP reloads, and clock-skew rejection and recovery. The
   legacy-floor row passed alongside the current Standard and Edge rows.
