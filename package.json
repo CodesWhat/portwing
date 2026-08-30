@@ -20,14 +20,16 @@
     "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run build && npm run budget:web && npm run lighthouse"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.7",
+    "@biomejs/biome": "2.5.10",
     "chrome-launcher": "1.2.1",
     "lighthouse": "13.4.1",
-    "turbo": "2.10.8"
+    "turbo": "2.10.12"
   },
   "overrides": {
     "postcss": "^8.5.25",
-    "sharp": "^0.35.3"
+    "next": {
+      "sharp": "^0.35.4"
+    }
   },
   "packageManager": "npm@12.0.2",
   "engines": {
