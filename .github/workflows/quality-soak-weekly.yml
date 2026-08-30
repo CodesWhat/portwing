@@ -5,7 +5,7 @@ run-name: >-
     format('Quality: Soak — Manual by {0}', github.actor)
   }}
 
-# RSS + thread-drift soak. Runs the Portwing agent (generic adapter) in front of
+# RSS-growth soak. Runs the Portwing agent (generic adapter) in front of
 # a mock Docker daemon under a sustained loadgen mix — cached-inventory reads,
 # version/info, a raw Docker proxy read, and a stream of SSE subscribers that
 # connect/hold/disconnect (the leak-prone path) — and asserts the agent's
@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   soak:
-    name: "Soak (portwing RSS + thread drift)"
+    name: "Soak (portwing RSS growth)"
     runs-on: ubuntu-24.04
     # Allow 30 minutes for build + warmup + post-run reporting on top of the
     # 4-hour soak; well under the 6-hour github-hosted ceiling.

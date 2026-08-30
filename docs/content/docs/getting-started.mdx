@@ -192,7 +192,7 @@ volumes:
 Edge mode lets Portwing dial **out** to your Drydock controller over a WebSocket tunnel instead of listening for inbound connections. This is useful for hosts behind NAT or a firewall where you cannot publish an inbound port.
 
 <Callout type="info">
-**Production supported; use Drydock `v1.6.0-rc.11+` with Portwing v0.9.0.** The stable `portwing/1.0` path is covered by a real multi-agent reconnect/load soak with concurrent exec, continuous logs, and controller backpressure. Drydock `v1.6.0-rc.11+` implements the complete controller-owned watcher/update contract; older controllers may remain wire-compatible without that behavior. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
+**Production supported; use Drydock `v1.6.0-rc.11+` with Portwing v0.9.0.** Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers the stable `portwing/1.0` path with real Portwing processes, multi-agent reconnect load, concurrent exec, continuous logs, and controller backpressure. Portwing's separate `quality-soak-weekly.yml` covers the Standard/generic HTTP path and SSE churn under an RSS-growth budget. Drydock `v1.6.0-rc.11+` implements the complete controller-owned watcher/update contract; older controllers may remain wire-compatible without that behavior. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
 </Callout>
 
 ```bash

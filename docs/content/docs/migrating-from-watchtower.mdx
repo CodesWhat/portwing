@@ -113,7 +113,7 @@ Key environment variables for Standard mode:
 Use this when your host is behind NAT, a firewall, or has a dynamic IP. Portwing initiates the outbound WebSocket connection to Drydock; no inbound port is required.
 
 <Callout type="info">
-Edge mode is production supported under the stable `portwing/1.0` protocol and is covered by a real multi-agent reconnect/load soak. Use Drydock `v1.6.0-rc.11+` with Portwing v0.9.0 for the full controller-owned watcher/update feature path. The endpoint is Ed25519-only: set `PRIVATE_KEY_FILE` (token-only connections are rejected).
+Edge mode is production supported under the stable `portwing/1.0` protocol. Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers it with real Portwing processes under multi-agent reconnect, exec, continuous-log, and controller-backpressure load; Portwing's separate weekly soak covers Standard/generic HTTP and SSE RSS growth. Use Drydock `v1.6.0-rc.11+` with Portwing v0.9.0 for the full controller-owned watcher/update feature path. The endpoint is Ed25519-only: set `PRIVATE_KEY_FILE` (token-only connections are rejected).
 </Callout>
 
 ```yaml

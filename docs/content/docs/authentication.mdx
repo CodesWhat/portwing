@@ -3,7 +3,7 @@ title: Authentication
 description: Configure token-based or Ed25519 per-client key authentication for the Portwing agent.
 ---
 
-Portwing supports four authentication mechanisms, ordered below from weakest to strongest. All token options and Ed25519 keys can coexist during migration — the middleware checks for an `X-Portwing-Signature` header first and falls back to token verification when that header is absent.
+Portwing supports four authentication mechanisms, ordered below from weakest to strongest. One shared-secret option and Ed25519 keys can coexist during migration — the middleware checks for an `X-Portwing-Signature` header first and falls back to token verification when that header is absent. Plaintext token configuration (`TOKEN` or `TOKEN_FILE`) and hash-at-rest configuration (`TOKEN_HASH` or `TOKEN_HASH_FILE`) are mutually exclusive.
 
 Requests authenticate via `Authorization: Bearer`, `X-Portwing-Token`, or `X-Dd-Agent-Secret` for token-based auth, and via a set of `X-Portwing-*` headers for Ed25519.
 
@@ -218,7 +218,7 @@ Drydock `v1.6.0-rc.11+` is the supported feature peer for Portwing v0.9.0 and im
 </Callout>
 
 <Callout type="warn">
-Drydock's bundled `AgentClient` (the HTTP-polling client used in Standard Mode) does not implement Ed25519 request signing today — it authenticates only via `X-Dd-Agent-Secret` (token-hash auth, see [3. Argon2id hash-at-rest](#3-argon2id-hash-at-rest) above). Per-request Ed25519 signing is available today only for custom, non-Drydock HTTP clients calling Portwing's Standard Mode API directly. Edge Mode's Ed25519 *hello* signing described above is a separate mechanism and is required by the supported Drydock `v1.6.0-rc.11+` path regardless of which client library talks to Standard Mode.
+Drydock's bundled `AgentClient` (the HTTP-polling client used in Standard Mode) supports both token authentication (the default `X-Dd-Agent-Secret` path, see [3. Argon2id hash-at-rest](#3-argon2id-hash-at-rest) above) and per-request Ed25519 signing. Set `DD_AGENT_{name}_AUTHMODE=ed25519`, `DD_AGENT_{name}_SIGNINGKEYID`, and `DD_AGENT_{name}_SIGNINGKEY` to use the latter; the controller then sends the five `X-Portwing-*` signature headers instead of a shared secret. Standard Mode Ed25519 signing and Edge Mode's Ed25519 *hello* signing are separate mechanisms. The Edge Mode hello remains required by the supported Drydock `v1.6.0-rc.11+` WebSocket path.
 </Callout>
 
 ---

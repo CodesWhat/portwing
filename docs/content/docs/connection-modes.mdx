@@ -74,8 +74,10 @@ See [Getting Started](/getting-started) for the full Sockguard variant and TLS e
 **Status: production supported with stable `portwing/1.0`; full v0.9 feature compatibility requires Drydock `v1.6.0-rc.11+`.**
 
 <Callout type="info">
-  Edge mode is covered by a real multi-agent reconnect/load soak, including concurrent
-  exec, continuous logs, and controller backpressure. Drydock `v1.6.0-rc.11+`
+  Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers Edge mode with
+  real Portwing processes, multi-agent reconnect load, concurrent exec, continuous logs,
+  and controller backpressure. Portwing's separate `quality-soak-weekly.yml` covers the
+  Standard/generic HTTP path and SSE churn under an RSS-growth budget. Drydock `v1.6.0-rc.11+`
   implements Portwing v0.9.0's controller-owned watcher/update contract; an
   older controller may connect at the wire level without that behavior. The endpoint is
   **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock —
@@ -114,7 +116,7 @@ Setting `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is rejected at startup with a f
 On each connection attempt the agent:
 
 1. Opens a WebSocket to `DRYDOCK_URL/api/portwing/ws` and identifies itself with the `portwing/1.0` protocol string carried in its `hello` message — an application-level identifier, not a negotiated `Sec-WebSocket-Protocol` sub-protocol header.
-2. Sends a `hello` message containing its agent ID, name, capabilities, Docker version, and a credential. When `PRIVATE_KEY_FILE` is configured the hello is Ed25519-signed (see [Authentication](/authentication)); otherwise the token SHA-256 hash is included.
+2. Sends a `hello` message containing its agent ID, name, capabilities, Docker version, and an Ed25519 signature created with `PRIVATE_KEY_FILE` (see [Authentication](/authentication)). Edge mode requires this key; token-hash authentication is rejected by the controller.
 3. Waits up to `WELCOME_TIMEOUT` seconds for the controller's `welcome` response.
 4. On success, sends component descriptors (`dd:component_sync`) before the
    initial container inventory (`dd:container_sync`), then sends host metrics.

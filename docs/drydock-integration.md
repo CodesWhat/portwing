@@ -95,7 +95,12 @@ The edge-mode hello is Ed25519-signed (`pubKeyId`/`timestamp`/`nonce`/`signature
 
 ## Endpoints Portwing Serves (Standard Mode)
 
-All `/api/*` endpoints require `X-Dd-Agent-Secret` or `X-Portwing-Token` header.
+All authenticated `/api/*` endpoints accept an `Authorization: Bearer`,
+`X-Dd-Agent-Secret`, or `X-Portwing-Token` header, or a valid Ed25519 request
+signature in the five `X-Portwing-*` headers. `POST /api/portwing/enroll` is
+the bootstrap exception when `ENROLLMENT_TOKEN` is configured: it is
+rate-limited but authenticates with the one-use enrollment token in its request
+body. The `/health` endpoint is unauthenticated.
 
 | Drydock Call | Portwing Endpoint | Method | Notes |
 |---|---|---|---|
@@ -327,7 +332,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `dd:update-operation-changed` SSE | N-A | Controller-owned update state; Portwing remains the Docker transport and lifecycle-event source |
 | `dd:batch-update-completed` SSE | N-A | Controller-owned batch state; update calls still traverse Portwing |
 | `dd:security-alert` / `dd:security-scan-cycle-complete` SSE | N-A | Portwing does not perform security scanning |
-| Edge Mode WebSocket (`/api/portwing/ws`) | STABLE (`portwing/1.0`) | Ed25519-only; correlated `request`/`response` messages carry controller-owned watcher/update Docker API calls. Portwing 0.8 adds continuous log streaming and the fleet-soak release gate. |
+| Edge Mode WebSocket (`/api/portwing/ws`) | STABLE (`portwing/1.0`) | Ed25519-only; correlated `request`/`response` messages carry controller-owned watcher/update Docker API calls. Portwing 0.8 adds continuous log streaming; Drydock owns the cross-repo `quality-portwing-fleet-soak.yml` gate. |
 
 ---
 
