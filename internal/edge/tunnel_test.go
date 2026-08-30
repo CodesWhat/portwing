@@ -661,8 +661,6 @@ func (c *gatedErrConn) attempts() int {
 // ---------------------------------------------------------------------------
 // HandleResize — done channel fires when inbox is full (line 253-254)
 // ---------------------------------------------------------------------------
-// HandleResize — done channel fires when inbox is full (line 253-254)
-// ---------------------------------------------------------------------------
 
 // TestHandleResizeDoneWhenInboxFull covers the done branch in HandleResize
 // when the inbox is already at capacity so the inbox send would block.
