@@ -14,4 +14,4 @@ export GOLANGCI_LINT_CACHE
 trap 'rm -rf "${GOLANGCI_LINT_CACHE}"' EXIT
 
 cd "${module_directory}"
-go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run

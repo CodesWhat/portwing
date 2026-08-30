@@ -68,6 +68,35 @@ if [ "${missing_builder_status}" -eq 0 ] ||
 	failures=$((failures + 1))
 fi
 
+check_stale_builder_ref() {
+	local dockerfile="$1"
+	local stale_builder_fixture
+	local stale_builder_output
+	local stale_builder_status
+
+	stale_builder_fixture="$(new_fixture)"
+	sed -E 's/^FROM golang:[^ ]+/FROM golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df/' \
+		"${stale_builder_fixture}/${dockerfile}" >"${stale_builder_fixture}/${dockerfile}.tmp"
+	mv "${stale_builder_fixture}/${dockerfile}.tmp" "${stale_builder_fixture}/${dockerfile}"
+
+	set +e
+	stale_builder_output="$(
+		cd "${stale_builder_fixture}" && bash scripts/package-release-config-test.sh 2>&1
+	)"
+	stale_builder_status=$?
+	set -e
+	if [ "${stale_builder_status}" -eq 0 ] ||
+		! grep -Fq "FAIL: ${dockerfile} must use the exact go.mod toolchain in a digest-pinned Alpine builder" <<<"${stale_builder_output}"; then
+		echo "FAIL: the validator must reject a stale Go builder in ${dockerfile}" >&2
+		failures=$((failures + 1))
+	fi
+
+	rm -rf "${stale_builder_fixture}"
+}
+
+check_stale_builder_ref Dockerfile.armv7
+check_stale_builder_ref Dockerfile.dev
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} package release contract self-test check(s) failed" >&2
 	exit 1

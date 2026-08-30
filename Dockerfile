@@ -3,7 +3,7 @@
 # Dockerfile.release; this file is the standalone equivalent.)
 
 # Stage 1: Build the binary from source.
-FROM golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS builder
+FROM golang:1.27.0-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS builder
 RUN apk add --no-cache git
 WORKDIR /src
 COPY go.mod go.sum ./
