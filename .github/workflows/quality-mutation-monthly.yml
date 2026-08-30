@@ -5,8 +5,9 @@ run-name: >-
     format('Quality: Mutation Testing — Manual by {0}', github.actor)
   }}
 
-# Monthly/manual quality signal using Gremlins (Go mutation tester).
-# Finds weak assertions, dead code, and refactor candidates. Advisory only.
+# Monthly/manual quality gate using Gremlins (Go mutation tester).
+# Floors are ratchets from measured v0.6.0 runs. Keep generator-only and
+# integration-test-only packages out of this production-package matrix.
 on:
   workflow_dispatch:
   schedule:
@@ -27,23 +28,78 @@ jobs:
     name: "Quality: Gremlins (${{ matrix.name }})"
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    continue-on-error: true  # advisory — review results, don't block
     strategy:
       fail-fast: false
       matrix:
         include:
+          - name: portwing
+            package: ./cmd/portwing
+            efficacy: 100
+            mcover: 100
           - name: server
             package: ./internal/server
+            efficacy: 77.88
+            mcover: 94.12
           - name: adapter
             package: ./internal/adapter
+            efficacy: 84.68
+            mcover: 93.28
           - name: adapter-drydock
             package: ./internal/adapter/drydock
-          - name: config
-            package: ./internal/config
-          - name: mcp
-            package: ./internal/mcp
+            efficacy: 83.72
+            mcover: 92.47
           - name: audit
             package: ./internal/audit
+            efficacy: 88.31
+            mcover: 100
+          - name: auth
+            package: ./internal/auth
+            efficacy: 79.17
+            mcover: 97.96
+          - name: banner
+            package: ./internal/banner
+            efficacy: 87.50
+            mcover: 16.00
+          - name: config
+            package: ./internal/config
+            efficacy: 82.22
+            mcover: 100
+          - name: docker
+            package: ./internal/docker
+            efficacy: 100
+            mcover: 78.08
+          - name: edge
+            package: ./internal/edge
+            efficacy: 85.21
+            mcover: 96.02
+          - name: generic
+            package: ./internal/generic
+            efficacy: 85.00
+            mcover: 100
+          - name: log
+            package: ./internal/log
+            zero_mutants: true
+          - name: mcp
+            package: ./internal/mcp
+            efficacy: 79.49
+            mcover: 79.59
+          - name: metrics
+            package: ./internal/metrics
+            # workers=1 repeats: 91.76/94.44, 92.00/83.33, 91.11/94.74.
+            # Floors retain observed slack for Gremlins run-to-run variance.
+            efficacy: 90.00
+            mcover: 80.00
+            workers: 1
+          - name: pool
+            package: ./internal/pool
+            efficacy: 50.00
+            mcover: 80.00
+          - name: protocol
+            package: ./internal/protocol
+            efficacy: 100
+            mcover: 100
+          # internal/banner/gen is generator-only and has no mutation target.
+          # internal/integration is integration-test-only and has no production package.
 
     steps:
       - name: Harden Runner
@@ -73,14 +129,23 @@ jobs:
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@"${GREMLINS_VERSION}"
 
       - name: Run Gremlins mutation testing
-        # shell: bash (rather than the default `bash -e {0}`) is required here:
-        # GitHub's default bash has -e but not -o pipefail, so `| tee` would
-        # report tee's exit code and hide a Gremlins crash behind a green step.
-        # The job stays advisory via continue-on-error; this only makes the
-        # step's own status honest.
         shell: bash
         run: |
-          gremlins unleash --tags="" ${{ matrix.package }} 2>&1 | tee mutation-report.txt
+          set -euo pipefail
+          gremlins_args=()
+          if [ -n "${{ matrix.workers || '' }}" ]; then
+            gremlins_args+=(--workers "${{ matrix.workers }}")
+          fi
+          if [ "${{ matrix.zero_mutants || false }}" = "true" ]; then
+            gremlins unleash --tags="" "${gremlins_args[@]+"${gremlins_args[@]}"}" "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
+            grep -q "No results to report" mutation-report.txt
+          else
+            gremlins unleash --tags="" \
+              "${gremlins_args[@]+"${gremlins_args[@]}"}" \
+              --threshold-efficacy "${{ matrix.efficacy }}" \
+              --threshold-mcover "${{ matrix.mcover }}" \
+              "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
+          fi
         env:
           GOFLAGS: ""
 
@@ -91,7 +156,7 @@ jobs:
             echo "### Mutation Testing: ${{ matrix.name }}"
             echo "- Tool: Gremlins (Go mutation tester)"
             echo "- Version: ${GREMLINS_VERSION}"
-            echo "- Mode: ADVISORY (non-blocking)"
+            echo "- Mode: blocking numeric ratchet"
             echo "- Package: ${{ matrix.package }}"
             echo ""
             if [ -f mutation-report.txt ]; then

@@ -222,7 +222,7 @@ jobs:
         # that leg from Alpine using its prebuilt docker-cli/docker-cli-compose,
         # which are themselves compiled with Go 1.26.3. Every stdlib advisory
         # they carry is fixed in Go 1.26.6, and portwing's own go.mod already
-        # pins toolchain go1.26.6 — the vulnerable toolchain is Alpine's, not
+        # pins toolchain go1.27.0 — the vulnerable toolchain is Alpine's, not
         # this repo's, and no Alpine branch ships a go>=1.26.6-built package
         # yet (edge is on 1.26.5, one patch short). portwing's own binary
         # carries zero findings on all three platforms.

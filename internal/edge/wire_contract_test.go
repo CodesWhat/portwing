@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +49,12 @@ type fakeAdapter struct {
 	onConnectErr    error
 	handleMsgResult bool
 	pollInterval    int
+
+	// mu guards handleMsgTypes, which records every msgType passed to
+	// HandleMessage. readPump calls HandleMessage on its own goroutine, so
+	// tests that assert delegation must read this under the lock.
+	mu             sync.Mutex
+	handleMsgTypes []string
 }
 
 func (a *fakeAdapter) Name() string                            { return "fake" }
@@ -63,8 +70,19 @@ func (a *fakeAdapter) OnContainerRefresh(_ context.Context, _ adapter.MessageSen
 	return nil
 }
 func (a *fakeAdapter) PollInterval() int { return a.pollInterval }
-func (a *fakeAdapter) HandleMessage(_ context.Context, _ adapter.MessageSender, _ string, _ json.RawMessage) bool {
+func (a *fakeAdapter) HandleMessage(_ context.Context, _ adapter.MessageSender, msgType string, _ json.RawMessage) bool {
+	a.mu.Lock()
+	a.handleMsgTypes = append(a.handleMsgTypes, msgType)
+	a.mu.Unlock()
 	return a.handleMsgResult
+}
+
+// messageTypes returns a copy of the msgTypes HandleMessage has been called
+// with, in order.
+func (a *fakeAdapter) messageTypes() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.handleMsgTypes...)
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +594,11 @@ func TestReadPumpDelegatesUnknownTypeToAdapter(t *testing.T) {
 
 	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 77})
 	expectType(t, ctrl, protocol.TypePong)
+
+	got := fa.messageTypes()
+	if len(got) != 1 || got[0] != "custom:thing" {
+		t.Fatalf("adapter.HandleMessage calls = %v, want [custom:thing]", got)
+	}
 }
 
 // TestReadPumpAdapterHandlesCustomMessage covers the adapter returning true
@@ -593,6 +616,11 @@ func TestReadPumpAdapterHandlesCustomMessage(t *testing.T) {
 
 	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 88})
 	expectType(t, ctrl, protocol.TypePong)
+
+	got := fa.messageTypes()
+	if len(got) != 1 || got[0] != "custom:handled" {
+		t.Fatalf("adapter.HandleMessage calls = %v, want [custom:handled]", got)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +693,37 @@ func TestReadPumpSkipsMalformedPing(t *testing.T) {
 
 	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 44})
 	expectType(t, ctrl, protocol.TypePong)
+}
+
+// TestReadPumpSkipsMalformedStreamFrames ensures a badly formed stream or
+// stream_end payload is skipped without crashing, and without being handed to
+// the adapter: a frame that failed to decode has no RequestID to route by, so
+// neither the reassembly path nor an adapter can do anything with it.
+// Liveness confirmed by ping.
+func TestReadPumpSkipsMalformedStreamFrames(t *testing.T) {
+	t.Parallel()
+
+	fa := &fakeAdapter{handleMsgResult: true}
+	c, ctrl := newTestClient(t)
+	c.adapter = fa
+
+	runReadPump(t, c)
+
+	for _, msgType := range []string{protocol.TypeStream, protocol.TypeStreamEnd} {
+		badEnv := protocol.Envelope{Type: msgType, Data: json.RawMessage(`"notanobject"`)}
+		if err := ctrl.WriteJSON(badEnv); err != nil {
+			t.Fatalf("write bad %s: %v", msgType, err)
+		}
+	}
+
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 123})
+	expectType(t, ctrl, protocol.TypePong)
+
+	// The ping/pong above is the ordering barrier: readPump is a single
+	// goroutine, so both frames are fully handled by the time the pong lands.
+	if got := fa.messageTypes(); len(got) != 0 {
+		t.Errorf("adapter.HandleMessage calls = %v, want none: a frame that failed to decode must not fall through", got)
+	}
 }
 
 // ---------------------------------------------------------------------------
