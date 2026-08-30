@@ -13,10 +13,10 @@ permissions:
   contents: read
 
 env:
-  # Kept equal to the grype that anchore/scan-action@v7.4.0 installs in
+  # Kept equal to the grype that anchore/scan-action@v7.4.2 installs in
   # security-grype.yml, so the release scan and the PR/scheduled scans cannot
   # disagree about the same image. Bump both together.
-  GRYPE_VERSION: "0.110.0"
+  GRYPE_VERSION: "0.118.0"
 
 jobs:
   verify-release-source:
@@ -294,7 +294,7 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
       - name: Install Grype
-        # Version-pinned to match what anchore/scan-action@v7.4.0 installs in
+        # Version-pinned to match what anchore/scan-action@v7.4.2 installs in
         # security-grype.yml, so both scanners agree. Bump this and the
         # scan-action pin together.
         #
@@ -305,7 +305,7 @@ jobs:
         # already control. Fetching the pinned assets and verifying them here
         # puts the signature check ahead of anything executing.
         #
-        # The signer identity is exact, not a regexp: read off grype v0.110.0's
+        # The signer identity is exact, not a regexp: read off grype v0.118.0's
         # own certificate SAN, and confirmed to reject a near-miss identity.
         # Re-read it if a bump ever fails this step rather than loosening it.
         run: |

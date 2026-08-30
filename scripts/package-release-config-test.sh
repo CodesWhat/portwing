@@ -286,6 +286,20 @@ require_text ".github/workflows/release.yml" "fedora:42@sha256:" "the rpm smoke 
 require_text ".github/workflows/release.yml" 'release.yml@refs/tags/${GITHUB_REF_NAME}' "release verification must bind the signer identity to the exact release tag"
 reject_text ".github/workflows/release.yml" "certificate-identity-regexp" "release verification must not accept an unanchored signer identity"
 
+expected_scan_action_ref="anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439"
+scan_action_count="$(awk -v expected="${expected_scan_action_ref}" \
+	'$1 == "uses:" && $2 == expected && $3 == "#" && $4 == "v7.4.2" { count++ } END { print count + 0 }' \
+	.github/workflows/security-grype.yml)"
+if [ "${scan_action_count}" -ne 2 ]; then
+	echo "FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in both scanner lanes" >&2
+	failures=$((failures + 1))
+fi
+require_text ".github/workflows/release.yml" 'GRYPE_VERSION: "0.118.0"' \
+	"release Grype version must match anchore/scan-action@v7.4.2's Grype v0.118.0"
+require_text ".github/workflows/release.yml" \
+	'--certificate-identity "https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main"' \
+	"release Grype checksum verification must use the exact Anchore Grype release workflow identity"
+
 # Publishing holds contents, packages, identity, and attestation write access.
 # Keep all provenance checks in a separate read-only job, then make the
 # privileged job depend on it. Checking these strings file-wide would let the

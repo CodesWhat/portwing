@@ -55,6 +55,22 @@ if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null)
 	exit 1
 fi
 
+sed 's/GRYPE_VERSION: "0.118.0"/GRYPE_VERSION: "0.118.1"/' \
+	"${fixture}/.github/workflows/release.yml" >"${fixture}/.github/workflows/release.yml.tmp"
+mv "${fixture}/.github/workflows/release.yml.tmp" "${fixture}/.github/workflows/release.yml"
+expect_release_contract_failure \
+	"FAIL: release Grype version must match anchore/scan-action@v7.4.2's Grype v0.118.0" \
+	"the package release contract must reject a Grype version that disagrees with scan-action v7.4.2"
+restore_release_workflows
+
+sed 's#https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main#https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/release#' \
+	"${fixture}/.github/workflows/release.yml" >"${fixture}/.github/workflows/release.yml.tmp"
+mv "${fixture}/.github/workflows/release.yml.tmp" "${fixture}/.github/workflows/release.yml"
+expect_release_contract_failure \
+	"FAIL: release Grype checksum verification must use the exact Anchore Grype release workflow identity" \
+	"the package release contract must reject a near-miss Grype signing identity"
+restore_release_workflows
+
 sed '/bash scripts\/package-release-config-test.sh/d' \
 	"${fixture}/scripts/ci/go-release-check.sh" >"${fixture}/scripts/ci/go-release-check.sh.tmp"
 mv "${fixture}/scripts/ci/go-release-check.sh.tmp" "${fixture}/scripts/ci/go-release-check.sh"
