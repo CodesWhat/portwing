@@ -483,16 +483,21 @@ func TestEventStream_run_BackoffCapped(t *testing.T) {
 		after: func(delay time.Duration) <-chan time.Time {
 			waits = append(waits, delay)
 			ready := make(chan time.Time)
-			close(ready)
 			if len(waits) == 4 {
 				close(cancelAfterWaits)
+				return ready
 			}
+			close(ready)
 			return ready
 		},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	go func() {
+		<-cancelAfterWaits
+		cancel()
+	}()
 
 	ch, err := es.Subscribe(ctx)
 	if err != nil {
@@ -501,7 +506,6 @@ func TestEventStream_run_BackoffCapped(t *testing.T) {
 
 	select {
 	case <-cancelAfterWaits:
-		cancel()
 	case <-time.After(time.Second):
 		t.Fatal("backoff did not request four waits")
 	}
