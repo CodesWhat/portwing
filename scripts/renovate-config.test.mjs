@@ -26,6 +26,19 @@ function assertPackageVersion(lock, name, version) {
   assert.equal(lock.packages[name].version, version, name);
 }
 
+function assertSharpPackagesCurrent(lock) {
+  const sharpPackages = Object.entries(lock.packages).filter(
+    ([name]) =>
+      name === "node_modules/sharp" ||
+      name.endsWith("/node_modules/sharp") ||
+      name.includes("/@img/sharp-"),
+  );
+  assert.ok(sharpPackages.length > 0);
+  for (const [name, packageData] of sharpPackages) {
+    assert.equal(packageData.version, name.includes("sharp-libvips") ? "1.3.3" : "0.35.4", name);
+  }
+}
+
 test("Renovate disables scheduled lock maintenance while retaining dependency updates", () => {
   const config = readConfig();
   assertScheduledLockMaintenanceDisabled(config);
@@ -40,14 +53,7 @@ test("the refreshed Next dependency keeps Sharp and every optional platform pack
   const packageJson = readPackage();
   const lock = readLock();
   assert.equal(packageJson.overrides.next.sharp, "^0.35.4");
-
-  const sharpPackages = Object.entries(lock.packages).filter(
-    ([name]) => name === "node_modules/sharp" || name.includes("/@img/sharp-"),
-  );
-  assert.ok(sharpPackages.length > 0);
-  for (const [name, packageData] of sharpPackages) {
-    assert.equal(packageData.version, name.includes("sharp-libvips") ? "1.3.3" : "0.35.4", name);
-  }
+  assertSharpPackagesCurrent(lock);
 
   for (const name of [
     "node_modules/@img/sharp-darwin-arm64",
@@ -73,6 +79,10 @@ test("the refreshed Next dependency keeps Sharp and every optional platform pack
   assert.throws(() =>
     assertPackageVersion(lockWithoutDarwin, "node_modules/@img/sharp-darwin-arm64", "0.35.4"),
   );
+
+  const lockWithNestedStaleSharp = { packages: { ...lock.packages } };
+  lockWithNestedStaleSharp.packages["node_modules/next/node_modules/sharp"] = { version: "0.35.3" };
+  assert.throws(() => assertSharpPackagesCurrent(lockWithNestedStaleSharp));
 
   const oldConfig = {
     ...packageJson,
