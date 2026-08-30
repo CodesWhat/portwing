@@ -10,6 +10,23 @@ const workflow = fs.readFileSync(
 );
 
 const excludedProductionDirs = new Set(["internal/banner/gen", "internal/integration"]);
+const expectedFloors = new Map([
+  ["./internal/server", [77.88, 94.12]],
+  ["./internal/adapter", [84.68, 93.28]],
+  ["./internal/adapter/drydock", [83.72, 92.47]],
+  ["./internal/audit", [88.31, 100]],
+  ["./internal/auth", [79.17, 97.96]],
+  ["./internal/banner", [87.5, 16]],
+  ["./internal/config", [82.22, 100]],
+  ["./internal/docker", [100, 78.08]],
+  ["./internal/edge", [85.21, 96.02]],
+  ["./internal/generic", [85, 100]],
+  ["./internal/log", null],
+  ["./internal/mcp", [79.49, 79.59]],
+  ["./internal/metrics", [90, 80]],
+  ["./internal/pool", [50, 80]],
+  ["./internal/protocol", [100, 100]],
+]);
 
 function productionPackagePaths() {
   const packages = [];
@@ -59,15 +76,19 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   for (const entry of entries) {
     const expectedName = entry.package.slice("./internal/".length).replaceAll("/", "-");
     assert.equal(entry.name, expectedName);
+    assert.ok(expectedFloors.has(entry.package), `unexpected mutation package ${entry.package}`);
+    const expectedFloor = expectedFloors.get(entry.package);
     if (entry.zero_mutants === "true") {
       assert.equal(
         entry.name,
         "log",
         "only the measured zero-mutant package may use the exception",
       );
+      assert.equal(expectedFloor, null);
       assert.equal(entry.efficacy, undefined);
       assert.equal(entry.mcover, undefined);
     } else {
+      assert.notEqual(expectedFloor, null);
       for (const field of ["efficacy", "mcover"]) {
         assert.match(
           entry[field] ?? "",
@@ -76,6 +97,8 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
         );
         assert.ok(Number(entry[field]) >= 0 && Number(entry[field]) <= 100);
       }
+      assert.equal(Number(entry.efficacy), expectedFloor[0]);
+      assert.equal(Number(entry.mcover), expectedFloor[1]);
     }
     if (entry.name === "metrics") assert.equal(entry.workers, "1");
   }
@@ -117,6 +140,14 @@ test("mutation contract rejects an undiscovered production package", () => {
 test("mutation contract rejects a missing numeric floor", () => {
   assert.throws(() =>
     assertMutationWorkflow(workflow.replace("            efficacy: 79.17\n", "")),
+  );
+});
+
+test("mutation contract rejects a weakened numeric floor", () => {
+  assert.throws(() =>
+    assertMutationWorkflow(
+      workflow.replace("            efficacy: 79.17\n", "            efficacy: 0\n"),
+    ),
   );
 });
 
