@@ -47,6 +47,7 @@ type EventStream struct {
 	client       *Client
 	initialDelay time.Duration
 	maxDelay     time.Duration
+	after        func(time.Duration) <-chan time.Time
 }
 
 // NewEventStream creates an EventStream that will reconnect with exponential
@@ -99,10 +100,14 @@ func (es *EventStream) run(ctx context.Context, ch chan<- DockerEvent) {
 
 		slog.Info("reconnecting to docker event stream", "delay", delay)
 
+		after := es.after
+		if after == nil {
+			after = time.After
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(delay):
+		case <-after(delay):
 		}
 
 		// Exponential backoff.
