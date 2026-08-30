@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
 
@@ -33,9 +34,11 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
   assert.doesNotMatch(analyticsClient, /webVitalsBuffer\.begin|captureWebVital/);
   assert.doesNotMatch(analyticsClient, /WebVitalsAutocapture|extension-bundles/);
 
-  const extensionBundleBytes = fs.statSync(
-    path.join(ROOT, "node_modules", "posthog-js", "dist", "extension-bundles.js"),
-  ).size;
+  const require = createRequire(import.meta.url);
+  const extensionBundle = require.resolve("posthog-js/dist/extension-bundles.js", {
+    paths: [path.join(ROOT, "analytics")],
+  });
+  const extensionBundleBytes = fs.statSync(extensionBundle).size;
   assert.equal(extensionBundleBytes, 148_886);
   assert.ok(extensionBundleBytes > 850_000 - 784_278);
 
