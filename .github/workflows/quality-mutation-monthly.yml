@@ -32,6 +32,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: portwing
+            package: ./cmd/portwing
+            efficacy: 100
+            mcover: 100
           - name: server
             package: ./internal/server
             efficacy: 77.88

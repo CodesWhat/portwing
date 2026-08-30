@@ -11,6 +11,7 @@ const workflow = fs.readFileSync(
 
 const excludedProductionDirs = new Set(["internal/banner/gen", "internal/integration"]);
 const expectedFloors = new Map([
+  ["./cmd/portwing", [100, 100]],
   ["./internal/server", [77.88, 94.12]],
   ["./internal/adapter", [84.68, 93.28]],
   ["./internal/adapter/drydock", [83.72, 92.47]],
@@ -41,7 +42,7 @@ function productionPackagePaths() {
       if (entry.isDirectory()) visit(path.join(relativeDir, entry.name));
     }
   }
-  visit("internal");
+  for (const root of ["cmd", "internal"]) visit(root);
   return packages.sort();
 }
 
@@ -74,7 +75,7 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
     "every real production package must appear exactly once",
   );
   for (const entry of entries) {
-    const expectedName = entry.package.slice("./internal/".length).replaceAll("/", "-");
+    const expectedName = entry.package.replace(/^\.\/(?:cmd|internal)\//u, "").replaceAll("/", "-");
     assert.equal(entry.name, expectedName);
     assert.ok(expectedFloors.has(entry.package), `unexpected mutation package ${entry.package}`);
     const expectedFloor = expectedFloors.get(entry.package);
@@ -104,14 +105,23 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   }
 
   assert.doesNotMatch(source, /^ {4}continue-on-error:/mu, "mutation failures must block the job");
-  const runStep = source.slice(source.indexOf("      - name: Run Gremlins mutation testing"));
+  const runStep = mutationRunStep(source);
+  assert.doesNotMatch(
+    runStep,
+    /^ {6}continue-on-error:\s*true\s*$/mu,
+    "Gremlins failures must not be ignored at step level",
+  );
   assert.match(
     runStep,
     /set -euo pipefail/u,
     "the report pipeline must preserve Gremlins failures",
   );
-  assert.match(runStep, /--threshold-efficacy "\$\{\{ matrix\.efficacy \}\}"/u);
-  assert.match(runStep, /--threshold-mcover "\$\{\{ matrix\.mcover \}\}"/u);
+  const executableRunLines = runStep
+    .split("\n")
+    .filter((line) => line.startsWith("          ") && !line.trimStart().startsWith("#"))
+    .join("\n");
+  assert.match(executableRunLines, /^\s+--threshold-efficacy "\$\{\{ matrix\.efficacy \}\}"/mu);
+  assert.match(executableRunLines, /^\s+--threshold-mcover "\$\{\{ matrix\.mcover \}\}"/mu);
   assert.match(runStep, /gremlins_args\+=\(--workers "\$\{\{ matrix\.workers \}\}"\)/u);
   assert.match(runStep, /\| tee mutation-report\.txt/u);
   assert.match(runStep, /grep -q "No results to report" mutation-report\.txt/u);
@@ -120,6 +130,33 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   assert.match(source, /internal\/banner\/gen is generator-only/u);
   assert.match(source, /internal\/integration is integration-test-only/u);
 }
+
+function mutationRunStep(source) {
+  const start = source.indexOf("      - name: Run Gremlins mutation testing");
+  const end = source.indexOf("\n      - name: ", start + 1);
+  assert.notEqual(start, -1, "Gremlins step is missing");
+  assert.notEqual(end, -1, "Gremlins step boundary is missing");
+  return source.slice(start, end);
+}
+
+function acceptsMutationWorkflow(source) {
+  try {
+    assertMutationWorkflow(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function withCommandPackage(source) {
+  return source.replace(
+    "          # internal/banner/gen is generator-only and has no mutation target.",
+    "          - name: portwing\n            package: ./cmd/portwing\n            efficacy: 100\n            mcover: 100\n          # internal/banner/gen is generator-only and has no mutation target.",
+  );
+}
+
+const matrixEfficacy = "$" + "{{ matrix.efficacy }}";
+const matrixMcover = "$" + "{{ matrix.mcover }}";
 
 test("mutation workflow covers production packages with numeric ratchets", () => {
   assertMutationWorkflow(workflow);
@@ -153,4 +190,36 @@ test("mutation contract rejects a weakened numeric floor", () => {
 
 test("mutation contract rejects swallowed Gremlins failures", () => {
   assert.throws(() => assertMutationWorkflow(workflow.replace("set -euo pipefail", "set -e")));
+});
+
+test("mutation contract rejects step-level continue-on-error", () => {
+  const source = withCommandPackage(workflow).replace(
+    "      - name: Run Gremlins mutation testing\n        shell: bash",
+    "      - name: Run Gremlins mutation testing\n        continue-on-error: true\n        shell: bash",
+  );
+  assert.equal(acceptsMutationWorkflow(source), false);
+});
+
+test("mutation contract rejects threshold strings that only occur in comments", () => {
+  const source = withCommandPackage(workflow)
+    .replace(
+      `              --threshold-efficacy "${matrixEfficacy}"`,
+      `              # --threshold-efficacy "${matrixEfficacy}"`,
+    )
+    .replace(
+      `              --threshold-mcover "${matrixMcover}"`,
+      `              # --threshold-mcover "${matrixMcover}"`,
+    );
+  assert.equal(acceptsMutationWorkflow(source), false);
+});
+
+test("mutation contract rejects threshold strings that only occur in a later step", () => {
+  const source = withCommandPackage(workflow)
+    .replace(`              --threshold-efficacy "${matrixEfficacy}"\n`, "")
+    .replace(`              --threshold-mcover "${matrixMcover}"\n`, "")
+    .replace(
+      "      - name: Summarize\n        if: always()",
+      `      - name: Summarize\n        run: echo --threshold-efficacy "${matrixEfficacy}" --threshold-mcover "${matrixMcover}"\n        if: always()`,
+    );
+  assert.equal(acceptsMutationWorkflow(source), false);
 });
