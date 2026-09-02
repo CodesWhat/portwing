@@ -13,6 +13,24 @@ const workflow = fs.readFileSync(
 const GATE = path.join(ROOT, "scripts/ci/mutation-gate.sh");
 
 const excludedProductionDirs = new Set(["internal/banner/gen", "internal/integration"]);
+// PW-6.8: the 6 mutator types Gremlins disables by default. They are measured
+// by the advisory job and must stay out of the gating matrix, whose floors were
+// all measured without them.
+const advisoryFlags = [
+  "--invert-logical",
+  "--invert-bitwise",
+  "--invert-bwassign",
+  "--invert-assignments",
+  "--invert-loopctrl",
+  "--remove-self-assignments",
+];
+const advisoryPackages = [
+  "./internal/auth",
+  "./internal/edge",
+  "./internal/adapter",
+  "./internal/server",
+  "./internal/mcp",
+];
 const timeoutCoefficients = new Set(["pool", "protocol"]);
 const expectedFloors = new Map([
   ["./cmd/portwing", [100, 100]],
@@ -176,6 +194,90 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   assert.match(source, /internal\/banner\/gen is generator-only/u);
   assert.match(source, /internal\/integration is integration-test-only/u);
   assertCanaryJob(source);
+  assertAdvisoryJob(source, entries);
+}
+
+// PW-6.8: the advisory job exists to measure the mutators the gating matrix
+// deliberately leaves off. Two things have to stay true for that split to mean
+// anything: the advisory job must never gate, and the gating jobs must never
+// pick up the advisory mutators, because every floor in the matrix was measured
+// without them.
+function assertAdvisoryJob(source, entries) {
+  const advisory = jobBlock(source, "mutation-advisory", "the advisory mutator job is missing");
+  const runStep = mutationRunStep(source);
+
+  assert.doesNotMatch(
+    advisory,
+    /mutation-gate\.sh/u,
+    "the advisory job must not call the gate, or it stops being advisory",
+  );
+  for (const flag of advisoryFlags) {
+    assert.match(
+      advisory,
+      new RegExp(`^ {12}${escapeForRegExp(flag)}$`, "mu"),
+      `the advisory job must enable ${flag}`,
+    );
+    assert.doesNotMatch(
+      runStep,
+      new RegExp(escapeForRegExp(flag), "u"),
+      `${flag} would invalidate every floor measured without it`,
+    );
+  }
+
+  // The advisory table prints each package against the floor the matrix
+  // measured, so the two have to be the same number.
+  for (const packagePath of advisoryPackages) {
+    const entry = entries.find((candidate) => candidate.package === packagePath);
+    assert.ok(entry, `${packagePath} is advisory but not in the gating matrix`);
+    assert.match(
+      advisory,
+      new RegExp(
+        `^ {12}"${escapeForRegExp(packagePath)}\\|${entry.name}\\|${entry.efficacy}"$`,
+        "mu",
+      ),
+      `${entry.name}'s advisory row must carry the efficacy floor the matrix measured`,
+    );
+  }
+
+  // A flag Gremlins renamed would be swallowed by the per-package guard and
+  // read as an unavailable package, and a run that discovers no advisory
+  // mutants at all measured nothing. Both are the PW-6.1 failure, so both have
+  // to be loud.
+  assert.match(
+    advisory,
+    /^ {10}help_text="\$\(gremlins unleash --help\)"$/mu,
+    "the advisory job must check the flag names against the binary",
+  );
+  assert.match(
+    advisory,
+    /^ {10}if \[ "\$\{advisory_mutants\}" -eq 0 \]; then$/mu,
+    "the advisory job must fail when the advisory mutators produce nothing",
+  );
+  assert.match(advisory, /GITHUB_STEP_SUMMARY/u, "the advisory job must publish its table");
+}
+
+// Gremlins reads .gremlins.yaml from the Go module root and the working
+// directory. One at the repo root would change the mutator set every gating job
+// measures against, invalidating all 16 floors without touching the workflow.
+// That is why the advisory mutators are command-line flags on one job.
+function assertNoRootGremlinsConfig(exists) {
+  for (const name of [".gremlins.yaml", ".gremlins.yml"]) {
+    if (exists(name)) {
+      throw new Error(`a repo-root ${name} would change every gating floor's mutator set`);
+    }
+  }
+}
+
+function escapeForRegExp(value) {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function jobBlock(source, jobName, missingMessage) {
+  const start = source.indexOf(`  ${jobName}:\n`);
+  assert.notEqual(start, -1, missingMessage);
+  const rest = source.slice(start + 1);
+  const next = rest.search(/^ {2}(?:[a-z][a-z0-9-]*:|#)/mu);
+  return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
 }
 
 // PW-6.1: a gate nobody proves can fail is the defect being fixed. The canary
@@ -224,6 +326,7 @@ function mutationRunStep(source) {
 const matrixEfficacy = "$" + "{{ matrix.efficacy }}";
 const matrixMcover = "$" + "{{ matrix.mcover }}";
 const matrixZeroMutants = "$" + "{{ matrix.zero_mutants || false }}";
+const advisoryMutants = "$" + "{advisory_mutants}";
 const expressionTrue = "$" + "{{ true }}";
 
 function assertMutationFailure(source, expectedMessage, expectedPackages) {
@@ -425,6 +528,77 @@ test("mutation contract rejects an outer dead wrapper", () => {
     )
     .replace("          fi\n        env:", "          fi\n          fi\n        env:");
   assertMutationFailure(source, "Gremlins script must preserve the zero-mutant branch");
+});
+
+// PW-6.8. The advisory job is only worth having if it stays advisory and stays
+// separate: a gate call in it would block on unratcheted mutators, and an
+// advisory flag in the matrix would drop every floor measured without it.
+test("mutation contract rejects a missing advisory job", () => {
+  assertMutationFailure(
+    workflow.replace("  mutation-advisory:\n", "  mutation-advisory-disabled:\n"),
+    "the advisory mutator job is missing",
+  );
+});
+
+test("mutation contract rejects an advisory job that gates", () => {
+  const source = workflow.replace(
+    `          echo "advisory: ${advisoryMutants} mutants came from the default-disabled mutators"`,
+    "          ./scripts/ci/mutation-gate.sh mutation-advisory-auth.json 79.17 97.96",
+  );
+  assertMutationFailure(
+    source,
+    "the advisory job must not call the gate, or it stops being advisory",
+  );
+});
+
+test("mutation contract rejects a dropped advisory mutator", () => {
+  assertMutationFailure(
+    workflow.replace("            --invert-logical\n", ""),
+    "the advisory job must enable --invert-logical",
+  );
+});
+
+test("mutation contract rejects an advisory mutator in the gating run", () => {
+  const source = workflow.replace(
+    `          if [ "${matrixZeroMutants}" = "true" ]; then`,
+    `          gremlins_args+=(--invert-logical)\n          if [ "${matrixZeroMutants}" = "true" ]; then`,
+  );
+  assertMutationFailure(
+    source,
+    "--invert-logical would invalidate every floor measured without it",
+  );
+});
+
+test("mutation contract rejects an advisory floor that drifts from the matrix", () => {
+  assertMutationFailure(
+    workflow.replace('"./internal/auth|auth|79.17"', '"./internal/auth|auth|79.16"'),
+    "auth's advisory row must carry the efficacy floor the matrix measured",
+  );
+});
+
+test("mutation contract rejects an advisory job that never checks the flag names", () => {
+  assertMutationFailure(
+    workflow.replace('          help_text="$(gremlins unleash --help)"\n', ""),
+    "the advisory job must check the flag names against the binary",
+  );
+});
+
+test("mutation contract rejects an advisory job that can pass having measured nothing", () => {
+  assertMutationFailure(
+    workflow.replace(
+      `          if [ "${advisoryMutants}" -eq 0 ]; then`,
+      "          if false; then",
+    ),
+    "the advisory job must fail when the advisory mutators produce nothing",
+  );
+});
+
+test("mutation contract rejects a repo-root Gremlins config", () => {
+  assertNoRootGremlinsConfig((name) => fs.existsSync(path.join(ROOT, name)));
+  assert.throws(
+    () => assertNoRootGremlinsConfig((name) => name === ".gremlins.yaml"),
+    /would change every gating floor's mutator set/u,
+  );
 });
 
 // The other half of PW-6.1. The workflow tests above prove the gate is wired
