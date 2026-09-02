@@ -193,54 +193,9 @@ jobs:
       - name: Compare against baseline
         env:
           ACCEPT_NEW_BASELINE: ${{ inputs.accept_new_baseline }}
-        run: |
-          set -euo pipefail
-          if [ "${ACCEPT_NEW_BASELINE}" = "true" ]; then
-            {
-              echo "### Go benchmarks (monthly)"
-              echo ""
-              echo "**Comparison skipped by request.** This run was dispatched with"
-              echo "\`accept_new_baseline\`, so no gate was applied. Its"
-              echo "\`benchmark-results.txt\` becomes the baseline for the next run."
-            } >bench-comparison.md
-            exit 0
-          fi
-          if [ ! -s baseline-candidates.txt ]; then
-            {
-              echo "### Go benchmarks (monthly)"
-              echo ""
-              echo "**No baseline.** No earlier successful run of this workflow on the"
-              echo "default branch still has a benchmark artifact, so there was nothing"
-              echo "to compare against. This run's \`benchmark-results.txt\` is recorded"
-              echo "as the first baseline; the next run gates against it."
-            } >bench-comparison.md
-            exit 0
-          fi
-          status=3
-          while IFS=$'\t' read -r run_id results label; do
-            [ -n "${results}" ] || continue
-            set +e
-            scripts/benchstat-gate.sh \
-              --baseline "${results}" \
-              --current benchmark-results.txt \
-              --threshold-percent "${BENCH_REGRESSION_THRESHOLD_PERCENT}" \
-              --gated-units "${BENCH_GATED_UNITS}" \
-              --baseline-label "${label}" \
-              --summary-file bench-comparison.md
-            status=$?
-            set -e
-            [ "${status}" -eq 3 ] || break
-            echo "run ${run_id} ran on different hardware; trying the next candidate" >&2
-          done <baseline-candidates.txt
-          case "${status}" in
-          0) ;;
-          3)
-            echo "::warning::No baseline ran on the same hardware as this run, so benchstat could not compare them and no regression gate was applied."
-            ;;
-          *)
-            exit "${status}"
-            ;;
-          esac
+        run: >-
+          scripts/benchstat-walk-baselines.sh
+          baseline-candidates.txt benchmark-results.txt bench-comparison.md
 
       - name: Upload benchmark results
         if: always()

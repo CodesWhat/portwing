@@ -26,4 +26,5 @@ bash scripts/quality-lane-notify-config-test-test.sh
 bash scripts/quality-lane-notify-config-test.sh
 bash scripts/drydock-compat-script-test.sh
 bash scripts/benchstat-gate-script-test.sh
+bash scripts/benchstat-walk-baselines-test.sh
 bash scripts/mutation-gate-script-test.sh
