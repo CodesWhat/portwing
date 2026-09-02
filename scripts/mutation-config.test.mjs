@@ -351,12 +351,22 @@ test("mutation contract rejects a gate invocation moved to a later step", () => 
   );
 });
 
-test("mutation contract rejects a return to Gremlins' inert threshold flags", () => {
+test("mutation contract rejects threshold flags inserted into the unleash command", () => {
   const source = workflow.replace(
     "              --output mutation-report.json \\\n",
     `              --output mutation-report.json \\\n              --threshold-efficacy "${matrixEfficacy}" \\\n              --threshold-mcover "${matrixMcover}" \\\n`,
   );
   assertMutationFailure(source, "Gremlins executable unleash command is malformed");
+});
+
+test("mutation contract rejects a return to Gremlins' inert threshold flags", () => {
+  const source = workflow.replace(
+    `          if [ "${matrixZeroMutants}" = "true" ]; then`,
+    `          gremlins_args+=(--threshold-efficacy "${matrixEfficacy}")\n` +
+      `          gremlins_args+=(--threshold-mcover "${matrixMcover}")\n` +
+      `          if [ "${matrixZeroMutants}" = "true" ]; then`,
+  );
+  assertMutationFailure(source, "Gremlins' own threshold flags are inert and must not be trusted");
 });
 
 test("mutation contract rejects a dropped pool timeout coefficient", () => {
