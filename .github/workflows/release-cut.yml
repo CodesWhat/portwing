@@ -69,7 +69,13 @@ jobs:
           fi
 
       - name: Verify successful CI on target SHA
-        uses: ./.github/actions/verify-ci-success
+        # zizmor 1.30.0's self-repository audit wants `$/.github/...` here, and
+        # actionlint rejects `$/` as an invalid `uses:` format. Both run in the
+        # same `Go CI / Workflow Security` job, so one has to stand down. This
+        # workflow is never called as a reusable workflow from another repo, so
+        # `./` resolves unambiguously. Drop the ignore once actionlint learns
+        # the July 2026 self-repository syntax.
+        uses: ./.github/actions/verify-ci-success  # zizmor: ignore[self-repository]
         with:
           workflow-file: ${{ env.CI_WORKFLOW_FILE }}
           target-sha: ${{ steps.target.outputs.sha }}
