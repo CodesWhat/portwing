@@ -35,7 +35,7 @@ jobs:
       test-check-name: Build & Test
       lint-check-name: Lint
       fuzzers-json: >-
-        ${{ (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && '[{"name":"FuzzParsePHC","pkg":"./internal/server/"},{"name":"FuzzParseTrustedProxies","pkg":"./internal/server/"},{"name":"FuzzParseImageRef","pkg":"./internal/adapter/"},{"name":"FuzzParseLabels","pkg":"./internal/adapter/drydock/"},{"name":"FuzzMCPHandler","pkg":"./internal/mcp/"},{"name":"FuzzEnvelope","pkg":"./internal/protocol/"},{"name":"FuzzVerifyRequest","pkg":"./internal/auth/"}]' || '[]' }}
+        ${{ (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && '[{"name":"FuzzParsePHC","pkg":"./internal/server/"},{"name":"FuzzParseTrustedProxies","pkg":"./internal/server/"},{"name":"FuzzParseImageRef","pkg":"./internal/adapter/"},{"name":"FuzzParseLabels","pkg":"./internal/adapter/drydock/"},{"name":"FuzzMCPHandler","pkg":"./internal/mcp/"},{"name":"FuzzEnvelope","pkg":"./internal/protocol/"},{"name":"FuzzVerifyRequest","pkg":"./internal/auth/"},{"name":"FuzzDecodeContainerLogStream","pkg":"./internal/docker/"},{"name":"FuzzComposeRequestValidate","pkg":"./internal/docker/"}]' || '[]' }}
       run-govulncheck: true
       run-qlty: ${{ github.event_name != 'schedule' }}
       run-goreleaser: ${{ github.event_name != 'schedule' }}

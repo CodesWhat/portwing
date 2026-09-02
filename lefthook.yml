@@ -9,7 +9,7 @@
 #   5. Qlty full-repository check
 #   6. go test -race
 #   7. govulncheck (reachable CVEs in deps + stdlib)
-#   8. Go fuzz smoke (5 s per fuzzer, all 7 fuzzers) — tier 0 of the fuzz
+#   8. Go fuzz smoke (5 s per fuzzer, all 9 fuzzers) — tier 0 of the fuzz
 #      strategy. Catches broken fuzz drivers and stale seed corpora before
 #      the push leaves the machine. Real coverage tiers live in
 #      .github/workflows/ci-verify.yml (60 s, every push/PR) and
@@ -100,7 +100,7 @@ pre-push:
       priority: 6
       timeout: 2m
 
-    # Fuzz smoke — 5 s per fuzzer, all 7 in series. Keep a finite Go
+    # Fuzz smoke — 5 s per fuzzer, all 9 in series. Keep a finite Go
     # watchdog above the tiny smoke budget so a hung input fails with a
     # stack dump instead of consuming the hook timeout.
     #
@@ -142,7 +142,9 @@ pre-push:
           "FuzzParseLabels ./internal/adapter/drydock/" \
           "FuzzMCPHandler ./internal/mcp/" \
           "FuzzEnvelope ./internal/protocol/" \
-          "FuzzVerifyRequest ./internal/auth/"; do
+          "FuzzVerifyRequest ./internal/auth/" \
+          "FuzzDecodeContainerLogStream ./internal/docker/" \
+          "FuzzComposeRequestValidate ./internal/docker/"; do
           set -- $entry
           run_fuzz "$1" "$2"
         done

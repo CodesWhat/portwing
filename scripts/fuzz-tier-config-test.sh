@@ -20,6 +20,8 @@ fuzzers=(
 	"FuzzMCPHandler|./internal/mcp/"
 	"FuzzEnvelope|./internal/protocol/"
 	"FuzzVerifyRequest|./internal/auth/"
+	"FuzzDecodeContainerLogStream|./internal/docker/"
+	"FuzzComposeRequestValidate|./internal/docker/"
 )
 
 lefthook_fuzz_entries="$(

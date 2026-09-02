@@ -63,6 +63,9 @@ go test -run=^$ -fuzz=^FuzzParseImageRef$       -fuzztime=5s ./internal/adapter/
 go test -run=^$ -fuzz=^FuzzParseLabels$         -fuzztime=5s ./internal/adapter/drydock/
 go test -run=^$ -fuzz=^FuzzMCPHandler$          -fuzztime=5s ./internal/mcp/
 go test -run=^$ -fuzz=^FuzzEnvelope$            -fuzztime=5s ./internal/protocol/
+go test -run=^$ -fuzz=^FuzzVerifyRequest$       -fuzztime=5s ./internal/auth/
+go test -run=^$ -fuzz=^FuzzDecodeContainerLogStream$ -fuzztime=5s ./internal/docker/
+go test -run=^$ -fuzz=^FuzzComposeRequestValidate$   -fuzztime=5s ./internal/docker/
 ```
 
 ## Code style
