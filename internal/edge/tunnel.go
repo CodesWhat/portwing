@@ -500,11 +500,15 @@ func (s *ExecSession) Close() {
 		s.closed = true
 		conn := s.conn
 		// Unregister before done is observable. Anything that waits on done
-		// (EndExec, the drainer, the write-failure teardown test) may check the
-		// registry immediately after, and unregistering only after the conn
-		// close and inbox drain below left a window where a closed session was
-		// still registered. Nothing can enqueue once closed is set, so the
-		// registry entry has no remaining job.
+		// (EndExec, the write-failure teardown test) may check the registry
+		// immediately after, and unregistering only after the conn close and
+		// inbox drain below left a window where a closed session was still
+		// registered. Once closed is set HandleInput can no longer enqueue; a
+		// racing HandleResize may still drop a zero-reservation item into an
+		// inbox nothing reads, which is harmless. The maxExecSessions slot is
+		// therefore released at closed=true rather than at the end of the
+		// drain, which is the intended direction: a dead session should not
+		// hold a slot while its conn finishes closing.
 		s.client.execSessions.CompareAndDelete(s.execID, s)
 		close(s.done)
 		s.mu.Unlock()
