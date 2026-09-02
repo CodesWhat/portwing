@@ -69,6 +69,14 @@ go test -run=^$ -fuzz=^FuzzComposeRequestValidate$   -fuzztime=5s ./internal/doc
 go test -run=^$ -fuzz=^FuzzParseKeyLine$             -fuzztime=5s ./internal/auth/
 ```
 
+Every target ships a committed seed corpus under
+`<pkg>/testdata/fuzz/<Target>/`, and that is also where the engine writes a
+crashing input. Commit a crasher along with its fix. The coverage-expanding
+inputs the engine finds live in `$GOCACHE/fuzz/` instead; the nightly and
+monthly lanes carry both directories between runs through a shared
+`actions/cache` key, so a deep run resumes rather than restarting from the
+`f.Add()` seeds.
+
 ## Code style
 
 - **Formatter**: `gofmt` (enforced by CI)

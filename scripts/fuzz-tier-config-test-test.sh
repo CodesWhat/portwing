@@ -76,4 +76,54 @@ seed_fixture
 } >"${fixture}/internal/protocol/testdata/fuzz/FuzzEnvelope/oversized"
 expect_fail "an oversized corpus file must not satisfy the contract"
 
+# --- Corpus persistence (PW-2.1) --------------------------------------------
+
+nightly="${fixture}/.github/workflows/quality-fuzz-nightly.yml"
+monthly="${fixture}/.github/workflows/quality-fuzz-monthly.yml"
+
+seed_fixture
+sed 's|uses: actions/cache/restore@|uses: actions/cache/restore@v6 # |' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "an unpinned corpus cache restore must not satisfy the contract"
+
+seed_fixture
+# Only the second key line — the save step's — so the two genuinely disagree.
+awk '
+	/^          key: fuzz-corpus-v1-/ {
+		seen++
+		if (seen == 2) { print $0 "-save"; next }
+	}
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "restore and save disagreeing on the cache key must not satisfy the contract"
+
+seed_fixture
+sed 's|^            fuzz-corpus-v1-\${{ runner.os }}-\${{ matrix.fuzzer.name }}-$|            fuzz-corpus-v1-monthly-\${{ matrix.fuzzer.name }}-|' \
+	"${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a monthly-private restore-keys prefix must not satisfy the contract"
+
+seed_fixture
+sed '/^            \*\.blob\.core\.windows\.net:443$/d' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "dropping a cache egress endpoint must not satisfy the contract"
+
+seed_fixture
+sed "s|^        if: always() && steps.corpus.outputs.seed != ''$|        if: success()|" \
+	"${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "a corpus save that skips failed runs must not satisfy the contract"
+
+seed_fixture
+sed 's|^    timeout-minutes: 75$|    timeout-minutes: 75\n    permissions:\n      actions: read|' \
+	"${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "a job-level permissions grant must not satisfy the contract"
+
+seed_fixture
+sed '/^        if: failure() || cancelled()$/d' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "dropping the on-failure corpus artifact upload must not satisfy the contract"
+
 echo "Fuzz tier contract self-tests passed."
