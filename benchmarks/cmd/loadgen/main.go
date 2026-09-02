@@ -80,11 +80,16 @@ func execute(args []string, stdout, stderr io.Writer) int {
 		scenario    = flags.String("scenario", "custom", "label for this run")
 		mode        = flags.String("mode", "req", "req | sse")
 		sseHold     = flags.Duration("sse-hold", time.Second, "how long each sse connection is held before close")
+		max429Ratio = flags.Float64("max-429-ratio", defaultMax429Ratio, "fraction of requests allowed to be HTTP 429 (rate limited) before the run fails; 0 makes any 429 fatal, 1 never fails on 429")
 	)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		return 2
+	}
+	if *max429Ratio < 0 || *max429Ratio > 1 {
+		fmt.Fprintf(stderr, "loadgen: -max-429-ratio must be between 0 and 1, got %v\n", *max429Ratio)
 		return 2
 	}
 
@@ -106,14 +111,28 @@ func execute(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "%-18s mode=%-3s conc=%-3d rps=%.0f p50=%dus p99=%dus max=%dus errs=%d\n",
 		out.Scenario, out.Mode, out.Concurrency, out.RPS, out.LatencyP50Micros, out.LatencyP99Micros, out.LatencyMaxMicros, out.ErrorRequests)
-	if err := resultFailure(out); err != nil {
+	if err := resultFailure(out, *max429Ratio); err != nil {
 		fmt.Fprintf(stderr, "loadgen: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-func resultFailure(out result) error {
+// defaultMax429Ratio is the share of a run's requests that may come back 429
+// before the run fails. The per-source-IP anti-brute-force limiter in
+// internal/server/middleware.go admits two concurrent verifications, so a
+// soak that drives tens of workers from 127.0.0.1 legitimately sees a small
+// burst of 429s. Measured locally at concurrency=20 the rate was ~0.2% on the
+// request scenarios and ~1% on the low-volume SSE scenario, so 10% leaves a
+// wide margin for benign bursts while still failing a run in which the agent
+// is rejecting load wholesale, which would otherwise pass the RSS check
+// vacuously because almost nothing reached the handlers.
+const defaultMax429Ratio = 0.10
+
+// resultFailure decides whether a run's summary counts as a failure. Transport
+// errors and any non-2xx other than 429 are always fatal. 429s are counted
+// against max429Ratio: 0 makes any 429 fatal, 1 never fails on 429.
+func resultFailure(out result, max429Ratio float64) error {
 	if out.TotalRequests == 0 {
 		return fmt.Errorf("zero requests completed")
 	}
@@ -121,14 +140,25 @@ func resultFailure(out result) error {
 		return fmt.Errorf("%d transport errors", out.ErrorRequests)
 	}
 
-	var failed int64
+	var failed, limited int64
 	for status, count := range out.StatusCodeCounts {
+		if status == http.StatusTooManyRequests {
+			limited += count
+			continue
+		}
 		if status < http.StatusOK || status >= http.StatusMultipleChoices {
 			failed += count
 		}
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d non-2xx responses", failed)
+	}
+	if limited > 0 {
+		ratio := float64(limited) / float64(out.TotalRequests)
+		if ratio > max429Ratio {
+			return fmt.Errorf("%d of %d requests rate limited (%.1f%%), over the %.1f%% budget",
+				limited, out.TotalRequests, ratio*100, max429Ratio*100)
+		}
 	}
 	return nil
 }
