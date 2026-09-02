@@ -22,6 +22,7 @@ fuzzers=(
 	"FuzzVerifyRequest|./internal/auth/"
 	"FuzzDecodeContainerLogStream|./internal/docker/"
 	"FuzzComposeRequestValidate|./internal/docker/"
+	"FuzzParseKeyLine|./internal/auth/"
 )
 
 lefthook_fuzz_entries="$(
