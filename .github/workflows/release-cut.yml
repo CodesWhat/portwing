@@ -69,12 +69,29 @@ jobs:
           fi
 
       - name: Verify successful CI on target SHA
-        # zizmor 1.30.0's self-repository audit wants `$/.github/...` here, and
-        # actionlint rejects `$/` as an invalid `uses:` format. Both run in the
-        # same `Go CI / Workflow Security` job, so one has to stand down. This
-        # workflow is never called as a reusable workflow from another repo, so
-        # `./` resolves unambiguously. Drop the ignore once actionlint learns
-        # the July 2026 self-repository syntax.
+        # zizmor wants `uses: $/.github/actions/...` here instead of the
+        # workspace-relative `./...`. The advice is right in principle (GitHub
+        # shipped `$/` on 2026-07-30; it resolves to the running commit and
+        # can't be fooled by whatever a prior step left on the filesystem), and
+        # this call site is already checked out at the running ref, so the swap
+        # would be a behavioural no-op.
+        #
+        # It is ignored because actionlint does not know the syntax yet and
+        # both tools run in `Go CI / Workflow Security`, a required context on
+        # main. actionlint rejects `$/...` with "invalid format because ref is
+        # missing", so taking zizmor's fix would red a required check to
+        # satisfy a low-severity style preference on two release workflows.
+        #
+        # Sockguard carries the same exemption in a `.github/zizmor.yml`.
+        # Ignoring inline instead is deliberate: zizmor resolves a linked git
+        # worktree's repository root to the MAIN checkout, so a worktree's own
+        # `.github/zizmor.yml` is never discovered and the pre-push hook stays
+        # red for anyone working out of `.claude/worktrees/`. Inline ignores
+        # work in both.
+        #
+        # Revisit when actionlint ships `$/` support: drop these two comments,
+        # run `zizmor --fix`, and confirm `actionlint .github/workflows/*.yml`
+        # is clean.
         uses: ./.github/actions/verify-ci-success  # zizmor: ignore[self-repository]
         with:
           workflow-file: ${{ env.CI_WORKFLOW_FILE }}
