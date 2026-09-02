@@ -36,6 +36,14 @@ run-name: >-
 # failures already have a human looking at a PR check, which is the exact
 # silence this workflow exists to break for the others.
 #
+# quality-integration-engines.yml IS in the list even though it also has a
+# `pull_request` trigger, because that trigger is scoped to the workflow file
+# itself. It fires when someone edits the matrix, not when someone edits the
+# code the matrix tests — so a weekly run that goes red because Docker Engine
+# 29.x changed a response shape has no PR attached to it and nobody looking at
+# a check. That is the silence this exists to break, and the narrow trigger is
+# exactly why quality-integration.yml's carve-out doesn't extend to it.
+#
 # quality-fuzz-monthly.yml's first attempt is excluded below. Explained at the
 # job `if:`.
 #
@@ -71,6 +79,7 @@ on:
       - "Quality: Mutation Testing"
       - "Quality: Benchmarks (monthly)"
       - "Quality: Deep Fuzz Infra Rerun"
+      - "Quality: Integration — Engine Matrix"
     types: [completed]
 
 permissions: {}

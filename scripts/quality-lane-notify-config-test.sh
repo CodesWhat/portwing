@@ -22,6 +22,7 @@ expected_workflows=(
 	"Quality: Mutation Testing"
 	"Quality: Benchmarks (monthly)"
 	"Quality: Deep Fuzz Infra Rerun"
+	"Quality: Integration — Engine Matrix"
 )
 
 # --- trigger list: on.workflow_run.workflows -------------------------------

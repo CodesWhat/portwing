@@ -1,0 +1,168 @@
+name: "Quality: Integration — Engine Matrix"
+run-name: >-
+  ${{
+    github.event_name == 'schedule' && 'Quality: Integration — Engine Matrix (Weekly)' ||
+    github.event_name == 'pull_request' && format('Quality: Integration — Engine Matrix — PR #{0}', github.event.pull_request.number) ||
+    format('Quality: Integration — Engine Matrix — Manual by {0}', github.actor)
+  }}
+
+# PW-5.2. Runs the same build-tagged integration suite quality-integration.yml
+# runs, but against a pinned matrix of Docker Engine releases instead of
+# whatever dockerd the ubuntu-24.04 runner image happens to ship that week.
+# That fast path stays where it is: this lane is about API-version drift, not
+# about being a second copy of the daily job. The `go test` line below is
+# byte-identical to quality-integration.yml's on purpose, and
+# scripts/quality-integration-engines-config-test.sh asserts that it stays
+# that way, so the two lanes can never drift into testing different things.
+#
+# Why these pins. internal/docker/client.go falls back to API v1.44 when
+# version negotiation fails, and docs/content/docs/api-reference.mdx and
+# standalone-mode.mdx both publish v1.44 as the floor. Docker Engine 25.0 is
+# the oldest release that serves API v1.44 (24.0 serves v1.43), so 25.0 is the
+# oldest Engine the documented contract covers and it anchors the bottom of
+# the matrix. 29.7 is current stable and anchors the top. 27.5 and 28.5 sit in
+# between so a break can be bisected to a minor rather than to a four-year
+# range.
+#
+# Bumping a pin means taking the latest patch of the SAME minor from
+# https://download.docker.com/linux/static/stable/x86_64/ — the minor is the
+# thing under test, the patch just has to exist. Moving the bottom of the
+# matrix UP is a documentation change, not a CI change: the contract test
+# re-derives the floor from the fallback constant in client.go and fails if
+# the matrix stops covering it.
+#
+# The pull_request trigger is scoped to this file alone, so the matrix
+# exercises itself on any PR that touches it and costs nothing on every other
+# PR.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '45 6 * * 1'  # 06:45 UTC Mondays
+  pull_request:
+    paths:
+      - '.github/workflows/quality-integration-engines.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-integration-engines-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: "Integration (Engine ${{ matrix.engine }})"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    strategy:
+      # One Engine failing must not hide how the others fared. Drift lands in
+      # exactly one minor first, and the whole point of the matrix is knowing
+      # WHICH one, so a cancelled sibling would throw away the answer.
+      fail-fast: false
+      matrix:
+        engine:
+          - v25.0.5
+          - v27.5.1
+          - v28.5.2
+          - v29.7.2
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          # quality-integration.yml's list plus what pinning an Engine adds:
+          # download.docker.com serves the static release tarball
+          # setup-docker-action installs, and it redirects onto the same two
+          # Docker CDN hosts the image pull already needed.
+          allowed-endpoints: >
+            api.github.com:443
+            auth.docker.io:443
+            dl.google.com:443
+            download.docker.com:443
+            github.com:443
+            go.dev:443
+            objects.githubusercontent.com:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            proxy.golang.org:443
+            registry-1.docker.io:443
+            release-assets.githubusercontent.com:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Docker Engine ${{ matrix.engine }}
+        uses: docker/setup-docker-action@77e84dbf09b47d1e29270283c22f16145aa85ca1  # v5.4.0
+        with:
+          version: ${{ matrix.engine }}
+
+      # Two failure modes this step exists to make loud, both of which would
+      # otherwise report a green matrix leg that tested nothing:
+      #
+      #   * setup-docker-action serves the pinned daemon on its own context
+      #     socket, not necessarily /var/run/docker.sock. Hard-coding the
+      #     stock path would silently test the runner's stock dockerd on every
+      #     leg, so resolve the real unix path from the active context.
+      #   * internal/integration's TestMain and internal/edge's
+      #     integrationDockerSocket both SKIP (os.Exit(0) / t.Skip) when the
+      #     socket is missing, and a skipped suite exits 0. So assert the
+      #     socket exists and the daemon reports the requested version BEFORE
+      #     running anything: those are exactly the two conditions the suite
+      #     silently skips on.
+      - name: Resolve daemon socket and verify pinned version
+        id: daemon
+        env:
+          WANT: ${{ matrix.engine }}
+        run: |
+          set -euo pipefail
+          docker version
+          host="$(docker context inspect --format '{{ .Endpoints.docker.Host }}')"
+          case "${host}" in
+          unix://*) sock="${host#unix://}" ;;
+          *)
+            echo "unexpected non-unix docker endpoint: ${host}" >&2
+            exit 1
+            ;;
+          esac
+          if [ ! -S "${sock}" ]; then
+            echo "resolved socket ${sock} is not a unix socket; the suite would silently skip" >&2
+            exit 1
+          fi
+          got="$(docker version --format '{{ .Server.Version }}')"
+          if [ "v${got}" != "${WANT}" ]; then
+            echo "daemon reports ${got}, wanted ${WANT#v} — the pinned Engine did not take" >&2
+            exit 1
+          fi
+          api="$(docker version --format '{{ .Server.APIVersion }}')"
+          echo "socket=${sock}" >>"${GITHUB_OUTPUT}"
+          echo "Engine ${got} (API v${api}) on ${sock}"
+          echo "Engine ${got}, API v${api}, socket ${sock}" >>"${GITHUB_STEP_SUMMARY}"
+
+      # Same sentinel image and same reason as quality-integration.yml: the
+      # suite runs containers from it and dockerd will not pull mid-test.
+      # Pulled against the pinned daemon, not the runner's stock one.
+      - name: Pre-pull alpine sentinel image
+        env:
+          DOCKER_HOST: unix://${{ steps.daemon.outputs.socket }}
+        run: docker pull alpine:3.20
+
+      # DOCKER_HOST as well as PORTWING_TEST_DOCKER_SOCKET: the suite reads
+      # the env var for the sockets it hands to portwing itself, but
+      # internal/integration's startAlpineContainer shells out to a bare
+      # `docker run` with no --host, which would otherwise follow whatever
+      # context the runner defaults to.
+      - name: Run integration suite
+        env:
+          PORTWING_TEST_DOCKER_SOCKET: ${{ steps.daemon.outputs.socket }}
+          DOCKER_HOST: unix://${{ steps.daemon.outputs.socket }}
+        run: go test -tags=integration -count=1 -timeout=10m -race ./internal/edge/ ./internal/integration/
