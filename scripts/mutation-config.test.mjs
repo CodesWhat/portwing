@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -8,6 +10,7 @@ const workflow = fs.readFileSync(
   path.join(ROOT, ".github/workflows/quality-mutation-monthly.yml"),
   "utf8",
 );
+const GATE = path.join(ROOT, "scripts/ci/mutation-gate.sh");
 
 const excludedProductionDirs = new Set(["internal/banner/gen", "internal/integration"]);
 const expectedFloors = new Map([
@@ -106,6 +109,11 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
       }
     }
     if (entry.name === "metrics") assert.equal(entry.workers, "1");
+    // Without a raised coefficient every protocol mutant TIMED OUT, which
+    // scores 0.00/0.00 while verifying nothing. See PW-6.2.
+    if (entry.name === "protocol" && entry.timeout_coefficient !== "40") {
+      throw new Error("protocol needs its timeout coefficient");
+    }
   }
 
   assert.doesNotMatch(source, /^ {4}continue-on-error:/mu, "mutation failures must block the job");
@@ -127,8 +135,25 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   );
   assert.match(
     runStep,
-    /^ {12}gremlins unleash --tags="" \\\n+^ {14}"\$\{gremlins_args\[@\]\+"\$\{gremlins_args\[@\]\}"\}" \\\n+^ {14}--threshold-efficacy "\$\{\{ matrix\.efficacy \}\}" \\\n+^ {14}--threshold-mcover "\$\{\{ matrix\.mcover \}\}" \\\n+^ {14}"\$\{\{ matrix\.package \}\}" 2>&1 \| tee mutation-report\.txt$/mu,
+    /^ {12}gremlins unleash --tags="" \\\n+^ {14}"\$\{gremlins_args\[@\]\+"\$\{gremlins_args\[@\]\}"\}" \\\n+^ {14}--output mutation-report\.json \\\n+^ {14}"\$\{\{ matrix\.package \}\}" 2>&1 \| tee mutation-report\.txt$/mu,
     "Gremlins executable unleash command is malformed",
+  );
+  // The floors are only real because mutation-gate.sh reads the report and
+  // exits non-zero. It has to be the next command in the same step, on its
+  // own, so nothing can swallow its status. See PW-6.1.
+  assert.match(
+    runStep,
+    /^ {12}\.\/scripts\/ci\/mutation-gate\.sh mutation-report\.json "\$\{\{ matrix\.efficacy \}\}" "\$\{\{ matrix\.mcover \}\}"$/mu,
+    "the mutation floors must be enforced by scripts/ci/mutation-gate.sh",
+  );
+  // Gremlins' own threshold flags parse and then do nothing: Viper returns a
+  // bound float64 pflag as a string, so report.assess() reads 0 and never
+  // fires. Anything that reintroduces them is claiming a gate that is not
+  // there. See the header of scripts/ci/mutation-gate.sh.
+  assert.doesNotMatch(
+    runStep,
+    /--threshold-(?:efficacy|mcover)/u,
+    "Gremlins' own threshold flags are inert and must not be trusted",
   );
   assert.doesNotMatch(
     runStep,
@@ -136,12 +161,48 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
     "Gremlins script must preserve the zero-mutant branch",
   );
   assert.match(runStep, /gremlins_args\+=\(--workers "\$\{\{ matrix\.workers \}\}"\)/u);
+  assert.match(
+    runStep,
+    /gremlins_args\+=\(--timeout-coefficient "\$\{\{ matrix\.timeout_coefficient \}\}"\)/u,
+  );
   assert.match(runStep, /\| tee mutation-report\.txt/u);
   assert.match(runStep, /grep -q "No results to report" mutation-report\.txt/u);
   assert.match(source, /name: Upload mutation report/u);
-  assert.match(source, /path: mutation-report\.txt/u);
+  assert.match(source, /^ {12}mutation-report\.txt$/mu);
+  assert.match(source, /^ {12}mutation-report\.json$/mu);
   assert.match(source, /internal\/banner\/gen is generator-only/u);
   assert.match(source, /internal\/integration is integration-test-only/u);
+  assertCanaryJob(source);
+}
+
+// PW-6.1: a gate nobody proves can fail is the defect being fixed. The canary
+// job runs the real binary and asserts both directions, so a future change
+// that neuters the gate turns this workflow red instead of quietly green.
+function assertCanaryJob(source) {
+  const canary = canaryJob(source);
+  assert.doesNotMatch(canary, /^ {4}continue-on-error:/mu, "the canary must block");
+  assert.doesNotMatch(canary, /^ {8}continue-on-error:/mu, "the canary must block");
+  assert.match(
+    canary,
+    /^ {10}if \.\/scripts\/ci\/mutation-gate\.sh canary-report\.json 101 101; then$/mu,
+    "the canary must assert an unreachable floor is rejected",
+  );
+  assert.match(
+    canary,
+    /^ {10}\.\/scripts\/ci\/mutation-gate\.sh canary-report\.json 0 0$/mu,
+    "the canary must assert a reachable floor is still accepted",
+  );
+  assert.match(
+    canary,
+    /^ {10}if \.\/scripts\/ci\/mutation-gate\.sh no-such-report\.json 0 0; then$/mu,
+    "the canary must assert a missing report is rejected",
+  );
+}
+
+function canaryJob(source) {
+  const start = source.indexOf("  gate-canary:\n");
+  assert.notEqual(start, -1, "the mutation gate canary job is missing");
+  return source.slice(start);
 }
 
 function mutationRunStep(source) {
@@ -224,33 +285,15 @@ test("mutation contract rejects a duplicate command package", () => {
   assertMutationFailure(source, "every real production package must appear exactly once");
 });
 
-test("mutation contract rejects threshold strings that only occur in comments", () => {
-  const source = workflow
-    .replace(
-      `              --threshold-efficacy "${matrixEfficacy}"`,
-      `              # --threshold-efficacy "${matrixEfficacy}"`,
-    )
-    .replace(
-      `              --threshold-mcover "${matrixMcover}"`,
-      `              # --threshold-mcover "${matrixMcover}"`,
-    );
+test("mutation contract rejects a machine-readable report the gate cannot read", () => {
+  const source = workflow.replace(
+    "              --output mutation-report.json \\\n",
+    "              # --output mutation-report.json \\\n",
+  );
   assertMutationFailure(source, "Gremlins executable unleash command is malformed");
 });
 
-test("mutation contract rejects threshold strings in printf arguments", () => {
-  const source = workflow
-    .replace(
-      `              --threshold-efficacy "${matrixEfficacy}" \\\n`,
-      `              printf --threshold-efficacy "${matrixEfficacy}" \\\n`,
-    )
-    .replace(
-      `              --threshold-mcover "${matrixMcover}" \\\n`,
-      `              printf --threshold-mcover "${matrixMcover}" \\\n`,
-    );
-  assertMutationFailure(source, "Gremlins executable unleash command is malformed");
-});
-
-test("mutation contract rejects a shell separator before thresholds", () => {
+test("mutation contract rejects a shell separator before the package argument", () => {
   const source = workflow.replace(
     '            gremlins unleash --tags="" \\\n',
     '            gremlins unleash --tags="" \\\n              ; printf "%s\\n" \\\n',
@@ -258,15 +301,80 @@ test("mutation contract rejects a shell separator before thresholds", () => {
   assertMutationFailure(source, "Gremlins executable unleash command is malformed");
 });
 
-test("mutation contract rejects threshold strings that only occur in a later step", () => {
+// PW-6.1's actual defect: Gremlins' own --threshold-efficacy/--threshold-mcover
+// exit 0 no matter what the package measured, so a workflow that passes them
+// and nothing else is not gating. These four tests are what "the gate can
+// never fail" looks like from the config side.
+test("mutation contract rejects a commented-out gate invocation", () => {
+  const source = workflow.replace(
+    `            ./scripts/ci/mutation-gate.sh mutation-report.json "${matrixEfficacy}" "${matrixMcover}"`,
+    `            # ./scripts/ci/mutation-gate.sh mutation-report.json "${matrixEfficacy}" "${matrixMcover}"`,
+  );
+  assertMutationFailure(
+    source,
+    "the mutation floors must be enforced by scripts/ci/mutation-gate.sh",
+  );
+});
+
+test("mutation contract rejects a gate invocation whose status is swallowed", () => {
+  const source = workflow.replace(
+    `            ./scripts/ci/mutation-gate.sh mutation-report.json "${matrixEfficacy}" "${matrixMcover}"`,
+    `            ./scripts/ci/mutation-gate.sh mutation-report.json "${matrixEfficacy}" "${matrixMcover}" || true`,
+  );
+  assertMutationFailure(
+    source,
+    "the mutation floors must be enforced by scripts/ci/mutation-gate.sh",
+  );
+});
+
+test("mutation contract rejects a gate invocation moved to a later step", () => {
   const source = workflow
-    .replace(`              --threshold-efficacy "${matrixEfficacy}" \\\n`, "")
-    .replace(`              --threshold-mcover "${matrixMcover}" \\\n`, "")
+    .replace(
+      `            ./scripts/ci/mutation-gate.sh mutation-report.json "${matrixEfficacy}" "${matrixMcover}"\n`,
+      "",
+    )
     .replace(
       "      - name: Summarize\n        if: always()",
-      `      - name: Summarize\n        run: echo --threshold-efficacy "${matrixEfficacy}" --threshold-mcover "${matrixMcover}"\n        if: always()`,
+      `      - name: Summarize\n        run: ./scripts/ci/mutation-gate.sh mutation-report.json "${matrixEfficacy}" "${matrixMcover}"\n        if: always()`,
     );
+  assertMutationFailure(
+    source,
+    "the mutation floors must be enforced by scripts/ci/mutation-gate.sh",
+  );
+});
+
+test("mutation contract rejects a return to Gremlins' inert threshold flags", () => {
+  const source = workflow.replace(
+    "              --output mutation-report.json \\\n",
+    `              --output mutation-report.json \\\n              --threshold-efficacy "${matrixEfficacy}" \\\n              --threshold-mcover "${matrixMcover}" \\\n`,
+  );
   assertMutationFailure(source, "Gremlins executable unleash command is malformed");
+});
+
+test("mutation contract rejects a dropped protocol timeout coefficient", () => {
+  const source = workflow.replace("            timeout_coefficient: 40\n", "");
+  assertMutationFailure(source, "protocol needs its timeout coefficient");
+});
+
+test("mutation contract rejects a missing canary job", () => {
+  const source = workflow.replace("  gate-canary:\n", "  gate-canary-disabled:\n");
+  assertMutationFailure(source, "the mutation gate canary job is missing");
+});
+
+test("mutation contract rejects a canary that never proves the gate can fail", () => {
+  const source = workflow.replace(
+    "          if ./scripts/ci/mutation-gate.sh canary-report.json 101 101; then",
+    "          if ./scripts/ci/mutation-gate.sh canary-report.json 0 0; then",
+  );
+  assertMutationFailure(source, "the canary must assert an unreachable floor is rejected");
+});
+
+test("mutation contract rejects a non-blocking canary", () => {
+  const source = workflow.replace(
+    "      - name: Prove the mutation gate still fails below a floor\n        shell: bash",
+    "      - name: Prove the mutation gate still fails below a floor\n        continue-on-error: true\n        shell: bash",
+  );
+  assertMutationFailure(source, "the canary must block");
 });
 
 test("mutation contract rejects a dead zero-mutant branch decoy", () => {
@@ -286,4 +394,81 @@ test("mutation contract rejects an outer dead wrapper", () => {
     )
     .replace("          fi\n        env:", "          fi\n          fi\n        env:");
   assertMutationFailure(source, "Gremlins script must preserve the zero-mutant branch");
+});
+
+// The other half of PW-6.1. The workflow tests above prove the gate is wired
+// in; these prove it actually rejects a below-floor measurement, which is the
+// thing Gremlins' own threshold flags silently stopped doing.
+function runGate(report, efficacyFloor, mcoverFloor) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mutation-gate-"));
+  try {
+    const reportPath = path.join(dir, "report.json");
+    if (report !== null) fs.writeFileSync(reportPath, report);
+    return spawnSync("bash", [GATE, reportPath, String(efficacyFloor), String(mcoverFloor)], {
+      encoding: "utf8",
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// auth's real numbers. Its floors were copied from Gremlins' two-decimal
+// report, so a gate comparing full JSON precision would reject the very run
+// the floors came from.
+const authReport = JSON.stringify({
+  test_efficacy: 79.16666666666666,
+  mutations_coverage: 97.95918367346938,
+  mutants_killed: 76,
+  mutants_lived: 20,
+  mutants_not_covered: 2,
+});
+
+test("mutation gate passes a package sitting exactly on its floor", () => {
+  const result = runGate(authReport, 79.17, 97.96);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("mutation gate fails a package below its efficacy floor", () => {
+  const result = runGate(authReport, 79.18, 97.96);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /test efficacy 79\.17% is below its floor of 79\.18%/u);
+});
+
+test("mutation gate fails a package below its mutator coverage floor", () => {
+  const result = runGate(authReport, 79.17, 97.97);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /mutator coverage 97\.96% is below its floor of 97\.97%/u);
+});
+
+test("mutation gate fails when every mutant timed out", () => {
+  // internal/protocol's shape before PW-6.2: five TIMED OUT mutants, which
+  // Gremlins scores 0.00/0.00 as though it had measured something.
+  const report = JSON.stringify({
+    test_efficacy: 0,
+    mutations_coverage: 0,
+    mutants_killed: 0,
+    mutants_lived: 0,
+    mutants_not_covered: 0,
+  });
+  const result = runGate(report, 100, 100);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /no mutant returned a KILLED or LIVED verdict/u);
+});
+
+test("mutation gate fails when Gremlins wrote no report", () => {
+  const result = runGate(null, 0, 0);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Gremlins wrote no report/u);
+});
+
+test("mutation gate fails on an unreadable report rather than passing it", () => {
+  const result = runGate("not json", 0, 0);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not a readable Gremlins JSON report/u);
+});
+
+test("mutation gate rejects a floor that is not a number", () => {
+  const result = runGate(authReport, "notafloor", 0);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /is not a plain decimal percentage/u);
 });
