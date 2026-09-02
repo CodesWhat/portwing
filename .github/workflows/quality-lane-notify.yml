@@ -76,11 +76,19 @@ on:
 permissions: {}
 
 concurrency:
-  # One notification decision per triggering run id, so two completion events
-  # for the same run can never race to both open and close the same issue.
+  # Two runs of the SAME source workflow (a manual `workflow_dispatch` and its
+  # own schedule, which quality-fuzz-monthly.yml explicitly allows to run
+  # side by side) must not process concurrently here: both `find_open_issue`
+  # calls could race past each other and create duplicate tracking issues, or
+  # a success's close could run before an in-flight failure's create and
+  # leave a stale open issue. Keying on the workflow id — not the run id,
+  # which is unique per run and would let two runs of the same lane process
+  # in parallel, and not the run name, which isn't guaranteed unique —
+  # serializes every completed event for that lane onto one queue.
+  group: quality-lane-notify-${{ github.event.workflow_run.workflow_id }}
   # Not cancel-in-progress: a decision that already called `gh issue
-  # create`/`close` must be allowed to finish.
-  group: quality-lane-notify-${{ github.event.workflow_run.id }}
+  # create`/`close` must be allowed to finish, not have its queued successor
+  # cancelled out from under it.
   cancel-in-progress: false
 
 jobs:

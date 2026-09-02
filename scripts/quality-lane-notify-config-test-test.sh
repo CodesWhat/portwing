@@ -77,41 +77,75 @@ assert_rejected \
 	"top-level permissions must be the empty set" \
 	"contract must reject a widened top-level permissions block"
 
+# Concurrency group keyed on the run id instead of the source workflow id:
+# two runs of the same lane (manual dispatch + schedule) would no longer
+# serialize.
+reset_fixture
+sed -i.bak \
+	's/group: quality-lane-notify-\${{ github\.event\.workflow_run\.workflow_id }}/group: quality-lane-notify-${{ github.event.workflow_run.id }}/' \
+	"${fixture}"
+assert_rejected \
+	"concurrency group must key on the source workflow_id, not the run id or name" \
+	"contract must reject a concurrency group keyed on the run id"
+
+# Concurrency set to cancel-in-progress, which would kill a decision that
+# already called gh issue create/close.
+reset_fixture
+sed -i.bak 's/^  cancel-in-progress: false$/  cancel-in-progress: true/' "${fixture}"
+assert_rejected \
+	"concurrency must not cancel an in-progress notification" \
+	"contract must reject cancel-in-progress: true"
+
 # Job loses issues: write.
 reset_fixture
 sed -i.bak 's/^      issues: write$/      pull-requests: write/' "${fixture}"
 assert_rejected \
-	"notify job must grant issues: write" \
+	"notify job permissions must be exactly: issues: write, actions: read" \
 	"contract must reject a notify job missing issues: write"
 
 # Job loses actions: read.
 reset_fixture
 sed -i.bak 's/^      actions: read$/      packages: read/' "${fixture}"
 assert_rejected \
-	"notify job must grant actions: read" \
+	"notify job permissions must be exactly: issues: write, actions: read" \
 	"contract must reject a notify job missing actions: read"
 
 # Job gains a contents permission it doesn't need.
 reset_fixture
 sed -i.bak 's/^      actions: read$/&\n      contents: read/' "${fixture}"
 assert_rejected \
-	"notify job must not grant a contents permission" \
+	"notify job permissions must be exactly: issues: write, actions: read" \
 	"contract must reject a notify job that grants contents"
+
+# Job gains id-token: write it has no business asking for.
+reset_fixture
+sed -i.bak 's/^      actions: read$/&\n      id-token: write/' "${fixture}"
+assert_rejected \
+	"notify job permissions must be exactly: issues: write, actions: read" \
+	"contract must reject a notify job that grants id-token: write"
 
 # Exclusion condition drops the run_attempt == 1 check, which would also skip
 # retried and final-failed monthly fuzz runs forever.
 reset_fixture
 sed -i.bak 's/run_attempt == 1/run_attempt == 2/' "${fixture}"
 assert_rejected \
-	"notify job condition must check for run_attempt == 1" \
+	"notify job condition must be exactly:" \
 	"contract must reject an exclusion that doesn't gate on the first attempt"
 
 # Exclusion condition inverted: requires the excluded case instead of skipping it.
 reset_fixture
 sed -i.bak 's/      !(github.event.workflow_run.name/      (github.event.workflow_run.name/' "${fixture}"
 assert_rejected \
-	"notify job condition must negate the excluded case, not require it" \
+	"notify job condition must be exactly:" \
 	"contract must reject a condition that runs only for the excluded case"
+
+# Exclusion condition weakened from && to ||: independent substring checks on
+# each clause wouldn't notice, since all three clauses are still present.
+reset_fixture
+sed -i.bak "s/github.event.workflow_run.conclusion == 'failure' &&/github.event.workflow_run.conclusion == 'failure' ||/" "${fixture}"
+assert_rejected \
+	"notify job condition must be exactly:" \
+	"contract must reject an exclusion that ORs its clauses instead of ANDing them"
 
 # Success branch dropped entirely.
 reset_fixture
@@ -119,6 +153,41 @@ sed -i.bak 's/^          success)$/          not-a-real-conclusion)/' "${fixture
 assert_rejected \
 	"notify step must handle a success conclusion" \
 	"contract must reject a workflow missing the success branch"
+
+# Case arms swapped: the failure) label now guards the close body and the
+# success) label guards the create/comment body. A file-wide substring check
+# for "gh issue create" would still pass; the scoped per-arm check must not.
+reset_fixture
+sed -i.bak \
+	-e 's/^          failure)$/          __TMP_ARM__/' \
+	-e 's/^          success)$/          failure)/' \
+	-e 's/^          __TMP_ARM__$/          success)/' \
+	"${fixture}"
+assert_rejected \
+	"failure branch must be able to create a tracking issue" \
+	"contract must reject swapped failure/success case arm bodies"
+
+# --label dropped from the gh issue create invocation: newly-opened issues
+# would no longer be findable by find_open_issue on the next run.
+reset_fixture
+sed -i.bak '/--label quality-lane \\$/d' "${fixture}"
+assert_rejected \
+	"the gh issue create invocation must carry the quality-lane label" \
+	"contract must reject a gh issue create call missing --label quality-lane"
+
+# types: [completed] moved off workflow_run onto a decoy trigger: the
+# unscoped version of this check would still find the string in the file.
+reset_fixture
+sed -i.bak \
+	-e '/^    types: \[completed\]$/d' \
+	-e '/^on:$/a\
+  push:\
+    types: [completed]
+' \
+	"${fixture}"
+assert_rejected \
+	"workflow_run trigger must fire only on types: [completed]" \
+	"contract must reject types: [completed] moved onto a decoy trigger"
 
 # Missing the pre-create idempotency search.
 reset_fixture
