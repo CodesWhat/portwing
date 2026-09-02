@@ -1,0 +1,223 @@
+name: "Quality: Lane Notify"
+run-name: >-
+  ${{
+    format('Quality: Lane Notify — {0} ({1}, attempt {2})',
+           github.event.workflow_run.name,
+           github.event.workflow_run.conclusion,
+           github.event.workflow_run.run_attempt)
+  }}
+
+# PW-2.2. The scheduled quality lanes (soak, nightly/monthly fuzz, monthly
+# mutation, monthly bench) only surface a red run in the Actions tab. On a
+# monthly cadence that means a red run can sit unnoticed for weeks — exactly
+# what happened to the monthly mutation lane, caught by a manual sweep on
+# 2026-09-02 rather than by anything watching it. This workflow is the thing
+# watching it: one shared `workflow_run` listener for every scheduled quality
+# lane, with a state machine of exactly two transitions:
+#
+#   * conclusion == 'failure' -> open, or comment on, one tracking issue for
+#     that workflow. Idempotent: it searches open `quality-lane`-labelled
+#     issues for an exact title match before creating, so a lane that stays
+#     red every night gets one issue with a growing comment thread, not one
+#     issue per run.
+#   * conclusion == 'success' -> close that issue, if one is open, with a
+#     comment pointing at the green run.
+#
+# Anything else (`cancelled`, `skipped`, `timed_out`, `action_required`,
+# `stale`) does nothing. A cancel is a human decision and not ours to react
+# to, same reasoning quality-fuzz-monthly-rerun.yml uses for the identical
+# question.
+#
+# `workflows:` below has to name every lane by its `name:` field verbatim —
+# GitHub's `workflow_run` trigger takes a literal list, not a `quality-*.yml`
+# glob, so a new scheduled quality lane needs a line added here by hand or it
+# fails silently just like the ones this exists to fix. quality-integration.yml
+# is deliberately not in the list: it also runs on `pull_request`, so its
+# failures already have a human looking at a PR check, which is the exact
+# silence this workflow exists to break for the others.
+#
+# quality-fuzz-monthly.yml's first attempt is excluded below. Explained at the
+# job `if:`.
+#
+# quality-fuzz-monthly-rerun.yml is in the list too, for its own sake, not as
+# a proxy for the monthly fuzz lane it triages. That workflow can itself fail
+# — a `kind=unknown` job listing failure, or a `gh run rerun` request that
+# gets rejected — and nothing else was watching those failures; its own exit
+# codes and step summary were the only record before this line was added.
+#
+# Like every `workflow_run` trigger, this only fires once the file is on the
+# DEFAULT branch, regardless of which branch defines it. Landing it on
+# dev/v0.9 buys nothing by itself; it starts watching at the next promotion,
+# and the way to prove it works after that is to force one of the listed
+# workflows red with `workflow_dispatch` and watch this react.
+
+on:
+  # zizmor's dangerous-triggers audit fires on `workflow_run` because the usual
+  # shape of one is exploitable: it runs with write scopes in the base repo and
+  # then checks out `workflow_run.head_sha` or executes an artifact the
+  # triggering run produced, letting a fork PR reach a privileged token. None
+  # of that applies here. This job checks out no code, downloads no artifact,
+  # and runs nothing from the upstream run; the only upstream data it touches
+  # is job names and conclusions read through the Actions API, which are typed
+  # values, not text that gets evaluated. None of the listed workflows can be
+  # fork-triggered either — they're `schedule` (default branch only) and
+  # `workflow_dispatch` (write access required) — so no untrusted actor can
+  # produce the event this reacts to.
+  workflow_run:  # zizmor: ignore[dangerous-triggers]
+    workflows:
+      - "Quality: Soak"
+      - "Quality: Deep Fuzz"
+      - "Quality: Deep Fuzz (monthly)"
+      - "Quality: Mutation Testing"
+      - "Quality: Benchmarks (monthly)"
+      - "Quality: Deep Fuzz Infra Rerun"
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  # Two runs of the SAME source workflow (a manual `workflow_dispatch` and its
+  # own schedule, which quality-fuzz-monthly.yml explicitly allows to run
+  # side by side) must not process concurrently here: both `find_open_issue`
+  # calls could race past each other and create duplicate tracking issues, or
+  # a success's close could run before an in-flight failure's create and
+  # leave a stale open issue. Keying on the workflow id — not the run id,
+  # which is unique per run and would let two runs of the same lane process
+  # in parallel, and not the run name, which isn't guaranteed unique —
+  # serializes every completed event for that lane onto one queue.
+  group: quality-lane-notify-${{ github.event.workflow_run.workflow_id }}
+  # Not cancel-in-progress: a decision that already called `gh issue
+  # create`/`close` must be allowed to finish, not have its queued successor
+  # cancelled out from under it.
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: "Notify on lane result"
+    # Every conclusion for every listed workflow reaches this job EXCEPT one:
+    # quality-fuzz-monthly.yml's own first attempt failing. That specific event
+    # is already being triaged, in parallel, by
+    # quality-fuzz-monthly-rerun.yml, which uses this exact same predicate
+    # (`conclusion == 'failure' && run_attempt == 1`) to decide whether to
+    # re-run the matrix. Two consequences of skipping it here:
+    #
+    #   * A first attempt that gets re-run and comes back green on attempt 2
+    #     never generates a tracking issue at all — attempt 2's own completed
+    #     event reaches this job normally and finds a success.
+    #   * A first attempt that gets re-run and fails again on attempt 2 (or
+    #     one the rerun lane classified as a real crash/error, so there is no
+    #     attempt 2) reaches this job on whatever its own final completed
+    #     event is, since the exclusion only matches run_attempt == 1.
+    #
+    # A crash or ordinary code failure that the rerun lane declines to retry
+    # on attempt 1 is the one case this does not raise an issue for by itself;
+    # the rerun lane's own step summary and `::error::` annotation are the
+    # record for that case. Extending coverage to it needs the same triage
+    # logic this workflow deliberately does not duplicate.
+    if: >-
+      !(github.event.workflow_run.name == 'Quality: Deep Fuzz (monthly)' &&
+        github.event.workflow_run.conclusion == 'failure' &&
+        github.event.workflow_run.run_attempt == 1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      issues: write
+      actions: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - name: Ensure quality-lane label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh label create quality-lane \
+            --repo "${REPO}" \
+            --color "d93f0b" \
+            --description "Automated: a scheduled quality lane is failing" \
+            --force ||
+            echo "::warning::Could not ensure the quality-lane label exists; issue creation may fail if it is missing."
+
+      - name: Open, update, or close the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+
+          TITLE="[quality] ${WORKFLOW_NAME} is failing"
+
+          find_open_issue() {
+            gh issue list \
+              --repo "${REPO}" \
+              --state open \
+              --label quality-lane \
+              --json number,title \
+              --limit 100 |
+              jq -r --arg t "${TITLE}" '.[] | select(.title == $t) | .number' |
+              head -n1
+          }
+
+          case "${CONCLUSION}" in
+          failure)
+            # The job list is enrichment, not a precondition. Left as a bare
+            # assignment, a transient 5xx here would abort the step under
+            # `set -e` and the lane failure would get no tracking issue at
+            # all, which is the exact silence this workflow exists to break.
+            # `gh api` does not retry, so one blip is one lost notification.
+            if ! FAILED_JOBS="$(
+              gh api --paginate \
+                "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100" \
+                --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")'
+            )"; then
+              echo "::warning::Could not list jobs for run ${RUN_ID}; filing the tracking issue without the job list."
+              FAILED_JOBS="(could not list the run's jobs; the Actions API call failed)"
+            elif [ -z "${FAILED_JOBS}" ]; then
+              FAILED_JOBS="(no individual job reported failure; the run itself concluded failure)"
+            fi
+
+            BODY="$(printf 'Run: %s\nConclusion: %s\nFailed jobs: %s\n' \
+              "${RUN_URL}" "${CONCLUSION}" "${FAILED_JOBS}")"
+
+            existing="$(find_open_issue)"
+            if [ -n "${existing}" ]; then
+              gh issue comment "${existing}" --repo "${REPO}" --body "${BODY}"
+              echo "Updated existing tracking issue #${existing}."
+            else
+              gh issue create \
+                --repo "${REPO}" \
+                --title "${TITLE}" \
+                --label quality-lane \
+                --body "${BODY}"
+              echo "Opened a new tracking issue."
+            fi
+            ;;
+          success)
+            existing="$(find_open_issue)"
+            if [ -n "${existing}" ]; then
+              gh issue close "${existing}" \
+                --repo "${REPO}" \
+                --comment "Resolved: ${RUN_URL} succeeded."
+              echo "Closed tracking issue #${existing}."
+            else
+              echo "No open tracking issue for ${WORKFLOW_NAME}; nothing to close."
+            fi
+            ;;
+          *)
+            echo "Conclusion is ${CONCLUSION}; not a failure or a success, nothing to do."
+            ;;
+          esac
