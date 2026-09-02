@@ -103,6 +103,27 @@ test("Go test adapter rejects a nonnumeric coverage floor", (t) => {
   assert.match(unmet.stderr, /coverage 100[.]0% is below the 101% floor/u);
 });
 
+// PW-6.11: CI never sets COVERAGE_MIN, so the default in the script is the
+// only number that gates anything. Pin it here, and to the figure COVERAGE.md
+// publishes, so a walk-back has to be argued for in a diff instead of landing
+// as a green run measuring less than the one before it.
+test("Go test adapter defaults to the documented coverage floor", (t) => {
+  const { root, bin } = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const result = run("go-test.sh", root, bin, {
+    COVERAGE_MIN: "",
+    GO_LIST_FIXTURE: "success",
+    MOCK_GO_TEST_SUCCESS: "1",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /floor 97%/u);
+  assert.match(
+    fs.readFileSync(path.join(ROOT, "COVERAGE.md"), "utf8"),
+    /enforced floor defaults to 97%/u,
+  );
+});
+
 test("Go fuzz adapter preserves the log and corpus from both bounded attempts", (t) => {
   const { root, bin } = fixture();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
