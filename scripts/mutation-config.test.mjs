@@ -224,6 +224,27 @@ function assertAdvisoryJob(source, entries) {
     );
   }
 
+  // Declaring advisory_flags is not the same as running with it: a version
+  // that keeps the array but drops it from the unleash invocation would still
+  // pass every check above while gremlins measured only the 5 default
+  // mutators. The invocation must expand the array literally.
+  assert.match(
+    advisory,
+    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
+    "the advisory job must expand advisory_flags on the unleash invocation",
+  );
+
+  // mutationRunStep is checked for step-level continue-on-error above, but
+  // that check is scoped to the gating job's own step. continue-on-error on
+  // the advisory step would swallow its zero-advisory-mutants exit 1 and
+  // report the job green having measured nothing, so it is banned anywhere
+  // in this job, not just on one named step.
+  assert.doesNotMatch(
+    advisory,
+    /continue-on-error:/u,
+    "continue-on-error must not appear anywhere in the advisory job",
+  );
+
   // The advisory table prints each package against the floor the matrix
   // measured, so the two have to be the same number.
   for (const packagePath of advisoryPackages) {
@@ -327,6 +348,7 @@ const matrixEfficacy = "$" + "{{ matrix.efficacy }}";
 const matrixMcover = "$" + "{{ matrix.mcover }}";
 const matrixZeroMutants = "$" + "{{ matrix.zero_mutants || false }}";
 const advisoryMutants = "$" + "{advisory_mutants}";
+const advisoryFlagsExpansion = "$" + "{advisory_flags[@]}";
 const expressionTrue = "$" + "{{ true }}";
 
 function assertMutationFailure(source, expectedMessage, expectedPackages) {
@@ -567,6 +589,25 @@ test("mutation contract rejects an advisory mutator in the gating run", () => {
     source,
     "--invert-logical would invalidate every floor measured without it",
   );
+});
+
+test("mutation contract rejects an advisory job that drops the flags expansion", () => {
+  const source = workflow.replace(
+    `            if ! gremlins unleash --tags="" \\\n              "${advisoryFlagsExpansion}" \\\n`,
+    '            if ! gremlins unleash --tags="" \\\n',
+  );
+  assertMutationFailure(
+    source,
+    "the advisory job must expand advisory_flags on the unleash invocation",
+  );
+});
+
+test("mutation contract rejects continue-on-error on the advisory step", () => {
+  const source = workflow.replace(
+    "      - name: Measure the default-disabled mutators\n        shell: bash",
+    "      - name: Measure the default-disabled mutators\n        continue-on-error: true\n        shell: bash",
+  );
+  assertMutationFailure(source, "continue-on-error must not appear anywhere in the advisory job");
 });
 
 test("mutation contract rejects an advisory floor that drifts from the matrix", () => {
