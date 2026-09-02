@@ -168,6 +168,7 @@ require_block_text() {
 	fi
 }
 
+require_text ".goreleaser.yml" 'mod_timestamp: "{{ .CommitTimestamp }}"' "release archives must be byte-reproducible (mod_timestamp pinned to the commit)"
 require_text ".goreleaser.yml" "nfpms:" "GoReleaser must define native Linux packages"
 require_text ".goreleaser.yml" "formats: [deb, rpm]" "GoReleaser must build deb and rpm packages"
 require_text ".goreleaser.yml" "src: scripts/portwing.service" "native packages must include the systemd unit"
