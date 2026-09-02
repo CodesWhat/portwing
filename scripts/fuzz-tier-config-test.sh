@@ -42,6 +42,12 @@ caller_fuzz_inventory="$(
 	' .github/workflows/ci-verify.yml
 )"
 
+# PW-2.1. A seed corpus regression is invisible from the outside: deleting
+# testdata/fuzz/<Target>/ still passes `go test`, and dropping the cache steps
+# still produces a green fuzz run that quietly starts from f.Add() every night.
+# Both get asserted here.
+corpus_max_bytes=4096
+
 for spec in "${fuzzers[@]}"; do
 	fuzzer="${spec%%|*}"
 	pkg="${spec#*|}"
@@ -59,6 +65,24 @@ for spec in "${fuzzers[@]}"; do
 		fail "quality-fuzz-nightly.yml must run ${fuzzer} in ${pkg}"
 	grep -Eq "${workflow_mapping}" .github/workflows/quality-fuzz-monthly.yml ||
 		fail "quality-fuzz-monthly.yml must run ${fuzzer} in ${pkg}"
+
+	corpus_dir="${pkg#./}"
+	corpus_dir="${corpus_dir%/}/testdata/fuzz/${fuzzer}"
+	corpus_count=0
+	if [ -d "${corpus_dir}" ]; then
+		corpus_count="$(find "${corpus_dir}" -type f | wc -l | tr -d ' ')"
+	fi
+	if [ "${corpus_count}" -eq 0 ]; then
+		fail "${fuzzer} must ship a non-empty committed seed corpus at ${corpus_dir}/"
+	else
+		while IFS= read -r corpus_file; do
+			[ "$(head -n 1 "${corpus_file}")" = "go test fuzz v1" ] ||
+				fail "${corpus_file} is missing the 'go test fuzz v1' header, so the engine ignores it"
+			corpus_size="$(wc -c <"${corpus_file}" | tr -d ' ')"
+			[ "${corpus_size}" -le "${corpus_max_bytes}" ] ||
+				fail "${corpus_file} is ${corpus_size} bytes; seed entries are capped at ${corpus_max_bytes}"
+		done < <(find "${corpus_dir}" -type f)
+	fi
 done
 
 if [ "$failures" -ne 0 ]; then
