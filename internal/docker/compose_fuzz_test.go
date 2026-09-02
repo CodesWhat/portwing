@@ -25,6 +25,10 @@ func FuzzComposeRequestValidate(f *testing.F) {
 	if err != nil {
 		f.Fatalf("resolving stacksDir: %v", err)
 	}
+	// stacksDir is shared by every iteration in this worker process, so
+	// without a bound the WalkDir below costs O(files written so far) and
+	// the target slows to a crawl over a long -fuzztime budget.
+	filesWritten := 0
 
 	// Seed: valid JSON, minimal.
 	f.Add([]byte(`{"stackName":"myapp"}`))
@@ -92,6 +96,17 @@ func FuzzComposeRequestValidate(f *testing.F) {
 		})
 		if walkErr != nil {
 			t.Fatalf("walking stacksDir: %v", walkErr)
+		}
+
+		filesWritten += len(req.Files) + 1
+		if filesWritten > 512 {
+			if err := os.RemoveAll(stacksDir); err != nil {
+				t.Fatalf("resetting stacksDir: %v", err)
+			}
+			if err := os.MkdirAll(stacksDir, 0o750); err != nil {
+				t.Fatalf("recreating stacksDir: %v", err)
+			}
+			filesWritten = 0
 		}
 	})
 }
