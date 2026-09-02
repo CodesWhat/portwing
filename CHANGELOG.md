@@ -172,9 +172,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now stamps the current v0.9.11 instead of v0.8.1.
 - **Arcane repinned to v2.10.1, and the edge agent auth row is no longer a
   tie.** Arcane v2.10.0 moved session tokens, OIDC verification, passkeys, and
-  edge mTLS to ML-DSA-87, the FIPS 204 post-quantum signature scheme, so the
-  comparison surfaces stamp v2.10.1 instead of v2.9.0 and the `/compare/arcane`
-  "Agent authentication" verdict moves from `tie` to `competitor`. The claim is
+  edge mTLS to ML-DSA-87, the FIPS 204 post-quantum signature scheme, so all
+  three comparison surfaces (the repo matrix, the docs-site table, and the
+  `/compare/arcane` page) stamp v2.10.1 instead of v2.9.0, and the
+  `/compare/arcane` "Agent authentication" verdict moves from `tie` to
+  `competitor`. The claim is
   bounded on both sides. Arcane's edge mTLS is still opt-in, its agent token
   still bootstraps the first enrollment, and an existing ECDSA P-384 CA keeps
   issuing P-384 client certificates, so only a freshly generated CA is
