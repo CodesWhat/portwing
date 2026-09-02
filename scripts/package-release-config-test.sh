@@ -168,7 +168,36 @@ require_block_text() {
 	fi
 }
 
-require_text ".goreleaser.yml" 'mod_timestamp: "{{ .CommitTimestamp }}"' "release archives must be byte-reproducible (mod_timestamp pinned to the commit)"
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*mod_timestamp:' \
+	'mod_timestamp: "{{ .CommitTimestamp }}"' \
+	"release binaries must be byte-reproducible (mod_timestamp pinned to the commit)"
+
+# The binary's mtime being pinned doesn't make the archive reproducible on its
+# own: GoReleaser auto-includes LICENSE*/README*/CHANGELOG* with the source
+# file's own filesystem mtime whenever `files:` is unset. An explicit `files:`
+# entry per glob, each carrying its own commit-pinned mtime, is what actually
+# closes that gap — so assert each entry individually (require_exactly_one_active
+# so a commented-out or duplicated entry still fails) and assert the mtime
+# override count separately, since the same "{{ .CommitDate }}" line repeats
+# once per entry and require_exactly_one_active can't express "exactly three".
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: LICENSE\*$' \
+	'- src: LICENSE*' \
+	"release archives must include LICENSE* with a pinned mtime"
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: README\*$' \
+	'- src: README*' \
+	"release archives must include README* with a pinned mtime"
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: CHANGELOG\*$' \
+	'- src: CHANGELOG*' \
+	"release archives must include CHANGELOG* with a pinned mtime"
+archive_mtime_overrides="$(active_lines ".goreleaser.yml" | grep -cF 'mtime: "{{ .CommitDate }}"' || true)"
+if [ "${archive_mtime_overrides}" -ne 3 ]; then
+	echo "FAIL: release archives must pin all three LICENSE*/README*/CHANGELOG* entries' mtime to the commit date (.goreleaser.yml has ${archive_mtime_overrides} active mtime: \"{{ .CommitDate }}\" line(s), want 3)" >&2
+	failures=$((failures + 1))
+fi
 require_text ".goreleaser.yml" "nfpms:" "GoReleaser must define native Linux packages"
 require_text ".goreleaser.yml" "formats: [deb, rpm]" "GoReleaser must build deb and rpm packages"
 require_text ".goreleaser.yml" "src: scripts/portwing.service" "native packages must include the systemd unit"
