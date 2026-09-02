@@ -23,6 +23,10 @@
 # decimal places Gremlins prints and the floors recorded in the workflow.
 # Without that rounding a floor copied from the report (auth 97.96) rejects the
 # very run it was copied from, because the JSON carries 97.959183673469383.
+# The rounding itself has to match Go's printf, which rounds an exact binary
+# tie to even rather than always up: 29 killed / 3 lived is 90.625, which
+# Gremlins prints as "90.62". A floor of 90.62 copied from that print must
+# compare equal to the run it came from, not fail it by a hundredth.
 #
 # Usage: mutation-gate.sh <report.json> <efficacy-floor> <mcover-floor>
 
@@ -88,9 +92,20 @@ fi
 
 check_floor() {
 	awk -v label="$1" -v measured="$2" -v floor="$3" '
+        # Convert to integer hundredths by formatting through the same
+        # printf machinery Gremlins uses to print its report ("%.2f"), then
+        # stripping the decimal point, instead of round-half-up. C printf and
+        # Go round an exact binary tie (90.625 -> "90.62", not "90.63") to
+        # the same even digit, so a floor copied verbatim from a Gremlins
+        # report always compares equal to the run it was copied from.
+        function to_hundredths(x,    s) {
+            s = sprintf("%.2f", x)
+            gsub(/\./, "", s)
+            return s + 0
+        }
         BEGIN {
-            m = int(measured * 100 + 0.5)
-            f = int(floor * 100 + 0.5)
+            m = to_hundredths(measured)
+            f = to_hundredths(floor)
             printf "mutation-gate: %s %.2f%% (floor %.2f%%)\n", label, m / 100, f / 100
             if (m < f) {
                 printf "mutation-gate: FAIL: %s %.2f%% is below its floor of %.2f%%\n", \
