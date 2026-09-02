@@ -2,7 +2,7 @@
 
 ## The Standard
 
-Portwing targets a **documented ~96% production coverage floor**, not 100%.
+Portwing targets a **documented ~97% production coverage floor**, not 100%.
 
 Go cannot cleanly reach 100% without production-code distortion. Certain
 patterns produce statements that are structurally unreachable or require
@@ -22,14 +22,22 @@ impractical test infrastructure:
 - Compile-time `GOOS=windows` branches — dead code on linux/darwin; cannot be
   compiled or executed in CI
 
-The **enforced floor defaults to 96%** (`COVERAGE_MIN` in
-`scripts/ci/go-test.sh`; the env override exists for local experiments — CI
-does not set it, so 96 is what every CI run enforces). Achieved total as of
-2026-08: **96.4%**. The floor was originally set ~1.5 percentage points below
-the achieved total so CI never fails on coverage noise — the org standard for
-the Go repos (drydock stays at 100% because TypeScript supports line-level
-`istanbul-ignore`; Go has no equivalent). The headroom has since narrowed to
-0.4 percentage points; new production code should land with tests, or the
+The **enforced floor defaults to 97%** (`COVERAGE_MIN` in
+`scripts/ci/go-test.sh`; the env override exists for local experiments, CI
+does not set it, so 97 is what every CI run enforces). Achieved total as of
+2026-09-02: **97.4%** (run `33684784256`, job `100429523414`, commit
+`7f61a77`), with 97.3% on the four commits before it. Keeping a floor below
+the achieved total is the org standard for the Go repos: drydock stays at
+100% because TypeScript supports line-level `istanbul-ignore`, and Go has no
+equivalent.
+
+The floor sat at 96 while the achieved total climbed from 96.4% to 97.4%,
+which turned it into 1.4 points of slack a regression could have hidden in.
+97 restores about 0.4 points of headroom, roughly 25 statements, which is the
+room a change that lands slightly ahead of its tests needs. It is a whole
+number rather than the measured total because the floor is here to catch a
+real regression, not to pin a figure that moves a tenth of a point whenever a
+test file lands. New production code should still land with tests, or the
 floor becomes the first thing a refactor trips over.
 
 ## Residual Uncovered Blocks
