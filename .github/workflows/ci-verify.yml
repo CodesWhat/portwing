@@ -333,7 +333,11 @@ jobs:
 
   dependency-review:
     name: "Dependency Review"
-    if: github.event.repository.visibility == 'public' && github.event_name == 'pull_request'
+    if: >-
+      github.event.repository.visibility == 'public' &&
+      (github.event_name == 'pull_request' ||
+       (github.event_name == 'push' &&
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -357,6 +361,9 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+        with:
+          base-ref: ${{ github.event_name == 'push' && github.event.before || '' }}
+          head-ref: ${{ github.event_name == 'push' && github.sha || '' }}
 
   # scripts/package-release-config-test.sh is also run by release-cut.yml, and
   # that remains the gate that blocks a bad tag. The problem it doesn't solve is
