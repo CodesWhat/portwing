@@ -126,6 +126,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a byte-for-byte duplicate of `openCredentialFile`'s permission check, which
   callers already use directly), along with the tests that existed solely to
   exercise them.
+- **`protocol.MetricsMessage` matches `metrics.HostMetrics` again.**
+  `DiskMetricsAvailable` and `DiskError` were added to `HostMetrics` without
+  being mirrored on the message type that documents the host-metrics wire
+  shape. The wire never regressed: `sendMetrics` and `toolHostMetrics` both
+  marshal the collector's `HostMetrics` value directly and nothing in the agent
+  ever constructs a `MetricsMessage`, so both fields have been going out over
+  the tunnel all along. Nothing type-checked the declaration against the struct
+  it documents, which is how it drifted unnoticed. A reflection-based parity
+  test now fails on a JSON field or tag option present on one type and not the
+  other, in either direction, backed by a wire-level round trip that pins
+  `diskMetricsAvailable` as always present and `diskError` as `omitempty`.
 - **Competitive claims re-verified against primary sources.** The market audit
   moved from its 2026-07-28 snapshot to 2026-08-29. Komodo Periphery is repinned
   to v2.3.2 and Arcane Agent to v2.9.0; Hawser stays at v0.2.46, still its
@@ -143,6 +154,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `https_proxy` and can stall reconnection on a hardcoded handshake timeout.
   Portwing's own edge listener defaults to loopback and refuses a non-loopback
   bind unless the operator sets `ALLOW_UNAUTHENTICATED_REMOTE`.
+- **Corrected four authentication and TLS claims the docs stated as fact.** The
+  authentication page said Drydock's bundled `AgentClient` does not implement
+  Ed25519 request signing, leaving standard-mode signing available only to
+  custom clients; it does, through `DD_AGENT_{name}_AUTHMODE=ed25519` with
+  `SIGNINGKEYID` and `SIGNINGKEY`. Both Drydock integration pages named
+  `X-Dd-Agent-Secret` and `X-Portwing-Token` as the only accepted credentials,
+  omitting `Authorization: Bearer`, the five `X-Portwing-*` signature headers,
+  and the rate-limited `POST /api/portwing/enroll` bootstrap exception that
+  authenticates with the one-use enrollment token in its body. The edge
+  connection sequence still offered a token SHA-256 hash as the fallback when
+  `PRIVATE_KEY_FILE` is unset, which startup rejects outright: edge mode is
+  Ed25519-only. And `security-grype.yml` justified having no testssl job with
+  "Portwing does not operate a TLS listener of its own", which standard mode's
+  `TLS_CERT`/`TLS_KEY` contradict.
+- **Soak coverage is credited to the workflow that actually provides it.** The
+  README and five docs pages attributed edge mode's multi-agent reconnect,
+  exec, backpressure, and continuous-log soak to Portwing; that gate is
+  Drydock's cross-repo `quality-portwing-fleet-soak.yml`. Portwing's own
+  `quality-soak-weekly.yml` covers the standard/generic HTTP path and SSE
+  connect/hold/disconnect churn, and it samples resident set size and nothing
+  else — `scripts/soak.sh` fails when growth from the post-warmup baseline
+  exceeds 64 MiB and never reads a thread or goroutine count, so both the "zero
+  RSS/goroutine growth" wording and the "RSS + thread drift" job name
+  overclaimed what the run measures. The job is renamed to "Soak (portwing RSS
+  growth)"; the soak itself is unchanged.
 - **Moved the Go toolchain to 1.27.0.** `go.mod`'s `toolchain` directive and the
   digest-pinned `golang:*-alpine` builder images in `Dockerfile`,
   `Dockerfile.armv7`, and `Dockerfile.dev` now match, as the release contract
