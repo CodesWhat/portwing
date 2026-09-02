@@ -499,6 +499,13 @@ func (s *ExecSession) Close() {
 		s.mu.Lock()
 		s.closed = true
 		conn := s.conn
+		// Unregister before done is observable. Anything that waits on done
+		// (EndExec, the drainer, the write-failure teardown test) may check the
+		// registry immediately after, and unregistering only after the conn
+		// close and inbox drain below left a window where a closed session was
+		// still registered. Nothing can enqueue once closed is set, so the
+		// registry entry has no remaining job.
+		s.client.execSessions.CompareAndDelete(s.execID, s)
 		close(s.done)
 		s.mu.Unlock()
 
@@ -512,7 +519,6 @@ func (s *ExecSession) Close() {
 			case item := <-s.inbox:
 				s.releaseInputBytes(item.reservedBytes)
 			default:
-				s.client.execSessions.CompareAndDelete(s.execID, s)
 				return
 			}
 		}
