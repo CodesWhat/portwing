@@ -14,6 +14,32 @@ require_text() {
 	fi
 }
 
+# grep -Fq matches anywhere in the file, comments included, which is a false
+# pass waiting to happen for a pinned release value: a stale
+# `# was GRYPE_VERSION: "0.118.0"` line satisfies it while the active
+# assignment says something else, and so does a second assignment that YAML
+# would actually be the one to use. Match active lines only and require exactly
+# one, so a stale comment and a duplicate key both fail here.
+active_lines() {
+	grep -vE '^[[:space:]]*#' "$1"
+}
+
+require_exactly_one_active() {
+	local file="$1"
+	local pattern="$2"
+	local text="$3"
+	local description="$4"
+	local total
+	local matching
+
+	total="$(active_lines "$file" | grep -cE -- "$pattern" || true)"
+	matching="$(active_lines "$file" | grep -cF -- "$text" || true)"
+	if [ "${total}" -ne 1 ] || [ "${matching}" -ne 1 ]; then
+		echo "FAIL: ${description} (${file} must contain exactly one active: ${text})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
 require_file() {
 	local file="$1"
 	local description="$2"
@@ -290,13 +316,23 @@ expected_scan_action_ref="anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c003
 scan_action_count="$(awk -v expected="${expected_scan_action_ref}" \
 	'$1 == "uses:" && $2 == expected && $3 == "#" && $4 == "v7.4.2" { count++ } END { print count + 0 }' \
 	.github/workflows/security-grype.yml)"
-if [ "${scan_action_count}" -ne 2 ]; then
+# Counting only the lines that match would still pass with a third scanner lane
+# pinned to an older scan-action sitting beside the two correct ones, which is
+# the shape a partial bump actually takes. Count every scan-action use as well,
+# so an added lane has to be at the reviewed pin or fail here.
+scan_action_total="$(awk \
+	'$1 == "uses:" && $2 ~ /^anchore\/scan-action@/ { count++ } END { print count + 0 }' \
+	.github/workflows/security-grype.yml)"
+if [ "${scan_action_count}" -ne 2 ] || [ "${scan_action_total}" -ne 2 ]; then
 	echo "FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in both scanner lanes" >&2
 	failures=$((failures + 1))
 fi
-require_text ".github/workflows/release.yml" 'GRYPE_VERSION: "0.118.0"' \
+require_exactly_one_active ".github/workflows/release.yml" \
+	'^[[:space:]]*GRYPE_VERSION:' \
+	'GRYPE_VERSION: "0.118.0"' \
 	"release Grype version must match anchore/scan-action@v7.4.2's Grype v0.118.0"
-require_text ".github/workflows/release.yml" \
+require_exactly_one_active ".github/workflows/release.yml" \
+	'--certificate-identity[= ]"?https://github\.com/anchore/grype/' \
 	'--certificate-identity "https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main"' \
 	"release Grype checksum verification must use the exact Anchore Grype release workflow identity"
 
