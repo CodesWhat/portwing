@@ -1,0 +1,319 @@
+name: "Quality: Deep Fuzz Infra Rerun"
+run-name: >-
+  ${{
+    format('Quality: Deep Fuzz — infra triage for monthly run {0} (attempt {1})',
+           github.event.workflow_run.run_number,
+           github.event.workflow_run.run_attempt)
+  }}
+
+# Re-runs `quality-fuzz-monthly.yml` when, and only when, it died because its
+# runner went away rather than because a fuzzer found something.
+#
+# The failure this exists for: on run 33514192612 (2026-09-01) and run
+# 28689657568 (2026-07-04) all seven matrix legs died at ~17m50s into a 1-hour
+# budget with exit code 143 and "The runner has received a shutdown signal".
+# It was not a fuzz finding and not a platform incident — sockguard's monthly
+# fuzz ran clean through the identical window, githubstatus.com records nothing
+# for 2026-09-01, and `cancel-in-progress` is false with a single trigger, so a
+# concurrency cancel is ruled out too.
+#
+# It has to be a SEPARATE WORKFLOW RUN. Extending the retry/classification loop
+# inside the fuzz step is a no-op against this failure mode: the bash
+# interpreter hosting that loop is itself one of the killed processes. The last
+# four seconds of job 99876956458 say it exactly:
+#
+#   13:58:39.105  fuzz: elapsed: 18m45s, execs: 22940370 ...
+#   13:58:40.435  ##[error]Process completed with exit code 143.
+#   13:58:40.451  ##[group]Run actions/upload-artifact@043fb46d...
+#   13:58:40.454  ##[error]The runner has received a shutdown signal...
+#   13:58:40.535  ##[error]The operation was canceled.
+#
+# `Upload fuzz corpus` got as far as printing its input group and was killed
+# 3ms later; `Summarize` (if: always()) never appears in the log at all. The
+# whole job went, not just the `go test` subprocess, so any code that runs on
+# that runner is unreachable by definition. This workflow runs on a different
+# runner, in a different run, after the fact.
+#
+# Three bounds, all load-bearing:
+#
+#   1. Exactly one automatic attempt, gated on run_attempt == 1. The re-run
+#      creates attempt 2 of the SAME run id, whose own `completed` event
+#      re-enters here and is refused. Without that gate a job that keeps
+#      losing its runner re-runs itself forever, burning Actions minutes and
+#      paging nobody. (GITHUB_TOKEN's recursion suppression may also stop the
+#      second event from creating a run at all, but that is a side effect to
+#      not depend on — workflow_dispatch and repository_dispatch are already
+#      documented exceptions to it, so the exemption list is not something to
+#      build a bound out of. The explicit gate is the mechanism.)
+#
+#   2. Never re-run past a real crash. If any failed job's log shows Go writing
+#      a failing input, this refuses. Go's fuzzer explores pseudo-randomly, so
+#      attempt 2 is not guaranteed to re-reach the crashing input and could come
+#      back green, silently swallowing a regression. The logs are actually
+#      downloaded and grepped; it is not inferred from the conclusion.
+#
+#   3. Every failed job must carry the infra signature. One ordinary failure
+#      anywhere in the matrix vetoes the re-run, so "some legs were killed" is
+#      never used as cover for a leg that failed on its own merits.
+#
+# Both greps below are deliberately narrow, and the narrowness is the whole
+# point rather than a style preference. A job log CONTAINS THE STEP'S OWN BASH
+# SOURCE, echoed inside the `##[group]Run ...` block, so a loose pattern
+# matches the code that looks for it. Measured 2026-09-02 across all seven legs
+# of run 33514192612: bare `Failing input written to testdata` matches 1 time
+# per log — every time — because quality-fuzz-monthly.yml's own `grep -q` line
+# is printed at log line 326. Requiring the `testdata/fuzz/` path Go actually
+# prints drops that to 0 across all seven. A loose pattern here would not be a
+# cosmetic wart; it would veto every re-run forever while the workflow reported
+# green, which is the exact "silent no-op" this is supposed to make impossible.
+#
+# Same reason the infra grep is anchored on the rendered `##[error]` prefix and
+# not the bare sentence: the classification added to quality-fuzz-monthly.yml
+# alongside this file mentions the shutdown-signal wording in a comment, so the
+# unanchored form would self-match too.
+#
+# And infra keys on the shutdown-signal line, NOT on exit 143 alone, even
+# though both appear in all seven logs. A step killed by `timeout-minutes` also
+# exits 143 and also fails the job, but is a budget misconfiguration rather
+# than lost infrastructure; re-running it burns another six hours to fail the
+# same way. Only a genuine runner teardown prints "The runner has received a
+# shutdown signal", so that is the discriminator and 143 is corroboration.
+#
+# Where `kind=infra` is observable, and why it is emitted in two places.
+# `quality-fuzz-monthly.yml`'s own `Summarize` step cannot report it in the
+# case that matters: on a full teardown that step never executes. So THIS
+# workflow's step summary is the authoritative place the classification exists
+# — it runs on a runner the upstream event cannot reach. The in-job
+# classification added alongside this file covers the weaker variant of the
+# same failure, where the step process takes the SIGTERM but the job survives
+# long enough to finish its remaining steps (an ordinary cancellation, or a
+# teardown the bash loop outlives). Without it, a `go test` exit of 143 with no
+# "context deadline exceeded" in the log lands in the `error` branch and gets
+# labelled a code failure. Neither place subsumes the other.
+#
+# Like every `workflow_run` and `schedule` trigger, this only starts firing
+# once the file is on the DEFAULT branch, regardless of which branch defines
+# it — the same constraint documented in `main-is-released.yml`. Landing it on
+# dev/v0.9 buys nothing on its own; it starts watching at the next promotion.
+# There is deliberately no `workflow_dispatch` escape hatch: without a
+# `github.event.workflow_run` payload every gate below evaluates against an
+# empty context, so a dispatch would either skip silently or need a second,
+# untested code path. Exercise it after promotion by re-running
+# https://github.com/CodesWhat/portwing/actions/runs/33514192612 and watching
+# what this decides.
+#
+# `workflows:` matches the upstream workflow's `name:` verbatim. Renaming
+# "Quality: Deep Fuzz (monthly)" without editing the line below silently
+# unhooks this, with no error anywhere.
+
+on:
+  # zizmor's dangerous-triggers audit fires on `workflow_run` because the usual
+  # shape of one is exploitable: it runs in the base repo with write scopes and
+  # then checks out `workflow_run.head_sha`, or downloads and executes an
+  # artifact the triggering run produced, letting a fork PR reach a privileged
+  # token. None of that applies here. This job checks out nothing, downloads no
+  # artifact, and executes nothing from the upstream run; the only upstream
+  # data it touches is job-log text, which is grepped and never evaluated. The
+  # upstream workflow cannot be fork-triggered in the first place — its triggers
+  # are `schedule` (default branch only) and `workflow_dispatch` (write access
+  # required), so no untrusted actor can produce the event this reacts to.
+  workflow_run:  # zizmor: ignore[dangerous-triggers]
+    workflows: ["Quality: Deep Fuzz (monthly)"]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  # One triage per upstream run id, so two completion events for the same run
+  # can never both decide to re-run it. Not cancel-in-progress: a triage that
+  # has already called `gh run rerun` must be allowed to finish writing down
+  # that it did.
+  group: quality-fuzz-monthly-rerun-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    name: "Triage monthly fuzz failure"
+    # `failure` only. `cancelled` is a human or a concurrency cancel and is not
+    # ours to undo; `success` needs nothing. run_attempt == 1 is bound 1 above.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      # WIDER THAN THIS REPO'S `contents: read` DEFAULT, on purpose, and this is
+      # the only workflow here that needs it. `gh run rerun` is an Actions API
+      # write; `actions: read` returns 403 for it and nothing narrower than
+      # `actions: write` grants it (the same wall `starchart.yml` documents for
+      # RELEASE_PAT: contents: write does not imply actions: write). It is
+      # scoped to this one job, which checks out no code, builds nothing, and
+      # runs no third-party action other than harden-runner — so the widened
+      # credential never sits next to attacker-influenced input. `contents` is
+      # omitted entirely rather than set to read, because nothing here reads
+      # the repository.
+      actions: write
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          # api.github.com is the API itself. The blob wildcard is NOT optional
+          # and is the reason this list is longer than release.yml's: the job
+          # log endpoint answers 302 to
+          # https://productionresultssaN.blob.core.windows.net/... (measured
+          # 2026-09-02 against job 99876956458: sa5), and N is not stable, so a
+          # literal host would break log download the first time GitHub moved
+          # storage accounts. Blocking it would make constraint 2 unenforceable
+          # while the workflow still reported green. Same wildcard pair
+          # quality-soak-weekly.yml already uses in this repo.
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            results-receiver.actions.githubusercontent.com:443
+
+      - name: Triage failed jobs and re-run infra kills
+        id: triage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+
+          JOBS_TSV="${RUNNER_TEMP}/failed-jobs.tsv"
+
+          # A failed listing must not read as "nothing failed". Without the
+          # explicit check, `gh` erroring would produce an empty file, the
+          # verdict would be `none`, and a silent no-op would be indistinguish-
+          # able from a healthy skip.
+          if ! gh api --paginate \
+              "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100" \
+              --jq '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"' \
+              > "${JOBS_TSV}"; then
+            echo "kind=unknown" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Monthly fuzz infra triage"
+              echo ""
+              echo "- Upstream run: ${RUN_URL} (attempt ${RUN_ATTEMPT})"
+              echo "- Verdict: \`kind=unknown\`"
+              echo "- Action:  no re-run."
+              echo "- Why:     listing the run's jobs failed, so nothing could be"
+              echo "  classified. Triage the upstream run by hand."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Could not list jobs for run ${RUN_ID}; refusing to re-run."
+            exit 1
+          fi
+
+          FAILED=()
+          while IFS= read -r row; do
+            if [ -n "${row}" ]; then
+              FAILED+=("${row}")
+            fi
+          done < "${JOBS_TSV}"
+
+          crash=()
+          infra=()
+          other=()
+
+          for row in ${FAILED[@]+"${FAILED[@]}"}; do
+            job_id="${row%%$'\t'*}"
+            job_name="${row#*$'\t'}"
+            log="${RUNNER_TEMP}/job-${job_id}.log"
+
+            # `--allow-escape-sequences` is required, not defensive. Every
+            # Actions job log carries ANSI colour codes, and without the flag
+            # `gh api` refuses the whole response with "the response contains
+            # terminal escape sequences" and exits 1 — including when stdout is
+            # already redirected to a file, which is the case here. Verified
+            # 2026-09-02 against job 99876956458: 0 bytes and exit 1 without it,
+            # 70519 bytes and exit 0 with it. Dropping the flag turns bound 2
+            # into an unenforceable no-op. The flag exists in gh 2.98.0, which
+            # is what the ubuntu-24.04 image ships.
+            if ! gh api --allow-escape-sequences \
+                "repos/${REPO}/actions/jobs/${job_id}/logs" > "${log}"; then
+              : > "${log}"
+              echo "::warning::Could not download the log for job ${job_id} (${job_name}); it counts as unclassified, which vetoes the re-run."
+            fi
+
+            # Order matters. A crashing input outranks every other signal: it is
+            # the one result a re-run can erase, per bound 2 in the header. The
+            # second alternative catches the monthly workflow's own rendered
+            # annotation, which is an independent witness to the same event.
+            if grep -qE 'Failing input written to testdata/fuzz/|##\[error\].*found a crashing input' "${log}"; then
+              crash+=("${job_name}")
+            elif grep -qF '##[error]The runner has received a shutdown signal' "${log}"; then
+              infra+=("${job_name}")
+            else
+              other+=("${job_name}")
+            fi
+          done
+
+          if [ "${#FAILED[@]}" -eq 0 ]; then
+            kind="none"
+            action="no re-run."
+            why="the run concluded \`failure\` but no job reports \`conclusion: failure\`. That is a startup failure or a failure outside the job list, and a re-run would not address it."
+          elif [ "${#crash[@]}" -gt 0 ]; then
+            kind="crash"
+            action="no re-run, deliberately."
+            why="at least one leg wrote a failing input to \`testdata\`. Go's fuzzer explores pseudo-randomly, so a second attempt is not guaranteed to re-reach that input and could come back green over a real regression. Download the \`fuzz-corpus-*\` artifact, commit the minimized input to the seed corpus, and fix the bug."
+          elif [ "${#other[@]}" -gt 0 ]; then
+            kind="error"
+            action="no re-run."
+            why="at least one failed leg shows no runner-teardown signature, so it failed on its own merits. Re-running the matrix would not fix it and would hide it behind an hour of fuzzing."
+          else
+            kind="infra"
+            action="re-running the failed jobs (attempt 2)."
+            why="every failed leg logged \`The runner has received a shutdown signal\` and none wrote a failing input. This is lost infrastructure, not a code regression."
+          fi
+
+          echo "kind=${kind}" >> "$GITHUB_OUTPUT"
+
+          rerun_status="not attempted"
+          if [ "${kind}" = "infra" ]; then
+            if gh run rerun "${RUN_ID}" --failed; then
+              rerun_status="requested"
+            else
+              rerun_status="FAILED to request"
+              echo "::error::Classified kind=infra but \`gh run rerun\` failed for run ${RUN_ID}."
+            fi
+          fi
+
+          {
+            echo "### Monthly fuzz infra triage"
+            echo ""
+            echo "- Upstream run: ${RUN_URL} (attempt ${RUN_ATTEMPT})"
+            echo "- Failed jobs:  ${#FAILED[@]}"
+            echo "- Verdict: \`kind=${kind}\`"
+            echo "- Action:  ${action}"
+            echo "- Why:     ${why}"
+            if [ "${#crash[@]}" -gt 0 ]; then
+              echo "- Crashing input: $(printf '%s, ' "${crash[@]}" | sed 's/, $//')"
+            fi
+            if [ "${#infra[@]}" -gt 0 ]; then
+              echo "- Runner teardown: $(printf '%s, ' "${infra[@]}" | sed 's/, $//')"
+            fi
+            if [ "${#other[@]}" -gt 0 ]; then
+              echo "- Unclassified / ordinary failure: $(printf '%s, ' "${other[@]}" | sed 's/, $//')"
+            fi
+            if [ "${kind}" = "infra" ]; then
+              echo "- Re-run: ${rerun_status}. This is the only automatic attempt;"
+              echo "  attempt 2 failing again is a human's problem by design."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${rerun_status}" = "FAILED to request" ]; then
+            exit 1
+          fi
+
+          # Every decided outcome exits 0, including the two refusals. A red
+          # mark here would be a second alarm for a failure the upstream run is
+          # already red for, and would make a genuine breakage in this
+          # workflow's own logic indistinguishable from a crash it correctly
+          # declined to re-run. The verdict lives in the summary above.

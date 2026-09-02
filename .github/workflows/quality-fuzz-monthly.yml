@@ -134,6 +134,35 @@ jobs:
               exit "${rc}"
             fi
 
+            # Killed by a signal, not a test failure. Checked after `crash` so a
+            # real finding can never be reclassified, and before `error` so a
+            # SIGTERM'd `go test` (143, and no "context deadline exceeded" in
+            # the output) stops being labelled a code regression.
+            #
+            # The exit code is the only signal available HERE. The runner's own
+            # "The runner has received a shutdown signal" line goes to the job
+            # log, not to `${LOG}`, which only ever holds what `go test` wrote
+            # through the tee — so grepping for it in this step would be dead
+            # code that never matches. 137 is deliberately not matched: it is
+            # ambiguous between a teardown escalating to SIGKILL and the kernel
+            # OOM-killing a fuzz target that ate the runner's memory, and the
+            # second one is a real finding.
+            #
+            # This branch only fires in the WEAKER variant of the failure, where
+            # the step process takes the signal but the job survives long enough
+            # to run this line. In a full teardown nothing here executes — on
+            # run 33514192612 the Summarize step below never appears in the log
+            # at all and Upload was killed 3ms after starting. The authoritative
+            # kind=infra for that case comes from quality-fuzz-monthly-rerun.yml,
+            # which runs on a different runner after the fact and also decides
+            # whether to re-run. Retrying in-loop is pointless either way: the
+            # loop is on the runner that is going away.
+            if [ "${rc}" -eq 143 ]; then
+              emit infra
+              echo "::error::${FUZZER}: killed by SIGTERM (exit 143), not a code failure. quality-fuzz-monthly-rerun.yml decides whether to re-run."
+              exit "${rc}"
+            fi
+
             if ! grep -q "context deadline exceeded" "${LOG}"; then
               emit error
               echo "::error::${FUZZER} failed for a non-flake reason (exit ${rc})."
@@ -172,10 +201,26 @@ jobs:
             echo "- Package: \`${PKG}\`"
             echo "- Budget:  ${FUZZTIME}"
             echo "- Result:  ${STATUS}"
+            # Rendered so a notification lane can key on the classification
+            # rather than on the job status, which cannot tell a code
+            # regression apart from a lost runner. Empty when the fuzz step
+            # never set an output.
+            echo "- Kind:    \`kind=${KIND:-unknown}\`"
             if [ "${KIND}" = "crash" ]; then
               echo ""
               echo "A crashing input was saved to \`testdata/fuzz/${FUZZER}/\`."
               echo "Download artifact \`fuzz-corpus-${FUZZER}-${RUN_ID}\`, commit the"
               echo "minimized input to the seed corpus, fix the bug, and push."
+            fi
+            if [ "${KIND}" = "infra" ]; then
+              echo ""
+              echo "\`go test\` was killed by SIGTERM (exit 143) rather than failing:"
+              echo "a lost runner, or the job hitting its own timeout. Either way this"
+              echo "is NOT a code regression and no fuzz finding is implied."
+              echo ""
+              echo "This line is best-effort. A full runner teardown kills this step"
+              echo "too, so \`Quality: Deep Fuzz Infra Rerun\` is the reliable place the"
+              echo "classification gets recorded, and the only thing that decides"
+              echo "whether to re-run."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
