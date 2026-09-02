@@ -121,6 +121,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`golang.org/x/crypto` bumped to v0.56.0**, clearing GO-2026-6354 and
+  GO-2026-6355 (CVE-2026-78662, CVE-2026-56855), two `x/crypto/ssh` channel
+  deadlock advisories. Same shape as the v0.55.0 move below: portwing imports
+  only `x/crypto/argon2` and `govulncheck` reports zero called
+  vulnerabilities, so this clears the scanner gate rather than a live
+  exposure. The `.grype.yaml` GO-2026-5932 pins moved in lockstep.
 - **`golang.org/x/crypto` bumped to v0.55.0**, clearing GO-2026-6303
   (CVE-2026-56854). The advisory is scoped to `x/crypto/ssh`; portwing imports
   only `x/crypto/argon2`, and `govulncheck` reported zero called vulnerabilities

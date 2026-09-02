@@ -3,6 +3,14 @@
 # location-scoped so dependency updates automatically force a new review. CI
 # separately rejects any source dependency or shipped binary that links openpgp.
 #
+# 2026-09-02: x/crypto moved v0.55.0 -> v0.56.0 to clear GO-2026-6354 and
+# GO-2026-6355 (CVE-2026-78662, CVE-2026-56855), both x/crypto/ssh channel
+# deadlock DoS advisories that the pre-push qlty osv-scanner gate began
+# failing on the day they published. Same shape as the 08-28 move below:
+# portwing imports only x/crypto/argon2, source-mode govulncheck reports no
+# called vulnerabilities, and v0.56.0 is the fix line. The two GO-2026-5932
+# pins tracking our module and binary moved in lockstep again.
+#
 # 2026-08-28 audit: x/crypto moved v0.54.0 -> v0.55.0 to clear GO-2026-6303
 # (CVE-2026-56854), which the pre-push qlty gate began failing on. That
 # advisory is scoped to golang.org/x/crypto/ssh (symbols NewServerConn,
@@ -20,17 +28,17 @@ ignore:
   # scripts/verify-scanner-exclusions.sh against the extracted binary). There
   # is no fixed x/crypto version because the advisory deprecates that package.
   - vulnerability: GO-2026-5932
-    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.55.0."
+    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.56.0."
     package:
       name: golang.org/x/crypto
-      version: v0.55.0
+      version: v0.56.0
       type: go-module
       location: "/go.mod"
   - vulnerability: GO-2026-5932
-    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.55.0."
+    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.56.0."
     package:
       name: golang.org/x/crypto
-      version: v0.55.0
+      version: v0.56.0
       type: go-module
       location: "**/usr/bin/portwing"
   - vulnerability: GO-2026-5932
