@@ -8,6 +8,6 @@
     "./contract": "./src/contract.ts"
   },
   "dependencies": {
-    "posthog-js": "1.421.0"
+    "posthog-js": "1.422.5"
   }
 }
