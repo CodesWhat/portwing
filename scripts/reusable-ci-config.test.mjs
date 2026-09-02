@@ -34,6 +34,7 @@ const FUZZERS = [
   ["FuzzVerifyRequest", "./internal/auth/"],
   ["FuzzDecodeContainerLogStream", "./internal/docker/"],
   ["FuzzComposeRequestValidate", "./internal/docker/"],
+  ["FuzzParseKeyLine", "./internal/auth/"],
 ];
 
 // The X1 canary promoted; branch protection now requires only the reusable

@@ -46,6 +46,7 @@ jobs:
           - { name: FuzzVerifyRequest,      pkg: ./internal/auth/ }
           - { name: FuzzDecodeContainerLogStream, pkg: ./internal/docker/ }
           - { name: FuzzComposeRequestValidate,   pkg: ./internal/docker/ }
+          - { name: FuzzParseKeyLine,       pkg: ./internal/auth/ }
 
     steps:
       - name: Harden Runner
