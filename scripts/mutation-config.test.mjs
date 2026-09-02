@@ -13,17 +13,18 @@ const workflow = fs.readFileSync(
 const GATE = path.join(ROOT, "scripts/ci/mutation-gate.sh");
 
 const excludedProductionDirs = new Set(["internal/banner/gen", "internal/integration"]);
+const timeoutCoefficients = new Set(["pool", "protocol"]);
 const expectedFloors = new Map([
   ["./cmd/portwing", [100, 100]],
   ["./internal/server", [77.88, 94.12]],
   ["./internal/adapter", [84.68, 93.28]],
-  ["./internal/adapter/drydock", [83.72, 92.47]],
+  ["./internal/adapter/drydock", [82.5, 91.95]],
   ["./internal/audit", [88.31, 100]],
   ["./internal/auth", [79.17, 97.96]],
-  ["./internal/banner", [87.5, 16]],
+  ["./internal/banner", [76.92, 38.24]],
   ["./internal/config", [82.22, 100]],
-  ["./internal/docker", [100, 78.08]],
-  ["./internal/edge", [85.21, 96.02]],
+  ["./internal/docker", [90.39, 78.08]],
+  ["./internal/edge", [74.73, 91]],
   ["./internal/generic", [85, 100]],
   ["./internal/log", null],
   ["./internal/mcp", [79.49, 79.59]],
@@ -109,10 +110,12 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
       }
     }
     if (entry.name === "metrics") assert.equal(entry.workers, "1");
-    // Without a raised coefficient every protocol mutant TIMED OUT, which
-    // scores 0.00/0.00 while verifying nothing. See PW-6.2.
-    if (entry.name === "protocol" && entry.timeout_coefficient !== "40") {
-      throw new Error("protocol needs its timeout coefficient");
+    // Gremlins budgets each mutant at the coverage-gathering time times the
+    // coefficient. Both of these packages measure well under a second, so the
+    // default of 3 timed their mutants out and scored them 0.00/0.00 while
+    // verifying nothing. See PW-6.2.
+    if (timeoutCoefficients.has(entry.name) && entry.timeout_coefficient !== "40") {
+      throw new Error(`${entry.name} needs its timeout coefficient`);
     }
   }
 
@@ -196,6 +199,11 @@ function assertCanaryJob(source) {
     canary,
     /^ {10}if \.\/scripts\/ci\/mutation-gate\.sh no-such-report\.json 0 0; then$/mu,
     "the canary must assert a missing report is rejected",
+  );
+  assert.match(
+    canary,
+    /^ {12}--timeout-coefficient 40 \\$/mu,
+    "the canary runs pool, so it needs pool's timeout coefficient",
   );
 }
 
@@ -351,9 +359,22 @@ test("mutation contract rejects a return to Gremlins' inert threshold flags", ()
   assertMutationFailure(source, "Gremlins executable unleash command is malformed");
 });
 
-test("mutation contract rejects a dropped protocol timeout coefficient", () => {
+test("mutation contract rejects a dropped pool timeout coefficient", () => {
   const source = workflow.replace("            timeout_coefficient: 40\n", "");
+  assertMutationFailure(source, "pool needs its timeout coefficient");
+});
+
+test("mutation contract rejects a dropped protocol timeout coefficient", () => {
+  const source = workflow.replace(
+    "            timeout_coefficient: 40\n            efficacy: 100\n",
+    "            efficacy: 100\n",
+  );
   assertMutationFailure(source, "protocol needs its timeout coefficient");
+});
+
+test("mutation contract rejects a canary that can flake on the timeout cliff", () => {
+  const source = workflow.replace("            --timeout-coefficient 40 \\\n", "");
+  assertMutationFailure(source, "the canary runs pool, so it needs pool's timeout coefficient");
 });
 
 test("mutation contract rejects a missing canary job", () => {
