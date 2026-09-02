@@ -73,10 +73,21 @@ jobs:
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
-          # quality-integration.yml's list plus what pinning an Engine adds:
-          # download.docker.com serves the static release tarball
-          # setup-docker-action installs, and it redirects onto the same two
-          # Docker CDN hosts the image pull already needed.
+          # quality-integration.yml's list plus what pinning an Engine adds.
+          # download.docker.com serves the static release tarball, and it
+          # redirects onto the same two Docker CDN hosts the image pull
+          # already needed.
+          #
+          # raw.githubusercontent.com is the non-obvious one and it is NOT
+          # optional. setup-docker-action prints "Downloading Docker vX from
+          # stable at download.docker.com" and then resolves the release
+          # metadata from a raw GitHub path FIRST, so blocking it fails the
+          # install before download.docker.com is ever dialled. Measured on
+          # run 33691346332, where all four legs died on
+          # `connect ECONNREFUSED 54.185.253.63:443` (StepSecurity's sinkhole
+          # address, which is why it never appears in the DNS log) with
+          # `domain not allowed: raw.githubusercontent.com.` on the same
+          # timestamp. Removing this line puts that back.
           allowed-endpoints: >
             api.github.com:443
             auth.docker.io:443
@@ -85,6 +96,7 @@ jobs:
             github.com:443
             go.dev:443
             objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
             production.cloudflare.docker.com:443
             production.cloudfront.docker.com:443
             proxy.golang.org:443

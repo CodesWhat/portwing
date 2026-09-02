@@ -232,6 +232,11 @@ grep -Eq '^[[:space:]]*egress-policy: block$' "${workflow}" ||
 	fail "harden-runner must run with egress-policy: block, not audit"
 grep -Fq "download.docker.com:443" "${workflow}" ||
 	fail "the egress allow-list must permit download.docker.com, where the pinned Engine tarball comes from"
+# Load-bearing and easy to mistake for cruft: setup-docker-action reads the
+# release metadata off a raw GitHub path before it dials download.docker.com,
+# so dropping this fails the install on every leg. Proven by run 33691346332.
+grep -Fq "raw.githubusercontent.com:443" "${workflow}" ||
+	fail "the egress allow-list must permit raw.githubusercontent.com, which setup-docker-action reads release metadata from before downloading"
 
 grep -Eq '^[[:space:]]*uses: docker/setup-docker-action@[0-9a-f]{40}' "${workflow}" ||
 	fail "lane must install the pinned Engine with docker/setup-docker-action"

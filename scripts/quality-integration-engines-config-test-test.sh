@@ -239,6 +239,15 @@ assert_rejected \
 	"must permit download.docker.com" \
 	"contract must reject an allow-list missing download.docker.com"
 
+# The allow-list loses the raw GitHub path setup-docker-action reads release
+# metadata from. This one looks removable and isn't: run 33691346332 failed
+# all four legs on exactly this.
+reset_all
+sed -i.bak "/raw.githubusercontent.com:443/d" "${fixture}"
+assert_rejected \
+	"must permit raw.githubusercontent.com" \
+	"contract must reject an allow-list missing raw.githubusercontent.com"
+
 # --- the pinned daemon actually being under test -----------------------------
 
 # Engine version hard-coded instead of taken from the matrix: every leg
