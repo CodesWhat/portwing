@@ -17,9 +17,9 @@ if ! (cd "${fixture}" && bash scripts/fuzz-tier-config-test.sh >/dev/null); then
 fi
 
 awk '
-	/FuzzVerifyRequest \.\/internal\/auth\/"; do/ {
-		print "        # \"FuzzVerifyRequest ./internal/auth/\""
-		print "          \"FuzzUnrelated ./internal/auth/\"; do"
+	/FuzzComposeRequestValidate \.\/internal\/docker\/"; do/ {
+		print "        # \"FuzzComposeRequestValidate ./internal/docker/\""
+		print "          \"FuzzUnrelated ./internal/docker/\"; do"
 		next
 	}
 	{ print }

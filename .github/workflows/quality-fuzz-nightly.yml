@@ -44,6 +44,8 @@ jobs:
           - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
           - { name: FuzzEnvelope,           pkg: ./internal/protocol/ }
           - { name: FuzzVerifyRequest,      pkg: ./internal/auth/ }
+          - { name: FuzzDecodeContainerLogStream, pkg: ./internal/docker/ }
+          - { name: FuzzComposeRequestValidate,   pkg: ./internal/docker/ }
 
     steps:
       - name: Harden Runner

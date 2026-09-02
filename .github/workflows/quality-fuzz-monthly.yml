@@ -12,7 +12,7 @@ run-name: >-
 # the shorter tiers miss, plus on-demand longer runs via `workflow_dispatch`
 # before a release. Mirrors sockguard's monthly tier; same rationale.
 #
-# 1 hour per fuzzer × 7 fuzzers × matrix-parallel = ~1 hour wall time. Crashes
+# 1 hour per fuzzer × 9 fuzzers × matrix-parallel = ~1 hour wall time. Crashes
 # upload with 180-day retention so a failing input from an older monthly run
 # stays recoverable long enough to turn into a committed regression test.
 
@@ -54,6 +54,8 @@ jobs:
           - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
           - { name: FuzzEnvelope,            pkg: ./internal/protocol/ }
           - { name: FuzzVerifyRequest,       pkg: ./internal/auth/ }
+          - { name: FuzzDecodeContainerLogStream, pkg: ./internal/docker/ }
+          - { name: FuzzComposeRequestValidate,   pkg: ./internal/docker/ }
 
     steps:
       - name: Harden Runner
