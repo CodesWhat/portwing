@@ -56,6 +56,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameters (`gclid`, `fbclid`, `msclkid`, ...) remain unreachable rather than
   filtered, and a `$referring_domain` that isn't a bare hostname or `$direct` is
   dropped.
+- **The monthly benchmark lane now fails on a regression instead of only
+  recording one.** `quality-bench-monthly.yml` compares each run against the
+  `benchmark-results.txt` artifact of an earlier successful run using benchstat,
+  and fails the job when `sec/op` or `B/op` regresses by more than 10% and
+  benchstat calls the difference statistically significant, or when a metric
+  that used to be zero starts allocating (benchstat reports that as `?` rather
+  than a percentage, so a percentage-only check would miss the zero-allocation
+  path that is most worth catching). The comparison table lands in the run
+  summary with the regressing rows called out. The baseline is a prior artifact
+  rather than a file the lane commits, so nothing writes to the repository on a
+  cron; artifacts last 90 days against a monthly cadence, so a skipped month
+  still leaves one in reach. GitHub-hosted runners rotate CPU models and
+  benchstat will not compare across hardware, so the lane walks back through
+  recent successful runs for one that matches and reports without gating when
+  none does. Dispatching with `accept_new_baseline` records an intended slowdown
+  as the new baseline. `allocs/op` is measured and reported but not gated: it is
+  a small integer, so the smallest possible change is often more than 10% and a
+  percentage threshold says nothing useful about it.
 
 ### Fixed
 
