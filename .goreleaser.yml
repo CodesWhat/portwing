@@ -24,6 +24,7 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/codeswhat/portwing/internal/protocol.AgentVersion={{.Version}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - linux
       - darwin
@@ -41,6 +42,21 @@ archives:
   - id: default
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    # GoReleaser auto-includes LICENSE*/README*/CHANGELOG* when `files:` is
+    # unset, but with the source file's own filesystem mtime, which defeats
+    # the `mod_timestamp` pin on the binary above and leaves the archive not
+    # byte-reproducible. Naming the same globs explicitly keeps the same
+    # contents while pinning each entry's mtime to the commit.
+    files:
+      - src: LICENSE*
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: README*
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: CHANGELOG*
+        info:
+          mtime: "{{ .CommitDate }}"
 
 nfpms:
   - id: packages
