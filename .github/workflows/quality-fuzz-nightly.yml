@@ -101,6 +101,17 @@ jobs:
           # never lands in the seed dir, so persisting one and not the other
           # loses either every crasher or every hour of coverage.
           #
+          # Only `generated` is cached below. `seed` is git-tracked, and
+          # actions/cache restores by extracting `tar -xf -P -C
+          # $GITHUB_WORKSPACE` over the checkout without cleaning the
+          # destination first, so a stale cache entry silently outranks HEAD
+          # for that directory: a `git rm` of an obsolete seed would come
+          # back on every scheduled run and get re-saved by `always()`. Git
+          # stays authoritative for the seed corpus instead, and a crasher
+          # found mid-run is preserved by the run's own failure plus the
+          # "Upload fuzz corpus on failure or cancel" artifact below, not by
+          # a cache entry silently outliving a commit.
+          #
           # The module path is read out of go.mod rather than `go list -m` so
           # this stays a pure file read with no module-graph load behind it.
           rel="${PKG#./}"
@@ -134,7 +145,6 @@ jobs:
         with:
           path: |
             ${{ steps.corpus.outputs.generated }}
-            ${{ steps.corpus.outputs.seed }}
           key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-
@@ -221,7 +231,7 @@ jobs:
         # tomorrow, or the finding is thrown away exactly the way it is today.
         # Guarded on the resolve step's output so a failure there cannot turn
         # into a second red step over an empty `path`.
-        if: always() && steps.corpus.outputs.seed != ''
+        if: always() && steps.corpus.outputs.generated != ''
         # The key carries run_id/run_attempt because cache keys are immutable —
         # writing the same key twice is a no-op, so a fixed key would freeze the
         # corpus at whatever the first run stored. restore-keys above does the
@@ -230,7 +240,6 @@ jobs:
         with:
           path: |
             ${{ steps.corpus.outputs.generated }}
-            ${{ steps.corpus.outputs.seed }}
           key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Summarize

@@ -110,7 +110,7 @@ mv "${nightly}.tmp" "${nightly}"
 expect_fail "dropping a cache egress endpoint must not satisfy the contract"
 
 seed_fixture
-sed "s|^        if: always() && steps.corpus.outputs.seed != ''$|        if: success()|" \
+sed "s|^        if: always() && steps.corpus.outputs.generated != ''$|        if: success()|" \
 	"${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "a corpus save that skips failed runs must not satisfy the contract"
@@ -125,5 +125,12 @@ seed_fixture
 sed '/^        if: failure() || cancelled()$/d' "${monthly}" >"${monthly}.tmp"
 mv "${monthly}.tmp" "${monthly}"
 expect_fail "dropping the on-failure corpus artifact upload must not satisfy the contract"
+
+seed_fixture
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+sed 's|^            ${{ steps.corpus.outputs.generated }}$|&\n            ${{ steps.corpus.outputs.seed }}|' \
+	"${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "caching the git-tracked seed corpus must not satisfy the contract"
 
 echo "Fuzz tier contract self-tests passed."

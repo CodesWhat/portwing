@@ -93,7 +93,7 @@ cache_action_sha="55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
 cache_key='          key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-${{ github.run_id }}-${{ github.run_attempt }}'
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 cache_restore_prefix='            fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-'
-cache_save_guard="        if: always() && steps.corpus.outputs.seed != ''"
+cache_save_guard="        if: always() && steps.corpus.outputs.generated != ''"
 
 for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
 	grep -Fq "uses: actions/cache/restore@${cache_action_sha}" "${workflow}" ||
@@ -114,11 +114,19 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 		fail "${workflow} must share the nightly/monthly corpus restore-keys prefix"
 
 	# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-	for corpus_path in '            ${{ steps.corpus.outputs.generated }}' '            ${{ steps.corpus.outputs.seed }}'; do
-		path_uses="$(grep -Fxc "${corpus_path}" "${workflow}" || true)"
-		[ "${path_uses}" -eq 2 ] ||
-			fail "${workflow} must cache ${corpus_path# *} on both restore and save (found ${path_uses})"
-	done
+	corpus_path='            ${{ steps.corpus.outputs.generated }}'
+	path_uses="$(grep -Fxc "${corpus_path}" "${workflow}" || true)"
+	[ "${path_uses}" -eq 2 ] ||
+		fail "${workflow} must cache ${corpus_path# *} on both restore and save (found ${path_uses})"
+
+	# Regression guard: the git-tracked seed corpus must never be cached
+	# alongside the generated corpus. actions/cache restore extracts over the
+	# checkout without cleaning the destination, so a stale cache entry would
+	# silently outrank HEAD for that directory.
+	# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+	seed_in_cache="$(grep -Fxc '            ${{ steps.corpus.outputs.seed }}' "${workflow}" || true)"
+	[ "${seed_in_cache}" -eq 0 ] ||
+		fail "${workflow} must not cache the git-tracked seed corpus; the cache restore extracts over the checkout and would outrank HEAD"
 
 	# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 	grep -Fq 'generated="$(go env GOCACHE)/fuzz/${module}/${rel}/${FUZZER}"' "${workflow}" ||
