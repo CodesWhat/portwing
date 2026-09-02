@@ -7,14 +7,19 @@ trap 'rm -rf "${test_root}"' EXIT
 mkdir -p "${test_root}/scripts"
 cp scripts/quality-lane-notify-config-test.sh "${test_root}/scripts/"
 fixture="${test_root}/workflow.yml"
+rerun_fixture="${test_root}/rerun.yml"
 
 reset_fixture() {
 	cp .github/workflows/quality-lane-notify.yml "${fixture}"
 }
 
+reset_rerun_fixture() {
+	cp .github/workflows/quality-fuzz-monthly-rerun.yml "${rerun_fixture}"
+}
+
 assert_passes() {
 	local failure_message="$1"
-	if ! (cd "${test_root}" && bash scripts/quality-lane-notify-config-test.sh workflow.yml >/dev/null 2>&1); then
+	if ! (cd "${test_root}" && bash scripts/quality-lane-notify-config-test.sh workflow.yml rerun.yml >/dev/null 2>&1); then
 		echo "FAIL: ${failure_message}" >&2
 		exit 1
 	fi
@@ -27,7 +32,7 @@ assert_rejected() {
 	local status
 
 	set +e
-	output="$(cd "${test_root}" && bash scripts/quality-lane-notify-config-test.sh workflow.yml 2>&1)"
+	output="$(cd "${test_root}" && bash scripts/quality-lane-notify-config-test.sh workflow.yml rerun.yml 2>&1)"
 	status=$?
 	set -e
 
@@ -41,6 +46,7 @@ assert_rejected() {
 
 # The real workflow must pass its own contract.
 reset_fixture
+reset_rerun_fixture
 assert_passes "the real quality-lane-notify.yml must pass its own contract"
 
 # Missing a required lane from the trigger list.
@@ -54,7 +60,7 @@ assert_rejected \
 reset_fixture
 sed -i.bak 's/^    types: \[completed\]$/      - "Quality: Extra Lane"\n&/' "${fixture}"
 assert_rejected \
-	"workflow_run trigger must list exactly 5 workflows, found 6" \
+	"workflow_run trigger must list exactly 6 workflows, found 7" \
 	"contract must reject a trigger list with an extra, unaccounted-for lane"
 
 # Trigger fires on more than just completed runs.
@@ -120,5 +126,14 @@ sed -i.bak 's/gh issue list/gh issue search/g' "${fixture}"
 assert_rejected \
 	"notify step must search for an existing open issue before creating one" \
 	"contract must reject a workflow that never searches for an existing issue"
+
+# Rerun lane loses issues: write, so it could no longer file the tracking
+# issue for a refusal the notifier structurally cannot see.
+reset_fixture
+reset_rerun_fixture
+sed -i.bak 's/^      issues: write$/      pull-requests: write/' "${rerun_fixture}"
+assert_rejected \
+	"rerun workflow's triage job must grant issues: write" \
+	"contract must reject a rerun workflow missing issues: write"
 
 echo "Quality lane notify contract self-tests passed."

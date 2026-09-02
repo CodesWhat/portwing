@@ -21,6 +21,7 @@ expected_workflows=(
 	"Quality: Deep Fuzz (monthly)"
 	"Quality: Mutation Testing"
 	"Quality: Benchmarks (monthly)"
+	"Quality: Deep Fuzz Infra Rerun"
 )
 
 # --- trigger list: on.workflow_run.workflows -------------------------------
@@ -127,6 +128,46 @@ grep -Fq '"[quality] ${WORKFLOW_NAME} is failing"' "${workflow}" ||
 # Idempotency: a search for an existing open issue must happen before create.
 grep -Fq "gh issue list" "${workflow}" ||
 	fail "notify step must search for an existing open issue before creating one"
+
+# --- rerun lane: quality-fuzz-monthly-rerun.yml must also file for refusals -
+#
+# quality-fuzz-monthly-rerun.yml owns the crash/error/none classification the
+# notifier structurally cannot see (no attempt 2 means no completed event for
+# it to react to). These assertions lock the step it uses to close that gap:
+# it must fire for exactly the three refusal verdicts, the job must be able
+# to write the issue, and the title must stay byte-identical to the
+# notifier's so the two never open competing issues.
+
+rerun_workflow="${2:-.github/workflows/quality-fuzz-monthly-rerun.yml}"
+
+if [ ! -f "${rerun_workflow}" ]; then
+	fail "rerun workflow not found: ${rerun_workflow}"
+	exit 1
+fi
+
+grep -Fq "      issues: write" "${rerun_workflow}" ||
+	fail "rerun workflow's triage job must grant issues: write"
+
+rerun_step="$(
+	awk '
+		/^      - name: Open or update the quality-lane tracking issue$/ { in_step = 1 }
+		in_step { print }
+	' "${rerun_workflow}"
+)"
+
+[ -n "${rerun_step}" ] ||
+	fail "rerun workflow must define the 'Open or update the quality-lane tracking issue' step"
+
+grep -Fq "steps.triage.outputs.kind == 'crash'" <<<"${rerun_step}" ||
+	fail "rerun tracking-issue step must fire for kind=crash"
+grep -Fq "steps.triage.outputs.kind == 'error'" <<<"${rerun_step}" ||
+	fail "rerun tracking-issue step must fire for kind=error"
+grep -Fq "steps.triage.outputs.kind == 'none'" <<<"${rerun_step}" ||
+	fail "rerun tracking-issue step must fire for kind=none"
+
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fq 'TITLE="[quality] ${WORKFLOW_NAME} is failing"' <<<"${rerun_step}" ||
+	fail "rerun tracking-issue step title must match the notifier's title literal"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} quality-lane-notify contract check(s) failed" >&2

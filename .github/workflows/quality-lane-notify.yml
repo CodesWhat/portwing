@@ -39,6 +39,12 @@ run-name: >-
 # quality-fuzz-monthly.yml's first attempt is excluded below. Explained at the
 # job `if:`.
 #
+# quality-fuzz-monthly-rerun.yml is in the list too, for its own sake, not as
+# a proxy for the monthly fuzz lane it triages. That workflow can itself fail
+# — a `kind=unknown` job listing failure, or a `gh run rerun` request that
+# gets rejected — and nothing else was watching those failures; its own exit
+# codes and step summary were the only record before this line was added.
+#
 # Like every `workflow_run` trigger, this only fires once the file is on the
 # DEFAULT branch, regardless of which branch defines it. Landing it on
 # dev/v0.9 buys nothing by itself; it starts watching at the next promotion,
@@ -64,6 +70,7 @@ on:
       - "Quality: Deep Fuzz (monthly)"
       - "Quality: Mutation Testing"
       - "Quality: Benchmarks (monthly)"
+      - "Quality: Deep Fuzz Infra Rerun"
     types: [completed]
 
 permissions: {}
@@ -129,7 +136,8 @@ jobs:
             --repo "${REPO}" \
             --color "d93f0b" \
             --description "Automated: a scheduled quality lane is failing" \
-            --force
+            --force ||
+            echo "::warning::Could not ensure the quality-lane label exists; issue creation may fail if it is missing."
 
       - name: Open, update, or close the tracking issue
         env:
@@ -158,12 +166,19 @@ jobs:
 
           case "${CONCLUSION}" in
           failure)
-            FAILED_JOBS="$(
+            # The job list is enrichment, not a precondition. Left as a bare
+            # assignment, a transient 5xx here would abort the step under
+            # `set -e` and the lane failure would get no tracking issue at
+            # all, which is the exact silence this workflow exists to break.
+            # `gh api` does not retry, so one blip is one lost notification.
+            if ! FAILED_JOBS="$(
               gh api --paginate \
                 "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100" \
                 --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")'
-            )"
-            if [ -z "${FAILED_JOBS}" ]; then
+            )"; then
+              echo "::warning::Could not list jobs for run ${RUN_ID}; filing the tracking issue without the job list."
+              FAILED_JOBS="(could not list the run's jobs; the Actions API call failed)"
+            elif [ -z "${FAILED_JOBS}" ]; then
               FAILED_JOBS="(no individual job reported failure; the run itself concluded failure)"
             fi
 
