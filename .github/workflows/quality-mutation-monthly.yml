@@ -8,6 +8,14 @@ run-name: >-
 # Monthly/manual quality gate using Gremlins (Go mutation tester).
 # Floors are ratchets from measured v0.6.0 runs. Keep generator-only and
 # integration-test-only packages out of this production-package matrix.
+#
+# The floors are enforced by scripts/ci/mutation-gate.sh, not by Gremlins'
+# own --threshold-efficacy/--threshold-mcover flags. Those flags parse and
+# then do nothing: Viper has no float64 case for a bound pflag, so it returns
+# the threshold as a string, report.assess()'s type assertions yield 0, and
+# the `if threshold > 0` guard never fires. Every job in this workflow
+# reported success for months while five packages measured below their own
+# configured floor. Do not put those flags back; see the script header.
 on:
   workflow_dispatch:
   schedule:
@@ -46,8 +54,12 @@ jobs:
             mcover: 93.28
           - name: adapter-drydock
             package: ./internal/adapter/drydock
-            efficacy: 83.72
-            mcover: 92.47
+            # Swings ~1.4pp between runs because its TIMED OUT count does
+            # (13 in 33288345891, 6 in 33672715580) and a timed-out mutant is
+            # scored as neither killed nor lived. Floors are the lower of the
+            # two measurements, not the better one.
+            efficacy: 82.50
+            mcover: 91.95
           - name: audit
             package: ./internal/audit
             efficacy: 88.31
@@ -58,20 +70,33 @@ jobs:
             mcover: 97.96
           - name: banner
             package: ./internal/banner
-            efficacy: 87.50
-            mcover: 16.00
+            # 42 of banner's 68 mutants are NOT COVERED, so mcover sits far
+            # below every other package here. Render's ANSI/width branches are
+            # selected by terminalCols() and colorEnabled() reading a real
+            # terminal, and the unit tests drive neither. Measured 76.92/38.24
+            # in both 33288345891 and 33672715580, with zero timeouts, so
+            # these are stable rather than slack. The old 16.00 was never a
+            # measurement of this package.
+            efficacy: 76.92
+            mcover: 38.24
           - name: config
             package: ./internal/config
             efficacy: 82.22
             mcover: 100
           - name: docker
             package: ./internal/docker
-            efficacy: 100
+            # Efficacy floor was 100 against a measured 90.43/90.39. The
+            # mcover floor of 78.08 is stale in the other direction (measured
+            # 93.50/93.47) and is left alone rather than ratcheted here.
+            efficacy: 90.39
             mcover: 78.08
           - name: edge
             package: ./internal/edge
-            efficacy: 85.21
-            mcover: 96.02
+            # Measured 74.73/91.00 in both 33288345891 and 33672715580. The
+            # old 85.21/96.02 never held on either branch. PW-6.6's
+            # dockerReady() boundary survivors are the way back up.
+            efficacy: 74.73
+            mcover: 91.00
           - name: generic
             package: ./internal/generic
             efficacy: 85.00
@@ -92,10 +117,30 @@ jobs:
             workers: 1
           - name: pool
             package: ./internal/pool
+            # Same cliff as protocol, found by this gate on its first real
+            # run. pool's coverage-gathering took 238 ms in 33288345891 and
+            # 78 ms in 33672715580, so the default coefficient of 3 bought
+            # 715 ms and then 234 ms. The second run timed out 4 of 5 mutants
+            # and scored 0.00/0.00. The budget is derived from a sub-second
+            # measurement that varies threefold, so it needs the same
+            # treatment protocol got.
+            timeout_coefficient: 40
             efficacy: 50.00
             mcover: 80.00
           - name: protocol
             package: ./internal/protocol
+            # Gremlins gives each mutant a wall-clock budget of the
+            # coverage-gathering time multiplied by the timeout coefficient
+            # (default 3). protocol's coverage run takes ~125 ms, so the
+            # default budget is ~375 ms for a full build-and-test cycle in a
+            # freshly copied worker directory, and all 5 mutants reported
+            # TIMED OUT in run 33288345891. Timed-out mutants count as
+            # neither killed nor lived, so the package scored 0.00/0.00 with
+            # nothing actually verified. 40 buys ~5 s, roughly 7x the budget
+            # that was already sufficient for the next-fastest package
+            # (pool, 715 ms), which is enough slack for runner variance while
+            # capping a genuinely hung mutant at ~5 s.
+            timeout_coefficient: 40
             efficacy: 100
             mcover: 100
           # internal/banner/gen is generator-only and has no mutation target.
@@ -136,15 +181,18 @@ jobs:
           if [ -n "${{ matrix.workers || '' }}" ]; then
             gremlins_args+=(--workers "${{ matrix.workers }}")
           fi
+          if [ -n "${{ matrix.timeout_coefficient || '' }}" ]; then
+            gremlins_args+=(--timeout-coefficient "${{ matrix.timeout_coefficient }}")
+          fi
           if [ "${{ matrix.zero_mutants || false }}" = "true" ]; then
             gremlins unleash --tags="" "${gremlins_args[@]+"${gremlins_args[@]}"}" "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
             grep -q "No results to report" mutation-report.txt
           else
             gremlins unleash --tags="" \
               "${gremlins_args[@]+"${gremlins_args[@]}"}" \
-              --threshold-efficacy "${{ matrix.efficacy }}" \
-              --threshold-mcover "${{ matrix.mcover }}" \
+              --output mutation-report.json \
               "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
+            ./scripts/ci/mutation-gate.sh mutation-report.json "${{ matrix.efficacy }}" "${{ matrix.mcover }}"
           fi
         env:
           GOFLAGS: ""
@@ -156,8 +204,14 @@ jobs:
             echo "### Mutation Testing: ${{ matrix.name }}"
             echo "- Tool: Gremlins (Go mutation tester)"
             echo "- Version: ${GREMLINS_VERSION}"
-            echo "- Mode: blocking numeric ratchet"
             echo "- Package: ${{ matrix.package }}"
+            if [ "${{ matrix.zero_mutants || false }}" = "true" ]; then
+              echo "- Mode: blocking, the package must keep producing no mutants"
+            else
+              echo "- Mode: blocking numeric ratchet, enforced by scripts/ci/mutation-gate.sh"
+              echo "- Floors: efficacy >= ${{ matrix.efficacy }}%, mutator coverage >= ${{ matrix.mcover }}%"
+              echo "- A job that succeeded here measured at or above both floors."
+            fi
             echo ""
             if [ -f mutation-report.txt ]; then
               echo '```'
@@ -171,6 +225,90 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: mutation-report-${{ matrix.name }}-${{ github.run_id }}
-          path: mutation-report.txt
+          path: |
+            mutation-report.txt
+            mutation-report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  # PW-6.1: the gate this workflow depends on silently stopped gating, and
+  # every job stayed green while five packages measured below their floor.
+  # This job runs the real binary over a real package and asserts the gate
+  # rejects an unreachable floor, accepts a reachable one, and refuses a
+  # missing report. It is green when the gate works, so it is a standing
+  # regression test rather than a one-off demonstration.
+  gate-canary:
+    name: "Quality: Mutation gate canary"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            dl.google.com:443
+            github.com:443
+            go.dev:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            sum.golang.org:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install Gremlins
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@"${GREMLINS_VERSION}"
+
+      - name: Prove the mutation gate still fails below a floor
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # internal/pool is the smallest package in the matrix (5 mutants,
+          # ~30 s), so the canary costs about as much as one matrix leg.
+          gremlins unleash --tags="" --workers 1 \
+            --timeout-coefficient 40 \
+            --output canary-report.json \
+            ./internal/pool 2>&1 | tee canary-report.txt
+
+          if ./scripts/ci/mutation-gate.sh canary-report.json 101 101; then
+            echo "CANARY FAILED: the gate accepted an unreachable 101% floor." >&2
+            echo "The mutation ratchet is not gating anything. See PW-6.1." >&2
+            exit 1
+          fi
+          echo "Canary: an unreachable floor is rejected."
+
+          # The mirror assertion. A gate wired to fail unconditionally would
+          # pass the check above while blocking every real run, so prove it
+          # still accepts a measurement that clears its floor.
+          ./scripts/ci/mutation-gate.sh canary-report.json 0 0
+          echo "Canary: a reachable floor is accepted."
+
+          if ./scripts/ci/mutation-gate.sh no-such-report.json 0 0; then
+            echo "CANARY FAILED: the gate passed with no report to read." >&2
+            exit 1
+          fi
+          echo "Canary: a missing report is rejected."
+        env:
+          GOFLAGS: ""
+
+      - name: Upload canary report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: mutation-canary-${{ github.run_id }}
+          path: |
+            canary-report.txt
+            canary-report.json
           if-no-files-found: warn
           retention-days: 30
