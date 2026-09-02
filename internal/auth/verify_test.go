@@ -1,17 +1,20 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -263,6 +266,105 @@ func TestVerifyRequest_ExtremeTimestampSkew(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("VerifyRequest error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// ---- Skew boundary tests (PW-6.5) ------------------------------------------
+//
+// These deliberately do not target the literal nanosecond-precision boundary
+// (skew == maxSkew exactly): tsUnix is a whole-number-of-seconds wire value,
+// while skew is measured against a continuously advancing wall clock, so
+// truncating "now" down to a whole second before subtracting always leaves a
+// nonzero fractional remainder. That remainder makes the measured skew land
+// strictly on one side of any whole-second target — reliably, not just
+// usually — which is what each offset below exploits: one offset that is
+// provably always inside the window and one that is provably always outside
+// it, one second apart. That's tight enough to kill a sign flip or a full
+// negation of the comparison, though not a literal "<" vs "<=" swap, which
+// only differs at a boundary this construction cannot land on exactly.
+
+func TestVerifyRequest_SkewBoundaries(t *testing.T) {
+	t.Parallel()
+	const maxSkewSeconds = 60
+
+	tests := []struct {
+		name string
+		// tsUnix = time.Now().Unix() - offset; a negative offset produces a
+		// future (client-clock-ahead) timestamp.
+		offset  int64
+		wantErr bool
+	}{
+		{name: "past just inside the window", offset: maxSkewSeconds - 1, wantErr: false},
+		{name: "past just outside the window", offset: maxSkewSeconds + 1, wantErr: true},
+		{name: "future just inside the window", offset: -maxSkewSeconds, wantErr: false},
+		{name: "future just outside the window", offset: -(maxSkewSeconds + 1), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reg, lru, pub, priv := testSetup(t)
+			req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
+			nonce := randomNonce(t)
+			tsUnix := time.Now().Unix() - tt.offset
+			signRequest(t, req, nil, priv, pub, tsUnix, nonce)
+
+			_, err := VerifyRequest(req, nil, reg, lru, maxSkewSeconds)
+			if tt.wantErr {
+				if !errors.Is(err, ErrTimestampSkew) {
+					t.Fatalf("offset %ds: VerifyRequest error = %v, want ErrTimestampSkew", tt.offset, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("offset %ds: VerifyRequest error = %v, want nil", tt.offset, err)
+			}
+		})
+	}
+}
+
+// TestVerifyRequest_SkewWarnThreshold pins the >30s clock-skew warning on
+// both sides of its threshold, in both timestamp directions. The future
+// cases matter on their own: they're the only ones that exercise the
+// "skew < 0 { skew = -skew }" sign flip verify.go applies before the warn
+// check, since a past timestamp never takes that branch.
+func TestVerifyRequest_SkewWarnThreshold(t *testing.T) {
+	// Deliberately NOT t.Parallel(): swaps the process-global slog default
+	// to capture log output, which races with any other test in this
+	// package that logs concurrently via package-level slog.* helpers.
+	const maxSkewSeconds = 60
+
+	tests := []struct {
+		name     string
+		offset   int64 // same convention as TestVerifyRequest_SkewBoundaries
+		wantWarn bool
+	}{
+		{name: "past just under the 30s warn threshold", offset: 29, wantWarn: false},
+		{name: "past just over the 30s warn threshold", offset: 30, wantWarn: true},
+		{name: "future just under the 30s warn threshold", offset: -30, wantWarn: false},
+		{name: "future just over the 30s warn threshold", offset: -31, wantWarn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg, lru, pub, priv := testSetup(t)
+			req := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
+			nonce := randomNonce(t)
+			tsUnix := time.Now().Unix() - tt.offset
+			signRequest(t, req, nil, priv, pub, tsUnix, nonce)
+
+			logBuf := &bytes.Buffer{}
+			oldLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
+			defer slog.SetDefault(oldLogger)
+
+			if _, err := VerifyRequest(req, nil, reg, lru, maxSkewSeconds); err != nil {
+				t.Fatalf("offset %ds: VerifyRequest error = %v, want nil", tt.offset, err)
+			}
+
+			gotWarn := strings.Contains(logBuf.String(), "clock skew warning")
+			if gotWarn != tt.wantWarn {
+				t.Errorf("offset %ds: warn logged = %v, want %v (log: %s)", tt.offset, gotWarn, tt.wantWarn, logBuf.String())
 			}
 		})
 	}

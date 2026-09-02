@@ -286,6 +286,13 @@ func TestNewNonceLRU_DefaultsOnZeroValues(t *testing.T) {
 	if lru.Len() != 1 {
 		t.Errorf("expected 1 entry, got %d", lru.Len())
 	}
+	// ttl must be 2x the 60s default window (120s), not the windowSeconds=0
+	// input itself: an unasserted ttl lets the "windowSeconds <= 0" default
+	// silently regress to a 0s (or otherwise wrong) ttl while Add() still
+	// appears to succeed.
+	if lru.ttl != 120*time.Second {
+		t.Errorf("ttl = %v, want 120s (2x the 60s default window)", lru.ttl)
+	}
 }
 
 func TestNewNonceLRU_NegativeValues(t *testing.T) {
@@ -294,6 +301,25 @@ func TestNewNonceLRU_NegativeValues(t *testing.T) {
 	defer lru.Close()
 	if !lru.Add("n1") {
 		t.Error("expected Add to succeed with defaults")
+	}
+	if lru.ttl != 120*time.Second {
+		t.Errorf("ttl = %v, want 120s (2x the 60s default window)", lru.ttl)
+	}
+}
+
+// TestNewNonceLRU_WindowSecondsBoundary pins the exact "windowSeconds <= 0"
+// boundary in NewNonceLRU: 0 must still default (matches
+// TestNewNonceLRU_DefaultsOnZeroValues), but 1 — the smallest positive
+// value — must NOT default. Both sides of the boundary are exact integers,
+// so this kills a CONDITIONALS_BOUNDARY flip of "<=" to "<" precisely: under
+// that mutant, windowSeconds=0 would no longer default and ttl would come
+// out as 0 instead of 120s.
+func TestNewNonceLRU_WindowSecondsBoundary(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(100, 1)
+	defer lru.Close()
+	if want := 2 * time.Second; lru.ttl != want {
+		t.Errorf("windowSeconds=1: ttl = %v, want %v (not defaulted)", lru.ttl, want)
 	}
 }
 
