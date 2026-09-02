@@ -93,6 +93,20 @@ test("pre-push mirrors the root web lane", () => {
   assert.equal(packageJson.engines.node, ">=24.0.0");
 });
 
+test("check:web runs knip so dead-code coverage travels with the same gate", () => {
+  assert.equal(packageJson.scripts.knip, "knip");
+  assert.match(packageJson.scripts["check:web"], /npm run knip &&/);
+  assert.ok(packageJson.devDependencies.knip, "knip must be a pinned devDependency");
+
+  const knipConfig = JSON.parse(fs.readFileSync(path.join(ROOT, "knip.json"), "utf8"));
+  for (const workspace of ["website", "docs", "analytics"]) {
+    assert.ok(
+      Object.hasOwn(knipConfig.workspaces ?? {}, workspace),
+      `knip.json must cover the ${workspace} workspace`,
+    );
+  }
+});
+
 test("Vercel deploys main while disabling automatic preview deployments", () => {
   const deploymentEnabled = vercelConfig.git?.deploymentEnabled;
   assert.deepEqual(deploymentEnabled, { "**": false, main: true });

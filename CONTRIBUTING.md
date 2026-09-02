@@ -77,6 +77,37 @@ go test -run=^$ -fuzz=^FuzzParseKeyLine$             -fuzztime=5s ./internal/aut
 - Line length: no hard limit; use judgment
 - **Zero new dependencies**: stdlib + `golang.org/x/crypto` + `github.com/google/uuid` + `github.com/gorilla/websocket`. PRs adding deps require a strong justification.
 
+## Knip
+
+The `website`, `docs`, and `analytics` npm workspaces (plus the root
+`scripts/` workspace) are checked for dead files, unused exports, and
+unlisted/unused dependencies by [knip](https://knip.dev), configured in
+`knip.json`. Run it with `npm run knip`; it also runs as part of
+`npm run check:web` (lefthook pre-push and CI's node-ci "Web Contract" job).
+
+`knip.json` is plain JSON, so the reasons behind each entry live here instead
+of inline comments:
+
+- `.` workspace `ignoreDependencies: ["posthog-js"]` — root's
+  `scripts/web-analytics-source.test.mjs` resolves
+  `posthog-js/dist/extension-bundles.js` via `require.resolve(..., { paths:
+  [...] })` pointed at the `analytics` workspace's `node_modules`, not root's.
+  `posthog-js` is a real dependency of `analytics`, not of the root
+  workspace, so knip correctly sees no root `package.json` entry for it; the
+  ignore documents that the reference is deliberate cross-workspace
+  resolution, not a phantom import.
+- `website` workspace `entry: ["scripts/*.mjs"]` — these scripts
+  (`gen-bird-png.mjs`, `security-headers.mjs`) are run manually or from
+  `npm` script hooks, not imported by the Next.js app, so knip's Next.js
+  plugin doesn't see them as reachable without being told they're entry
+  points.
+- `website` workspace `ignore: ["src/components/ui/**"]` — these are
+  shadcn/ui-generated primitives; the unused variant exports (e.g.
+  `badgeVariants`, `CardHeader`) are part of the generator's standard public
+  API, kept for future consumers rather than trimmed to current usage.
+- `website` workspace `ignoreBinaries: ["magick"]` — `gen-bird-png.mjs`
+  shells out to ImageMagick's `magick` CLI, which isn't an npm dependency.
+
 ## Commit convention
 
 We use **Conventional Commits** — no emoji:

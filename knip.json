@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.mjs"],
+      "ignoreDependencies": ["posthog-js"]
+    },
+    "docs": {},
+    "website": {
+      "entry": ["scripts/*.mjs"],
+      "ignore": ["src/components/ui/**"],
+      "ignoreBinaries": ["magick"]
+    },
+    "analytics": {}
+  }
+}
