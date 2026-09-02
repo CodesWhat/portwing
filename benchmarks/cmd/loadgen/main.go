@@ -24,6 +24,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -88,7 +89,9 @@ func execute(args []string, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
-	if *max429Ratio < 0 || *max429Ratio > 1 {
+	// NaN compares false against everything, so a bare range check would let
+	// `-max-429-ratio NaN` through and then `ratio > NaN` would never fire.
+	if math.IsNaN(*max429Ratio) || *max429Ratio < 0 || *max429Ratio > 1 {
 		fmt.Fprintf(stderr, "loadgen: -max-429-ratio must be between 0 and 1, got %v\n", *max429Ratio)
 		return 2
 	}

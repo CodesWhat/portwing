@@ -240,7 +240,10 @@ func TestLoadgenProcessRejectsAllErrorRuns(t *testing.T) {
 func TestExecuteRejectsOutOfRange429Ratio(t *testing.T) {
 	t.Parallel()
 
-	for _, ratio := range []string{"-0.1", "1.5"} {
+	// NaN is accepted by strconv.ParseFloat and compares false against every
+	// bound, so it needs its own rejection rather than falling out of the range
+	// check.
+	for _, ratio := range []string{"-0.1", "1.5", "NaN", "+Inf"} {
 		t.Run(ratio, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			// Fails at flag validation, before any request is made, so no
