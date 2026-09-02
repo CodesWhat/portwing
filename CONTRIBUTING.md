@@ -69,6 +69,15 @@ go test -run=^$ -fuzz=^FuzzComposeRequestValidate$   -fuzztime=5s ./internal/doc
 go test -run=^$ -fuzz=^FuzzParseKeyLine$             -fuzztime=5s ./internal/auth/
 ```
 
+### Benchmarks
+
+```bash
+go test -run='^$' -bench=. -benchmem -count=5 -timeout=20m ./...
+```
+
+Methodology, hardware/Go version baseline, and what the monthly benchmark
+gate does and doesn't measure: [`BENCHMARKS.md`](BENCHMARKS.md).
+
 ## Code style
 
 - **Formatter**: `gofmt` (enforced by CI)
