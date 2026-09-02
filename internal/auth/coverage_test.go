@@ -308,18 +308,33 @@ func TestNewNonceLRU_NegativeValues(t *testing.T) {
 }
 
 // TestNewNonceLRU_WindowSecondsBoundary pins the exact "windowSeconds <= 0"
-// boundary in NewNonceLRU: 0 must still default (matches
-// TestNewNonceLRU_DefaultsOnZeroValues), but 1 — the smallest positive
-// value — must NOT default. Both sides of the boundary are exact integers,
-// so this kills a CONDITIONALS_BOUNDARY flip of "<=" to "<" precisely: under
-// that mutant, windowSeconds=0 would no longer default and ttl would come
-// out as 0 instead of 120s.
+// boundary in NewNonceLRU by asserting both sides of it here: 0 must still
+// default to the 60s window (ttl 120s), and 1 — the smallest positive value —
+// must NOT default (ttl 2s). Both are exact integers, so together they kill a
+// CONDITIONALS_BOUNDARY flip of "<=" to "<": under that mutant windowSeconds=0
+// stops defaulting and ttl comes out as 0 instead of 120s. The 0 row overlaps
+// with TestNewNonceLRU_DefaultsOnZeroValues on purpose — without it this test
+// only exercises the side of the boundary where "<=" and "<" agree, so it kills
+// nothing on its own and the mutant survives if that other test ever changes.
 func TestNewNonceLRU_WindowSecondsBoundary(t *testing.T) {
 	t.Parallel()
-	lru := NewNonceLRU(100, 1)
-	defer lru.Close()
-	if want := 2 * time.Second; lru.ttl != want {
-		t.Errorf("windowSeconds=1: ttl = %v, want %v (not defaulted)", lru.ttl, want)
+	tests := []struct {
+		name          string
+		windowSeconds int
+		wantTTL       time.Duration
+	}{
+		{name: "zero takes the 60s default", windowSeconds: 0, wantTTL: 120 * time.Second},
+		{name: "one does not default", windowSeconds: 1, wantTTL: 2 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			lru := NewNonceLRU(100, tt.windowSeconds)
+			defer lru.Close()
+			if lru.ttl != tt.wantTTL {
+				t.Errorf("windowSeconds=%d: ttl = %v, want %v", tt.windowSeconds, lru.ttl, tt.wantTTL)
+			}
+		})
 	}
 }
 
