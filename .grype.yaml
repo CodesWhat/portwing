@@ -3,6 +3,24 @@
 # location-scoped so dependency updates automatically force a new review. CI
 # separately rejects any source dependency or shipped binary that links openpgp.
 #
+# 2026-09-02 image audit: the first live run of the weekly published-image
+# rescan (run 33697361140) failed both gating legs of the published v0.9.11
+# image on GHSA-vp52-pcj8-j9qc / CVE-2026-84304, google.golang.org/grpc v1.83.0
+# HIGH. Portwing's own module graph has no grpc in it at all (`go list -m all`
+# on dev/v0.9 and main), and `go version -m` on the extracted amd64 and arm64
+# binaries puts the carrier in Wolfi's docker-compose (v5.5.0+dirty), so the
+# entry below is scoped to that third-party binary exactly like the
+# docker/docker ones. Nothing exists to bump to: docker/compose's newest
+# release is v5.5.0 (2026-08-17) and pins grpc v1.83.0, Wolfi's newest package
+# 5.5.0-r4 still embeds v1.83.0, and the advisory's vulnerable range is
+# <= 1.83.0 so no older Compose is any better. compose@main has already moved
+# to grpc v1.83.2, so the fix arrives with the next Compose release; the
+# version pin below is what forces the re-review when Wolfi ships it.
+# go-vulndb had assigned no GO- alias for this advisory as of 2026-09-02
+# (checked against osv.dev). Pair one in below the moment it appears, the same
+# way GO-2026-4883 and GO-2026-4887 are paired, or an alias flip in the Grype
+# database silently reopens the gate.
+#
 # 2026-09-02: x/crypto moved v0.55.0 -> v0.56.0 to clear GO-2026-6354 and
 # GO-2026-6355 (CVE-2026-78662, CVE-2026-56855), both x/crypto/ssh channel
 # deadlock DoS advisories that the pre-push qlty osv-scanner gate began
@@ -123,5 +141,42 @@ ignore:
     package:
       name: github.com/docker/docker
       version: v28.5.2+incompatible
+      type: go-module
+      location: "**/usr/bin/docker-compose"
+
+  # GHSA-vp52-pcj8-j9qc / CVE-2026-84304 is a heap-exhaustion DoS: an
+  # unauthenticated peer fragments its payload across millions of tiny HTTP/2
+  # DATA frames on concurrent multiplexed streams and each fragment costs a
+  # separate recvMsg in grpc's shared internal/transport recvBuffer.
+  #
+  # Unlike the openpgp entries above this is NOT a linkage argument, and saying
+  # so plainly matters: grpc's server code *is* linked into the shipped Compose
+  # binary. `go tool nm` finds google.golang.org/grpc.(*Server).Serve, and the
+  # pclntab carries internal/transport/http2_server.go. The argument is
+  # reachability. The only gRPC server Compose can run is BuildKit's session
+  # (the registered services are moby.filesync.v1 and moby.buildkit.v1), and
+  # that is served over the single already-established hijacked /session
+  # connection to the Docker daemon the operator configured, never a network
+  # listener, so the unauthenticated-remote position the advisory describes does
+  # not exist. Its gRPC clients dial only operator-configured endpoints:
+  # buildkitd through that same daemon, and the OTLP trace exporter, which this
+  # image sets no endpoint for. Portwing runs Compose as a short-lived
+  # subprocess per request (internal/docker/compose.go, buildCommand) via
+  # exec.CommandContext, sharing this container's memory cgroup rather than one
+  # of its own, so a cgroup-level OOM kill can take down the whole container,
+  # not just Compose. The argument here is not isolation, it's reachability:
+  # there is no listener for an unauthenticated peer to hit.
+  #
+  # Version-scoped, so the pin keeps this ignore from silently following
+  # whatever grpc Wolfi's Compose package embeds next; once the version drifts,
+  # the weekly rescan stops matching and this entry goes dead rather than
+  # forcing a review on its own. The dated review deadline is what actually
+  # drives cleanup: review when Wolfi ships a Compose past v5.5.0, or by
+  # 2026-11-15 alongside the docker/docker entries above, whichever is sooner.
+  - vulnerability: GHSA-vp52-pcj8-j9qc
+    reason: "Embedded in the Wolfi docker-compose binary; Compose's only gRPC server is BuildKit's session over the hijacked Docker /session connection, never a network listener, and its gRPC clients dial only operator-configured endpoints. No fixed Compose release exists yet (v5.5.0 pins grpc v1.83.0; compose@main is already on v1.83.2). Review when Wolfi ships a Compose past v5.5.0, or by 2026-11-15."
+    package:
+      name: google.golang.org/grpc
+      version: v1.83.0
       type: go-module
       location: "**/usr/bin/docker-compose"

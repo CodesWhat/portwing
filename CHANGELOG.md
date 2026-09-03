@@ -121,6 +121,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Adjudicated GHSA-vp52-pcj8-j9qc (CVE-2026-84304, HIGH) in the published
+  container image.** The first live run of the weekly published-image rescan
+  failed both gating legs of v0.9.11 on `google.golang.org/grpc` v1.83.0. The
+  carrier is not portwing, which has no grpc in its module graph at all: it is
+  the Wolfi-packaged `docker-compose` binary the image ships so stacks can be
+  deployed. There is nothing to bump to. Compose's newest release, v5.5.0, pins
+  grpc v1.83.0, Wolfi's newest package still embeds it, and the advisory's
+  vulnerable range is `<= 1.83.0`, so an older Compose is no better. The
+  advisory needs an unauthenticated peer fragmenting HTTP/2 DATA frames at a
+  gRPC server, and the only gRPC server Compose can run is BuildKit's session
+  over the hijacked Docker `/session` connection, never a network listener;
+  portwing also spawns Compose as a short-lived subprocess per request, but that
+  subprocess shares portwing's memory cgroup rather than one of its own, so a
+  cgroup-level OOM kill could still take the whole container down. The argument
+  here is unreachability, not isolation. Suppressed in `.grype.yaml` scoped to
+  that binary and pinned to v1.83.0, so the ignore won't silently follow
+  whatever grpc Wolfi ships next; the weekly rescan just stops matching once it
+  drifts, which is why the entry carries a review-by date of 2026-11-15 and a
+  contract test that fails if the scope is widened.
+  Compose's `main` is already on grpc v1.83.2, so the real fix lands with the
+  next Compose release.
 - **Dropped the stale `.grype.yaml` OpenSSL suppression entries for
   CVE-2026-54876 and CVE-2026-14456.** Wolfi shipped `libcrypto3`/`libssl3`
   3.6.4-r0 and Alpine shipped 3.5.8-r0, both past the entries' pinned
