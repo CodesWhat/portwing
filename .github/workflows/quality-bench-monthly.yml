@@ -74,7 +74,7 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: '45 7 1 * *'  # Monthly on day 1 at 07:45 UTC (between mutation 06:30 and deep fuzz 08:30)
+    - cron: '45 7 1 * *'  # Monthly on day 1 at 07:45 UTC (after mutation at 06:30; deep fuzz now starts 02:30, see quality-fuzz-monthly.yml)
 
 permissions:
   contents: read

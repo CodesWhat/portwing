@@ -11,12 +11,14 @@ run-name: >-
 #   tier 0  lefthook pre-push          5s per fuzzer
 #   tier 1  ci-verify.yml go-fuzz      60s per fuzzer, every push/PR
 #   tier 2  quality-fuzz-nightly.yml   5m per fuzzer, daily 09:30 UTC
-#   tier 3  quality-fuzz-monthly.yml   1h per fuzzer, day 1 at 08:30 UTC
+#   tier 3  quality-fuzz-monthly.yml   1h per fuzzer, day 1 at 02:30 UTC
 #
 # This one builds the SAME ten `func Fuzz*(f *testing.F)` targets against
 # libFuzzer and AddressSanitizer through OSS-Fuzz's base-builder-go, and runs
-# them against a corpus that survives between runs. Nothing under internal/ is
-# rewritten for it; .clusterfuzzlite/build.sh does the bridging.
+# them against a corpus committed to a branch. Tiers 2 and 3 also persist their
+# corpus, but through the Actions cache, where an entry is evicted after seven
+# days without a hit; a branch does not expire. See .clusterfuzzlite/build.sh
+# for what a target may depend on here, which is narrower than `go test`.
 #
 # What this tier adds that the Go engine cannot: ASan catches memory errors
 # reached through cgo and the runtime that Go's own fuzzer does not model, and

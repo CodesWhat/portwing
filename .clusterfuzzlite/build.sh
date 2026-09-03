@@ -15,7 +15,7 @@
 #   tier 2  quality-fuzz-nightly   5m per fuzzer, daily
 #   tier 3  quality-fuzz-monthly   1h per fuzzer, monthly
 #   tier 4  ClusterFuzzLite        this file — libFuzzer + AddressSanitizer,
-#                                  with a corpus that persists between runs
+#                                  corpus committed to a branch, not cached
 #
 # What a target may depend on
 # ---------------------------
@@ -101,8 +101,12 @@ build_fuzzer internal/docker FuzzDecodeContainerLogStream
 build_fuzzer internal/docker FuzzComposeRequestValidate
 build_fuzzer internal/auth FuzzParseKeyLine
 
-# No seeds are copied out of internal/*/testdata/fuzz/. Go writes those with a
+# No seeds are copied out of internal/*/testdata/fuzz/, even though every target
+# is now required to ship one there. Go writes those files with a
 # `go test fuzz v1` header and one quoted Go literal per argument; libFuzzer
-# reads raw bytes, so copying them in would hand every target a corpus of
-# malformed inputs. The corpus this tier runs on is the one batch fuzzing
-# accumulates on the storage branch.
+# reads raw bytes, so copying them in as-is would hand every target a corpus of
+# malformed inputs, and decoding them would need a per-signature decoder that
+# silently rots the moment a target takes a second argument. This tier starts
+# cold and builds its own corpus on the storage branch instead. Worth revisiting
+# only if a target's coverage plateaus below what the Go engine reaches from the
+# same seeds.
