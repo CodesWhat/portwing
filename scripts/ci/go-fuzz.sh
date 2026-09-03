@@ -69,7 +69,7 @@ for attempt in 1 2; do
 		mkdir -p "${attempt_corpus}"
 		cp -R "${corpus}/." "${attempt_corpus}/"
 	fi
-	if grep -q "Failing input written to testdata" "${attempt_log}"; then
+	if grep -qE "Failing input written to testdata|failure while testing seed corpus entry" "${attempt_log}"; then
 		echo "${fuzzer} found a crashing input" >&2
 		exit "${status}"
 	fi

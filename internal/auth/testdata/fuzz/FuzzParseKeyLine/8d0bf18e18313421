@@ -1,0 +1,2 @@
+go test fuzz v1
+string("ed25519 0000000!0000")
