@@ -121,6 +121,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Dropped the stale `.grype.yaml` OpenSSL suppression entries for
+  CVE-2026-54876 and CVE-2026-14456.** Wolfi shipped `libcrypto3`/`libssl3`
+  3.6.4-r0 and Alpine shipped 3.5.8-r0, both past the entries' pinned
+  3.6.3-r4/3.5.7-r0 versions, and a fresh `grype` scan of the published
+  0.9.11 image confirms neither CVE matches at the current versions on any
+  scanned platform (amd64, arm64, armv7). The six dead entries (two CVEs
+  across the Wolfi pin and, for CVE-2026-14456, the separate armv7 Alpine
+  pin) are removed rather than left matching nothing.
 - **`golang.org/x/crypto` bumped to v0.56.0**, clearing GO-2026-6354 and
   GO-2026-6355 (CVE-2026-78662, CVE-2026-56855), two `x/crypto/ssh` channel
   deadlock advisories. Same shape as the v0.55.0 move below: portwing imports
