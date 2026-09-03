@@ -505,7 +505,7 @@ const RAW_FRAMES: RawFrame[] = [
         kind: "text",
         content: (
           <span className="text-[0.72rem]">
-            MC4CAQAwBQYDK2VwBCIEIJ8vQm3NdXqKpLhY2eRfWs6cTnAzBxOuDiGvE1Fk7mPs
+            MC4CAQAwBQYDK2VwBCIEIJ8vQm3N…{/* gitleaks:allow */}
           </span>
         ),
       },
