@@ -1118,10 +1118,20 @@ paths:
           description: Invalid `tail` value.
         "401":
           description: Missing or invalid token.
+        "404":
+          description: Container not found (Docker reported status 404).
+        "409":
+          description: >
+            Conflict reported by Docker for this container (Docker reported
+            status 409).
         "429":
           description: Rate limit exceeded.
         "500":
           description: Error retrieving logs from Docker.
+        "503":
+          description: >
+            Concurrent stream limit reached (follow mode only; see
+            MAX_STREAM_SESSIONS).
 
   /api/containers/{id}:
     delete:
@@ -1516,10 +1526,20 @@ paths:
           description: Invalid `tail` value.
         "401":
           description: Missing or invalid token.
+        "404":
+          description: Container not found (Docker reported status 404).
+        "409":
+          description: >
+            Conflict reported by Docker for this container (Docker reported
+            status 409).
         "429":
           description: Rate limit exceeded.
         "500":
           description: Error retrieving logs from Docker.
+        "503":
+          description: >
+            Concurrent stream limit reached (follow mode only; see
+            MAX_STREAM_SESSIONS).
 
   /api/v1/events:
     get:

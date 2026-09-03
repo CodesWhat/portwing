@@ -64,8 +64,9 @@ type AuditEntry = {
     | "exec_start"
     | "enrollment";
   actor: string;
-  method: string;
-  path: string;
+  // method/path are only present on api_request, auth_failure, rate_limited
+  method?: string;
+  path?: string;
   outcome: "allowed" | "denied" | "error";
   status?: number;
   duration_ms?: number;
@@ -151,8 +152,9 @@ function buildAuditLine(entry: AuditEntry, iso: string): RawFrameLine {
 
 // buildAuditStream builds the fake audit log stream that plays under the
 // standard-mode boot banner. Entry fields mirror Portwing's real audit schema
-// from internal/audit/audit.go — event/actor/method/path/outcome/status/
-// duration_ms, with compose_op and exec_start extras as documented.
+// from internal/audit/audit.go — event/actor/outcome/status/duration_ms, with
+// method/path only on api_request, auth_failure and rate_limited, and
+// compose_op and exec_start extras as documented.
 function buildAuditStream(): RawFrameLine[] {
   const entries: Array<AuditEntry> = [
     {
@@ -237,8 +239,6 @@ function buildAuditStream(): RawFrameLine[] {
     {
       event: "compose_op",
       actor: "10.0.0.42",
-      method: "POST",
-      path: "/_portwing/compose",
       outcome: "allowed",
       operation: "up",
       stack: "nginx-stack",
@@ -255,8 +255,6 @@ function buildAuditStream(): RawFrameLine[] {
     {
       event: "exec_start",
       actor: "10.0.0.42",
-      method: "POST",
-      path: "/exec/abc123def456",
       outcome: "allowed",
       container: "abc123def456",
       exec_id: "e7f8a9b1",
