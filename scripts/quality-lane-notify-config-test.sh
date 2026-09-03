@@ -23,6 +23,8 @@ expected_workflows=(
 	"Quality: Benchmarks (monthly)"
 	"Quality: Deep Fuzz Infra Rerun"
 	"Quality: Integration — Engine Matrix"
+	"Quality: ClusterFuzzLite (batch)"
+	"Quality: ClusterFuzzLite (prune)"
 )
 
 # --- trigger list: on.workflow_run.workflows -------------------------------

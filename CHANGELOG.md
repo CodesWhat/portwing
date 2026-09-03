@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ClusterFuzzLite now fuzzes the same ten targets against libFuzzer and
+  AddressSanitizer, with a corpus that survives between runs.** The four
+  existing tiers all run Go's native engine and throw the corpus away when the
+  job ends, so every run starts from the committed seeds. This one rebuilds the
+  identical `func Fuzz*(f *testing.F)` targets through OSS-Fuzz's
+  base-builder-go (`.clusterfuzzlite/`) and keeps what they find. 300 seconds
+  across all ten on a pull request that touches Go, an hour every Saturday, and
+  a corpus prune on Wednesday, which are separate workflows so a green prune
+  cannot close the tracking issue a crashing batch run opened. The corpus lives
+  on an orphan `clusterfuzzlite-corpus` branch of this repository, written with
+  the workflow's own `GITHUB_TOKEN`, so there is no new secret and no second
+  repository to keep. Only the two scheduled jobs can write; the pull-request
+  lane reads the corpus and has `contents: read`, and the trigger is
+  `pull_request` rather than `pull_request_target`, so a fork's token stays
+  read-only. No fuzz body changed; two `internal/docker` test helpers moved into
+  the fuzz files that use them, because this tier compiles a target's `_test.go`
+  file on its own.
 - **Edge mode agents can now accept a streamed request body via the new
   `edge-request-body-stream` capability (issue #205).** `request.body` is a
   JSON `RawMessage`, so it could never carry a binary or otherwise non-JSON

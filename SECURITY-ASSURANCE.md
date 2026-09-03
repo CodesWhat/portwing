@@ -109,7 +109,22 @@ coverage floor. The release workflow creates signed images and archives,
 CycloneDX SBOMs, and provenance, then verifies the published artifacts against
 the expected workflow identity.
 
+Fuzzing runs in five tiers over the same ten targets, so a finding is reachable
+from a laptop and from a scheduled lane alike. Four of them run Go's native
+engine: 5 seconds per target on pre-push, 60 seconds on every push and pull
+request, 5 minutes nightly, and an hour per target on the first of the month.
+The fifth rebuilds the identical targets against libFuzzer and
+AddressSanitizer through OSS-Fuzz's toolchain (ClusterFuzzLite). It adds two
+things the other four do not have: a different mutation engine, so the inputs
+it reaches are not the ones Go's engine reaches, and a corpus that survives
+between runs, accumulating on an orphan branch of this repository instead of
+being discarded when the job ends. AddressSanitizer is on as well, though on a
+codebase this close to pure Go its reach is limited to the runtime boundary.
+
 Evidence: [`.github/workflows/ci-verify.yml`](.github/workflows/ci-verify.yml),
+[`.github/workflows/quality-fuzz-cflite-pr.yml`](.github/workflows/quality-fuzz-cflite-pr.yml),
+[`.github/workflows/quality-fuzz-cflite-batch.yml`](.github/workflows/quality-fuzz-cflite-batch.yml),
+[`.github/workflows/quality-fuzz-cflite-prune.yml`](.github/workflows/quality-fuzz-cflite-prune.yml),
 [`.github/workflows/release.yml`](.github/workflows/release.yml), the public
 [coverage report](https://qlty.sh/gh/CodesWhat/projects/portwing), and
 [`docs/content/docs/verification.mdx`](docs/content/docs/verification.mdx).

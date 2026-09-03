@@ -1,0 +1,124 @@
+name: "Quality: ClusterFuzzLite (batch)"
+run-name: >-
+  ${{
+    github.event_name == 'schedule' && 'ClusterFuzzLite — weekly batch' ||
+    format('ClusterFuzzLite — batch, manual by {0}', github.actor)
+  }}
+
+# The batch half of tier 4: an hour of fuzzing a week against the whole project,
+# writing everything it finds back to the corpus branch. The pull-request half is
+# quality-fuzz-cflite-pr.yml, which carries the full rationale for the tier, for
+# the corpus-persistence design, and for what about ClusterFuzzLite cannot be
+# pinned. Read that file first. Pruning is quality-fuzz-cflite-prune.yml.
+#
+# --- Why batch and prune are separate files ---------------------------------
+#
+# They were one file with two schedule-gated jobs, which made the shared
+# concurrency group automatic. That is wrong for a different reason:
+# quality-lane-notify.yml keys its tracking issue on the workflow NAME, so a
+# green prune run on Wednesday would close the issue a crashing batch run opened
+# on Saturday. Prune does not fuzz — it minimizes — so it passes happily while
+# the crash batch found is still unfixed. Two workflows, two names, two issues.
+#
+# The concurrency group below is therefore a literal shared across both files
+# rather than something derived from ${{ github.workflow }}, which would differ
+# per file and put the two corpus writers back in parallel.
+# scripts/cflite-config-test.sh asserts both files carry the same literal.
+#
+# --- The corpus branch -------------------------------------------------------
+#
+# `clusterfuzzlite-corpus` is an orphan branch in this repository holding
+# `corpus/<FuzzTarget>/` directories and nothing else. No ruleset covers it (they
+# cover ~DEFAULT_BRANCH, refs/heads/dev/**, refs/heads/renovate/** and
+# refs/tags/v*), no workflow triggers on a push to it, and pushes made with
+# GITHUB_TOKEN do not start workflow runs anyway.
+#
+# It was created with an EMPTY root commit on 2026-09-03 (f6efa1b, 0 files, 0
+# parents) rather than left for the first run to make. If the branch does not
+# exist, GitFilestore._reset_git falls back to `git checkout --orphan <branch>`,
+# and `git checkout --orphan` leaves the whole index populated from the branch
+# that was cloned; the `git clean -fxd` after it removes untracked files only.
+# The first corpus commit would then carry a complete copy of the default
+# branch's tree alongside the corpus. Verified against git directly on
+# 2026-09-03. If the branch is ever deleted, recreate it the same way before the
+# next batch run:
+#
+#   gh api repos/CodesWhat/portwing/git/commits -f message='seed corpus branch' \
+#     -f tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904 --jq .sha
+#   gh api repos/CodesWhat/portwing/git/refs \
+#     -f ref=refs/heads/clusterfuzzlite-corpus -f sha=<that sha>
+#
+# Schedule: 10:30 UTC is clear of every existing lane (mutation 06:30,
+# integration 06:15, soak 06:15, CI weekly 06:30, engine matrix 06:45, grype and
+# ZAP 07:15, main-is-released 07:23, benchmarks 07:45, deep fuzz monthly 08:30,
+# deep fuzz nightly 09:30), and nothing else runs on a Saturday.
+
+on:
+  schedule:
+    - cron: '30 10 * * 6'  # Saturdays 10:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Shared verbatim with quality-fuzz-cflite-prune.yml. Both jobs clone, reset,
+  # copy, commit and push the same branch, so two at once is a lost update or a
+  # rejected push. Queue, never cancel: a cancelled run can already have pushed
+  # part of a corpus, and the next run reconciles from the branch rather than
+  # from anything the cancelled run was holding.
+  group: quality-fuzz-cflite-corpus
+  cancel-in-progress: false
+
+jobs:
+  batch-fuzz:
+    name: "ClusterFuzzLite (batch)"
+    runs-on: ubuntu-24.04
+    # 3600s of fuzzing plus the image pull, the toolchain download, and ten
+    # libFuzzer builds.
+    timeout-minutes: 90
+
+    permissions:
+      # This job writes exactly one thing: the corpus branch.
+      # BatchFuzzTargetRunner.run_fuzz_target calls upload_corpus after each
+      # target, which the git filestore turns into a commit and a push on
+      # `clusterfuzzlite-corpus`.
+      contents: write
+      actions: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            gcr.io:443
+            github.com:443
+            objects.githubusercontent.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            storage.googleapis.com:443
+            sum.golang.org:443
+
+      - name: Build fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: go
+          sanitizer: address
+          github-token: ${{ github.token }}
+
+      - name: Run fuzzers
+        id: run
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: go
+          github-token: ${{ github.token }}
+          # One hour total, split across the ten targets by run_fuzzers.py.
+          fuzz-seconds: 3600
+          mode: batch
+          sanitizer: address
+          storage-repo: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+          storage-repo-branch: clusterfuzzlite-corpus
+          storage-repo-branch-coverage: clusterfuzzlite-corpus

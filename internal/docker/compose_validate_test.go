@@ -4,14 +4,6 @@ import (
 	"testing"
 )
 
-// newTestComposeManager creates a ComposeManager with a temp stacksDir for
-// validation tests. It mirrors the approach in compose_test.go (direct struct
-// literal) — the compose binary detection is irrelevant for validateRequest.
-func newTestComposeManager(t *testing.T) *ComposeManager {
-	t.Helper()
-	return &ComposeManager{stacksDir: t.TempDir()}
-}
-
 // TestValidateRequest exercises the security-critical validation paths in
 // ComposeManager.validateRequest.
 func TestValidateRequest(t *testing.T) {
