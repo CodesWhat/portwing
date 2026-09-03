@@ -145,32 +145,82 @@ cache_key='          key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name
 cache_restore_prefix='            fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-'
 cache_save_guard="        if: always() && steps.corpus.outputs.generated != ''"
 
-# Crash classification: Go prints a different message once a crasher already
-# lives in the committed seed corpus (re-tested before anything new runs) than
-# it does on first discovery, so the workflow has to grep both or every run
-# after the first silently falls through to kind=error.
+# Crash classification (PW-5.10): scripts/ci/fuzz-run.sh is the single owner
+# of the retry/classify loop for all four callers — lefthook.yml,
+# scripts/ci/go-fuzz.sh, quality-fuzz-nightly.yml and quality-fuzz-monthly.yml
+# — instead of each one reimplementing it. Go prints a different message once
+# a crasher already lives in the committed seed corpus (re-tested before
+# anything new runs) than it does on first discovery, so the shared script
+# has to grep both or every run after the first silently falls through to
+# kind=error.
+fuzz_run_script="scripts/ci/fuzz-run.sh"
 crash_pattern_first_discovery="Failing input written to testdata"
 crash_pattern_seed_regression="failure while testing seed corpus entry"
 
+# Every check below runs against comment-stripped content, not the raw file:
+# a caller could otherwise satisfy "must invoke fuzz-run.sh" or "must not
+# reimplement the classifier" by leaving a comment behind — e.g. commenting
+# out the real call while keeping a comment that mentions the script path, or
+# discussing a crash phrase in prose. Both the bash `run:` blocks and the
+# YAML around them use `#` for a full-line comment, so a first pass drops
+# those. A second pass truncates a trailing comment too (e.g.
+# `FUZZ_RETRIES=2 true # bash scripts/ci/fuzz-run.sh ...`, which would
+# otherwise satisfy both the anchored FUZZ_RETRIES check and the invocation
+# check while never actually running fuzz-run.sh) — safe here because none
+# of the real invocation lines contain a literal '#'.
+strip_comments() {
+	grep -Ev '^[[:space:]]*#' "$1" | sed -E 's/[[:space:]]+#.*$//'
+}
+
+fuzz_run_script_code="$(strip_comments "${fuzz_run_script}")"
+
 # Anchored to the classifier's own `if grep -q ...` line, not just "appears
-# somewhere in the file": both phrases are echoed again in the Summarize
-# step's step-summary text, so a bare `grep -Fq` would still pass after the
+# somewhere in the file": both phrases are echoed again in the script's own
+# human-facing messages, so a bare `grep -Fq` would still pass after the
 # classifier condition itself stopped matching.
-# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-crash_classifier_first_discovery='            if grep -q "Failing input written to testdata" "${LOG}"; then'
-# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-crash_classifier_seed_regression='            if grep -q "failure while testing seed corpus entry" "${LOG}"; then'
+# shellcheck disable=SC2016 # Asserting the literal text of the script.
+crash_classifier_first_discovery='	if grep -q "Failing input written to testdata" "${attempt_log}"; then'
+# shellcheck disable=SC2016 # Asserting the literal text of the script.
+crash_classifier_seed_regression='	if grep -q "failure while testing seed corpus entry" "${attempt_log}"; then'
+
+grep -Fxq "${crash_classifier_first_discovery}" <<<"${fuzz_run_script_code}" ||
+	fail "${fuzz_run_script} must classify '${crash_pattern_first_discovery}' as kind=crash in the classifier condition itself"
+grep -Fxq "${crash_classifier_seed_regression}" <<<"${fuzz_run_script_code}" ||
+	fail "${fuzz_run_script} must classify '${crash_pattern_seed_regression}' as kind=crash in the classifier condition itself"
+
+# None of the four callers may reimplement the classifier inline — that is
+# exactly the duplication PW-5.10 removed, and a caller that grows its own
+# copy of either phrase can silently drift from the shared one. Matched as
+# "grep" and the phrase on the same non-comment line, in any quoting style
+# (double quotes, single quotes, or none) — not the bare phrase text: the
+# nightly/monthly step-summary steps legitimately echo the same phrases into
+# their human-facing output, and that is reporting, not reclassification, and
+# it never puts the word "grep" on that line.
+#
+# Each caller must instead invoke the shared script. The invocation is
+# anchored to a non-comment line that starts (after leading whitespace) with
+# the FUZZ_RETRIES= env-assignment prefix every caller leads its call with,
+# and separately to a non-comment `bash .../fuzz-run.sh` line — not just "the
+# path or FUZZ_RETRIES=2 appear somewhere in the file", which a stale comment
+# can satisfy on its own once a caller's real call is commented out.
+for caller in lefthook.yml scripts/ci/go-fuzz.sh .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
+	caller_code="$(strip_comments "${caller}")"
+
+	grep -Eq "grep.*${crash_pattern_first_discovery}" <<<"${caller_code}" &&
+		fail "${caller} must not reimplement the '${crash_pattern_first_discovery}' classifier inline; it must call ${fuzz_run_script}"
+	grep -Eq "grep.*${crash_pattern_seed_regression}" <<<"${caller_code}" &&
+		fail "${caller} must not reimplement the '${crash_pattern_seed_regression}' classifier inline; it must call ${fuzz_run_script}"
+	grep -Eq 'bash[[:space:]]+.*fuzz-run\.sh' <<<"${caller_code}" ||
+		fail "${caller} must invoke ${fuzz_run_script} rather than its own retry/classify loop"
+	grep -Eq '^[[:space:]]*FUZZ_RETRIES=2([[:space:]]|\\$|"|$)' <<<"${caller_code}" ||
+		fail "${caller} must pass FUZZ_RETRIES=2 explicitly to ${fuzz_run_script}, anchored at the call itself"
+done
 
 for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
 	grep -Fq "uses: actions/cache/restore@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must restore the fuzz corpus from actions/cache pinned to ${cache_action_sha}"
 	grep -Fq "uses: actions/cache/save@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must save the fuzz corpus to actions/cache pinned to ${cache_action_sha}"
-
-	grep -Fxq "${crash_classifier_first_discovery}" "${workflow}" ||
-		fail "${workflow} must classify '${crash_pattern_first_discovery}' as kind=crash in the classifier condition itself"
-	grep -Fxq "${crash_classifier_seed_regression}" "${workflow}" ||
-		fail "${workflow} must classify '${crash_pattern_seed_regression}' as kind=crash in the classifier condition itself"
 
 	# Restore and save have to name the same key. If they drift, every run
 	# writes an entry the next run cannot find and the lane is back to zero.
@@ -255,19 +305,6 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 		fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
 	grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${upload_step_block}" ||
 		fail "${workflow} must upload the corpus artifact with actions/upload-artifact pinned to ${upload_artifact_sha} in the same step"
-done
-
-# The 60s CI/smoke tier (lefthook's fast lane and its go-fuzz.sh equivalent)
-# has to key off the exact same two phrases as the nightly/monthly
-# classifiers above. An abbreviated form still matches today's crash message,
-# so this doesn't catch a live bug — but a drifted phrase here is a silent
-# trap: it keeps matching until Go's wording changes, at which point CI stops
-# recognizing a crash on the tier a developer actually watches on every push.
-for driver in lefthook.yml scripts/ci/go-fuzz.sh; do
-	grep -Fq "${crash_pattern_first_discovery}" "${driver}" ||
-		fail "${driver} must match '${crash_pattern_first_discovery}' verbatim, not an abbreviated form"
-	grep -Fq "${crash_pattern_seed_regression}" "${driver}" ||
-		fail "${driver} must match '${crash_pattern_seed_regression}' verbatim"
 done
 
 # Monthly/nightly cron overlap. Both lanes restore from and save to the same

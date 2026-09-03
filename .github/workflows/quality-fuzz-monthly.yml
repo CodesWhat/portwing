@@ -203,95 +203,30 @@ jobs:
           fi
           echo "test_timeout=$(( budget_s + 120 ))s" >> "$GITHUB_OUTPUT"
 
+      # Retry-once-on-flake and crash classification live in
+      # scripts/ci/fuzz-run.sh (PW-5.10), shared with quality-fuzz-nightly.yml,
+      # lefthook.yml and scripts/ci/go-fuzz.sh. It also classifies exit 143
+      # (SIGTERM) as kind=infra rather than a code failure — the weaker
+      # variant where the step process takes the signal but the job survives
+      # long enough to keep running. In a full teardown nothing here executes
+      # at all; on run 33514192612 the Summarize step below never appeared in
+      # the log and Upload was killed 3ms after starting. The authoritative
+      # kind=infra for THAT case still comes from
+      # quality-fuzz-monthly-rerun.yml, which greps the runner's own
+      # "shutdown signal" line from a different runner after the fact and
+      # decides whether to re-run — unaffected by anything in this step.
+      # Neither classification subsumes the other. It writes this step's
+      # `kind`/`reason` outputs straight to $GITHUB_OUTPUT, which the
+      # Summarize step below still reads exactly as before.
       - name: Fuzz ${{ matrix.fuzzer.name }}
         id: fuzz
         env:
           FUZZER: ${{ matrix.fuzzer.name }}
           PKG: ${{ matrix.fuzzer.pkg }}
           FUZZTIME: ${{ steps.budget.outputs.fuzztime }}
-          TEST_TIMEOUT: ${{ steps.budget.outputs.test_timeout }}
+          FUZZ_TIMEOUT: ${{ steps.budget.outputs.test_timeout }}
         run: |
-          LOG="${RUNNER_TEMP}/fuzz-${FUZZER}.log"
-
-          run_fuzz() {
-            go test -run='^$' \
-              -fuzz="^${FUZZER}\$" \
-              -fuzztime="${FUZZTIME}" \
-              -timeout="${TEST_TIMEOUT}" \
-              "${PKG}" 2>&1 | tee "${LOG}"
-            return "${PIPESTATUS[0]}"
-          }
-
-          emit() { echo "kind=$1" >> "$GITHUB_OUTPUT"; }
-
-          for attempt in 1 2; do
-            rc=0
-            run_fuzz || rc=$?
-
-            if [ "${rc}" -eq 0 ]; then
-              emit pass
-              exit 0
-            fi
-
-            if grep -q "Failing input written to testdata" "${LOG}"; then
-              emit crash
-              echo "reason=first-discovery" >> "$GITHUB_OUTPUT"
-              echo "::error::${FUZZER} found a crashing input (matched 'Failing input written to testdata') — commit it to the seed corpus and fix the regression."
-              exit "${rc}"
-            fi
-
-            # The committed seed corpus already holds a crasher from a prior
-            # run, so Go re-tests it before generating anything new and never
-            # reaches the "Failing input written" path above. Same finding,
-            # different message.
-            if grep -q "failure while testing seed corpus entry" "${LOG}"; then
-              emit crash
-              echo "reason=seed-regression" >> "$GITHUB_OUTPUT"
-              echo "::error::${FUZZER}'s committed seed corpus is failing (matched 'failure while testing seed corpus entry') — a previously-fixed crash has regressed."
-              exit "${rc}"
-            fi
-
-            # Killed by a signal, not a test failure. Checked after `crash` so a
-            # real finding can never be reclassified, and before `error` so a
-            # SIGTERM'd `go test` (143, and no "context deadline exceeded" in
-            # the output) stops being labelled a code regression.
-            #
-            # The exit code is the only signal available HERE. The runner's own
-            # "The runner has received a shutdown signal" line goes to the job
-            # log, not to `${LOG}`, which only ever holds what `go test` wrote
-            # through the tee — so grepping for it in this step would be dead
-            # code that never matches. 137 is deliberately not matched: it is
-            # ambiguous between a teardown escalating to SIGKILL and the kernel
-            # OOM-killing a fuzz target that ate the runner's memory, and the
-            # second one is a real finding.
-            #
-            # This branch only fires in the WEAKER variant of the failure, where
-            # the step process takes the signal but the job survives long enough
-            # to run this line. In a full teardown nothing here executes — on
-            # run 33514192612 the Summarize step below never appears in the log
-            # at all and Upload was killed 3ms after starting. The authoritative
-            # kind=infra for that case comes from quality-fuzz-monthly-rerun.yml,
-            # which runs on a different runner after the fact and also decides
-            # whether to re-run. Retrying in-loop is pointless either way: the
-            # loop is on the runner that is going away.
-            if [ "${rc}" -eq 143 ]; then
-              emit infra
-              echo "::error::${FUZZER}: killed by SIGTERM (exit 143), not a code failure. quality-fuzz-monthly-rerun.yml decides whether to re-run."
-              exit "${rc}"
-            fi
-
-            if ! grep -q "context deadline exceeded" "${LOG}"; then
-              emit error
-              echo "::error::${FUZZER} failed for a non-flake reason (exit ${rc})."
-              exit "${rc}"
-            fi
-
-            echo "::warning::${FUZZER}: known -fuzztime boundary flake on attempt ${attempt}/2."
-          done
-
-          emit flake
-          echo "::error::${FUZZER} hit the boundary flake on both attempts."
-          exit 1
+          FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" bash scripts/ci/fuzz-run.sh "${PKG}" "${FUZZER}" "${FUZZTIME}"
 
       - name: Upload fuzz corpus on failure or cancel
         if: failure() || cancelled()
