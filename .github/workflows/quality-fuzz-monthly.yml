@@ -24,7 +24,13 @@ on:
         required: false
         default: "1h"
   schedule:
-    - cron: '30 8 1 * *'  # Monthly on day 1 at 08:30 UTC (after mutation at 06:30)
+    # Monthly on day 1 at 02:30 UTC. Has to finish before the nightly's 09:30
+    # restore-keys prefix match; nightly and monthly share the same corpus
+    # cache prefix and each save wins on recency, so whichever lane finishes
+    # second silently discards the other's coverage. 7h of headroom before
+    # 09:30 is greater than this job's 360m timeout, so the two can never
+    # overlap.
+    - cron: '30 2 1 * *'
 
 permissions:
   contents: read
@@ -211,7 +217,19 @@ jobs:
 
             if grep -q "Failing input written to testdata" "${LOG}"; then
               emit crash
-              echo "::error::${FUZZER} found a crashing input — commit it to the seed corpus and fix the regression."
+              echo "reason=first-discovery" >> "$GITHUB_OUTPUT"
+              echo "::error::${FUZZER} found a crashing input (matched 'Failing input written to testdata') — commit it to the seed corpus and fix the regression."
+              exit "${rc}"
+            fi
+
+            # The committed seed corpus already holds a crasher from a prior
+            # run, so Go re-tests it before generating anything new and never
+            # reaches the "Failing input written" path above. Same finding,
+            # different message.
+            if grep -q "failure while testing seed corpus entry" "${LOG}"; then
+              emit crash
+              echo "reason=seed-regression" >> "$GITHUB_OUTPUT"
+              echo "::error::${FUZZER}'s committed seed corpus is failing (matched 'failure while testing seed corpus entry') — a previously-fixed crash has regressed."
               exit "${rc}"
             fi
 
@@ -293,6 +311,7 @@ jobs:
           FUZZTIME: ${{ steps.budget.outputs.fuzztime }}
           STATUS: ${{ job.status }}
           KIND: ${{ steps.fuzz.outputs.kind }}
+          REASON: ${{ steps.fuzz.outputs.reason }}
           RUN_ID: ${{ github.run_id }}
           MATCHED_KEY: ${{ steps.corpus-restore.outputs.cache-matched-key }}
           GENERATED: ${{ steps.corpus.outputs.generated }}
@@ -321,7 +340,12 @@ jobs:
             echo "- Kind:    \`kind=${KIND:-unknown}\`"
             if [ "${KIND}" = "crash" ]; then
               echo ""
-              echo "A crashing input was saved to \`testdata/fuzz/${FUZZER}/\`."
+              if [ "${REASON}" = "seed-regression" ]; then
+                echo "The committed seed corpus is failing (matched \`failure while testing seed corpus entry\`):"
+                echo "a previously-fixed crash has regressed."
+              else
+                echo "A crashing input was saved to \`testdata/fuzz/${FUZZER}/\` (matched \`Failing input written to testdata\`)."
+              fi
               echo "Download artifact \`fuzz-corpus-${FUZZER}-${RUN_ID}\`, commit the"
               echo "minimized input to the seed corpus, fix the bug, and push."
             fi

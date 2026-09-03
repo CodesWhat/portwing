@@ -89,17 +89,30 @@ done
 # mechanical line the workflows have to agree on; the reasoning for each choice
 # lives in the workflow comments, not here.
 cache_action_sha="55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
+upload_artifact_sha="043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 cache_key='          key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-${{ github.run_id }}-${{ github.run_attempt }}'
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 cache_restore_prefix='            fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-'
 cache_save_guard="        if: always() && steps.corpus.outputs.generated != ''"
 
+# Crash classification: Go prints a different message once a crasher already
+# lives in the committed seed corpus (re-tested before anything new runs) than
+# it does on first discovery, so the workflow has to grep both or every run
+# after the first silently falls through to kind=error.
+crash_pattern_first_discovery="Failing input written to testdata"
+crash_pattern_seed_regression="failure while testing seed corpus entry"
+
 for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
 	grep -Fq "uses: actions/cache/restore@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must restore the fuzz corpus from actions/cache pinned to ${cache_action_sha}"
 	grep -Fq "uses: actions/cache/save@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must save the fuzz corpus to actions/cache pinned to ${cache_action_sha}"
+
+	grep -Fq "${crash_pattern_first_discovery}" "${workflow}" ||
+		fail "${workflow} must classify '${crash_pattern_first_discovery}' as kind=crash"
+	grep -Fq "${crash_pattern_seed_regression}" "${workflow}" ||
+		fail "${workflow} must classify '${crash_pattern_seed_regression}' as kind=crash"
 
 	# Restore and save have to name the same key. If they drift, every run
 	# writes an entry the next run cannot find and the lane is back to zero.
@@ -153,9 +166,41 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	[ "${perms_block}" = "  contents: read" ] ||
 		fail "${workflow} permissions must stay exactly 'contents: read'"
 
-	grep -Fxq "        if: failure() || cancelled()" "${workflow}" ||
-		fail "${workflow} must keep the on-failure corpus artifact upload"
+	# The if: guard has to sit ON the upload-artifact step itself, not just
+	# appear somewhere in the file — a guard attached to the wrong step would
+	# match a bare `grep -Fxq` just as well and silently stop protecting the
+	# corpus artifact.
+	upload_step_block="$(awk '
+		/^      - name: Upload fuzz corpus on failure or cancel$/ { inside = 1; print; next }
+		inside && /^      - name:/ { exit }
+		inside { print }
+	' "${workflow}")"
+	[ -n "${upload_step_block}" ] ||
+		fail "${workflow} must have an 'Upload fuzz corpus on failure or cancel' step"
+	grep -Fxq "        if: failure() || cancelled()" <<<"${upload_step_block}" ||
+		fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
+	grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${upload_step_block}" ||
+		fail "${workflow} must upload the corpus artifact with actions/upload-artifact pinned to ${upload_artifact_sha} in the same step"
 done
+
+# Monthly/nightly cron overlap. Both lanes restore from and save to the same
+# corpus cache prefix, and restore-keys picks whichever entry is newest, so if
+# the monthly 360m job is still running when the nightly starts, the lane that
+# saves second silently discards the other's coverage. The monthly cron hour
+# has to leave at least 6 hours (360m + margin) before the nightly cron hour.
+cron_hour() {
+	awk -F"'" '/^[[:space:]]*- cron: /{print $2; exit}' "$1" | awk '{print $2}'
+}
+nightly_cron_hour="$(cron_hour .github/workflows/quality-fuzz-nightly.yml)"
+monthly_cron_hour="$(cron_hour .github/workflows/quality-fuzz-monthly.yml)"
+[ -n "${nightly_cron_hour}" ] ||
+	fail "quality-fuzz-nightly.yml must declare a schedule.cron"
+[ -n "${monthly_cron_hour}" ] ||
+	fail "quality-fuzz-monthly.yml must declare a schedule.cron"
+if [ -n "${nightly_cron_hour}" ] && [ -n "${monthly_cron_hour}" ]; then
+	[ "$((10#${monthly_cron_hour} + 6))" -le "$((10#${nightly_cron_hour}))" ] ||
+		fail "quality-fuzz-monthly.yml cron hour (${monthly_cron_hour}) + 6 must be <= quality-fuzz-nightly.yml cron hour (${nightly_cron_hour}), or the 360m monthly job can still be running when the nightly starts and restore-keys races the corpus cache"
+fi
 
 if [ "$failures" -ne 0 ]; then
 	echo "${failures} fuzz tier contract check(s) failed" >&2

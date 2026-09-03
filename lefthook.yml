@@ -119,7 +119,9 @@ pre-push:
         [ "$workers" -gt 4 ] && workers=4
         # Retry once on the coordinator-starvation flake ("context deadline
         # exceeded" with no failing input) — mirrors the backstop in
-        # ci-verify.yml. Never retry a real crash ("Failing input written").
+        # ci-verify.yml. Never retry a real crash ("Failing input written" on
+        # first discovery, or "failure while testing seed corpus entry" when
+        # the committed seed already holds one).
         run_fuzz() {
           fuzzer="$1"; pkg="$2"; attempt=1
           while [ "$attempt" -le 2 ]; do
@@ -127,7 +129,7 @@ pre-push:
               echo "$out"; return 0
             fi
             echo "$out"
-            echo "$out" | grep -q "Failing input written" && return 1
+            echo "$out" | grep -qE "Failing input written|failure while testing seed corpus entry" && return 1
             if [ "$attempt" -eq 1 ] && echo "$out" | grep -q "context deadline exceeded"; then
               echo "fuzz ${fuzzer}: coordinator-starvation flake — retrying once"
               attempt=2; continue
