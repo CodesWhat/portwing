@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ClusterFuzzLite now fuzzes the same ten targets against libFuzzer and
+  AddressSanitizer.** The four existing tiers all run Go's native engine, and
+  the two scheduled ones keep their corpus in the Actions cache, which evicts an
+  entry after seven days without a hit. This one rebuilds the identical
+  `func Fuzz*(f *testing.F)` targets through OSS-Fuzz's base-builder-go
+  (`.clusterfuzzlite/`), runs a second mutation engine over them, and commits
+  what it finds to a branch, so the corpus does not expire. 300 seconds
+  across all ten on a pull request that touches Go, an hour every Saturday, and
+  a corpus prune on Wednesday, which are separate workflows so a green prune
+  cannot close the tracking issue a crashing batch run opened. The corpus lives
+  on an orphan `clusterfuzzlite-corpus` branch of this repository, written with
+  the workflow's own `GITHUB_TOKEN`, so there is no new secret and no second
+  repository to keep. Only the two scheduled jobs can write; the pull-request
+  lane reads the corpus and has `contents: read`, and the trigger is
+  `pull_request` rather than `pull_request_target`, so a fork's token stays
+  read-only. No fuzz body changed; two `internal/docker` test helpers moved into
+  the fuzz files that use them, because this tier compiles a target's `_test.go`
+  file on its own.
 - **Edge mode agents can now accept a streamed request body via the new
   `edge-request-body-stream` capability (issue #205).** `request.body` is a
   JSON `RawMessage`, so it could never carry a binary or otherwise non-JSON
@@ -207,6 +225,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Evaluated ML-DSA for the edge hello and the standard-mode request
+  signature, and deferred it.** `docs/design/mldsa-edge-auth.md` records the
+  decision with measured numbers: ML-DSA-87 costs 4,627 signature bytes and
+  2,592 public-key bytes against Ed25519's 64 and 32, which is affordable once
+  per connection on the hello and roughly +6,084 bytes on every standard-mode
+  request. It sketches hybrid Ed25519 + ML-DSA-87 on the hello once Drydock
+  ships a verifier that stores both public keys on one identity record, guards
+  the new signature field separately from the existing one, and carries a
+  per-identity flag making the post-quantum signature mandatory; that rollout is
+  controller-first and is not backward compatible. It rejects a per-request
+  post-quantum signature outright, and names a key rotation cadence as the
+  mitigation that matches the threat today, with a documented caveat that
+  zero-downtime rotation works in standard mode but not in edge mode.
 - **Documented four real gaps between the API reference/OpenAPI spec and the
   handlers.** `GET /api/log/entries` and `POST /_portwing/mcp` were live,
   auth-required routes the reference omitted; the OpenAPI spec was missing the

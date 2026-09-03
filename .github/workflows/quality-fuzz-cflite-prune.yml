@@ -1,0 +1,89 @@
+name: "Quality: ClusterFuzzLite (prune)"
+run-name: >-
+  ${{
+    github.event_name == 'schedule' && 'ClusterFuzzLite — weekly corpus prune' ||
+    format('ClusterFuzzLite — prune, manual by {0}', github.actor)
+  }}
+
+# The pruning half of tier 4. Batch fuzzing accumulates inputs on the corpus
+# branch every week and never removes any; prune replaces each target's corpus
+# with the smallest set that keeps the same coverage. Without it the corpus only
+# grows, and the time batch spends replaying it eats the hour it is supposed to
+# spend finding things. The upstream docs put this plainly: if batch fuzzing is
+# running, corpus pruning has to run too.
+#
+# Full rationale for the tier, the corpus-persistence design, and what about
+# ClusterFuzzLite cannot be pinned: quality-fuzz-cflite-pr.yml. Why this is its
+# own file rather than a second job next to batch: quality-fuzz-cflite-batch.yml.
+#
+# Wednesday, four days after Saturday's batch run, so it always minimizes a
+# corpus that has just grown rather than one that is about to.
+
+on:
+  schedule:
+    - cron: '30 10 * * 3'  # Wednesdays 10:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # The same literal group as quality-fuzz-cflite-batch.yml, which is what keeps
+  # the two corpus writers off the branch at the same time. Concurrency groups
+  # are repository-scoped strings, so two workflows naming the same one
+  # serialize against each other. Deriving it from ${{ github.workflow }} would
+  # quietly give each file its own group.
+  group: quality-fuzz-cflite-corpus
+  cancel-in-progress: false
+
+jobs:
+  prune-corpus:
+    name: "ClusterFuzzLite (prune)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    permissions:
+      # PruneTargetRunner uploads with replace=True, which deletes the target's
+      # directory on the branch and writes the minimized set in its place. Same
+      # single-branch write as batch, and nothing else.
+      contents: write
+      actions: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            api.github.com:443
+            gcr.io:443
+            github.com:443
+            objects.githubusercontent.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            storage.googleapis.com:443
+            sum.golang.org:443
+
+      - name: Build fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: go
+          sanitizer: address
+          github-token: ${{ github.token }}
+
+      - name: Run fuzzers
+        id: run
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: go
+          github-token: ${{ github.token }}
+          fuzz-seconds: 600
+          mode: prune
+          sanitizer: address
+          storage-repo: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+          storage-repo-branch: clusterfuzzlite-corpus
+          storage-repo-branch-coverage: clusterfuzzlite-corpus
