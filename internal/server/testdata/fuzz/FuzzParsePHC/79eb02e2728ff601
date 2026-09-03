@@ -1,0 +1,2 @@
+go test fuzz v1
+string("$argon2id$\xf2\x87\xbf\xf2\x87\xbf0$$$")

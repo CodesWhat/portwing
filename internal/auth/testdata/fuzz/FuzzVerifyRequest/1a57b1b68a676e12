@@ -1,0 +1,9 @@
+go test fuzz v1
+string("GET")
+string("/v1.44/containers/a%2Fb/logs?tail=10&s\x91\x91\x91\x91t=1")
+[]byte("{\"follow\":true}")
+string("453eb1222a9a1412")
+string("1788384661")
+string("00112233445566778899aabbccddeeff")
+string("2ASvvJ-Ao2hL-D_pmHsQpXQ2ZbBeKoJUvLOumiSBDGG3FhZNGzyGyjbAJKt-OH0doqSjGZuhm55aXpVd3iuNAA")
+string("2")
