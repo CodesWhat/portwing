@@ -4,8 +4,8 @@
 # separately rejects any source dependency or shipped binary that links openpgp.
 #
 # 2026-09-02 image audit: the first live run of the weekly published-image
-# rescan (run 33697361140) failed both gating legs of the published v0.9.11
-# image on GHSA-vp52-pcj8-j9qc / CVE-2026-84304, google.golang.org/grpc v1.83.0
+# rescan (run 33697361140) failed both gating legs of the then-current
+# published image on GHSA-vp52-pcj8-j9qc / CVE-2026-84304, google.golang.org/grpc v1.83.0
 # HIGH. Portwing's own module graph has no grpc in it at all (`go list -m all`
 # on dev/v0.9 and main), and `go version -m` on the extracted amd64 and arm64
 # binaries puts the carrier in Wolfi's docker-compose (v5.5.0+dirty), so the
