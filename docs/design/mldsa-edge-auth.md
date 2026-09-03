@@ -27,6 +27,12 @@ unresolved and the "`PRIVATE_KEY_FILE` does not grow" claim was wrong (§6.7,
 attack stays open behind a terminating proxy (§4.2). The certificate trigger is
 about issuance and ecosystem compatibility, not runtime support (§7.3).
 
+Third round, consistency: 6.3's binding argument is now explicitly a read-path
+argument that depends on hybrid enrolment staying authorization gated, with proof
+of possession recorded as an open question (§6.3, §6.5, §6.6); §8.2 no longer
+claims hybrid enrolment inherits the rotation disconnect, which contradicted 6.3
+once the pair-derived ID was withdrawn.
+
 **Standing instruction for the next reader:** every compatibility statement here
 needs re-checking against Drydock at implementation time. Three drafts have now
 asserted one that the code did not support.
@@ -494,8 +500,10 @@ a controller capability in the welcome frame, which cannot work.
 
 An old controller ignores the extra field. That much is verified rather than
 assumed: Drydock parses the hello with a bare `JSON.parse` and per-field
-`typeof` checks (`app/api/portwing-ws.ts:545-560`), with no schema validator, no
-`strict`, and no unknown-key rejection in that path. Its auth-mode detector
+`typeof` checks (`JSON.parse` at `app/api/portwing-ws.ts:547`, an unchecked cast
+to `HelloMessage` at `:565`, and the per-field checks in the auth-mode detector
+at `:635-639`), with no schema validator, no `strict`, and no unknown-key
+rejection in that path. Its auth-mode detector
 inspects only the four classic fields. **That is the limit of what old
 controllers tolerate, and it is not enough on its own** — see 6.5.
 
@@ -534,8 +542,24 @@ a rollback fails with `unknown-key`, which Portwing treats as terminal.
 
 So `pubKeyId` keeps its current derivation and its current value. Lookup finds
 the identity record; if that record is hybrid, both keys in it are used. The
-attack in 5.2 is still closed, because the ML-DSA key is reachable only through
-the record the Ed25519 key ID resolves to, and never independently.
+attack in 5.2 is closed **on the read path**, because the ML-DSA key is reachable
+only through the record the Ed25519 key ID resolves to, and never independently.
+
+That is only half the argument, and the other half is a write-path assumption
+this sketch inherits rather than establishes. One-record lookup closes the attack
+only while attaching an ML-DSA key to an existing record stays authorization
+gated. Today the key-registration surface sits behind `requireAuthentication` and
+`requireSameOriginForMutations` (`app/api/api.ts:128-129`), and `addKey` refuses
+to overwrite a key that is still active (`app/store/agent-keys.ts:87-89`). But
+`POST /keys` (`app/api/portwing.ts:34`) takes a bare public key and a label with
+**no proof of possession**: the caller never demonstrates it holds the matching
+private key. For a single Ed25519 key that is tolerable, because an authenticated
+operator registering a key they do not control only locks themselves out. For a
+hybrid record it is sharper: anyone who reaches that endpoint could attach an
+ML-DSA key they own to an identity they do not, which reconstructs exactly the
+mix-and-match failure from 5.2 through the front door. So the read-path binding
+in this section is necessary and not sufficient; see 6.5 step 2 and the open
+question in 6.6.
 
 ### 6.4 `authorized_keys` gains a hybrid line type
 
@@ -560,7 +584,11 @@ required order is:
 1. Ship the controller: import hybrid lines, store both keys on one record,
    verify `signaturePq` when present, and add the per-identity hybrid policy
    flag from 6.2 defaulted off.
-2. Enrol hybrid identities and confirm the classical path still verifies.
+2. Enrol hybrid identities **through the authenticated key-registration path
+   only**, never through an unauthenticated or trust-on-first-use route, and
+   confirm the classical path still verifies. This is a hard requirement, not a
+   preference: the whole security argument in 6.3 rests on an attacker being
+   unable to attach their own ML-DSA key to someone else's identity record.
 3. Ship agents that send `signaturePq`.
 4. Only then turn the per-identity policy flag on, which is the step that
    actually buys the security property. Before this step the deployment has the
@@ -583,11 +611,17 @@ have to be answered before any of the above is implemented.
    from classical to hybrid changes the record, not the key ID, so it may avoid
    the section 8.2 disconnect. That is a hypothesis from reading the code, not
    something demonstrated, and it needs testing against a real controller.
-4. **Whether the ML-DSA signature should cover a context string.** Go's
+4. **Whether hybrid enrolment needs proof of possession of the ML-DSA key.**
+   `POST /keys` has none today (`app/api/portwing.ts:34`), and 6.3 explains why
+   the gap matters more for a paired record than for a single key. The obvious
+   fix is to require the enrolling caller to sign a server-issued challenge with
+   the ML-DSA private key, which is cheap and would also cover the existing
+   Ed25519 path. Not proposed here because it is Drydock's surface to design.
+5. **Whether the ML-DSA signature should cover a context string.** Go's
    `mldsa.Options.Context` is free and would domain-separate hello signatures
    from any future use of the same key. Probably yes, but it has to be agreed
    on both sides before first deployment because it cannot change afterwards.
-5. **Whether this should wait for channel binding** (section 4.2 item 2)
+6. **Whether this should wait for channel binding** (section 4.2 item 2)
    instead, or ship alongside it, given that channel binding closes a live
    classical attack while this closes a future one.
 
@@ -740,9 +774,16 @@ because the new key can never connect while the old binding stands.
 let one agent name hold a set of authorized key IDs rather than a single one,
 admitting any member and pruning on revocation. That is a Drydock change, not a
 Portwing one, and it is worth raising with that repo independently of anything
-post-quantum, because it also gates the hybrid migration in section 6: moving an
-identity from a classical key ID to a hybrid one is itself a key ID change, so
-it inherits exactly this disconnect.
+post-quantum.
+
+An earlier revision added that this also gates the hybrid migration, on the
+grounds that moving an identity to a hybrid one is itself a key ID change. **That
+was written before 6.3 dropped the pair-derived key ID and no longer holds.**
+With `pubKeyId` keeping its current derivation, hybrid enrolment changes the
+contents of the identity record and not its ID, so the name binding is never
+challenged and the disconnect above should not apply. Marked "should" rather than
+"does" deliberately: it follows from reading the code and has not been
+demonstrated against a running controller, which is open question 3 in 6.6.
 
 ### 8.3 Guidance to add to `docs/security-model.md`
 
