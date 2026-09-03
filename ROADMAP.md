@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is pre-`v1.0.0` software (currently `v0.9.11`). This roadmap describes
+> Portwing is pre-`v1.0.0` software (currently `v0.9.12`). This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
@@ -49,8 +49,8 @@ calendar date:
   stay tied to primary sources. The audit found no missing container lifecycle,
   streaming, Compose, observability, or authentication primitive that requires
   new Portwing code for v1.0.
-- **Completed 2026-08-29: Tagged acceptance matrix.** Published Portwing
-  v0.9.11, Drydock v1.6.0, and Sockguard v2.0.0 artifacts passed the full
+- **Completed 2026-08-29: Tagged acceptance matrix.** Published Portwing's
+  then-current release, Drydock v1.6.0, and Sockguard v2.0.0 artifacts passed the full
   Standard/Edge matrix in the
   [hosted conformance run](https://github.com/CodesWhat/sockguard/actions/runs/33283283870).
   A real Drydock controller exercised enrollment, overlapping-key rotation,
