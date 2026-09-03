@@ -7,7 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v0.9.12] - 2026-09-03
+## [v0.9.13] - 2026-09-03
+
+### Fixed
+
+- **Docs now match the logs routes' real status-code and stream-cap
+  behavior.** `security-model.mdx`'s concurrent-stream-cap row wrongly said
+  the cap excluded the adapter's SSE and follow-mode logs; the transparent
+  proxy gates every `/logs` request regardless of `follow`, and only the
+  adapter's own non-follow reads skip the slot. `api/openapi.yaml` now
+  documents the 404 and 409 Docker status mappings and the 503 the
+  follow-mode stream gate returns on both logs paths.
+- **GOVERNANCE.md now describes the branch model correctly.** Changes branch
+  from and merge into the active dev branch; `main` only moves by promotion.
+- **The built-in image's `HEALTHCHECK` path is corrected in both the standard
+  compose example and getting-started.** It probes `/health`, not
+  `/_portwing/health`.
+- **Website copy dropped a route and fields that don't exist, and its
+  hardened compose snippet is back in sync with getting-started.**
+  `llms.txt` and the cli-demo no longer describe a `POST /exec/{container}`
+  route — exec goes through the Engine API (create, then start with
+  `Upgrade: tcp`) — or an `exec_start` audit record carrying method/path
+  fields it never had. get-started's "Secure" tab snippet now matches the
+  doc: loopback bind, explicit UID 65532, `DOCKER_SOCK_GID` group_add.
+- **CHANGELOG's v0.9.12 entry now records the edge-example bind-guard fix.**
+  `examples/kubernetes/edge.yaml` and the observability compose `edge`
+  profile needing `ALLOW_UNAUTHENTICATED_REMOTE` alongside a non-loopback
+  bind landed in #272 and was the only user-visible v0.9.12 fix without a
+  bullet.
+
+### Security
+
+- **`.gitleaksignore` no longer pins a fingerprint to a working-tree line
+  number.** The cli-demo private-key finding was pinned to a line that moved
+  every time the file changed, so the PR Secrets check (which restores the
+  ignore policy from the base ref before scanning) failed again on the next
+  unrelated edit. The demo key's body is truncated with an inline
+  `gitleaks:allow` marker instead, which travels with the line's content
+  rather than its position; the release contract now rejects any
+  `.gitleaksignore` line that isn't a commit-pinned history fingerprint.
 
 ### Added
 
