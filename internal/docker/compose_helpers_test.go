@@ -1,7 +1,9 @@
 package docker
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -602,6 +604,10 @@ func TestStatRootedEnvFile_ErrorsWhenStacksDirMissing(t *testing.T) {
 // which root or a permissive CI user can bypass; skipped in that case
 // instead of racing other tests over a shared assumption.
 func TestStatRootedEnvFile_NonNotExistStatErrorIsWrapped(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod 0o000 doesn't deny root, so the permission-denied path is unreachable")
+	}
+
 	dir := t.TempDir()
 	stackDir := filepath.Join(dir, "app")
 	if err := os.MkdirAll(stackDir, 0o750); err != nil {
@@ -621,13 +627,17 @@ func TestStatRootedEnvFile_NonNotExistStatErrorIsWrapped(t *testing.T) {
 	cm := &ComposeManager{stacksDir: dir}
 	envFile, err := cm.statRootedEnvFile("app")
 	if err == nil {
-		if envFile == "" {
-			t.Skip("running with elevated privileges that bypass permission bits; boundary not observable")
-		}
 		t.Fatalf("statRootedEnvFile: expected a permission error, got envFile=%q", envFile)
 	}
 	if !strings.Contains(err.Error(), "checking env file") {
 		t.Fatalf("statRootedEnvFile error = %v, want it to mention 'checking env file'", err)
+	}
+	// A wrapped nil (fmt.Errorf("checking env file: %w", nil)) would still
+	// satisfy the substring check above, so pin down the real cause too:
+	// the wrapped error must be an actual permission error, not a nil one
+	// dressed up in the right text.
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("statRootedEnvFile error = %v, want it to wrap a permission error", err)
 	}
 }
 

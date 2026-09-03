@@ -497,9 +497,20 @@ func TestEventStream_run_LogsOnlyOnConnectionError(t *testing.T) {
 		client:       c,
 		initialDelay: 10 * time.Millisecond,
 		maxDelay:     20 * time.Millisecond,
+		// Fire the reconnect backoff immediately instead of sleeping in real
+		// time: this test is serial and Gremlins reruns it per mutant, so a
+		// real wait here only matters if the backoff itself is broken
+		// (covered separately by TestEventStream_run_BackoffCapped).
+		after: func(time.Duration) <-chan time.Time {
+			ready := make(chan time.Time, 1)
+			ready <- time.Now()
+			return ready
+		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// 1s is plenty once the backoff fires immediately; it only matters if a
+	// mutant breaks the reconnect loop outright.
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	ch, err := es.Subscribe(ctx)
@@ -519,7 +530,8 @@ func TestEventStream_run_LogsOnlyOnConnectionError(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for event after reconnect")
 	}
-	<-ch // drain until run() closes the channel after cancellation
+	for range ch {
+	}
 
 	logged := buf.String()
 	got := strings.Count(logged, "docker event stream disconnected")
