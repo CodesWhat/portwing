@@ -538,6 +538,38 @@ require_scoped_compose_advisory_alias "GHSA-pxq6-2prw-chj9"
 require_scoped_compose_advisory_alias "GO-2026-4883"
 require_scoped_compose_advisory_alias "GHSA-x744-4wpc-v9h2"
 require_scoped_compose_advisory_alias "GO-2026-4887"
+
+# The Compose grpc suppression is a reachability argument about one third-party
+# binary, not a claim about Portwing. Portwing's own module graph carries no
+# google.golang.org/grpc at all, so an ignore that lost its package, version or
+# location scope would quietly cover a real future grpc import into the agent
+# itself. Version-scoped for the same reason the entries above are: the next
+# grpc the Wolfi Compose package embeds has to come back through review.
+require_scoped_compose_grpc_advisory() {
+	local advisory_id="$1"
+	local block
+	local count
+
+	count="$(grep -Fc -- "  - vulnerability: ${advisory_id}" .grype.yaml || true)"
+	block="$(awk -v advisory_id="${advisory_id}" '
+		$1 == "-" && $2 == "vulnerability:" {
+			if (capture) exit
+			capture = ($3 == advisory_id)
+		}
+		capture { print }
+	' .grype.yaml)"
+
+	if [ "${count}" -ne 1 ] ||
+		! grep -Fq 'name: google.golang.org/grpc' <<<"${block}" ||
+		! grep -Fq 'version: v1.83.0' <<<"${block}" ||
+		! grep -Fq 'type: go-module' <<<"${block}" ||
+		! grep -Fq 'location: "**/usr/bin/docker-compose"' <<<"${block}"; then
+		echo "FAIL: .grype.yaml must contain exactly one ${advisory_id} ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_scoped_compose_grpc_advisory "GHSA-vp52-pcj8-j9qc"
 require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/daemon/pkg/plugin" \
 	"the Compose advisory exclusion must stay guarded against linking Docker Engine's daemon plugin package"
 require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/pkg/authorization" \

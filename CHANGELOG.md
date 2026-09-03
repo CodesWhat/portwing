@@ -121,6 +121,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Adjudicated GHSA-vp52-pcj8-j9qc (CVE-2026-84304, HIGH) in the published
+  container image.** The first live run of the weekly published-image rescan
+  failed both gating legs of v0.9.11 on `google.golang.org/grpc` v1.83.0. The
+  carrier is not portwing, which has no grpc in its module graph at all: it is
+  the Wolfi-packaged `docker-compose` binary the image ships so stacks can be
+  deployed. There is nothing to bump to. Compose's newest release, v5.5.0, pins
+  grpc v1.83.0, Wolfi's newest package still embeds it, and the advisory's
+  vulnerable range is `<= 1.83.0`, so an older Compose is no better. The
+  advisory needs an unauthenticated peer fragmenting HTTP/2 DATA frames at a
+  gRPC server, and the only gRPC server Compose can run is BuildKit's session
+  over the hijacked Docker `/session` connection, never a network listener;
+  portwing also spawns Compose as a short-lived subprocess per request, so a
+  reached OOM would be bounded to one invocation. Suppressed in `.grype.yaml`
+  scoped to that binary and pinned to v1.83.0, so the next grpc Wolfi ships
+  forces a re-review, with a contract test that fails if the scope is widened.
+  Compose's `main` is already on grpc v1.83.2, so the real fix lands with the
+  next Compose release.
 - **`golang.org/x/crypto` bumped to v0.56.0**, clearing GO-2026-6354 and
   GO-2026-6355 (CVE-2026-78662, CVE-2026-56855), two `x/crypto/ssh` channel
   deadlock advisories. Same shape as the v0.55.0 move below: portwing imports

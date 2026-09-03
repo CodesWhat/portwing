@@ -255,6 +255,39 @@ type|unknown
 location|"**/usr/bin/*"
 EOF
 
+awk '
+	$1 == "-" && $2 == "vulnerability:" { skip = ($3 == "GHSA-vp52-pcj8-j9qc") }
+	!skip { print }
+' "${fixture}/.grype.yaml" >"${fixture}/.grype.yaml.tmp"
+mv "${fixture}/.grype.yaml.tmp" "${fixture}/.grype.yaml"
+expect_release_contract_failure \
+	"FAIL: .grype.yaml must contain exactly one GHSA-vp52-pcj8-j9qc ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" \
+	"the package release contract must reject removal of the scoped Compose grpc suppression"
+cp .grype.yaml "${fixture}/"
+
+while IFS='|' read -r scope_field replacement; do
+	awk -v scope_field="${scope_field}:" -v replacement="${replacement}" '
+		$1 == "-" && $2 == "vulnerability:" { target = ($3 == "GHSA-vp52-pcj8-j9qc") }
+		target && $1 == scope_field && !changed {
+			print "      " scope_field " " replacement
+			changed = 1
+			next
+		}
+		{ print }
+		END { if (!changed) exit 1 }
+	' "${fixture}/.grype.yaml" >"${fixture}/.grype.yaml.tmp"
+	mv "${fixture}/.grype.yaml.tmp" "${fixture}/.grype.yaml"
+	expect_release_contract_failure \
+		"FAIL: .grype.yaml must contain exactly one GHSA-vp52-pcj8-j9qc ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" \
+		"the package release contract must reject changing the GHSA-vp52-pcj8-j9qc ${scope_field} scope"
+	cp .grype.yaml "${fixture}/"
+done <<'EOF'
+name|google.golang.org/other
+version|v1.83.1
+type|unknown
+location|"**/usr/bin/*"
+EOF
+
 prefix_version="${release_version}0"
 
 awk -v from="VERSION=${release_version}" -v to="VERSION=${prefix_version}" '
