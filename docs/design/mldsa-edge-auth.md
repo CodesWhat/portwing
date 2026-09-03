@@ -156,9 +156,12 @@ affordable. Bytes are the problem, not cycles.
 Worth stating plainly because it is easy to misread: the published
 `AuthMiddleware/authorized_raw` figure of 433.4 ns in `BENCHMARKS.md` is the
 **raw-token** path. `internal/server/middleware_bench_test.go:59` passes an empty
-`Ed25519Config{}`, so no signature is verified in that benchmark. The signature
-verification already dominates the middleware today, at roughly 62 times the
-whole measured token path.
+`Ed25519Config{}`, so no signature is verified in that benchmark. Signature
+verification therefore dominates the authenticated request path by about two
+orders of magnitude, and ML-DSA-87 would multiply that already-dominant term by
+5.2. Read that as a magnitude and not a ratio: the 433.4 ns figure was measured
+on a different machine and toolchain from the numbers above, which is exactly
+the comparison this section warned against making precisely.
 
 ### 3.3 Per-request byte cost, standard mode
 
