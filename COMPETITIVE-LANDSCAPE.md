@@ -48,13 +48,13 @@ the capability. It is intentionally different from a definitive “no.”
 | Transparent Docker API | Yes | Yes | No; controller-specific command/resource API | No; controller-specific API | Yes |
 | Container lifecycle, logs, exec | Yes | Yes | Yes | Yes | Yes |
 | Compose lifecycle | Yes | Yes | Yes | Yes | Yes |
-| Image builds through the hardened socket profile | Docker build streaming is proxied, but published Sockguard presets intentionally deny `/build` and BuildKit session paths | Yes | Yes | Yes | Full Docker proxy; Dockhand documents builds |
+| Image builds through the hardened socket profile | Docker build streaming is proxied; the base and compose Sockguard presets deny `/build`, `/session`, and `/grpc`, but `portwing-with-build.yaml` and `portwing-with-mediated-build.yaml` allow classic and BuildKit builds respectively | Yes | Yes | Yes | Full Docker proxy; Dockhand documents builds |
 | General host shell or file browser | No; container exec only | Agent exposes file-browse APIs | Host shell supported | Volume/project file operations | No general host shell documented |
 | Swarm orchestration | No; explicit non-goal | Yes | Yes | Yes | Not documented |
 | Standard-mode agent auth | Ed25519 signature over method, request target, body hash, timestamp, and nonce; token fallback | Claim key exchange; optional shared `AGENT_SECRET` | Public-key authenticated channel | Agent token | Bearer token |
 | Edge agent auth | Ed25519-signed hello over TLS; classical signatures, no post-quantum option | Edge key, revolving password, optional Business mTLS | Public-key handshake with per-server keys | Agent token; optional or required automatically enrolled mTLS. mTLS is off unless `EDGE_MTLS_MODE` is set, and from v2.10.0 a freshly generated edge CA and the certificates it issues use ML-DSA-87 (FIPS 204 post-quantum); an existing ECDSA P-384 CA keeps issuing P-384 client certificates | Token over WSS |
 | Explicit per-request replay defense | Yes for signed HTTP requests | Not documented | Channel handshake; no per-request scheme documented | TLS/channel authentication; no per-request scheme documented | Not documented |
-| Credential rotation | Multiple keys; file update plus SIGHUP; manual operational flow | Revolving Edge password; Edge key lifecycle | Automatic Periphery key rotation | Automatic certificate renewal; environment token can be regenerated | Manual token replacement |
+| Credential rotation | Multiple keys; file update plus SIGHUP in standard mode. Edge mode cannot overlap keys because Drydock binds one agent name to one key ID, so rotation is revoke-then-reconnect with a brief disconnect; see `docs/design/mldsa-edge-auth.md` section 8. Manual operational flow | Revolving Edge password; Edge key lifecycle | Automatic Periphery key rotation | Automatic certificate renewal; environment token can be regenerated | Manual token replacement |
 | Docker socket least privilege | Recommended Sockguard path-and-method allowlist; Portwing need not mount the raw socket | Documented deployment mounts the socket and host paths directly | Documented deployment mounts the socket directly | Optional Tecnativa category-level socket proxy; direct socket is the default simple path | Documented deployment mounts the socket directly |
 | Agent-level audit trail | Structured API, authentication, enrollment, Compose, and exec records; cursor-based export | Controller activity logs are a Business feature | Controller stores a full audit trail | Controller activities and security audit events | Debug request logs; no structured audit export documented |
 | Agent Prometheus endpoint | Yes | No agent scrape endpoint documented | Host metrics and alerts, but no agent scrape endpoint documented | Metrics in the controller; no agent scrape endpoint documented | Host metrics forwarded to Dockhand; no scrape endpoint documented |
@@ -90,7 +90,13 @@ advantages:
   arriving inside that key's service life would let an attacker recover the
   private key and impersonate the agent. That is the case ML-DSA-87 answers
   and Ed25519 does not, which is why this row reads as a difference rather
-  than a tie.
+  than a tie. The evaluation is in
+  [`docs/design/mldsa-edge-auth.md`](docs/design/mldsa-edge-auth.md), which
+  defers adoption, sketches a hybrid Ed25519 + ML-DSA-87 hello (both keys on one
+  identity record, its own guard on the new signature field, and a per-identity
+  flag that makes it mandatory) as controller-first and not backward compatible,
+  rejects a 6 KB per-request signature, and names key rotation as the mitigation
+  that fits the threat today.
 - Hawser now matches Portwing's broad topology: lightweight Go binary,
   transparent Docker API, Compose, host metrics, standard mode, and outbound
   edge mode.
@@ -139,9 +145,13 @@ outbound implementations have maintainer-confirmed gaps worth tracking:
    real Drydock controller. The cryptography is implemented; the fleet
    operation must be proved and documented.
 3. **Published capability boundary.** Keep `COMPATIBILITY.md`, the OpenAPI
-   contract, Sockguard presets, and this matrix aligned. Builds must remain
-   explicitly denied in hardened examples until BuildKit's `/session` and
-   `/grpc` surfaces can be constrained and tested.
+   contract, Sockguard presets, and this matrix aligned. Classic `POST /build`
+   stays denied in the base and compose presets; `portwing-with-build.yaml`
+   allows it for a `DOCKER_BUILDKIT=0` client, and
+   `portwing-with-mediated-build.yaml` allows a stock `docker compose build`
+   by having Sockguard terminate and inspect the BuildKit `/session` and
+   `/grpc` traffic (sockguard v1.7.0+, sockguard issue #185) instead of
+   hijacking the streams.
 4. **Competitive-claim verification.** Comparison pages must state the
    reviewed product version/date and link to this evidence. Unknown behavior
    is “not documented,” not “no.”
@@ -158,7 +168,6 @@ v1.0.
 | Optional mTLS client authentication | Portwing | Defense in depth for certificate-mandated environments; Ed25519 plus TLS remains the supported baseline. |
 | Polling/intermittent edge transport | Drydock + Portwing | Defer until an offline/low-bandwidth deployment requires it; the current persistent tunnel is the Drydock contract. |
 | Automated controller-assisted key rotation | Drydock + Portwing | Preserve operator-controlled trust roots; design a two-key overlap flow rather than letting a controller silently replace its only trust anchor. |
-| BuildKit-aware Sockguard profile | Sockguard + Portwing | Defer until session and gRPC paths can be least-privilege and regression tested. Never fold build access into the base preset. |
 | Broader platform support such as Podman or Windows agents | Portwing | Demand-driven; do not dilute Docker/Linux reliability before v1.0. |
 
 ### Explicit non-goals for the Portwing agent

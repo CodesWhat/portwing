@@ -43,7 +43,7 @@
 
 6. **No source version bump needed** — the binary's version is injected at build time via GoReleaser ldflags (`-X github.com/codeswhat/portwing/internal/protocol.AgentVersion={{.Version}}`). `AgentVersion` in `internal/protocol/version.go` must stay a `var`: `-X` silently does nothing to a `const`.
 
-7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → goreleaser snapshot → lint → Qlty → test (-race) → govulncheck → fuzz smoke → actionlint → zizmor. The push is blocked if any step fails.
+7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → release contract (`scripts/package-release-config-test.sh`) → goreleaser snapshot → lint → Qlty → test (-race) → govulncheck → fuzz smoke → actionlint → zizmor → web (`npm run check:web`). The push is blocked if any step fails.
 
 ---
 
