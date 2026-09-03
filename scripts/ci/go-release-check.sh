@@ -20,6 +20,7 @@ bash scripts/pre-push-config-test-test.sh
 bash scripts/pre-push-config-test.sh
 bash scripts/fuzz-tier-config-test-test.sh
 bash scripts/fuzz-tier-config-test.sh
+bash scripts/fuzz-run-script-test.sh
 bash scripts/codeql-trigger-config-test-test.sh
 bash scripts/codeql-trigger-config-test.sh
 bash scripts/quality-lane-notify-config-test-test.sh

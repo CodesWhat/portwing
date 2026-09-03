@@ -96,32 +96,56 @@ cache_key='          key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name
 cache_restore_prefix='            fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-'
 cache_save_guard="        if: always() && steps.corpus.outputs.generated != ''"
 
-# Crash classification: Go prints a different message once a crasher already
-# lives in the committed seed corpus (re-tested before anything new runs) than
-# it does on first discovery, so the workflow has to grep both or every run
-# after the first silently falls through to kind=error.
+# Crash classification (PW-5.10): scripts/ci/fuzz-run.sh is the single owner
+# of the retry/classify loop for all four callers — lefthook.yml,
+# scripts/ci/go-fuzz.sh, quality-fuzz-nightly.yml and quality-fuzz-monthly.yml
+# — instead of each one reimplementing it. Go prints a different message once
+# a crasher already lives in the committed seed corpus (re-tested before
+# anything new runs) than it does on first discovery, so the shared script
+# has to grep both or every run after the first silently falls through to
+# kind=error.
+fuzz_run_script="scripts/ci/fuzz-run.sh"
 crash_pattern_first_discovery="Failing input written to testdata"
 crash_pattern_seed_regression="failure while testing seed corpus entry"
 
 # Anchored to the classifier's own `if grep -q ...` line, not just "appears
-# somewhere in the file": both phrases are echoed again in the Summarize
-# step's step-summary text, so a bare `grep -Fq` would still pass after the
+# somewhere in the file": both phrases are echoed again in the script's own
+# human-facing messages, so a bare `grep -Fq` would still pass after the
 # classifier condition itself stopped matching.
-# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-crash_classifier_first_discovery='            if grep -q "Failing input written to testdata" "${LOG}"; then'
-# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-crash_classifier_seed_regression='            if grep -q "failure while testing seed corpus entry" "${LOG}"; then'
+# shellcheck disable=SC2016 # Asserting the literal text of the script.
+crash_classifier_first_discovery='	if grep -q "Failing input written to testdata" "${attempt_log}"; then'
+# shellcheck disable=SC2016 # Asserting the literal text of the script.
+crash_classifier_seed_regression='	if grep -q "failure while testing seed corpus entry" "${attempt_log}"; then'
+
+grep -Fxq "${crash_classifier_first_discovery}" "${fuzz_run_script}" ||
+	fail "${fuzz_run_script} must classify '${crash_pattern_first_discovery}' as kind=crash in the classifier condition itself"
+grep -Fxq "${crash_classifier_seed_regression}" "${fuzz_run_script}" ||
+	fail "${fuzz_run_script} must classify '${crash_pattern_seed_regression}' as kind=crash in the classifier condition itself"
+
+# None of the four callers may reimplement the classifier inline — that is
+# exactly the duplication PW-5.10 removed, and a caller that grows its own
+# copy of either phrase can silently drift from the shared one. This is
+# anchored on a `grep`-of-the-phrase construct, not the bare phrase text: the
+# nightly/monthly step-summary steps legitimately echo the same phrases into
+# their human-facing output, and that is reporting, not reclassification.
+# Each caller must instead invoke the shared script, with its retry budget
+# explicit rather than relying on fuzz-run.sh's own default.
+for caller in lefthook.yml scripts/ci/go-fuzz.sh .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
+	grep -Eq 'grep[^"]*"[^"]*'"${crash_pattern_first_discovery}" "${caller}" &&
+		fail "${caller} must not reimplement the '${crash_pattern_first_discovery}' classifier inline; it must call ${fuzz_run_script}"
+	grep -Eq 'grep[^"]*"[^"]*'"${crash_pattern_seed_regression}" "${caller}" &&
+		fail "${caller} must not reimplement the '${crash_pattern_seed_regression}' classifier inline; it must call ${fuzz_run_script}"
+	grep -Fq "${fuzz_run_script}" "${caller}" ||
+		fail "${caller} must invoke ${fuzz_run_script} rather than its own retry/classify loop"
+	grep -Fq "FUZZ_RETRIES=2" "${caller}" ||
+		fail "${caller} must pass FUZZ_RETRIES=2 explicitly to ${fuzz_run_script}"
+done
 
 for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
 	grep -Fq "uses: actions/cache/restore@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must restore the fuzz corpus from actions/cache pinned to ${cache_action_sha}"
 	grep -Fq "uses: actions/cache/save@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must save the fuzz corpus to actions/cache pinned to ${cache_action_sha}"
-
-	grep -Fxq "${crash_classifier_first_discovery}" "${workflow}" ||
-		fail "${workflow} must classify '${crash_pattern_first_discovery}' as kind=crash in the classifier condition itself"
-	grep -Fxq "${crash_classifier_seed_regression}" "${workflow}" ||
-		fail "${workflow} must classify '${crash_pattern_seed_regression}' as kind=crash in the classifier condition itself"
 
 	# Restore and save have to name the same key. If they drift, every run
 	# writes an entry the next run cannot find and the lane is back to zero.
@@ -206,19 +230,6 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 		fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
 	grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${upload_step_block}" ||
 		fail "${workflow} must upload the corpus artifact with actions/upload-artifact pinned to ${upload_artifact_sha} in the same step"
-done
-
-# The 60s CI/smoke tier (lefthook's fast lane and its go-fuzz.sh equivalent)
-# has to key off the exact same two phrases as the nightly/monthly
-# classifiers above. An abbreviated form still matches today's crash message,
-# so this doesn't catch a live bug — but a drifted phrase here is a silent
-# trap: it keeps matching until Go's wording changes, at which point CI stops
-# recognizing a crash on the tier a developer actually watches on every push.
-for driver in lefthook.yml scripts/ci/go-fuzz.sh; do
-	grep -Fq "${crash_pattern_first_discovery}" "${driver}" ||
-		fail "${driver} must match '${crash_pattern_first_discovery}' verbatim, not an abbreviated form"
-	grep -Fq "${crash_pattern_seed_regression}" "${driver}" ||
-		fail "${driver} must match '${crash_pattern_seed_regression}' verbatim"
 done
 
 # Monthly/nightly cron overlap. Both lanes restore from and save to the same

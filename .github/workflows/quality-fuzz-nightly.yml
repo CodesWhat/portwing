@@ -181,66 +181,20 @@ jobs:
           fi
           echo "test_timeout=$(( budget_s + 120 ))s" >> "$GITHUB_OUTPUT"
 
+      # Retry-once-on-flake and crash classification live in
+      # scripts/ci/fuzz-run.sh (PW-5.10), shared with quality-fuzz-monthly.yml,
+      # lefthook.yml and scripts/ci/go-fuzz.sh. It writes this step's
+      # `kind`/`reason` outputs straight to $GITHUB_OUTPUT, which the
+      # Summarize step below still reads exactly as before.
       - name: Fuzz ${{ matrix.fuzzer.name }}
         id: fuzz
         env:
           FUZZER: ${{ matrix.fuzzer.name }}
           PKG: ${{ matrix.fuzzer.pkg }}
           FUZZTIME: ${{ steps.budget.outputs.fuzztime }}
-          TEST_TIMEOUT: ${{ steps.budget.outputs.test_timeout }}
+          FUZZ_TIMEOUT: ${{ steps.budget.outputs.test_timeout }}
         run: |
-          LOG="${RUNNER_TEMP}/fuzz-${FUZZER}.log"
-
-          run_fuzz() {
-            go test -run='^$' \
-              -fuzz="^${FUZZER}\$" \
-              -fuzztime="${FUZZTIME}" \
-              -timeout="${TEST_TIMEOUT}" \
-              "${PKG}" 2>&1 | tee "${LOG}"
-            return "${PIPESTATUS[0]}"
-          }
-
-          emit() { echo "kind=$1" >> "$GITHUB_OUTPUT"; }
-
-          for attempt in 1 2; do
-            rc=0
-            run_fuzz || rc=$?
-
-            if [ "${rc}" -eq 0 ]; then
-              emit pass
-              exit 0
-            fi
-
-            if grep -q "Failing input written to testdata" "${LOG}"; then
-              emit crash
-              echo "reason=first-discovery" >> "$GITHUB_OUTPUT"
-              echo "::error::${FUZZER} found a crashing input (matched 'Failing input written to testdata') — commit it to the seed corpus and fix the regression."
-              exit "${rc}"
-            fi
-
-            # The committed seed corpus already holds a crasher from a prior
-            # run, so Go re-tests it before generating anything new and never
-            # reaches the "Failing input written" path above. Same finding,
-            # different message.
-            if grep -q "failure while testing seed corpus entry" "${LOG}"; then
-              emit crash
-              echo "reason=seed-regression" >> "$GITHUB_OUTPUT"
-              echo "::error::${FUZZER}'s committed seed corpus is failing (matched 'failure while testing seed corpus entry') — a previously-fixed crash has regressed."
-              exit "${rc}"
-            fi
-
-            if ! grep -q "context deadline exceeded" "${LOG}"; then
-              emit error
-              echo "::error::${FUZZER} failed for a non-flake reason (exit ${rc})."
-              exit "${rc}"
-            fi
-
-            echo "::warning::${FUZZER}: known -fuzztime boundary flake on attempt ${attempt}/2."
-          done
-
-          emit flake
-          echo "::error::${FUZZER} hit the boundary flake on both attempts."
-          exit 1
+          FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" bash scripts/ci/fuzz-run.sh "${PKG}" "${FUZZER}" "${FUZZTIME}"
 
       - name: Upload fuzz corpus on failure or cancel
         if: failure() || cancelled()

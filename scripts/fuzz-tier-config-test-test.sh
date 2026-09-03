@@ -10,7 +10,7 @@ seed_fixture() {
 	rm -rf "${fixture:?}"/*
 	mkdir -p "${fixture}/scripts/ci" "${fixture}/.github/workflows"
 	cp scripts/fuzz-tier-config-test.sh "${fixture}/scripts/"
-	cp scripts/ci/go-fuzz.sh "${fixture}/scripts/ci/"
+	cp scripts/ci/go-fuzz.sh scripts/ci/fuzz-run.sh "${fixture}/scripts/ci/"
 	cp lefthook.yml "${fixture}/"
 	cp .github/workflows/ci-verify.yml "${fixture}/.github/workflows/"
 	cp .github/workflows/quality-fuzz-nightly.yml "${fixture}/.github/workflows/"
@@ -134,21 +134,57 @@ sed 's|^            ${{ steps.corpus.outputs.generated }}$|&\n            ${{ st
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "caching the git-tracked seed corpus must not satisfy the contract"
 
-# --- Crash classification (PW codex follow-up #1) ---------------------------
+# --- Crash classification lives in scripts/ci/fuzz-run.sh (PW-5.10) --------
+
+fuzz_run="${fixture}/scripts/ci/fuzz-run.sh"
+lefthook="${fixture}/lefthook.yml"
+go_fuzz="${fixture}/scripts/ci/go-fuzz.sh"
 
 seed_fixture
-# Only the seed-corpus-regression string goes missing; first-discovery stays,
-# so a classifier that only greps the old string would still pass this.
+# The shared script losing the seed-corpus-regression phrase from its own
+# classifier condition. first-discovery stays, so a classifier that only
+# greps the old string would still pass this.
 sed 's|failure while testing seed corpus entry|failure while testing seed corpus ENTRY|' \
+	"${fuzz_run}" >"${fuzz_run}.tmp"
+mv "${fuzz_run}.tmp" "${fuzz_run}"
+expect_fail "scripts/ci/fuzz-run.sh losing the seed-corpus-regression classifier phrase must not satisfy the contract"
+
+seed_fixture
+# Same, for the first-discovery phrase.
+sed 's|Failing input written to testdata|Failing input written to TESTDATA|' \
+	"${fuzz_run}" >"${fuzz_run}.tmp"
+mv "${fuzz_run}.tmp" "${fuzz_run}"
+expect_fail "scripts/ci/fuzz-run.sh losing the first-discovery classifier phrase must not satisfy the contract"
+
+seed_fixture
+# A caller reimplementing the grep inline instead of calling the shared
+# script — exactly the duplication PW-5.10 removed. lefthook.yml still calls
+# fuzz-run.sh here too, so a bare "does this caller invoke the shared script"
+# check would miss the reintroduced duplicate classifier entirely.
+awk '
+	/FUZZ_RETRIES=2 FUZZ_TIMEOUT=1m/ {
+		print "          grep -q \"Failing input written to testdata\" /dev/null && true"
+	}
+	{ print }
+' "${lefthook}" >"${lefthook}.tmp"
+mv "${lefthook}.tmp" "${lefthook}"
+expect_fail "a caller reimplementing the crash-phrase grep inline must not satisfy the contract"
+
+seed_fixture
+# A caller dropping the retry env — the explicit FUZZ_RETRIES=2 that makes
+# the retry budget visible at the call site instead of relying silently on
+# fuzz-run.sh's own default.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+sed 's|FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE="\$GITHUB_OUTPUT" bash scripts/ci/fuzz-run.sh|FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" bash scripts/ci/fuzz-run.sh|' \
 	"${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
-expect_fail "a workflow that stops classifying a seed-corpus regression as a crash must not satisfy the contract"
+expect_fail "a caller dropping the FUZZ_RETRIES retry env must not satisfy the contract"
 
 seed_fixture
-sed 's|failure while testing seed corpus entry|failure while testing seed corpus ENTRY|' \
-	"${monthly}" >"${monthly}.tmp"
-mv "${monthly}.tmp" "${monthly}"
-expect_fail "a workflow that stops classifying a seed-corpus regression as a crash must not satisfy the contract"
+# go-fuzz.sh dropping the retry env too — a separate caller, separate line.
+sed '/^FUZZ_RETRIES=2 \\$/d' "${go_fuzz}" >"${go_fuzz}.tmp"
+mv "${go_fuzz}.tmp" "${go_fuzz}"
+expect_fail "scripts/ci/go-fuzz.sh dropping the FUZZ_RETRIES retry env must not satisfy the contract"
 
 # --- Monthly/nightly cron overlap (PW codex follow-up #2) -------------------
 
@@ -172,33 +208,6 @@ awk '
 ' "${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "an if: guard attached to a different step must not satisfy the contract"
-
-# --- CI/smoke tier crash phrase alignment (review follow-up) ---------------
-
-seed_fixture
-sed 's|Failing input written to testdata|Failing input written|' \
-	"${fixture}/lefthook.yml" >"${fixture}/lefthook.yml.tmp"
-mv "${fixture}/lefthook.yml.tmp" "${fixture}/lefthook.yml"
-expect_fail "lefthook.yml must match the full 'Failing input written to testdata' phrase, not an abbreviated form"
-
-seed_fixture
-sed 's|Failing input written to testdata|Failing input written|' \
-	"${fixture}/scripts/ci/go-fuzz.sh" >"${fixture}/scripts/ci/go-fuzz.sh.tmp"
-mv "${fixture}/scripts/ci/go-fuzz.sh.tmp" "${fixture}/scripts/ci/go-fuzz.sh"
-expect_fail "scripts/ci/go-fuzz.sh must match the full 'Failing input written to testdata' phrase, not an abbreviated form"
-
-# --- Crash classifier anchoring (review follow-up) --------------------------
-
-seed_fixture
-# The phrase stays intact in the same step's ::error line and the Summarize
-# step's step-summary echo further down, so a bare "does this string exist
-# anywhere in the file" check would still pass even though the classifier
-# condition itself can no longer match a real crash.
-# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-sed 's|if grep -q "Failing input written to testdata" "\${LOG}"; then|if grep -q "Failing input written to TESTDATA" "${LOG}"; then|' \
-	"${nightly}" >"${nightly}.tmp"
-mv "${nightly}.tmp" "${nightly}"
-expect_fail "a classifier condition that stops matching the crash phrase, even though a summary echo line still contains it, must not satisfy the contract"
 
 # --- Corpus writer concurrency (review follow-up) ---------------------------
 
