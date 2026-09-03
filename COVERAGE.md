@@ -65,14 +65,45 @@ exec-subprocess round-trip that adds no meaningful signal.
 JSON-safe primitives. The Go JSON encoder never returns an error for these types.
 The `if err != nil` guard is a defensive API pattern, not a reachable path.
 
-### `internal/adapter/drydock/adapter.go` — `json.Marshal` error in `sendContainerEvent` (line ~665)
+### `internal/adapter/drydock/adapter.go` — `sendComponentSync` `protoTriggers` loop body (lines 649-655)
+
+```go
+protoTriggers := make([]protocol.ComponentDescriptor, len(triggers))
+for i, t := range triggers {
+    protoTriggers[i] = protocol.ComponentDescriptor{
+        Type:          t.Type,
+        Name:          t.Name,
+        Configuration: t.Configuration,
+    }
+}
+```
+
+`GetTriggerComponents()` (line 304) always returns an empty slice — "No
+triggers in v1.0 - agent-side triggering deferred to v2.0" (line 305) — so
+`triggers` is always empty and the loop body never executes. Documented by
+`TestSendComponentSync_TriggersAlwaysEmpty` in
+`internal/adapter/drydock/drydock_coverage_test.go:792-800`, which asserts
+`GetTriggerComponents()` stays empty rather than asserting coverage; the test
+fails loudly if the product ever adds v2.0 triggers and makes the loop
+reachable.
+
+### `internal/adapter/drydock/adapter.go` — `json.Marshal` error in `sendContainerEvent` (line 665)
 
 ```go
 data, err := json.Marshal(toDrydockContainer(container))
 if err != nil { ... }
 ```
 
-`adapter.Container` marshals cleanly (all string/int/bool fields). The error
+The value actually marshaled is `toDrydockContainer(container)`'s return, the
+`drydockContainer` wire type in `internal/adapter/drydock/wire.go:10-33`, not
+`adapter.Container` itself. It marshals cleanly for the same reason: every
+field on `drydockContainer` and the structs it embeds (`drydockContainerImage`,
+`drydockContainerRegistry`, `drydockContainerTag`, `drydockContainerDigest`,
+`drydockContainerUpdateKind`, `drydockContainerError`, `drydockRuntimeDetails`,
+and `adapter.ContainerResult`/`adapter.EnvVar` pulled in from
+`internal/adapter/model.go:22-34`) is a string, bool, slice of strings, or
+`map[string]string` — no funcs, channels, complex numbers, or cyclic pointers,
+which are the only things that make `encoding/json` return an error. The error
 branch is a defensive guard; unreachable in practice.
 
 ### `internal/auth/keygen.go` — `crypto/rand` failure branches

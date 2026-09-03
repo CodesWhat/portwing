@@ -24,11 +24,10 @@
 # The allow_privileged: false / allow_root_user enforcement layer still
 # applies — it gates on the inspect payload, not on argv prefix matching.
 # Operators who can constrain exec to known commands should instead replace
-# allow_root_user with an allowed_commands list and drop
-# insecure_allow_body_blind_writes.
+# allow_root_user with an allowed_commands list (see drydock-with-selfupdate.yaml
+# for the pinned-command pattern) and drop insecure_allow_body_blind_writes.
 #
-# Use this preset instead of portwing.yaml (sockguard.yaml in this examples
-# directory) when:
+# Use this preset instead of portwing.yaml when:
 #   - Portwing's terminal/exec feature is in use
 #   - Drydock drives exec calls through the Portwing edge mode
 #   - You need exec for container debugging via the Portwing UI
@@ -36,7 +35,7 @@
 # Security note: exec grants arbitrary command execution inside any container
 # that Portwing can reach. Keep the proxy socket access-controlled (unix peer
 # credentials or client CIDR allowlist) so only the Portwing process can call
-# the exec paths. See sockguard.yaml for the exec-disabled baseline.
+# the exec paths. See portwing.yaml for the exec-disabled baseline.
 
 upstream:
   socket: /var/run/docker.sock
@@ -51,11 +50,18 @@ health:
   path: /health
 
 # Response redaction — all three disabled for the drydock passthrough topology.
-# See sockguard.yaml header for standalone-mode guidance.
+# See portwing.yaml header for standalone-mode guidance.
+#
+# deny_verbosity: verbose — detailed denial reasons flow to portwing/drydock
+# for operator-visible errors (portwing reads the reason field as of the
+# release after 0.8.1). The denial consumer in this topology is the trusted
+# Portwing agent / drydock controller, not an untrusted caller, so surfacing
+# the detailed reason is the right default here.
 response:
   redact_mount_paths: false
   redact_container_env: false
   redact_network_topology: false
+  deny_verbosity: verbose
 
 # Exec without pinned AllowedCommands requires insecure_allow_body_blind_writes;
 # log streaming requires insecure_allow_read_exfiltration. See the header
@@ -63,7 +69,7 @@ response:
 insecure_allow_body_blind_writes: true
 insecure_allow_read_exfiltration: true
 
-# Container-create and image-pull inspection mirrors sockguard.yaml.
+# Container-create and image-pull inspection mirrors portwing.yaml.
 # Exec body inspection: allow_privileged denied, root user allowed for
 # interactive sessions. To pin allowed commands, replace allow_root_user
 # with an allowed_commands list (argv prefix allowlist).

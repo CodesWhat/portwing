@@ -131,11 +131,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection, and drained the inbox before unregistering, so a waiter that saw
   `done` closed could still find the session registered and the session held
   one of the `maxExecSessions` slots for the length of the drain. The
-  unregister now runs inside the same locked section, ahead of `close(done)`;
-  nothing can enqueue once `closed` is set, so the entry has no remaining job.
-  The exec ID is released at the same point, which slightly widens the window
-  in which a controller reusing that ID could see the old read loop's last
-  frames.
+  unregister now runs inside the same locked section, ahead of `close(done)`,
+  so a waiter that observes `done` closed will not find the session still
+  registered. This does not stop all enqueueing: `HandleInput` can no longer
+  enqueue once `closed` is set, but a racing `HandleResize` may still land a
+  zero-reservation item that `inputWriter` picks over `done`; that item is
+  harmless because `doResize` then runs against the already-cancelled session
+  context and aborts. The exec ID is released at the same point, which
+  slightly widens the window in which a controller reusing that ID could see
+  the old read loop's last frames.
 
 ### Security
 

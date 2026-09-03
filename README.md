@@ -481,8 +481,12 @@ always use `https://`/`wss://` against a real controller.
 
 ```text
 DRYDOCK_URL set + PRIVATE_KEY_FILE set  →  Edge Mode (outbound WebSocket)
-Otherwise                                →  Standard Mode (inbound HTTP server)
+DRYDOCK_URL unset                       →  Standard Mode (inbound HTTP server)
 ```
+
+`DRYDOCK_URL` set without `PRIVATE_KEY_FILE` is neither of the above — it's a
+fatal startup error, since the edge endpoint is Ed25519-only and rejects
+token-only agents.
 
 </details>
 

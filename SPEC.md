@@ -40,7 +40,7 @@ DRYDOCK_URL set + PRIVATE_KEY_FILE set  ->  Edge Mode (outbound WebSocket)
 DRYDOCK_URL unset                       ->  Standard Mode (inbound HTTP server)
 ```
 
-`PRIVATE_KEY_FILE` is mandatory whenever `DRYDOCK_URL` is set: the controller's edge endpoint is Ed25519-only and rejects token-only agents. `TOKEN` or `AUTHORIZED_KEYS` may also be set, but neither satisfies the edge-mode requirement on its own. `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is a fatal startup error (`edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents`), not a silent fallback to Standard Mode.
+`PRIVATE_KEY_FILE` is mandatory whenever `DRYDOCK_URL` is set: the controller's edge endpoint is Ed25519-only and rejects token-only agents. `TOKEN` or `AUTHORIZED_KEYS` may also be set, but neither satisfies the edge-mode requirement on its own, and the checks are ordered: `TOKEN_HASH` set without `TOKEN` or `AUTHORIZED_KEYS` fails first with a `TOKEN_HASH`-specific error (`requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone`), even if `PRIVATE_KEY_FILE` is also set. Past that check, `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is a fatal startup error (`edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents`), not a silent fallback to Standard Mode.
 
 ### 2.2 Standard Mode
 
