@@ -8,8 +8,9 @@ trap 'rm -rf "${fixture}"' EXIT
 # leave a broken file behind and make the next one pass for the wrong reason.
 seed_fixture() {
 	rm -rf "${fixture:?}"/*
-	mkdir -p "${fixture}/scripts" "${fixture}/.github/workflows"
+	mkdir -p "${fixture}/scripts/ci" "${fixture}/.github/workflows"
 	cp scripts/fuzz-tier-config-test.sh "${fixture}/scripts/"
+	cp scripts/ci/go-fuzz.sh "${fixture}/scripts/ci/"
 	cp lefthook.yml "${fixture}/"
 	cp .github/workflows/ci-verify.yml "${fixture}/.github/workflows/"
 	cp .github/workflows/quality-fuzz-nightly.yml "${fixture}/.github/workflows/"
@@ -171,5 +172,50 @@ awk '
 ' "${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "an if: guard attached to a different step must not satisfy the contract"
+
+# --- CI/smoke tier crash phrase alignment (review follow-up) ---------------
+
+seed_fixture
+sed 's|Failing input written to testdata|Failing input written|' \
+	"${fixture}/lefthook.yml" >"${fixture}/lefthook.yml.tmp"
+mv "${fixture}/lefthook.yml.tmp" "${fixture}/lefthook.yml"
+expect_fail "lefthook.yml must match the full 'Failing input written to testdata' phrase, not an abbreviated form"
+
+seed_fixture
+sed 's|Failing input written to testdata|Failing input written|' \
+	"${fixture}/scripts/ci/go-fuzz.sh" >"${fixture}/scripts/ci/go-fuzz.sh.tmp"
+mv "${fixture}/scripts/ci/go-fuzz.sh.tmp" "${fixture}/scripts/ci/go-fuzz.sh"
+expect_fail "scripts/ci/go-fuzz.sh must match the full 'Failing input written to testdata' phrase, not an abbreviated form"
+
+# --- Crash classifier anchoring (review follow-up) --------------------------
+
+seed_fixture
+# The phrase stays intact in the same step's ::error line and the Summarize
+# step's step-summary echo further down, so a bare "does this string exist
+# anywhere in the file" check would still pass even though the classifier
+# condition itself can no longer match a real crash.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+sed 's|if grep -q "Failing input written to testdata" "\${LOG}"; then|if grep -q "Failing input written to TESTDATA" "${LOG}"; then|' \
+	"${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "a classifier condition that stops matching the crash phrase, even though a summary echo line still contains it, must not satisfy the contract"
+
+# --- Corpus writer concurrency (review follow-up) ---------------------------
+
+seed_fixture
+# Nightly keeps the correct shared group; monthly's diverges, so the two
+# workflows' corpus-touching jobs no longer serialise against each other.
+sed 's|      group: quality-fuzz-corpus-\${{ matrix.fuzzer.name }}|      group: quality-fuzz-corpus-monthly-${{ matrix.fuzzer.name }}|' \
+	"${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a corpus-touching job whose concurrency group doesn't match the other fuzz-corpus workflow's must not satisfy the contract"
+
+seed_fixture
+# 6-space indent is the job-level concurrency block; the workflow-level one
+# above it is indented 2 spaces and must stay untouched by this mutation.
+sed 's|^      cancel-in-progress: false$|      cancel-in-progress: true|' \
+	"${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "a corpus-touching job's concurrency group with cancel-in-progress: true must not satisfy the contract"
 
 echo "Fuzz tier contract self-tests passed."

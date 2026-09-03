@@ -103,16 +103,25 @@ cache_save_guard="        if: always() && steps.corpus.outputs.generated != ''"
 crash_pattern_first_discovery="Failing input written to testdata"
 crash_pattern_seed_regression="failure while testing seed corpus entry"
 
+# Anchored to the classifier's own `if grep -q ...` line, not just "appears
+# somewhere in the file": both phrases are echoed again in the Summarize
+# step's step-summary text, so a bare `grep -Fq` would still pass after the
+# classifier condition itself stopped matching.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+crash_classifier_first_discovery='            if grep -q "Failing input written to testdata" "${LOG}"; then'
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+crash_classifier_seed_regression='            if grep -q "failure while testing seed corpus entry" "${LOG}"; then'
+
 for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
 	grep -Fq "uses: actions/cache/restore@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must restore the fuzz corpus from actions/cache pinned to ${cache_action_sha}"
 	grep -Fq "uses: actions/cache/save@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must save the fuzz corpus to actions/cache pinned to ${cache_action_sha}"
 
-	grep -Fq "${crash_pattern_first_discovery}" "${workflow}" ||
-		fail "${workflow} must classify '${crash_pattern_first_discovery}' as kind=crash"
-	grep -Fq "${crash_pattern_seed_regression}" "${workflow}" ||
-		fail "${workflow} must classify '${crash_pattern_seed_regression}' as kind=crash"
+	grep -Fxq "${crash_classifier_first_discovery}" "${workflow}" ||
+		fail "${workflow} must classify '${crash_pattern_first_discovery}' as kind=crash in the classifier condition itself"
+	grep -Fxq "${crash_classifier_seed_regression}" "${workflow}" ||
+		fail "${workflow} must classify '${crash_pattern_seed_regression}' as kind=crash in the classifier condition itself"
 
 	# Restore and save have to name the same key. If they drift, every run
 	# writes an entry the next run cannot find and the lane is back to zero.
@@ -166,6 +175,22 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	[ "${perms_block}" = "  contents: read" ] ||
 		fail "${workflow} permissions must stay exactly 'contents: read'"
 
+	# Nightly and monthly restore from and save to the same per-fuzzer cache
+	# prefix, so a manual workflow_dispatch of one can race the other's
+	# scheduled run for the same fuzzer's cache entry outside the cron
+	# spacing that keeps the two routine schedules apart. Both workflows'
+	# corpus-touching jobs have to share one job-level concurrency group,
+	# keyed on the fuzzer name the cache key itself uses (runner.os isn't a
+	# valid context in a concurrency expression), with cancel-in-progress:
+	# false so the second writer queues instead of either run being cancelled
+	# mid-save.
+	# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+	corpus_concurrency_group='      group: quality-fuzz-corpus-${{ matrix.fuzzer.name }}'
+	grep -Fxq "${corpus_concurrency_group}" "${workflow}" ||
+		fail "${workflow} corpus-touching job must share the concurrency group quality-fuzz-corpus-\${{ matrix.fuzzer.name }} with the other fuzz-corpus workflow"
+	grep -Fxq "      cancel-in-progress: false" "${workflow}" ||
+		fail "${workflow} corpus-touching job's concurrency group must set cancel-in-progress: false so a racing writer queues instead of being cancelled"
+
 	# The if: guard has to sit ON the upload-artifact step itself, not just
 	# appear somewhere in the file — a guard attached to the wrong step would
 	# match a bare `grep -Fxq` just as well and silently stop protecting the
@@ -181,6 +206,19 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 		fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
 	grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${upload_step_block}" ||
 		fail "${workflow} must upload the corpus artifact with actions/upload-artifact pinned to ${upload_artifact_sha} in the same step"
+done
+
+# The 60s CI/smoke tier (lefthook's fast lane and its go-fuzz.sh equivalent)
+# has to key off the exact same two phrases as the nightly/monthly
+# classifiers above. An abbreviated form still matches today's crash message,
+# so this doesn't catch a live bug — but a drifted phrase here is a silent
+# trap: it keeps matching until Go's wording changes, at which point CI stops
+# recognizing a crash on the tier a developer actually watches on every push.
+for driver in lefthook.yml scripts/ci/go-fuzz.sh; do
+	grep -Fq "${crash_pattern_first_discovery}" "${driver}" ||
+		fail "${driver} must match '${crash_pattern_first_discovery}' verbatim, not an abbreviated form"
+	grep -Fq "${crash_pattern_seed_regression}" "${driver}" ||
+		fail "${driver} must match '${crash_pattern_seed_regression}' verbatim"
 done
 
 # Monthly/nightly cron overlap. Both lanes restore from and save to the same

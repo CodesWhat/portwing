@@ -24,12 +24,16 @@ on:
         required: false
         default: "1h"
   schedule:
-    # Monthly on day 1 at 02:30 UTC. Has to finish before the nightly's 09:30
-    # restore-keys prefix match; nightly and monthly share the same corpus
-    # cache prefix and each save wins on recency, so whichever lane finishes
-    # second silently discards the other's coverage. 7h of headroom before
-    # 09:30 is greater than this job's 360m timeout, so the two can never
-    # overlap.
+    # Monthly on day 1 at 02:30 UTC. Nightly and monthly share the same
+    # corpus cache prefix and each save wins on recency, so two writers for
+    # the same fuzzer racing each other silently discards whichever finished
+    # first. 7h of headroom before the nightly's 09:30 restore-keys touch,
+    # against this job's 360m timeout, keeps the two *scheduled* runs from
+    # ever overlapping. A `workflow_dispatch` of this workflow gets no such
+    # spacing, so the per-fuzzer job-level concurrency group below — shared
+    # with quality-fuzz-nightly.yml — is what actually serialises a manual
+    # dispatch against whichever scheduled run holds the same fuzzer's cache
+    # entry.
     - cron: '30 2 1 * *'
 
 permissions:
@@ -48,6 +52,20 @@ jobs:
     # 6-hour ceiling is the hard cap regardless of the fuzztime input.
     # Anything longer should run on a dedicated box, not a shared runner.
     timeout-minutes: 360
+
+    # Shared with quality-fuzz-nightly.yml's corpus-touching job, keyed on
+    # the same fuzzer name the cache key itself uses (runner.os isn't in
+    # this group — it isn't a valid context in a concurrency expression, and
+    # both workflows only ever run on ubuntu-24.04 anyway). Both workflows
+    # restore from and save to one cache-key prefix per fuzzer, so letting a
+    # manual dispatch of this workflow run alongside the nightly's scheduled
+    # job for the same fuzzer would race two save steps against each other —
+    # the one that finishes second silently overwrites the first's coverage.
+    # cancel-in-progress: false because the answer is to queue the second
+    # writer, not cancel either run.
+    concurrency:
+      group: quality-fuzz-corpus-${{ matrix.fuzzer.name }}
+      cancel-in-progress: false
 
     strategy:
       fail-fast: false

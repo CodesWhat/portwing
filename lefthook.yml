@@ -129,7 +129,7 @@ pre-push:
               echo "$out"; return 0
             fi
             echo "$out"
-            echo "$out" | grep -qE "Failing input written|failure while testing seed corpus entry" && return 1
+            echo "$out" | grep -qE "Failing input written to testdata|failure while testing seed corpus entry" && return 1
             if [ "$attempt" -eq 1 ] && echo "$out" | grep -q "context deadline exceeded"; then
               echo "fuzz ${fuzzer}: coordinator-starvation flake — retrying once"
               attempt=2; continue
