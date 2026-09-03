@@ -45,12 +45,15 @@ write_record() {
         }' >"${dir}/quality-history-record.json"
 }
 
-# Write one history.jsonl row for a package.
+# Write one history.jsonl row for a package. run_id defaults to omitted, so
+# existing call sites (rows with no run_id) are unaffected.
 write_history_row() {
-	local name="$1" efficacy="$2" mcover="$3"
+	local name="$1" efficacy="$2" mcover="$3" run_id="${4:-}"
 	jq -cn \
 		--arg name "${name}" --argjson efficacy "${efficacy}" --argjson mcover "${mcover}" \
-		'{name: $name, mode: "gated", outcome: "success", efficacy: $efficacy, mutator_coverage: $mcover}'
+		--arg run_id "${run_id}" \
+		'{name: $name, mode: "gated", outcome: "success", efficacy: $efficacy, mutator_coverage: $mcover}
+		 + (if $run_id == "" then {} else {run_id: $run_id} end)'
 }
 
 # --- (1) a measured value below the current floor produces no proposal ------
@@ -169,6 +172,66 @@ bash "${gate}" "${report}" "${proposed}" 0
 gate_status=$?
 set -e
 expect_status 0 "${gate_status}" "a run measuring the pool's own basis (${basis}) must clear the proposed floor (${proposed})"
+
+# --- (6) this run's own history row must not evict the oldest prior --------
+#
+# The ratchet job needs [gremlins, history], so by the time it checks out
+# quality-history the history job has already appended this run's row for
+# every package. Without the run_id filter, the newest slot in the 6-row
+# window holds a duplicate of the current measurement instead of the oldest
+# real prior (70.00), raising basis from 70.00 to 90.00 and turning a
+# correctly-conservative "no proposal" into a proposal of 84.00.
+case6="${fixture}/case6"
+mkdir -p "${case6}/records/edge"
+write_record "${case6}/records/edge" "edge" "./internal/edge" \
+	"gated" "success" 0 74.73 96.00 91.00 99.00
+{
+	write_history_row "edge" 70.00 99.00 r1
+	write_history_row "edge" 90.00 99.00 r2
+	write_history_row "edge" 90.00 99.00 r3
+	write_history_row "edge" 90.00 99.00 r4
+	write_history_row "edge" 90.00 99.00 r5
+	write_history_row "edge" 90.00 99.00 r6
+	write_history_row "edge" 96.00 99.00 CURRENT
+} >"${case6}/history.jsonl"
+
+GITHUB_RUN_ID=CURRENT bash "${ratchet}" "${case6}/records" "${case6}/history.jsonl" "${case6}/out.json"
+efficacy_proposals="$(jq '[.proposals[] | select(.metric == "efficacy")] | length' "${case6}/out.json")"
+[ "${efficacy_proposals}" -eq 0 ] ||
+	fail "this run's own history row must not evict the oldest prior (70.00) from the 6-row window"
+
+# --- (7) samples counts distinct runs, not this run counted twice ----------
+case7="${fixture}/case7"
+mkdir -p "${case7}/records/dupe"
+write_record "${case7}/records/dupe" "dupe" "./internal/dupe" \
+	"gated" "success" 0 74.73 90.00 0 0
+{
+	write_history_row "dupe" 89.00 0 r1
+	write_history_row "dupe" 90.00 0 CURRENT
+} >"${case7}/history.jsonl"
+
+GITHUB_RUN_ID=CURRENT bash "${ratchet}" "${case7}/records" "${case7}/history.jsonl" "${case7}/out.json"
+samples="$(jq -r '.proposals[] | select(.metric == "efficacy") | .samples' "${case7}/out.json")"
+[ "${samples}" = "2" ] ||
+	fail "samples must count this run plus 1 real prior, not a duplicate of itself, got samples=${samples}"
+
+# --- (8) history rows written before the run_id field existed still count --
+#
+# Guards against over-filtering: a row with no run_id must not be treated as
+# "this run" just because GITHUB_RUN_ID is set.
+case8="${fixture}/case8"
+mkdir -p "${case8}/records/legacy"
+write_record "${case8}/records/legacy" "legacy" "./internal/legacy" \
+	"gated" "success" 0 74.73 96.00 0 0
+{
+	write_history_row "legacy" 95.00 0
+	write_history_row "legacy" 95.00 0
+} >"${case8}/history.jsonl"
+
+GITHUB_RUN_ID=CURRENT bash "${ratchet}" "${case8}/records" "${case8}/history.jsonl" "${case8}/out.json"
+samples="$(jq -r '.proposals[] | select(.metric == "efficacy") | .samples' "${case8}/out.json")"
+[ "${samples}" = "3" ] ||
+	fail "history rows without a run_id must survive the current-run filter, got samples=${samples}"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} mutation ratchet check(s) failed" >&2

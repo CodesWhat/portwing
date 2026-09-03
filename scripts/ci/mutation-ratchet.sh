@@ -23,7 +23,12 @@
 #
 #   pool    = this run's measured value, plus up to the 6 most recent prior
 #             mutation.jsonl rows for that package with mode == "gated" and
-#             outcome == "success".
+#             outcome == "success". "Prior" is enforced by run id, not by
+#             position: the `history` job appends this run's own rows to the
+#             branch before this job checks it out, so without that filter
+#             the newest slot in the 6-row window holds a duplicate of the
+#             current measurement and silently evicts the oldest real prior,
+#             raising basis and shrinking the buffer.
 #   basis   = min(pool). Never the best run in the pool -- a ratchet built
 #             from the best run would relock the very slack PW-6.1 exists to
 #             catch.
@@ -156,8 +161,11 @@ while IFS= read -r name; do
 		fi
 		pool_ok=1
 
-		history_values="$(jq -r --arg name "${name}" --arg metric "${metric}" '
-            [ .[] | select(.name == $name and .mode == "gated" and .outcome == "success") ]
+		history_values="$(jq -r --arg name "${name}" --arg metric "${metric}" --arg run_id "${GITHUB_RUN_ID:-}" '
+            [ .[]
+              | select(.name == $name and .mode == "gated" and .outcome == "success")
+              | select($run_id == "" or ((.run_id // "") | tostring) != $run_id)
+            ]
             | .[-6:][]
             | .[$metric]
             | select(. != null)
