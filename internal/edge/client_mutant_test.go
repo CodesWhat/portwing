@@ -224,8 +224,8 @@ func TestConnectWelcomePollIntervalZeroDoesNotResetExisting(t *testing.T) {
 	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
 		readAndAckHello(t, ctrl)
 		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{PollInterval: 0})
-		_ = ctrl.SetReadDeadline(time.Now().Add(3 * time.Second))
-		_, _, _ = ctrl.ReadMessage()
+		// Close immediately: the pumps finish as soon as the read errors,
+		// instead of idling until a hardcoded server-side deadline.
 	})
 
 	cfg := &config.Config{
@@ -238,7 +238,7 @@ func TestConnectWelcomePollIntervalZeroDoesNotResetExisting(t *testing.T) {
 	c := newWireClient(t, cfg)
 	c.welcomePollInterval = 77 // sentinel: must survive a PollInterval==0 welcome
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	established, _ := c.connect(ctx)
@@ -266,8 +266,8 @@ func TestConnectWelcomeCompatMismatchLogsWarning(t *testing.T) {
 		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{
 			Config: map[string]string{"serverCompatLevel": "99.0"},
 		})
-		_ = ctrl.SetReadDeadline(time.Now().Add(3 * time.Second))
-		_, _, _ = ctrl.ReadMessage()
+		// Close immediately: the pumps finish as soon as the read errors,
+		// instead of idling until a hardcoded server-side deadline.
 	})
 
 	cfg := &config.Config{
@@ -284,7 +284,7 @@ func TestConnectWelcomeCompatMismatchLogsWarning(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
 	defer slog.SetDefault(oldLogger)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	established, _ := c.connect(ctx)
@@ -309,8 +309,8 @@ func TestConnectAdapterOnConnectFailureLogsWarning(t *testing.T) {
 	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
 		readAndAckHello(t, ctrl)
 		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{})
-		_ = ctrl.SetReadDeadline(time.Now().Add(3 * time.Second))
-		_, _, _ = ctrl.ReadMessage()
+		// Close immediately: the pumps finish as soon as the read errors,
+		// instead of idling until a hardcoded server-side deadline.
 	})
 
 	cfg := &config.Config{
@@ -328,7 +328,7 @@ func TestConnectAdapterOnConnectFailureLogsWarning(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
 	defer slog.SetDefault(oldLogger)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	established, _ := c.connect(ctx)
