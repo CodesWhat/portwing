@@ -18,7 +18,7 @@ MCP server (read-only)|Not documented|Yes|self
 License|BSD-3-Clause|AGPL-3.0|tie
 `,
   highlightsTable: `
-keyround|Arcane Signs Post-Quantum|Arcane v2.10.0 moved its signing surfaces, including edge mTLS, to ML-DSA-87 (FIPS 204). mTLS stays opt-in and the agent token still bootstraps enrollment, but a freshly generated edge CA is post-quantum. Portwing signs each standard-mode request and the edge hello with Ed25519, which is classical and has no post-quantum option today.
+keyround|Arcane Signs Post-Quantum|Arcane v2.10.0 moved its signing surfaces, including edge mTLS, to ML-DSA-87 (FIPS 204). mTLS stays opt-in and the agent token still bootstraps enrollment, but a freshly generated edge CA is post-quantum. Portwing verifies Ed25519-signed requests in standard mode, falling back to bearer auth when a request carries no signature, and signs its edge hello with Ed25519. Both paths are classical, with no post-quantum option today.
 shieldcheck|Narrower Socket Policy|Arcane documents an optional Tecnativa proxy using broad Docker API categories. Portwing's hardened deployment uses Sockguard rules scoped by HTTP method and path.
 network|Transparent Docker Compatibility|Portwing preserves Docker Engine request and response formats for compatible clients. Arcane exposes its own controller API and UI workflows.
 activity|Mediation-Point Audit|Portwing records API, authentication, enrollment, Compose, and exec activity at the host agent and supports cursor-based export. Arcane records controller activities and security events.
@@ -51,8 +51,10 @@ bot|Read-Only MCP|Portwing exposes five read-only host and container inspection 
   heroDescription: (
     <p>
       Arcane v2.10.1 is a broad Docker management platform with direct and edge agents, polling,
-      automated mTLS now issuing ML-DSA-87 post-quantum certificates, RBAC, GitOps, scanning, and
-      Swarm. Portwing v{SITE_CONFIG.version} is a narrower access agent for Drydock, focused on{" "}
+      RBAC, GitOps, scanning, Swarm, and opt-in edge mTLS that issues ML-DSA-87 post-quantum
+      certificates from a freshly generated CA. An existing ECDSA P-384 CA keeps issuing P-384
+      client certificates. Portwing v{SITE_CONFIG.version} is a narrower access agent for Drydock,
+      focused on{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
         replay-resistant signed requests, transparent Docker compatibility, Sockguard policy, and
         mediation-point audit
