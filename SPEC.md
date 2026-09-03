@@ -36,9 +36,11 @@ Portwing and the Docker Engine.
 ### 2.1 Mode Detection
 
 ```text
-DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set  ->  Edge Mode (outbound WebSocket)
-Otherwise                                                              ->  Standard Mode (inbound HTTP server)
+DRYDOCK_URL set + PRIVATE_KEY_FILE set  ->  Edge Mode (outbound WebSocket)
+DRYDOCK_URL unset                       ->  Standard Mode (inbound HTTP server)
 ```
+
+`PRIVATE_KEY_FILE` is mandatory whenever `DRYDOCK_URL` is set: the controller's edge endpoint is Ed25519-only and rejects token-only agents. `TOKEN` or `AUTHORIZED_KEYS` may also be set, but neither satisfies the edge-mode requirement on its own, and the checks are ordered: `TOKEN_HASH` set without `TOKEN` or `AUTHORIZED_KEYS` fails first with a `TOKEN_HASH`-specific error (`requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone`), even if `PRIVATE_KEY_FILE` is also set. Past that check, `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is a fatal startup error (`edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents`), not a silent fallback to Standard Mode.
 
 ### 2.2 Standard Mode
 
@@ -222,7 +224,7 @@ and container identifiers.
 
 `/*` (all other paths) -> Transparent proxy to Docker Engine API.
 
-- Streaming detection for `/logs`, `/attach`, `/exec/*/start`, `/events`, `/build`, `/images/create`, `/images/push`
+- Streaming detection for `/logs`, `/attach`, `/exec/*/start`, `/events`, `/build`, `/images/create`, `/images/push`, `/export`, `/images/get`, and `/images/*/get`; `/containers/*/archive` is method-sensitive and streams on `GET` only (a `PUT` upload returns no tar body)
 - Connection hijacking for interactive exec (`Upgrade: tcp`)
 - Hop-by-hop header stripping
 - Binary response auto-detection
