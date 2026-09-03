@@ -46,11 +46,15 @@ This starts sockguard and Portwing as two separate containers sharing a filtered
 # a fully compromised agent is constrained to the explicit API allowlist in
 # sockguard.yaml.
 #
-# The bundled sockguard.yaml mirrors sockguard's drydock preset: container
-# lifecycle, image pull/inspect/remove, events, and narrow network/volume
-# reads. Compose stack deploys through Portwing need broader rules (network
-# create, volume create, build) — extend sockguard.yaml deliberately if you
-# use stacks, rather than bypassing the filter.
+# The bundled sockguard.yaml tracks sockguard's own portwing.yaml preset:
+# container lifecycle, image pull/inspect/remove, events, and narrow network/
+# volume reads. Check upstream for the current version:
+# https://github.com/CodesWhat/sockguard/blob/main/app/configs/portwing.yaml
+# Exec is denied by this preset — swap in sockguard's
+# portwing-with-exec.yaml to opt into interactive exec sessions. Compose stack
+# deploys through Portwing need broader rules (network create, volume create,
+# build) — extend sockguard.yaml deliberately if you use stacks, rather than
+# bypassing the filter.
 #
 # Generate a token first and make it readable by the container user:
 #   openssl rand -hex 32 > portwing_token.txt
@@ -117,7 +121,7 @@ volumes:
 ```
 
 <Callout type="info">
-If you manage Docker Compose stacks through Portwing, the bundled `sockguard.yaml` uses the drydock preset (container lifecycle, image ops, events, narrow network/volume reads). Compose deploys require additional rules — extend `sockguard.yaml` deliberately (network create, volume create, build) rather than bypassing the filter.
+If you manage Docker Compose stacks through Portwing, the bundled `sockguard.yaml` tracks sockguard's `portwing.yaml` preset (container lifecycle, image ops, events, narrow network/volume reads) — check [upstream](https://github.com/CodesWhat/sockguard/blob/main/app/configs/portwing.yaml) for the current version. Compose deploys require additional rules — extend `sockguard.yaml` deliberately (network create, volume create, build) rather than bypassing the filter. That preset also denies exec: `POST /containers/*/exec` matches no allow rule and returns 403. For interactive exec, swap in sockguard's `portwing-with-exec.yaml`, shipped here as [`examples/sockguard-with-exec.yaml`](https://github.com/CodesWhat/portwing/blob/main/examples/sockguard-with-exec.yaml); for Drydock's edge exec feature use [`examples/docker-compose.edge-with-exec.yml`](https://github.com/CodesWhat/portwing/blob/main/examples/docker-compose.edge-with-exec.yml), which pairs edge mode with that preset.
 </Callout>
 
 ---
@@ -208,8 +212,11 @@ docker compose -f docker-compose.edge.yml up -d
 ```yaml filename="docker-compose.edge.yml"
 # Portwing — edge mode: outbound WebSocket tunnel to Drydock.
 # No inbound ports are published; the agent dials out, so it works
-# behind NAT and firewalls. The built-in HEALTHCHECK still works
-# (the health endpoint listens container-locally in edge mode too).
+# behind NAT and firewalls. The built-in HEALTHCHECK still works because the
+# local operations listener remains active. That listener also exposes metrics
+# and retained audit records without inbound auth in Edge mode; this example
+# deliberately publishes no port, so keep it that way unless an authenticating
+# proxy and trusted network are in front.
 #
 # Edge mode against Drydock v1.6.0-rc.11+ is Ed25519-only: the controller's
 # /api/portwing/ws endpoint rejects token-based hellos. Generate a
