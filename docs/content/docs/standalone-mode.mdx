@@ -147,10 +147,18 @@ curl -sf http://localhost:3000/health
 curl -sf http://localhost:3000/_portwing/health
 ```
 
+`GET /_portwing/health` returns the full readiness body. `GET /health` returns the same shape with `"status": "ok"`, `"ready": false`, and `"docker": "unknown"`, since it does not probe Docker.
+
 ```json
 {
   "status": "healthy",
-  "docker": "connected"
+  "live": true,
+  "ready": true,
+  "mode": "standard",
+  "version": "0.9.11",
+  "uptimeSeconds": 3842.7,
+  "docker": "connected",
+  "controller": "not_applicable"
 }
 ```
 

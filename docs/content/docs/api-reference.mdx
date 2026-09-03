@@ -260,6 +260,7 @@ These endpoints are used by the Drydock controller when Portwing runs in Standar
 | `DELETE` | `/api/containers/{id}` | Required | Force-remove a container. Returns HTTP 204 on success. |
 | `GET` | `/api/events` | Required | SSE stream of container lifecycle events in Drydock envelope format. |
 | `GET` | `/api/watchers` | Required | Watcher component descriptors registered with this agent. |
+| `GET` | `/api/watchers/{type}/{name}` | Required | Single watcher descriptor by type and name. Returns HTTP 404 when no watcher matches. |
 | `GET` | `/api/triggers` | Required | Trigger component descriptors registered with this agent. |
 | `GET` | `/api/log/entries` | Required | Compatibility stub for Drydock's agent log viewer. Portwing keeps no in-memory log buffer, so it always returns `[]`. |
 | `POST` | `/api/watchers/{type}/{name}` | Required | Trigger watcher poll — **not implemented in v1.0**, returns HTTP 501. |
@@ -552,6 +553,8 @@ curl -s -X POST \
 | `400` | Bad request — invalid body or parameters |
 | `401` | Missing, invalid, or burned token |
 | `405` | Method not allowed |
+| `409` | Conflict — audit export cursor is outside the retained buffer |
+| `413` | Payload too large — request body exceeds its limit (64 KiB enrollment, 1 MiB signed request, 10 MB exec/attach upgrade) |
 | `429` | Rate limit exceeded (10 failures/min/IP) |
 | `500` | Internal error |
 | `501` | Not implemented (stub Drydock endpoints) |
