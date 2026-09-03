@@ -1,0 +1,9 @@
+go test fuzz v1
+string("0")
+string("/")
+[]byte("0")
+string("453eb1222a9a1412")
+string("1788384700")
+string("00000000000000000000000000000000")
+string("\r\r")
+string("0")
