@@ -36,7 +36,7 @@ export const SITE_CONFIG = {
   aurora: "violet" as AuroraPalette,
 } as const;
 
-export type SiteConfig = typeof SITE_CONFIG;
+type SiteConfig = typeof SITE_CONFIG;
 
 /** "owner/repo" slug — used to build GitHub URLs. */
 const REPO_SLUG = `${SITE_CONFIG.githubOwner}/${SITE_CONFIG.githubRepo}`;

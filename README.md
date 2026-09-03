@@ -100,6 +100,7 @@ flowchart LR
 | Ed25519 Auth Design | [`docs/design/ed25519-auth.md`](docs/design/ed25519-auth.md) |
 | Watchtower Migration | [`docs/migrating-from-watchtower.md`](docs/migrating-from-watchtower.md) |
 | Drydock Integration | [`docs/drydock-integration.md`](docs/drydock-integration.md) |
+| Benchmarks | [`BENCHMARKS.md`](BENCHMARKS.md) |
 | OpenAPI Spec | [`api/openapi.yaml`](api/openapi.yaml) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
