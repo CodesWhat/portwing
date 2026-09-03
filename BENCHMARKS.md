@@ -44,8 +44,10 @@ they measure different failure modes:
 dispatch):
 
 1. `go test -run='^$' -bench=. -benchmem -count=5 -timeout=20m ./...` —
-   `-count=5` gives `benchstat` five samples per benchmark, which is the
-   minimum it needs to say anything about significance at all.
+   `-count=5` is the workflow's chosen sample count, picked for stability
+   against a shared runner's noise: with five samples on both sides,
+   `benchstat`'s significance test needs the two sample sets to barely
+   overlap before it prints a percentage at all, printing `~` otherwise.
 2. Fetches the `benchmark-results.txt` artifact from the newest prior
    successful run of this same workflow on the default branch (`gh run
    download`; artifacts expire at 90 days against a monthly cadence, so a
@@ -71,7 +73,10 @@ dispatch):
 
 An intentional slowdown doesn't have to stay red forever: dispatching the
 workflow with `accept_new_baseline: true` skips the comparison once and lets
-that run's numbers become the new baseline.
+that run's numbers become the new baseline — but only when the dispatch runs
+on the default branch. The "Fetch baseline candidates" step filters
+`gh run list` to `--branch` on the default branch, so a run accepted from a
+dev branch is never picked up as a candidate by a later run.
 
 Full design reasoning — why a fetched artifact instead of a committed file,
 why hardware-matched walk-back, why `sec/op`/`B/op` gate and `allocs/op`
@@ -135,8 +140,13 @@ at least 6 samples per side.
 
 The `Argon2idParamsVerify`/`Argon2VerifierVerify` rows in the low milliseconds
 and ~19 MiB/op are the Argon2id KDF doing its job — that cost is the point of
-the algorithm, not a regression candidate in the usual sense. Everything else
-in this package is nanosecond-scale, on-path per-request logic.
+the algorithm, not a regression candidate in the usual sense. `ParsePHC` and
+`ParseTrustedProxies` are startup-time parsers: `NewServer`
+(`internal/server/http.go`) calls each once while building the server, not on
+the request path. Everything else in this package is nanosecond-scale,
+on-path per-request logic — the middleware and handler benchmarks
+(`AuthMiddleware`, `ClientIP`, `AgentToken`, `RateLimiter`) run on every
+request.
 
 ### `internal/mcp` — MCP request dispatch
 
@@ -170,8 +180,8 @@ in this package is nanosecond-scale, on-path per-request logic.
 
 - **A competitor.** There is no head-to-head comparison against another
   Docker-proxy agent in this document, and that's deliberate rather than an
-  oversight — see the roadmap item that tracks it
-  (`.planning/roadmap.md`, PW-2.4). sockguard's `BENCHMARKS.md` can run a
+  oversight — a head-to-head competitor comparison is tracked on the project
+  roadmap. sockguard's `BENCHMARKS.md` can run a
   same-class comparison against `wollomatic/socket-proxy` because both are
   stateless HTTP reverse proxies answering the same request/response shape.
   Portwing is a persistent agent that holds a WebSocket tunnel to a
@@ -192,9 +202,12 @@ in this package is nanosecond-scale, on-path per-request logic.
 - **Concurrent throughput.** `-bench=.` runs each benchmark function
   single-threaded (`RateLimiter/is_rate_limited_parallel` is the one
   exception, using `b.RunParallel`). Nothing here characterizes how the
-  server behaves under many simultaneous connections; the load generator in
-  `benchmarks/cmd/loadgen` is the tool for that question, and no lane
-  currently runs it against this repo's own server on a schedule.
+  server behaves under many simultaneous connections. The weekly
+  `quality-soak-weekly.yml` lane does run `scripts/soak.sh`, which builds
+  `benchmarks/cmd/loadgen` and drives sustained concurrent load — inventory,
+  version, proxy, health, and SSE-churn scenarios at once — against a live
+  portwing on a schedule, but it gates on RSS growth and a 429 budget, not on
+  throughput. No lane gates on loadgen throughput numbers.
 - **A real Docker daemon.** The parsers and middleware benchmarked here don't
   talk to Docker at all; they operate on values already extracted from
   requests or config. Docker-facing behavior is exercised by the integration
@@ -206,10 +219,14 @@ in this package is nanosecond-scale, on-path per-request logic.
 go test -run='^$' -bench=. -benchmem -count=5 -timeout=20m ./...
 ```
 
-To compare against a saved baseline the way CI does:
+To compare against a saved baseline the way CI does, install the same
+`benchstat` version CI pins as `BENCHSTAT_VERSION` in
+[`quality-bench-monthly.yml`](.github/workflows/quality-bench-monthly.yml)
+(that env var is the source of truth; don't install `@latest`, which can
+drift from what CI actually ran):
 
 ```bash
-go install golang.org/x/perf/cmd/benchstat@latest
+go install golang.org/x/perf/cmd/benchstat@"$BENCHSTAT_VERSION"
 scripts/benchstat-gate.sh --baseline old-results.txt --current new-results.txt
 ```
 
