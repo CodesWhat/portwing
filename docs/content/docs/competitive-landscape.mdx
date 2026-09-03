@@ -44,7 +44,7 @@ products rather than direct general-purpose agent peers.
 | Agent audit and metrics | Structured audit export plus Prometheus scrape endpoint | Competing controllers record activity and collect metrics, but the reviewed agents do not document the same mediation-point audit/export and scrape surfaces. |
 | Polling edge transport | Not supported | Arcane and Portainer cover intermittently connected fleets. Defer until a Drydock deployment requires it. |
 | Controller-managed agent upgrades | Not shipped | Portainer and Arcane provide fleet upgrade workflows. This belongs in Drydock plus Portwing packaging, not in an unaudited self-update endpoint. |
-| Builds behind the hardened socket profile | Denied | Keep builds opt-in until BuildKit session and gRPC paths can be constrained and tested in Sockguard. |
+| Builds behind the hardened socket profile | Denied by default, opt-in via preset | The base and compose presets deny builds; `portwing-with-build.yaml` allows classic `POST /build`, and `portwing-with-mediated-build.yaml` allows a stock BuildKit `docker compose build` by inspecting the `/session` and `/grpc` traffic in Sockguard. |
 | Host shell, file browser, and Swarm | Not supported | Intentional agent non-goals even though broader competitors provide them. |
 | Verifiable release artifacts | Cosign signatures, CycloneDX SBOM, and SLSA Build L2 provenance | Arcane ships Cosign-verifiable artifacts and images. Portainer and Komodo were not evaluated for this. Hawser publishes checksummed releases with no equivalent set documented. |
 | Credential rotation | Multiple keys; file update plus SIGHUP; manual operational flow | Portainer has a revolving Edge password and Edge key lifecycle. Komodo automatically rotates Periphery keys. Arcane automatically renews certificates and can regenerate its environment token. Hawser requires manual token replacement. |
@@ -108,8 +108,9 @@ remaining gates are operational:
    clock-skew failure, and recovery against a real controller.
 3. Keep the OpenAPI contract, compatibility matrix, Sockguard presets, and
    competitive claims synchronized.
-4. Continue denying builds in hardened profiles until a least-privilege
-   BuildKit policy exists.
+4. Keep the base and compose presets build-denied by default; the
+   `portwing-with-build.yaml` and `portwing-with-mediated-build.yaml` presets
+   are the opt-in paths for classic and BuildKit builds respectively.
 
 ## Deliberate non-goals
 

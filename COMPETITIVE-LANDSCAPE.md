@@ -48,7 +48,7 @@ the capability. It is intentionally different from a definitive “no.”
 | Transparent Docker API | Yes | Yes | No; controller-specific command/resource API | No; controller-specific API | Yes |
 | Container lifecycle, logs, exec | Yes | Yes | Yes | Yes | Yes |
 | Compose lifecycle | Yes | Yes | Yes | Yes | Yes |
-| Image builds through the hardened socket profile | Docker build streaming is proxied, but published Sockguard presets intentionally deny `/build` and BuildKit session paths | Yes | Yes | Yes | Full Docker proxy; Dockhand documents builds |
+| Image builds through the hardened socket profile | Docker build streaming is proxied; the base and compose Sockguard presets deny `/build`, `/session`, and `/grpc`, but `portwing-with-build.yaml` and `portwing-with-mediated-build.yaml` allow classic and BuildKit builds respectively | Yes | Yes | Yes | Full Docker proxy; Dockhand documents builds |
 | General host shell or file browser | No; container exec only | Agent exposes file-browse APIs | Host shell supported | Volume/project file operations | No general host shell documented |
 | Swarm orchestration | No; explicit non-goal | Yes | Yes | Yes | Not documented |
 | Standard-mode agent auth | Ed25519 signature over method, request target, body hash, timestamp, and nonce; token fallback | Claim key exchange; optional shared `AGENT_SECRET` | Public-key authenticated channel | Agent token | Bearer token |
@@ -139,9 +139,13 @@ outbound implementations have maintainer-confirmed gaps worth tracking:
    real Drydock controller. The cryptography is implemented; the fleet
    operation must be proved and documented.
 3. **Published capability boundary.** Keep `COMPATIBILITY.md`, the OpenAPI
-   contract, Sockguard presets, and this matrix aligned. Builds must remain
-   explicitly denied in hardened examples until BuildKit's `/session` and
-   `/grpc` surfaces can be constrained and tested.
+   contract, Sockguard presets, and this matrix aligned. Classic `POST /build`
+   stays denied in the base and compose presets; `portwing-with-build.yaml`
+   allows it for a `DOCKER_BUILDKIT=0` client, and
+   `portwing-with-mediated-build.yaml` allows a stock `docker compose build`
+   by having Sockguard terminate and inspect the BuildKit `/session` and
+   `/grpc` traffic (sockguard v1.7.0+, sockguard issue #185) instead of
+   hijacking the streams.
 4. **Competitive-claim verification.** Comparison pages must state the
    reviewed product version/date and link to this evidence. Unknown behavior
    is “not documented,” not “no.”
@@ -158,7 +162,6 @@ v1.0.
 | Optional mTLS client authentication | Portwing | Defense in depth for certificate-mandated environments; Ed25519 plus TLS remains the supported baseline. |
 | Polling/intermittent edge transport | Drydock + Portwing | Defer until an offline/low-bandwidth deployment requires it; the current persistent tunnel is the Drydock contract. |
 | Automated controller-assisted key rotation | Drydock + Portwing | Preserve operator-controlled trust roots; design a two-key overlap flow rather than letting a controller silently replace its only trust anchor. |
-| BuildKit-aware Sockguard profile | Sockguard + Portwing | Defer until session and gRPC paths can be least-privilege and regression tested. Never fold build access into the base preset. |
 | Broader platform support such as Podman or Windows agents | Portwing | Demand-driven; do not dilute Docker/Linux reliability before v1.0. |
 
 ### Explicit non-goals for the Portwing agent
