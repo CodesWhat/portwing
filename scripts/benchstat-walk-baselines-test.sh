@@ -128,6 +128,22 @@ expect_line_count "${gate_log}" 2 "mismatch then match"
 [ "$(sed -n '2p' <<<"${gate_log}")" = "${fixture}/results/samecpu-results.txt" ] ||
 	fail "mismatch then match: second attempt should be the matching candidate"
 
+# (a2) Same scenario, but the candidates file has no trailing newline on its
+# last line (e.g. a `gh run list` --jq output that wasn't newline-terminated).
+# `read` returns false on that final read even though it populated the
+# variables, so the loop must still process it via `|| [ -n "${run_id}" ]`.
+printf '111\t%s\trun 111 (other cpu)\n222\t%s\trun 222 (same cpu)' \
+	"${fixture}/results/othercpu-results.txt" "${fixture}/results/samecpu-results.txt" \
+	>"${fixture}/candidates-no-trailing-newline.txt"
+
+run_walk "${fixture}/candidates-no-trailing-newline.txt"
+expect_status 0 "${status}" "no trailing newline"
+expect_contains "${summary}" "**No regression.**" "no trailing newline"
+expect_contains "${summary}" "samecpu-results.txt" "no trailing newline"
+expect_line_count "${gate_log}" 2 "no trailing newline: must still try the last, newline-less candidate"
+[ "$(sed -n '2p' <<<"${gate_log}")" = "${fixture}/results/samecpu-results.txt" ] ||
+	fail "no trailing newline: the final, newline-less candidate must be used"
+
 # (b) Empty candidates file: the documented "no earlier successful run" text,
 # no attempt to run the gate script at all.
 : >"${fixture}/candidates-empty.txt"

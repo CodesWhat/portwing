@@ -78,7 +78,7 @@ if [ ! -s "${candidates}" ]; then
 fi
 
 status=3
-while IFS=$'\t' read -r run_id results label; do
+while IFS=$'\t' read -r run_id results label || [ -n "${run_id}" ]; do
 	[ -n "${results}" ] || continue
 	set +e
 	"${gate_script}" \
