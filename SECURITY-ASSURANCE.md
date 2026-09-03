@@ -134,6 +134,15 @@ Evidence: [`.github/workflows/ci-verify.yml`](.github/workflows/ci-verify.yml),
 [coverage report](https://qlty.sh/gh/CodesWhat/projects/portwing), and
 [`docs/content/docs/verification.mdx`](docs/content/docs/verification.mdx).
 
+The scheduled lanes also record what they measured, not only whether they
+passed. The weekly RSS-growth soak and the monthly mutation matrix each append
+their headline numbers to `quality-history`, an orphan branch carrying one
+append-only JSONL file per lane, so a leak or a mutation-score decline that
+stays inside its threshold on every individual run is still visible as a trend
+across them. Reading a lane's series is
+[`scripts/quality-history.sh`](scripts/quality-history.sh); the branch is never
+merged and is not part of any released tree.
+
 ## Residual risk
 
 A valid Docker-capable credential can still produce host-level impact. A

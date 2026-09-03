@@ -31,7 +31,11 @@ bash scripts/security-grype-config-test-test.sh
 bash scripts/security-grype-config-test.sh
 bash scripts/quality-integration-engines-config-test-test.sh
 bash scripts/quality-integration-engines-config-test.sh
+bash scripts/quality-history-config-test-test.sh
+bash scripts/quality-history-config-test.sh
 bash scripts/drydock-compat-script-test.sh
 bash scripts/benchstat-gate-script-test.sh
 bash scripts/benchstat-walk-baselines-test.sh
 bash scripts/mutation-gate-script-test.sh
+bash scripts/quality-history-script-test.sh
+bash scripts/quality-history-record-test.sh
