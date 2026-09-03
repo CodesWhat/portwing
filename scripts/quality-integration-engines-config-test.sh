@@ -183,18 +183,29 @@ fallback_api="$(
 if [ -z "${fallback_api}" ]; then
 	fail "could not read the negotiation fallback API version from ${client_source}"
 else
-	# Docker publishes the Engine release each API version shipped in. Only
-	# versions this table knows are accepted; an unknown one fails loudly
-	# rather than silently skipping the floor check.
+	# The FIRST Engine minor to serve each API version, transcribed from the
+	# API version matrix at
+	# https://docs.docker.com/reference/api/engine/#api-version-matrix.
+	# Transcribe, don't infer: several API versions span three or four Engine
+	# minors, so "the Engine that reports API vX" is not the same question as
+	# "the oldest Engine that serves API vX", and only the second one is the
+	# floor. 1.47 is the trap — it ships in 27.2 through 27.5, and 27.1 serves
+	# 1.46. An unknown API version fails loudly rather than silently skipping
+	# the floor check.
 	case "${fallback_api}" in
 	1.43) floor_engine="24.0" ;;
 	1.44) floor_engine="25.0" ;;
 	1.45) floor_engine="26.0" ;;
 	1.46) floor_engine="27.0" ;;
-	1.47) floor_engine="27.1" ;;
+	1.47) floor_engine="27.2" ;;
 	1.48) floor_engine="28.0" ;;
 	1.49) floor_engine="28.1" ;;
 	1.50) floor_engine="28.2" ;;
+	1.51) floor_engine="28.3" ;;
+	1.52) floor_engine="29.0" ;;
+	1.53) floor_engine="29.2" ;;
+	1.54) floor_engine="29.3" ;;
+	1.55) floor_engine="29.6" ;;
 	*) floor_engine="" ;;
 	esac
 
@@ -203,8 +214,15 @@ else
 	else
 		oldest_matrix="$(awk '{ sub(/^v/, ""); print }' <<<"${matrix_versions}" | grep . | sort -V | head -n1)"
 		oldest_minor="$(cut -d. -f1,2 <<<"${oldest_matrix}")"
-		if [ "$(printf '%s\n%s\n' "${oldest_minor}" "${floor_engine}" | sort -V | head -n1)" != "${oldest_minor}" ]; then
-			fail "oldest matrix Engine ${oldest_matrix} is newer than the documented floor: API v${fallback_api} first shipped in Engine ${floor_engine}, so the matrix must reach back to it"
+		# Equality, not "at least as old as". Too new leaves the documented
+		# floor untested, which is the obvious half. Too OLD is also wrong and
+		# a one-sided check misses it: an Engine below the floor serves an API
+		# the docs don't claim, so a red leg there is a failure against a
+		# contract portwing never made, and a green one quietly widens the
+		# support claim without anybody deciding to. The bottom of the matrix
+		# and the published floor are the same fact and have to move together.
+		if [ "${oldest_minor}" != "${floor_engine}" ]; then
+			fail "oldest matrix Engine ${oldest_matrix} must sit exactly on the documented floor: API v${fallback_api} first shipped in Engine ${floor_engine}, so the matrix must start at ${floor_engine}.x"
 		fi
 	fi
 fi
@@ -272,10 +290,47 @@ grep -Fq 'docker context inspect --format' <<<"${daemon_step}" ||
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 grep -Fq 'WANT: ${{ matrix.engine }}' <<<"${daemon_step}" ||
 	fail "the version guard must compare against the matrix pin"
-grep -Fq 'pinned Engine did not take' <<<"${daemon_step}" ||
-	fail "the version guard must fail when the daemon reports a version other than the pin"
-grep -Fq 'the suite would silently skip' <<<"${daemon_step}" ||
-	fail "the lane must fail when the resolved socket is missing, since the suite skips instead of failing"
+# The guards' predicates AND their bodies. Asserting only the echo strings
+# would pass a step that prints the right diagnostic and then carries on: the
+# message is not the guard, the non-zero exit is. Each block is scoped from its
+# own `if` to its own `fi` so an `exit 1` belonging to the other guard can't
+# stand in for a missing one.
+#
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fq 'if [ "v${got}" != "${WANT}" ]; then' <<<"${daemon_step}" ||
+	fail "the version guard must compare the daemon's reported version against the pin with !="
+
+version_guard="$(
+	awk '
+        /^          if \[ "v\$\{got\}" != "\$\{WANT\}" \]; then$/ { in_guard = 1; next }
+        in_guard && /^          fi$/ { in_guard = 0 }
+        in_guard { print }
+    ' <<<"${daemon_step}"
+)"
+
+[ -n "${version_guard}" ] || fail "expected a version-mismatch guard block in the daemon step"
+grep -Fq 'pinned Engine did not take' <<<"${version_guard}" ||
+	fail "the version guard must say what went wrong when the daemon reports a version other than the pin"
+grep -Eq '^[[:space:]]*exit 1$' <<<"${version_guard}" ||
+	fail "the version guard must exit non-zero, not just print: a wrong daemon version has to fail the leg"
+
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fq 'if [ ! -S "${sock}" ]; then' <<<"${daemon_step}" ||
+	fail "the lane must check the resolved path is actually a socket"
+
+socket_guard="$(
+	awk '
+        /^          if \[ ! -S "\$\{sock\}" \]; then$/ { in_guard = 1; next }
+        in_guard && /^          fi$/ { in_guard = 0 }
+        in_guard { print }
+    ' <<<"${daemon_step}"
+)"
+
+[ -n "${socket_guard}" ] || fail "expected a missing-socket guard block in the daemon step"
+grep -Fq 'the suite would silently skip' <<<"${socket_guard}" ||
+	fail "the lane must say why a missing socket is fatal, since the suite skips instead of failing"
+grep -Eq '^[[:space:]]*exit 1$' <<<"${socket_guard}" ||
+	fail "the missing-socket guard must exit non-zero: a skipped suite exits 0 and would report green"
 
 # --- suite invocation: byte-identical to quality-integration.yml -------------
 #
@@ -295,15 +350,39 @@ if [ -n "${engines_test_cmd}" ] && [ -n "${base_test_cmd}" ] &&
 	fail "suite invocation must match ${base_workflow} exactly; found '${engines_test_cmd}' vs '${base_test_cmd}'"
 fi
 
+# Both env vars have to be on the step that actually runs the suite, so this
+# is scoped to that step rather than grepped file-wide. The file-wide version
+# was satisfiable by a decoy: the pre-pull step already carries its own
+# DOCKER_HOST, so a DOCKER_HOST deleted from the test step would still have
+# been found somewhere in the file.
+suite_step="$(
+	awk '
+        /^      - name: Run integration suite$/ { in_step = 1; next }
+        in_step && /^      - name: / { in_step = 0 }
+        in_step { print }
+    ' "${workflow}"
+)"
+
+[ -n "${suite_step}" ] || fail "expected a 'Run integration suite' step"
+
 # The suite reads its socket from PORTWING_TEST_DOCKER_SOCKET, and it has to
 # come from the resolved context socket. A hard-coded /var/run/docker.sock
-# here would point every leg at the runner's stock dockerd.
+# would point every leg at the runner's stock dockerd.
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-grep -Fq 'PORTWING_TEST_DOCKER_SOCKET: ${{ steps.daemon.outputs.socket }}' "${workflow}" ||
-	fail "the suite must be pointed at the resolved daemon socket via PORTWING_TEST_DOCKER_SOCKET"
-if grep -Fq "PORTWING_TEST_DOCKER_SOCKET: /var/run/docker.sock" "${workflow}"; then
+grep -Fq 'PORTWING_TEST_DOCKER_SOCKET: ${{ steps.daemon.outputs.socket }}' <<<"${suite_step}" ||
+	fail "the suite step must be pointed at the resolved daemon socket via PORTWING_TEST_DOCKER_SOCKET"
+if grep -Fq "PORTWING_TEST_DOCKER_SOCKET: /var/run/docker.sock" <<<"${suite_step}"; then
 	fail "the suite must not be pointed at the runner's stock docker socket"
 fi
+
+# DOCKER_HOST covers the path PORTWING_TEST_DOCKER_SOCKET does not:
+# internal/integration's startAlpineContainer shells out to a bare `docker run`
+# with no --host, so without this the container lands on whatever daemon the
+# runner's default context points at while the rest of the suite talks to the
+# pinned one.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fq 'DOCKER_HOST: unix://${{ steps.daemon.outputs.socket }}' <<<"${suite_step}" ||
+	fail "the suite step must set DOCKER_HOST to the resolved daemon socket, for the bare docker run in startAlpineContainer"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} quality-integration-engines contract check(s) failed" >&2

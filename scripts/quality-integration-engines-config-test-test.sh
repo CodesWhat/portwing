@@ -178,7 +178,7 @@ assert_rejected \
 reset_all
 sed -i.bak "/^          - v25\.0\.5$/d" "${fixture}"
 assert_rejected \
-	"is newer than the documented floor" \
+	"must sit exactly on the documented floor" \
 	"contract must reject a matrix that no longer covers the documented API floor"
 
 # The floor is read from client.go, not restated in the contract: drop the
@@ -187,8 +187,18 @@ assert_rejected \
 reset_all
 sed -i.bak 's|c.apiVersion = "v1.44"|c.apiVersion = "v1.43"|g' "${client_fixture}"
 assert_rejected \
-	"is newer than the documented floor" \
+	"must sit exactly on the documented floor" \
 	"contract must re-derive the floor from client.go, not hard-code it"
+
+# Matrix reaching BELOW the floor. A one-sided "at least as old as" check
+# passes this, which is why the assertion is equality: Engine 24.0 serves API
+# v1.43, which portwing's docs don't claim, so a leg there tests a contract
+# nobody made.
+reset_all
+sed -i.bak "s|^          - v25\.0\.5$|          - v24.0.9|" "${fixture}"
+assert_rejected \
+	"must sit exactly on the documented floor" \
+	"contract must reject a matrix that reaches back past the documented floor"
 
 # An API version the table doesn't know must fail loudly rather than skip the
 # floor check and report a green contract.
@@ -279,7 +289,7 @@ assert_rejected \
 reset_all
 sed -i.bak "/pinned Engine did not take/d" "${fixture}"
 assert_rejected \
-	"must fail when the daemon reports a version other than the pin" \
+	"must say what went wrong when the daemon reports a version other than the pin" \
 	"contract must reject a lane that doesn't check the daemon version it got"
 
 # The socket existence check dropped: the suite skips on a missing socket and
@@ -287,8 +297,43 @@ assert_rejected \
 reset_all
 sed -i.bak "/the suite would silently skip/d" "${fixture}"
 assert_rejected \
-	"must fail when the resolved socket is missing" \
+	"must say why a missing socket is fatal" \
 	"contract must reject a lane that lets the suite skip itself green"
+
+# The version comparison inverted from != to =, so the guard passes only when
+# the daemon is WRONG. The echo string survives, which is exactly why the
+# contract asserts the predicate and not just the message.
+reset_all
+# shellcheck disable=SC2016 # ${got}/${WANT} are the workflow's shell variables, not ours.
+sed -i.bak 's|if \[ "v${got}" != "${WANT}" \]; then|if [ "v${got}" = "${WANT}" ]; then|' "${fixture}"
+assert_rejected \
+	"must compare the daemon's reported version against the pin with !=" \
+	"contract must reject an inverted version comparison"
+
+# The version guard keeps its diagnostic but stops failing the leg. Printing
+# is not guarding: the suite would then run against the wrong daemon and pass.
+reset_all
+sed -i.bak '/pinned Engine did not take/{n;s/exit 1/true/;}' "${fixture}"
+assert_rejected \
+	"the version guard must exit non-zero" \
+	"contract must reject a version guard that prints without failing"
+
+# Same for the missing-socket guard. This is the worse of the two, because a
+# skipped suite exits 0 and the leg reports green having run nothing.
+reset_all
+sed -i.bak '/the suite would silently skip/{n;s/exit 1/true/;}' "${fixture}"
+assert_rejected \
+	"the missing-socket guard must exit non-zero" \
+	"contract must reject a socket guard that prints without failing"
+
+# -S relaxed to -e: a plain file or directory at the resolved path would now
+# satisfy the check, and the suite would skip on it.
+reset_all
+# shellcheck disable=SC2016 # ${sock} is the workflow's shell variable, not ours.
+sed -i.bak 's|if \[ ! -S "${sock}" \]; then|if [ ! -e "${sock}" ]; then|' "${fixture}"
+assert_rejected \
+	"must check the resolved path is actually a socket" \
+	"contract must reject a socket check relaxed to mere existence"
 
 # --- suite invocation --------------------------------------------------------
 
@@ -314,5 +359,26 @@ sed -i.bak 's|          PORTWING_TEST_DOCKER_SOCKET: ${{ steps.daemon.outputs.so
 assert_rejected \
 	"must not be pointed at the runner's stock docker socket" \
 	"contract must reject the suite being pointed at the stock docker socket"
+
+# PORTWING_TEST_DOCKER_SOCKET dropped from the step that runs the suite. The
+# suite then falls back to /var/run/docker.sock and every leg tests the
+# runner's stock dockerd.
+reset_all
+sed -i.bak '/^          PORTWING_TEST_DOCKER_SOCKET: ${{ steps.daemon.outputs.socket }}$/d' "${fixture}"
+assert_rejected \
+	"the suite step must be pointed at the resolved daemon socket" \
+	"contract must reject a suite step with no PORTWING_TEST_DOCKER_SOCKET"
+
+# DOCKER_HOST dropped from the suite step only. The pre-pull step keeps its
+# own, so a file-wide grep still finds the string. This is the case that makes
+# the step scoping load-bearing rather than cosmetic, and it is the exact
+# regression that would send startAlpineContainer's bare `docker run` to the
+# runner's default context while the rest of the suite talks to the pinned
+# daemon.
+reset_all
+sed -i.bak '/PORTWING_TEST_DOCKER_SOCKET/{n;d;}' "${fixture}"
+assert_rejected \
+	"the suite step must set DOCKER_HOST to the resolved daemon socket" \
+	"contract must reject a suite step missing DOCKER_HOST even when a decoy DOCKER_HOST survives elsewhere"
 
 echo "Quality integration engine-matrix contract self-tests passed."
