@@ -3,6 +3,24 @@
 # location-scoped so dependency updates automatically force a new review. CI
 # separately rejects any source dependency or shipped binary that links openpgp.
 #
+# 2026-09-02 image audit: the first live run of the weekly published-image
+# rescan (run 33697361140) failed both gating legs of the published v0.9.11
+# image on GHSA-vp52-pcj8-j9qc / CVE-2026-84304, google.golang.org/grpc v1.83.0
+# HIGH. Portwing's own module graph has no grpc in it at all (`go list -m all`
+# on dev/v0.9 and main), and `go version -m` on the extracted amd64 and arm64
+# binaries puts the carrier in Wolfi's docker-compose (v5.5.0+dirty), so the
+# entry below is scoped to that third-party binary exactly like the
+# docker/docker ones. Nothing exists to bump to: docker/compose's newest
+# release is v5.5.0 (2026-08-17) and pins grpc v1.83.0, Wolfi's newest package
+# 5.5.0-r4 still embeds v1.83.0, and the advisory's vulnerable range is
+# <= 1.83.0 so no older Compose is any better. compose@main has already moved
+# to grpc v1.83.2, so the fix arrives with the next Compose release; the
+# version pin below is what forces the re-review when Wolfi ships it.
+# go-vulndb had assigned no GO- alias for this advisory as of 2026-09-02
+# (checked against osv.dev). Pair one in below the moment it appears, the same
+# way GO-2026-4883 and GO-2026-4887 are paired, or an alias flip in the Grype
+# database silently reopens the gate.
+#
 # 2026-09-02: x/crypto moved v0.55.0 -> v0.56.0 to clear GO-2026-6354 and
 # GO-2026-6355 (CVE-2026-78662, CVE-2026-56855), both x/crypto/ssh channel
 # deadlock DoS advisories that the pre-push qlty osv-scanner gate began
@@ -126,79 +144,39 @@ ignore:
       type: go-module
       location: "**/usr/bin/docker-compose"
 
-  # CVE-2026-54876 is a memory leak in OpenSSL's TLS *client* OCSP response
-  # checking — a feature the application must opt into. Nothing in this image
-  # can enable it: portwing, docker-cli, and docker-compose are static Go
-  # binaries (Go crypto, no libssl linkage), and libssl's only consumers are
-  # busybox and wget, whose binaries contain no OCSP code at all (verified by
-  # string inspection of the shipped wget). The image's sole TLS-client use is
-  # the HEALTHCHECK wget against portwing's own localhost listener. No fixed
-  # package exists to bump to: upstream OpenSSL has only fix commits, Wolfi's
-  # secdb declares no fixed version, and grype matches these via NVD CPE
-  # fallback, so even the 3.6.3-r4 rebuild would still match. Version-scoped
-  # so a Wolfi openssl bump forces re-review. Review by 2026-09-15 or when
-  # Wolfi publishes an openssl secfix for this CVE, whichever is sooner.
+  # GHSA-vp52-pcj8-j9qc / CVE-2026-84304 is a heap-exhaustion DoS: an
+  # unauthenticated peer fragments its payload across millions of tiny HTTP/2
+  # DATA frames on concurrent multiplexed streams and each fragment costs a
+  # separate recvMsg in grpc's shared internal/transport recvBuffer.
   #
-  # 2026-08-17 re-review: the release image at the time picked up Wolfi's
-  # 3.6.3-r4 rebuild and the version pin fired as designed. r4 is a
-  # rebuild, not a secfix — Wolfi's secdb still declares no fixed version
-  # for this CVE and the CPE fallback matched r4 exactly as predicted
-  # above. Re-verified the shipped wget contains zero OCSP references;
-  # rationale unchanged, entries re-scoped to 3.6.3-r4. Review deadline
-  # unchanged (2026-09-15).
-  - vulnerability: CVE-2026-54876
-    reason: "Opt-in OCSP-checking TLS client leak; no libssl consumer in the image implements OCSP checking and no fixed Wolfi package exists yet. Review by 2026-09-15."
-    package:
-      name: libcrypto3
-      version: 3.6.3-r4
-      type: apk
-  - vulnerability: CVE-2026-54876
-    reason: "Opt-in OCSP-checking TLS client leak; no libssl consumer in the image implements OCSP checking and no fixed Wolfi package exists yet. Review by 2026-09-15."
-    package:
-      name: libssl3
-      version: 3.6.3-r4
-      type: apk
-
-  # CVE-2026-14456 is a DoS in OpenSSL's QUIC *server* role: an unauthenticated
-  # peer flooding Initial packets at a Listener SSL object makes it queue
-  # unbounded per-channel state. Read the advisory text directly rather than
-  # inferring from the CVSS score — the vector is entirely server-side QUIC.
-  # Nothing in this image is a QUIC server. Re-verified per-binary with
-  # `objdump -p` on the extracted images rather than reasoning from the
-  # Dockerfile: docker, docker-compose, and busybox link only libc (musl on the
-  # armv7 leg), so wget is the sole libssl.so.3/libcrypto.so.3 consumer, and the
-  # shipped wget has no QUIC support at all (no quic/http3 strings). Its only
-  # invocation is Dockerfile.release's HEALTHCHECK against portwing's own
-  # loopback listener.
+  # Unlike the openpgp entries above this is NOT a linkage argument, and saying
+  # so plainly matters: grpc's server code *is* linked into the shipped Compose
+  # binary. `go tool nm` finds google.golang.org/grpc.(*Server).Serve, and the
+  # pclntab carries internal/transport/http2_server.go. The argument is
+  # reachability. The only gRPC server Compose can run is BuildKit's session
+  # (the registered services are moby.filesync.v1 and moby.buildkit.v1), and
+  # that is served over the single already-established hijacked /session
+  # connection to the Docker daemon the operator configured, never a network
+  # listener, so the unauthenticated-remote position the advisory describes does
+  # not exist. Its gRPC clients dial only operator-configured endpoints:
+  # buildkitd through that same daemon, and the OTLP trace exporter, which this
+  # image sets no endpoint for. Portwing runs Compose as a short-lived
+  # subprocess per request (internal/docker/compose.go, buildCommand) via
+  # exec.CommandContext, sharing this container's memory cgroup rather than one
+  # of its own, so a cgroup-level OOM kill can take down the whole container,
+  # not just Compose. The argument here is not isolation, it's reachability:
+  # there is no listener for an unauthenticated peer to hit.
   #
-  # No fixed package exists to bump to on either base: grype reports fix state
-  # "unknown", Wolfi's secdb has no secfix past 3.6.3-r4, and Alpine ships
-  # 3.5.7-r0 on both 3.24 and edge while the upstream fix line is 3.5.8/3.6.4.
-  # Entries are version-scoped per base so either distro shipping a fix forces
-  # re-review. Review by 2026-09-15, alongside the CVE-2026-54876 entries.
-  - vulnerability: CVE-2026-14456
-    reason: "QUIC-server DoS; wget is the image's only libssl/libcrypto consumer (objdump-verified) and has no QUIC support. No fixed Wolfi package exists yet. Review by 2026-09-15."
+  # Version-scoped, so the pin keeps this ignore from silently following
+  # whatever grpc Wolfi's Compose package embeds next; once the version drifts,
+  # the weekly rescan stops matching and this entry goes dead rather than
+  # forcing a review on its own. The dated review deadline is what actually
+  # drives cleanup: review when Wolfi ships a Compose past v5.5.0, or by
+  # 2026-11-15 alongside the docker/docker entries above, whichever is sooner.
+  - vulnerability: GHSA-vp52-pcj8-j9qc
+    reason: "Embedded in the Wolfi docker-compose binary; Compose's only gRPC server is BuildKit's session over the hijacked Docker /session connection, never a network listener, and its gRPC clients dial only operator-configured endpoints. No fixed Compose release exists yet (v5.5.0 pins grpc v1.83.0; compose@main is already on v1.83.2). Review when Wolfi ships a Compose past v5.5.0, or by 2026-11-15."
     package:
-      name: libcrypto3
-      version: 3.6.3-r4
-      type: apk
-  - vulnerability: CVE-2026-14456
-    reason: "QUIC-server DoS; wget is the image's only libssl/libcrypto consumer (objdump-verified) and has no QUIC support. No fixed Wolfi package exists yet. Review by 2026-09-15."
-    package:
-      name: libssl3
-      version: 3.6.3-r4
-      type: apk
-  # armv7 leg: Alpine ships older OpenSSL than Wolfi, so the same CVE matches a
-  # different version and needs its own scoped entry.
-  - vulnerability: CVE-2026-14456
-    reason: "armv7 (Alpine) leg of the same QUIC-server DoS; wget is again the only libssl/libcrypto consumer, objdump-verified on the armv7 binaries. No fixed Alpine package on 3.24 or edge. Review by 2026-09-15."
-    package:
-      name: libcrypto3
-      version: 3.5.7-r0
-      type: apk
-  - vulnerability: CVE-2026-14456
-    reason: "armv7 (Alpine) leg of the same QUIC-server DoS; wget is again the only libssl/libcrypto consumer, objdump-verified on the armv7 binaries. No fixed Alpine package on 3.24 or edge. Review by 2026-09-15."
-    package:
-      name: libssl3
-      version: 3.5.7-r0
-      type: apk
+      name: google.golang.org/grpc
+      version: v1.83.0
+      type: go-module
+      location: "**/usr/bin/docker-compose"

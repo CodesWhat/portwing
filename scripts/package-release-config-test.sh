@@ -544,6 +544,45 @@ require_scoped_compose_advisory_alias "GHSA-pxq6-2prw-chj9"
 require_scoped_compose_advisory_alias "GO-2026-4883"
 require_scoped_compose_advisory_alias "GHSA-x744-4wpc-v9h2"
 require_scoped_compose_advisory_alias "GO-2026-4887"
+
+# The Compose grpc suppression is a reachability argument about one third-party
+# binary, not a claim about Portwing. Portwing's own module graph carries no
+# google.golang.org/grpc at all, so an ignore that lost its package, version or
+# location scope would quietly cover a real future grpc import into the agent
+# itself. Version-scoped for the same reason the entries above are: the next
+# grpc the Wolfi Compose package embeds has to come back through review.
+require_scoped_compose_grpc_advisory() {
+	local advisory_id="$1"
+	local block
+	local scrubbed_block
+	local count
+
+	count="$(grep -Fc -- "  - vulnerability: ${advisory_id}" .grype.yaml || true)"
+	block="$(awk -v advisory_id="${advisory_id}" '
+		$1 == "-" && $2 == "vulnerability:" {
+			if (capture) exit
+			capture = ($3 == advisory_id)
+		}
+		capture { print }
+	' .grype.yaml)"
+	# A field commented out (e.g. "#      location: ...") is absent as far
+	# as YAML and grype are concerned, but a plain substring grep over the
+	# raw block still sees the text and passes. Strip full comment lines and
+	# trailing comments before matching, then anchor each field to a key at
+	# the start of a line so a comment can no longer stand in for scope.
+	scrubbed_block="$(sed -e 's/[[:space:]]#.*$//' -e '/^[[:space:]]*#/d' <<<"${block}")"
+
+	if [ "${count}" -ne 1 ] ||
+		! grep -Eq '^[[:space:]]+name: google\.golang\.org/grpc[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+version: v1\.83\.0[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+type: go-module[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+location: "\*\*/usr/bin/docker-compose"[[:space:]]*$' <<<"${scrubbed_block}"; then
+		echo "FAIL: .grype.yaml must contain exactly one ${advisory_id} ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_scoped_compose_grpc_advisory "GHSA-vp52-pcj8-j9qc"
 require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/daemon/pkg/plugin" \
 	"the Compose advisory exclusion must stay guarded against linking Docker Engine's daemon plugin package"
 require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/pkg/authorization" \
