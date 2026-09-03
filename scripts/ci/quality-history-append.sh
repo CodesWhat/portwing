@@ -40,6 +40,10 @@
 #                                   filesystem remote.
 #   QUALITY_HISTORY_PUSH_ATTEMPTS   CAS attempts before giving up (default 20)
 #   QUALITY_HISTORY_EVENT           event name to gate on (default $GITHUB_EVENT_NAME)
+#   QUALITY_HISTORY_TIMESTAMP       fixed record timestamp. Exists so the
+#                                   duplicate-suppression path below can be
+#                                   tested: it needs two invocations that
+#                                   produce a byte-identical record.
 
 set -euo pipefail
 export LC_ALL=C
@@ -52,10 +56,17 @@ warn() {
 
 # Any nonzero exit becomes a warning and a zero status. Cleanup happens here
 # too so the credential in the temporary clone's config never outlives the run.
+#
+# `set +e` first, and every command in here is failure-tolerant. errexit still
+# applies inside an EXIT trap, so a cleanup that failed (a read-only temp dir,
+# an NFS mount that will not unlink) would abort the trap before `exit 0` and
+# hand the caller the very nonzero status this whole function exists to
+# prevent.
 soft_exit() {
 	local status=$?
+	set +e
 	if [ -n "${work_dir}" ] && [ -d "${work_dir}" ]; then
-		rm -rf "${work_dir}"
+		rm -rf "${work_dir}" || warn "could not remove the temporary clone at ${work_dir}"
 	fi
 	if [ "${status}" -ne 0 ]; then
 		warn "append did not complete (exit ${status}); the lane's own result is unaffected"
@@ -90,9 +101,14 @@ fi
 # the series unreadable. The calling workflows gate the step on the same
 # condition; this is the second lock, and it is the one a copy-pasted step into
 # some future PR-triggered lane still hits.
+#
+# An unset or empty event is refused rather than allowed through. Allowing it
+# made the gate fail open in exactly the case where it is most needed: a caller
+# that forgot to pass the event, or a context where GITHUB_EVENT_NAME is not
+# set, would record unconditionally. Both workflows pass it explicitly.
 event="${QUALITY_HISTORY_EVENT:-${GITHUB_EVENT_NAME:-}}"
 case "${event}" in
-schedule | workflow_dispatch | "") ;;
+schedule | workflow_dispatch) ;;
 *)
 	echo "quality-history: event '${event}' is not schedule or workflow_dispatch; not recording."
 	exit 0
@@ -127,7 +143,7 @@ record="$(
 	jq -cn \
 		--argjson numbers "${numbers}" \
 		--arg lane "${lane}" \
-		--arg timestamp "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+		--arg timestamp "${QUALITY_HISTORY_TIMESTAMP:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}" \
 		--arg workflow "${GITHUB_WORKFLOW:-local}" \
 		--arg event "${event:-local}" \
 		--arg run_id "${GITHUB_RUN_ID:-}" \
@@ -224,6 +240,18 @@ attempt_append() {
 		echo "quality-history: ${branch} does not exist yet; creating it."
 	fi
 
+	# A push can land server-side and still report failure to the client: the
+	# ref moves, the response is lost, and the retry below would append the
+	# same run a second time. The record is unique per lane, run, attempt and
+	# package, so finding this exact line already present means the previous
+	# attempt did land and there is nothing left to do. Checked on every
+	# attempt, which also makes a re-invocation of a run that already
+	# recorded a no-op rather than a duplicate row.
+	if [ -f "${repo_dir}/${file}" ] && grep -Fxq "${record}" "${repo_dir}/${file}"; then
+		echo "quality-history: this record is already on ${branch}; not appending it twice."
+		return 0
+	fi
+
 	if [ ! -f "${repo_dir}/README.md" ]; then
 		readme_text >"${repo_dir}/README.md" || return 1
 	fi
@@ -237,7 +265,12 @@ attempt_append() {
 	git -C "${repo_dir}" push --quiet origin "history:refs/heads/${branch}" || return 1
 }
 
-for attempt in $(seq 1 "${attempts}"); do
+# An arithmetic loop, not `for attempt in $(seq 1 N)`. A missing or shadowed
+# seq expands to nothing, the loop body never runs, and the script exits 0
+# having recorded nothing at all: a silent no-op is the one failure mode this
+# script's own soft-failure design cannot distinguish from success.
+attempt=1
+while [ "${attempt}" -le "${attempts}" ]; do
 	if attempt_append; then
 		echo "quality-history: recorded ${lane} on ${branch} (attempt ${attempt}/${attempts})."
 		exit 0
@@ -248,10 +281,10 @@ for attempt in $(seq 1 "${attempts}"); do
 		exit 1
 	fi
 
-	# Every other lane job pushes to this same branch, and the mutation
-	# matrix alone has 16 of them, so a rejected push is the expected case
-	# rather than an error. Refetch and replay on top of whoever won;
-	# jittered so two racers don't retry in lockstep forever.
+	# Another lane's job can be pushing to this same branch, so a rejected
+	# push is an expected case rather than an error. Refetch and replay on
+	# top of whoever won; jittered so two racers don't retry in lockstep.
 	echo "quality-history: attempt ${attempt}/${attempts} did not land, retrying."
 	sleep "$(((RANDOM % 3) + 1))"
+	attempt=$((attempt + 1))
 done

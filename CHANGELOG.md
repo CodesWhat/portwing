@@ -79,17 +79,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   print to the run log and step summary and nothing else, so a leak that adds
   a few MiB of RSS a week never trips the 64 MiB budget on any single run and
   is invisible in all of them; the same is true of a mutation score drifting
-  down inside its floor. Each lane now ends with a step that appends that run's
-  numbers to `quality-history`, an orphan branch in this repository holding one
-  append-only JSONL file per lane: baseline/final/growth RSS with the request
-  and error totals for soak, and per-package efficacy, mutator coverage, mutant
-  counts and the floor they were measured against for mutation. Read a series
-  with `scripts/quality-history.sh <lane> [--last N]`. Only `schedule` and
-  `workflow_dispatch` runs record, `contents: write` is scoped to the one job
-  in each lane that appends, and an append that cannot reach the remote emits a
-  warning and exits 0 rather than turning a green quality lane red. The branch
-  shares no history with `main` or any `dev/*` branch and is never merged, so
-  no tracked file changes on a cron and nothing here reaches a released tree.
+  down inside its floor. Each lane now ends with a separate job that appends
+  that run's numbers to `quality-history`, an orphan branch in this repository
+  holding one append-only JSONL file per lane: baseline/final/growth RSS with
+  the request and error totals for soak, and per-package efficacy, mutator
+  coverage, mutant counts and the floor they were measured against for
+  mutation. Read a series with `scripts/quality-history.sh <lane> [--last N]`.
+  Only `schedule` and `workflow_dispatch` runs record. `contents: write` is
+  scoped to that recording job alone, which builds nothing and runs no product
+  code, so the credential never sits in the job that spends four hours running
+  the agent or the one that executes mutated source. An append that cannot
+  reach the remote emits a warning and exits 0 rather than turning a green
+  quality lane red, and a record already present is never written twice. The
+  branch shares no history with `main` or any `dev/*` branch and is never
+  merged, so no tracked file changes on a cron and nothing here reaches a
+  released tree.
 
 ### Fixed
 

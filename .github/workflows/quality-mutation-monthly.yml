@@ -37,16 +37,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
 
-    # Scoped to this job, and used by exactly one step: the final append to
-    # the `quality-history` orphan branch (PW-5.5). The workflow default
-    # stays contents: read, and the other two jobs in this file keep it —
-    # mutation-advisory and gate-canary record nothing and must not be able
-    # to write. Checkout runs with persist-credentials: false, so none of the
-    # Gremlins steps carry a git credential; the append step is handed one
-    # through env and confines it to a temporary clone.
-    permissions:
-      contents: write
-
     strategy:
       fail-fast: false
       matrix:
@@ -246,17 +236,21 @@ jobs:
       # PW-5.5/PW-2.5. The report artifact expires in 30 days on a lane that
       # runs every 30, so the previous run's numbers are gone by the time the
       # next one lands and "did adapter's efficacy drift?" has no answer that
-      # doesn't involve re-running it. This step keeps the headline numbers
-      # (not the surviving mutants themselves) on the quality-history branch,
-      # one record per package per run, alongside the floor they were measured
-      # against so a ratchet edit is visible in the same series.
+      # doesn't involve re-running it. This records the headline numbers (not
+      # the surviving mutants themselves) for the `history` job below to
+      # append, alongside the floor they were measured against so a ratchet
+      # edit is visible in the same series.
+      #
+      # The record is computed here, where the matrix context lives, and
+      # written to a file rather than pushed from here. This job runs Gremlins
+      # over mutated source and must stay read-only; the job that holds the
+      # credential does no such thing.
       #
       # always(), because the run that fell below its floor is precisely the
       # one worth having in the history.
-      - name: Append the package to the quality history
+      - name: Record this package for the quality history
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         env:
-          QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE_NAME: ${{ matrix.name }}
           PACKAGE_PATH: ${{ matrix.package }}
           EFFICACY_FLOOR: ${{ matrix.efficacy || '' }}
@@ -267,12 +261,22 @@ jobs:
           # Read back from the same mutation-report.json that
           # scripts/ci/mutation-gate.sh gated on, so the recorded efficacy is
           # by construction the number the lane passed or failed against.
+          #
+          # `jq -e .` rather than `[ -s ]`. A truncated or corrupt report is
+          # non-empty, so a size check passes it, every field then reads as
+          # null, and the series grows a row that says "measured, and every
+          # number was zero" for a run that measured nothing. That is the same
+          # green-means-nothing failure PW-6.1 was about, so it gets its own
+          # mode instead.
           if [ "${ZERO_MUTANTS}" = "true" ]; then
             mode="zero-mutants"
-          elif [ -s mutation-report.json ]; then
+          elif [ ! -f mutation-report.json ]; then
+            mode="unmeasured"
+          elif jq -e . mutation-report.json >/dev/null 2>&1; then
             mode="gated"
           else
-            mode="unmeasured"
+            mode="unparseable"
+            echo "::warning::mutation-report.json is not readable JSON; recording ${PACKAGE_NAME} as unparseable."
           fi
 
           # Gremlins counts TIMED OUT mutants but never writes the count to
@@ -318,12 +322,102 @@ jobs:
             }' mutation-report.json 2>/dev/null || echo '{}')"
           fi
 
-          numbers="$(jq -cn \
+          jq -cn \
             --argjson envelope "${envelope}" \
             --argjson measured "${measured}" \
-            '$envelope + $measured')"
+            '$envelope + $measured' >quality-history-record.json
 
-          scripts/ci/quality-history-append.sh mutation "${numbers}"
+          cat quality-history-record.json
+
+      - name: Upload the quality history record
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: mutation-history-${{ matrix.name }}-${{ github.run_id }}
+          path: quality-history-record.json
+          if-no-files-found: warn
+          # Read by the history job in this same run and never again.
+          retention-days: 1
+
+  # PW-5.5. The one job in this workflow that can write to the repository, and
+  # the only one that runs no Go, no Gremlins and nothing from the workspace
+  # beyond the append script itself.
+  #
+  # Keeping the push in the matrix job would mean sixteen jobs holding a
+  # write-scoped credential while Gremlins executes mutated source and a
+  # third-party binary, with the append script read from the same workspace
+  # those steps could have rewritten. Splitting it costs one short job and
+  # removes that entirely: this one checks out the tree fresh at the run's own
+  # SHA, downloads the legs' records, and treats them strictly as data (each
+  # is validated as JSON and passed as an argument, never sourced).
+  #
+  # It also removes the push contention the in-job version had. Sixteen legs
+  # racing to append to one branch relied on a retry loop nobody had run at
+  # that width; sixteen sequential appends from one job race nothing.
+  history:
+    name: "Record the mutation run in the quality history"
+    needs: gremlins
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          # The union of two endpoint sets already proven in this repository:
+          # ci-verify.yml's coverage job downloads an artifact with
+          # results-receiver, and quality-soak-weekly.yml lists the blob host
+          # for artifact traffic. github.com carries the checkout and the git
+          # push; there is no other network call in this job.
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the per-package records
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: mutation-history-*-${{ github.run_id }}
+          path: records
+
+      - name: Append each package to the quality history
+        env:
+          QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}
+          QUALITY_HISTORY_EVENT: ${{ github.event_name }}
+        run: |
+          shopt -s nullglob
+          records=(records/*/quality-history-record.json)
+
+          if [ "${#records[@]}" -eq 0 ]; then
+            echo "::warning::No per-package records were downloaded; nothing to append."
+            exit 0
+          fi
+
+          # Every record is untrusted input from another job: read as data
+          # through jq, checked for being an object, and passed as a single
+          # argument. Nothing here evaluates a downloaded file, and the
+          # package name comes from inside the JSON rather than from the
+          # artifact's filename.
+          for record in "${records[@]}"; do
+            if ! numbers="$(jq -ec 'select(type == "object")' "${record}" 2>/dev/null)"; then
+              echo "::warning::${record} is not a JSON object; skipping it."
+              continue
+            fi
+            scripts/ci/quality-history-append.sh mutation "${numbers}"
+          done
 
   # PW-6.8: Gremlins ships 11 mutator types and enables 5 of them. The 6 it
   # leaves off by default (invert-logical, invert-bitwise, invert-bwassign,

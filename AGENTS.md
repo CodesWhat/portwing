@@ -69,10 +69,22 @@ The scheduled quality lanes print their headline numbers to one run's log and
 step summary and nothing else, so a regression that is slow enough to stay
 inside its threshold every single week is invisible in every single run. The
 `quality-soak-weekly.yml` and `quality-mutation-monthly.yml` lanes each end
-with a step that appends that run's numbers to `quality-history`, an orphan
-branch in this repository holding one append-only JSONL file per lane
-(`soak.jsonl`, `mutation.jsonl`, and `fuzz-nightly.jsonl`/`bench.jsonl` when
-those lanes adopt it).
+with a separate `history` job that appends that run's numbers to
+`quality-history`, an orphan branch in this repository holding one append-only
+JSONL file per lane (`soak.jsonl`, `mutation.jsonl`, and
+`fuzz-nightly.jsonl`/`bench.jsonl` when those lanes adopt it).
+
+It is a separate job on purpose. `contents: write` has to live somewhere for
+the push, and the measuring jobs run the product: the soak job drives the agent
+under load for four hours, and the Gremlins matrix executes mutated source and
+a third-party binary. A write-scoped credential in either would be reachable
+through anything those steps could have rewritten, including the append script
+itself. The `history` job checks the tree out fresh, downloads the run's
+artifacts, and runs nothing but jq and git; the soak numbers travel as job
+outputs plus the existing `soak-output.txt` artifact, and each mutation matrix
+leg uploads a one-file `mutation-history-<package>-<run_id>` record for it to
+read. Downloaded records are data: validated as JSON and passed as arguments,
+never sourced.
 
 Read a lane's series with `scripts/quality-history.sh <lane> [--last N]`, which
 fetches the branch into a throwaway clone and prints a table; `--json` gives
@@ -84,8 +96,9 @@ append, gated both in the workflow `if:` and in the script.
 
 The branch is never merged and never released. Nothing on a trunk branch
 changes when a lane runs, which is what keeps the house rule that committed
-generated artifacts only move at a release cut. `contents: write` is scoped to
-the single job that appends in each lane; `scripts/quality-history-config-test.sh`
-holds both lanes to that, and `scripts/quality-history-script-test.sh` drives
-the appender against a real git remote (bootstrap, append, and a push rejected
-by a concurrent writer).
+generated artifacts only move at a release cut.
+`scripts/quality-history-config-test.sh` holds both lanes to the write
+scoping, including that the recording job never grows a `setup-go` or a `go
+build`, and `scripts/quality-history-script-test.sh` drives the appender
+against a real git remote (bootstrap, append, a push rejected by a concurrent
+writer, and a repeated identical record that must not become a second row).

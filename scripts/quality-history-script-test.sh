@@ -195,6 +195,53 @@ grep -Fq "unknown lane" <<<"${output}" || fail "an unknown lane must be refused"
 [ "$(branch_file soak.jsonl | grep -c . || true)" = "${lines_before}" ] ||
 	fail "a refused append must leave the series untouched"
 
+# An unset event is refused rather than treated as "probably fine". Allowing
+# it made the gate fail open exactly where it mattered: a caller that forgot
+# to pass the event recorded unconditionally.
+output="$(env -u QUALITY_HISTORY_EVENT -u GITHUB_EVENT_NAME \
+	QUALITY_HISTORY_REMOTE="${bare}" \
+	bash "${append}" soak '{"rss_growth_bytes":1}' 2>&1)" || true
+grep -Fq "not schedule or workflow_dispatch" <<<"${output}" ||
+	fail "an unset event must be refused (output: ${output})"
+[ "$(branch_file soak.jsonl | grep -c . || true)" = "${lines_before}" ] ||
+	fail "an unset event must not append"
+
+# A push can land server-side and lose its response, and the retry would then
+# write the same run twice. Two invocations that produce a byte-identical
+# record must leave one row, not two. QUALITY_HISTORY_TIMESTAMP exists so this
+# is reproducible; everything else about the record is already fixed by the
+# run id, attempt and lane.
+duplicate_numbers='{"rss_growth_bytes":777,"outcome":"success"}'
+run_append_fixed() {
+	env \
+		QUALITY_HISTORY_REMOTE="${bare}" \
+		QUALITY_HISTORY_EVENT="schedule" \
+		QUALITY_HISTORY_TIMESTAMP="2026-09-03T00:00:00Z" \
+		QUALITY_HISTORY_AUTHOR_NAME="test" \
+		QUALITY_HISTORY_AUTHOR_EMAIL="test@example.invalid" \
+		GITHUB_RUN_ID="900" \
+		GITHUB_RUN_ATTEMPT="1" \
+		GITHUB_RUN_NUMBER="9" \
+		GITHUB_WORKFLOW="Quality: Test" \
+		GITHUB_SHA="1111111111111111111111111111111111111111" \
+		GITHUB_REF_NAME="dev/v0.9" \
+		bash "${append}" soak "${duplicate_numbers}" 2>&1
+}
+
+run_append_fixed >/dev/null || true
+after_first="$(branch_file soak.jsonl | grep -c . || true)"
+output="$(run_append_fixed)" || true
+after_second="$(branch_file soak.jsonl | grep -c . || true)"
+
+grep -Fq "already on quality-history" <<<"${output}" ||
+	fail "a repeated identical record must be recognised, not re-appended (output: ${output})"
+[ "${after_second}" = "${after_first}" ] ||
+	fail "a repeated identical record must not grow the file (${after_first} -> ${after_second})"
+[ "$(branch_file soak.jsonl | grep -c '"rss_growth_bytes":777' || true)" = "1" ] ||
+	fail "the duplicated run must appear exactly once in the series"
+
+lines_before="$(branch_file soak.jsonl | grep -c . || true)"
+
 # An unreachable remote warns and exits 0. This is the property that keeps a
 # history outage from turning a green quality lane red.
 set +e

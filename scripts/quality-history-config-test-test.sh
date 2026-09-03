@@ -13,6 +13,7 @@ export LC_ALL=C
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/portwing-quality-history-contract.XXXXXX")"
 trap 'rm -rf "${test_root}"' EXIT
 
+tab="$(printf '\t')"
 contract="scripts/quality-history-config-test.sh"
 soak="${test_root}/soak.yml"
 mutation="${test_root}/mutation.yml"
@@ -56,27 +57,28 @@ assert_rejected() {
 reset_fixtures
 assert_passes "the real workflows and append script must pass their own contract"
 
-# The append step is deleted outright.
-reset_fixtures
-sed -i.bak '/^      - name: Append the run to the quality history$/d' "${soak}"
-assert_rejected \
-	"expected a step named 'Append the run to the quality history'" \
-	"contract must reject a soak lane that stopped appending"
+# --- the recording job itself ------------------------------------------------
 
 reset_fixtures
-sed -i.bak '/^      - name: Append the package to the quality history$/d' "${mutation}"
+sed -i.bak '/^    needs: soak$/d' "${soak}"
 assert_rejected \
-	"expected a step named 'Append the package to the quality history'" \
-	"contract must reject a mutation lane that stopped appending"
+	"the history job must run after 'soak'" \
+	"contract must reject a history job that no longer waits for the lane it records"
+
+reset_fixtures
+sed -i.bak '/^      - name: Append the run to the quality history$/,$d' "${soak}"
+assert_rejected \
+	"must call the shared script with lane 'soak'" \
+	"contract must reject a soak lane that stopped appending"
 
 # The event gate is dropped, so a pull_request or push run would record.
 reset_fixtures
 sed -i.bak \
-	"s/^        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')$/        if: always()/" \
+	"s/^    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')\$/    if: always()/" \
 	"${soak}"
 assert_rejected \
-	"the append step condition must be exactly" \
-	"contract must reject an append step with no event gate"
+	"the history job condition must be exactly" \
+	"contract must reject a history job with no event gate"
 
 # The gate is inverted into a conjunction, which no run can satisfy.
 reset_fixtures
@@ -84,23 +86,51 @@ sed -i.bak \
 	"s/github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'/github.event_name == 'schedule' \&\& github.event_name == 'workflow_dispatch'/" \
 	"${mutation}"
 assert_rejected \
-	"the append step condition must be exactly" \
+	"the history job condition must be exactly" \
 	"contract must reject a gate whose || became &&"
 
-# The step writes into the wrong lane's series.
+# The job writes into the wrong lane's series.
 reset_fixtures
 sed -i.bak 's#quality-history-append.sh soak #quality-history-append.sh bench #' "${soak}"
 assert_rejected \
 	"must call the shared script with lane 'soak'" \
-	"contract must reject a soak step recording into another lane's file"
+	"contract must reject a soak job recording into another lane's file"
 
-# The credential is no longer handed to the step, so every push would fail
+# The credential is no longer handed to the job, so every push would fail
 # silently behind the appender's own warning.
 reset_fixtures
 sed -i.bak '/^          QUALITY_HISTORY_CREDENTIAL:/d' "${mutation}"
 assert_rejected \
 	"must pass the credential through QUALITY_HISTORY_CREDENTIAL" \
-	"contract must reject an append step with no credential"
+	"contract must reject a history job with no credential"
+
+# The event is left to the ambient GITHUB_EVENT_NAME, which the script now
+# refuses when empty.
+reset_fixtures
+sed -i.bak '/^          QUALITY_HISTORY_EVENT:/d' "${soak}"
+assert_rejected \
+	"must pass the event through QUALITY_HISTORY_EVENT" \
+	"contract must reject a history job that does not pass the event explicitly"
+
+# --- the reason the job is separate at all -----------------------------------
+#
+# The whole justification for a second job is that the one holding the
+# credential executes nothing. A toolchain appearing in it undoes that
+# silently, so the contract has to see it.
+
+reset_fixtures
+sed -i.bak 's|^      - name: Download the soak output$|      - name: Setup Go\n        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e\n&|' "${soak}"
+assert_rejected \
+	"the history job must not run 'actions/setup-go'" \
+	"contract must reject a toolchain in the job that holds the credential"
+
+reset_fixtures
+sed -i.bak 's|^      - name: Download the per-package records$|      - name: Sneak a build in\n        run: go build ./...\n&|' "${mutation}"
+assert_rejected \
+	"the history job must not run 'go build'" \
+	"contract must reject product code running in the job that holds the credential"
+
+# --- write scoping -----------------------------------------------------------
 
 # contents: write promoted to the workflow level, where it covers every job.
 reset_fixtures
@@ -109,27 +139,39 @@ assert_rejected \
 	"contents: write must appear exactly once in the file" \
 	"contract must reject a workflow-level contents: write"
 
-# The appending job loses its scoped write and falls back to the workflow
+# The recording job loses its scoped write and falls back to the workflow
 # default, which cannot push.
 reset_fixtures
 sed -i.bak 's/^      contents: write$/      contents: read/' "${mutation}"
 assert_rejected \
-	"job's permissions must be exactly contents: write" \
-	"contract must reject an appending job that cannot write"
+	"history job's permissions must be exactly contents: write" \
+	"contract must reject a history job that cannot write"
 
-# The appending job's grant is widened beyond what it needs.
+# The recording job's grant is widened beyond what it needs.
 reset_fixtures
 sed -i.bak 's/^      contents: write$/&\n      id-token: write/' "${soak}"
 assert_rejected \
-	"job's permissions must be exactly contents: write" \
-	"contract must reject a widened grant on the appending job"
+	"history job's permissions must be exactly contents: write" \
+	"contract must reject a widened grant on the history job"
 
-# A job that records nothing takes a permissions block of its own.
+# The measuring job takes a permissions block of its own.
+reset_fixtures
+sed -i.bak 's/^  soak:$/&\n    permissions:\n      contents: write/' "${soak}"
+assert_rejected \
+	"the 'soak' job must not declare permissions of its own" \
+	"contract must reject a write scope back on the four-hour soak job"
+
+reset_fixtures
+sed -i.bak 's/^  gremlins:$/&\n    permissions:\n      contents: read/' "${mutation}"
+assert_rejected \
+	"the 'gremlins' job must not declare permissions of its own" \
+	"contract must reject a permissions block on the Gremlins matrix"
+
 reset_fixtures
 sed -i.bak 's/^  gate-canary:$/&\n    permissions:\n      contents: read/' "${mutation}"
 assert_rejected \
 	"the 'gate-canary' job must not declare permissions of its own" \
-	"contract must reject a permissions block on a job that never appends"
+	"contract must reject a permissions block on a job that never records"
 
 # The workflow default stops being read-only.
 reset_fixtures
@@ -138,21 +180,60 @@ assert_rejected \
 	"workflow-level permissions must stay contents: read" \
 	"contract must reject a workflow default that is no longer contents: read"
 
-# The appender's own event gate is removed, leaving only the workflow `if:`.
-reset_fixtures
-sed -i.bak 's/^schedule | workflow_dispatch | "") ;;$/*) ;;/' "${append}"
-assert_rejected \
-	"must refuse any event that is not schedule or workflow_dispatch" \
-	"contract must reject an appender that records any event"
+# --- the mutation matrix's half of the handover ------------------------------
 
-# The appender is allowed to fail its caller.
+reset_fixtures
+sed -i.bak '/^      - name: Record this package for the quality history$/d' "${mutation}"
+assert_rejected \
+	"the matrix leg must write its record for the history job" \
+	"contract must reject a matrix that stopped producing records"
+
+reset_fixtures
+sed -i.bak '/^      - name: Upload the quality history record$/d' "${mutation}"
+assert_rejected \
+	"the matrix leg must upload its record for the history job" \
+	"contract must reject a record the history job can never download"
+
+reset_fixtures
+sed -i.bak 's|^          PACKAGE_NAME: ${{ matrix.name }}$|&\n          QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}|' "${mutation}"
+assert_rejected \
+	"the matrix leg must never see the write credential" \
+	"contract must reject a credential handed back to the Gremlins matrix"
+
+# --- the appender's own locks ------------------------------------------------
+
+reset_fixtures
+sed -i.bak 's/^schedule | workflow_dispatch) ;;$/schedule | workflow_dispatch | "") ;;/' "${append}"
+assert_rejected \
+	"must not treat an empty event as permission to record" \
+	"contract must reject an appender whose event gate fails open"
+
 reset_fixtures
 sed -i.bak '/^trap soft_exit EXIT$/d' "${append}"
 assert_rejected \
 	"must convert its own failures into a warning" \
 	"contract must reject an appender that can fail a quality lane"
 
-# The appender is no longer executable.
+reset_fixtures
+sed -i.bak "/^${tab}set +e\$/d" "${append}"
+assert_rejected \
+	"exit trap must disable errexit before cleaning up" \
+	"contract must reject an exit trap that can itself fail"
+
+reset_fixtures
+# shellcheck disable=SC2016 # A sed program over the append script's literal text.
+sed -i.bak 's/grep -Fxq "${record}"/grep -Fq "nothing-like-it"/' "${append}"
+assert_rejected \
+	"must not append a record the branch already carries" \
+	"contract must reject an appender that can write a duplicate row"
+
+reset_fixtures
+# shellcheck disable=SC2016 # A sed program over the append script's literal text.
+sed -i.bak 's/^while \[ "${attempt}" -le "${attempts}" \]; do$/for attempt in $(seq 1 "${attempts}"); do/' "${append}"
+assert_rejected \
+	"retry loop must not depend on seq" \
+	"contract must reject a retry loop that silently runs zero times"
+
 reset_fixtures
 chmod -x "${append}"
 assert_rejected \
