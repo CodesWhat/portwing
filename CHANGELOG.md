@@ -136,6 +136,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Evaluated ML-DSA for the edge hello and the standard-mode request
+  signature, and deferred it.** `docs/design/mldsa-edge-auth.md` records the
+  decision with measured numbers: ML-DSA-87 costs 4,627 signature bytes and
+  2,592 public-key bytes against Ed25519's 64 and 32, which is affordable once
+  per connection on the hello and roughly +6,084 bytes on every standard-mode
+  request. It recommends hybrid Ed25519 + ML-DSA-87 on the hello once Drydock
+  ships a verifier, rejects a per-request post-quantum signature outright, and
+  names a key rotation cadence as the mitigation that matches the threat today.
 - **Documented four real gaps between the API reference/OpenAPI spec and the
   handlers.** `GET /api/log/entries` and `POST /_portwing/mcp` were live,
   auth-required routes the reference omitted; the OpenAPI spec was missing the

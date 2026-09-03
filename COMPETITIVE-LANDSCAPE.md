@@ -90,7 +90,11 @@ advantages:
   arriving inside that key's service life would let an attacker recover the
   private key and impersonate the agent. That is the case ML-DSA-87 answers
   and Ed25519 does not, which is why this row reads as a difference rather
-  than a tie.
+  than a tie. The evaluation is in
+  [`docs/design/mldsa-edge-auth.md`](docs/design/mldsa-edge-auth.md), which
+  defers adoption, recommends hybrid Ed25519 + ML-DSA-87 on the hello rather
+  than a 6 KB per-request signature once Drydock can verify one, and names key
+  rotation as the mitigation that fits the threat today.
 - Hawser now matches Portwing's broad topology: lightweight Go binary,
   transparent Docker API, Compose, host metrics, standard mode, and outbound
   edge mode.
