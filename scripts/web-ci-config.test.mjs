@@ -105,6 +105,19 @@ test("check:web runs knip so dead-code coverage travels with the same gate", () 
       `knip.json must cover the ${workspace} workspace`,
     );
   }
+
+  const website = knipConfig.workspaces.website;
+  assert.equal(
+    website.ignore,
+    undefined,
+    "website workspace must not use a file-level ignore for src/components/ui/** " +
+      "(it exempts dead files too, not just the shadcn variant exports)",
+  );
+  assert.ok(
+    Object.hasOwn(website.ignoreIssues ?? {}, "src/components/ui/**"),
+    "website workspace must scope the shadcn exemption via ignoreIssues",
+  );
+  assert.deepEqual(website.ignoreIssues["src/components/ui/**"], ["exports", "types"]);
 });
 
 test("Vercel deploys main while disabling automatic preview deployments", () => {

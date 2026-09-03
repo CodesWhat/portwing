@@ -101,10 +101,13 @@ of inline comments:
   `npm` script hooks, not imported by the Next.js app, so knip's Next.js
   plugin doesn't see them as reachable without being told they're entry
   points.
-- `website` workspace `ignore: ["src/components/ui/**"]` — these are
-  shadcn/ui-generated primitives; the unused variant exports (e.g.
-  `badgeVariants`, `CardHeader`) are part of the generator's standard public
-  API, kept for future consumers rather than trimmed to current usage.
+- `website` workspace `ignoreIssues: { "src/components/ui/**": ["exports",
+  "types"] }` — these are shadcn/ui-generated primitives; the unused variant
+  exports (e.g. `badgeVariants`, `CardHeader`) are part of the generator's
+  standard public API, kept for future consumers rather than trimmed to
+  current usage. Scoped to the `exports`/`types` issue types rather than a
+  file-level `ignore`, so a genuinely dead new file in that directory is
+  still reported as unused.
 - `website` workspace `ignoreBinaries: ["magick"]` — `gen-bird-png.mjs`
   shells out to ImageMagick's `magick` CLI, which isn't an npm dependency.
 

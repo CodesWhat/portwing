@@ -8,7 +8,7 @@
     "docs": {},
     "website": {
       "entry": ["scripts/*.mjs"],
-      "ignore": ["src/components/ui/**"],
+      "ignoreIssues": { "src/components/ui/**": ["exports", "types"] },
       "ignoreBinaries": ["magick"]
     },
     "analytics": {}
