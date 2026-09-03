@@ -162,10 +162,14 @@ crash_pattern_seed_regression="failure while testing seed corpus entry"
 # reimplement the classifier" by leaving a comment behind — e.g. commenting
 # out the real call while keeping a comment that mentions the script path, or
 # discussing a crash phrase in prose. Both the bash `run:` blocks and the
-# YAML around them use `#` for a full-line comment, so one strip covers all
-# four caller files.
+# YAML around them use `#` for a full-line comment, so a first pass drops
+# those. A second pass truncates a trailing comment too (e.g.
+# `FUZZ_RETRIES=2 true # bash scripts/ci/fuzz-run.sh ...`, which would
+# otherwise satisfy both the anchored FUZZ_RETRIES check and the invocation
+# check while never actually running fuzz-run.sh) — safe here because none
+# of the real invocation lines contain a literal '#'.
 strip_comments() {
-	grep -Ev '^[[:space:]]*#' "$1"
+	grep -Ev '^[[:space:]]*#' "$1" | sed -E 's/[[:space:]]+#.*$//'
 }
 
 fuzz_run_script_code="$(strip_comments "${fuzz_run_script}")"

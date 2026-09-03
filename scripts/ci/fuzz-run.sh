@@ -12,12 +12,14 @@ set -euo pipefail
 # Env:
 #   FUZZ_RETRIES      total attempts before giving up on a boundary flake
 #                      (default 2, matching every current caller). Must be a
-#                      positive integer; an unset/empty value falls back to
-#                      the default instead of failing, but 0, a negative
-#                      number, or anything non-numeric is a misconfiguration
-#                      and is rejected up front as kind=error, status=2 —
-#                      never silently treated as "no attempts" and reported
-#                      as kind=flake
+#                      positive integer from 1 to 100; an unset/empty value
+#                      falls back to the default instead of failing, but 0, a
+#                      negative number, anything non-numeric, or anything
+#                      above 100 (including a digit string too large for
+#                      bash's own integer ops) is a misconfiguration and is
+#                      rejected up front as kind=error, status=2 — never
+#                      silently treated as "no attempts" and reported as
+#                      kind=flake
 #   FUZZ_TIMEOUT      passed as `go test -timeout`; the flag is omitted when
 #                      this is unset, so `go test`'s own default applies
 #   FUZZ_PARALLEL     passed as `go test -parallel`; omitted when unset
@@ -52,6 +54,13 @@ emit() {
 	fi
 }
 
+reject_retries() {
+	emit "kind=error"
+	emit "status=2"
+	echo "${annotate_prefix}FUZZ_RETRIES must be a positive integer between 1 and 100, got '${retries}'." >&2
+	exit 2
+}
+
 # Validate before anything is created (mktemp/trap) or attempted: a
 # malformed FUZZ_RETRIES (0, negative, non-numeric) used to skip the while
 # loop's body entirely and fall straight through to the kind=flake tail
@@ -59,27 +68,37 @@ emit() {
 # flake or aborted on the unbound variable depending on the bash build.
 case "${retries}" in
 '' | *[!0-9]*)
-	emit "kind=error"
-	emit "status=2"
-	echo "${annotate_prefix}FUZZ_RETRIES must be a positive integer, got '${retries}'." >&2
-	exit 2
+	reject_retries
 	;;
 esac
-if [ "${retries}" -lt 1 ]; then
-	emit "kind=error"
-	emit "status=2"
-	echo "${annotate_prefix}FUZZ_RETRIES must be a positive integer, got '${retries}'." >&2
-	exit 2
+# Bound the digit count before any arithmetic comparison touches it: a
+# huge digit string (e.g. 999999999999999999999999999) passes the
+# digits-only check above but overflows bash's integer ops, and
+# `[ "${retries}" -lt 1 ]` then fails with "integer expression expected"
+# instead of returning true or false. An `if` condition is exempt from
+# `set -e`, so that failure is silently treated as false, the value slips
+# through unvalidated, and the same overflow later makes the while loop's
+# own `-le` comparison behave the same way — skipping the loop body and
+# leaving `rc` unset for the kind=flake tail under `set -u`. Three digits
+# (max 999) keeps every later comparison safely inside any shell's native
+# integer range.
+if [ "${#retries}" -gt 3 ]; then
+	reject_retries
+fi
+if [ "${retries}" -lt 1 ] || [ "${retries}" -gt 100 ]; then
+	reject_retries
 fi
 
 attempt_log="$(mktemp)"
 # `$?` at the moment the trap fires is this script's own pending exit code
 # (0-4, from whichever `exit N` triggered it) — capture and re-exit with it
-# explicitly. A bare `rm -f "${attempt_log}"` here would otherwise let rm's
-# own exit status silently overwrite it whenever the cleanup itself fails,
-# e.g. tee having turned attempt_log into something rm -f can't remove.
+# explicitly. Cleanup runs with errexit still active in the trap's own
+# context, so a bare `rm -rf "${attempt_log}"` that fails (e.g. its parent
+# directory lost write permission) would abort the trap right there and
+# let rm's own exit status silently replace the one being preserved; `||
+# true` keeps a failed cleanup from ever touching the exit code.
 # shellcheck disable=SC2154 # exit_code is assigned inside the trap string itself.
-trap 'exit_code=$?; rm -rf "${attempt_log}"; exit "${exit_code}"' EXIT
+trap 'exit_code=$?; rm -rf "${attempt_log}" || true; exit "${exit_code}"' EXIT
 
 go_test_args=(-run='^$' -fuzz="^${target}\$" -fuzztime="${fuzztime}")
 if [ -n "${FUZZ_TIMEOUT:-}" ]; then

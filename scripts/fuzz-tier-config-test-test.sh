@@ -221,6 +221,20 @@ awk -v ins="${inline_grep_line}" '
 mv "${go_fuzz}.tmp" "${go_fuzz}"
 expect_fail "a caller reimplementing the crash-phrase grep inline with single quotes must not satisfy the contract"
 
+seed_fixture
+# A caller keeping the anchored FUZZ_RETRIES=2 prefix and the
+# bash .../fuzz-run.sh text on the same line, but as a trailing comment
+# after a real command that never runs it — strip_comments only dropped
+# full-line comments, so this line's non-comment prefix
+# (`FUZZ_RETRIES=2 true`) satisfied the anchored FUZZ_RETRIES check and the
+# whole line's text satisfied the invocation check, while `true` (not
+# fuzz-run.sh) is what actually runs.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+sed 's|FUZZ_RETRIES=2 FUZZ_TIMEOUT=1m FUZZ_PARALLEL="\$workers" bash scripts/ci/fuzz-run.sh "\$2" "\$1" 5s|FUZZ_RETRIES=2 true # bash scripts/ci/fuzz-run.sh "\$2" "\$1" 5s|' \
+	"${lefthook}" >"${lefthook}.tmp"
+mv "${lefthook}.tmp" "${lefthook}"
+expect_fail "a caller with the real call reduced to a trailing comment after an unrelated command must not satisfy the contract"
+
 # --- Monthly/nightly cron overlap (PW codex follow-up #2) -------------------
 
 seed_fixture

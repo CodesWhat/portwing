@@ -34,10 +34,16 @@ if [ "${1:-}" != "test" ]; then
 	exit 90
 fi
 
-# Assert the flags fuzz-run.sh is contractually supposed to pass, not just
-# that *something* named `go test` ran — a caller (or fuzz-run.sh itself)
-# silently dropping -fuzz= would leave nightly/monthly running zero fuzz
-# targets while every other check here still reported green.
+# Assert the exact flags fuzz-run.sh is contractually supposed to pass, not
+# just that some argument has the right shape — a hardcoded
+# -fuzz=^WrongTarget$ or the wrong -fuzztime value would still satisfy a
+# shape-only check. MOCK_EXPECT_TARGET/MOCK_EXPECT_FUZZTIME carry the exact
+# target and fuzztime the test itself passed to fuzz-run.sh, so the
+# expectation is derived from the same call the test made, not duplicated
+# here as an independent literal that could drift — or coincidentally match
+# a bug — on its own.
+expected_fuzz="-fuzz=^${MOCK_EXPECT_TARGET:?MOCK_EXPECT_TARGET must be set}\$"
+expected_fuzztime="-fuzztime=${MOCK_EXPECT_FUZZTIME:?MOCK_EXPECT_FUZZTIME must be set}"
 saw_run=0
 saw_fuzz=0
 saw_fuzztime=0
@@ -45,8 +51,8 @@ saw_parallel=0
 for arg in "$@"; do
 	case "${arg}" in
 	'-run=^$') saw_run=1 ;;
-	-fuzz=^*'$') saw_fuzz=1 ;;
-	-fuzztime=*) saw_fuzztime=1 ;;
+	"${expected_fuzz}") saw_fuzz=1 ;;
+	"${expected_fuzztime}") saw_fuzztime=1 ;;
 	-parallel=*) saw_parallel=1 ;;
 	esac
 done
@@ -55,16 +61,26 @@ done
 	exit 92
 }
 [ "${saw_fuzz}" -eq 1 ] || {
-	echo "go test missing -fuzz=^<target>\$ in args: $*" >&2
+	echo "go test missing exact ${expected_fuzz} in args: $*" >&2
 	exit 93
 }
 [ "${saw_fuzztime}" -eq 1 ] || {
-	echo "go test missing -fuzztime= in args: $*" >&2
+	echo "go test missing exact ${expected_fuzztime} in args: $*" >&2
 	exit 94
 }
-if [ -n "${FUZZ_PARALLEL:-}" ] && [ "${saw_parallel}" -ne 1 ]; then
-	echo "go test missing -parallel= in args despite FUZZ_PARALLEL set: $*" >&2
-	exit 95
+if [ -n "${FUZZ_PARALLEL:-}" ]; then
+	expected_parallel="-parallel=${FUZZ_PARALLEL}"
+	if [ "${saw_parallel}" -ne 1 ]; then
+		echo "go test missing -parallel= in args despite FUZZ_PARALLEL set: $*" >&2
+		exit 95
+	fi
+	case " $* " in
+	*" ${expected_parallel} "*) ;;
+	*)
+		echo "go test's -parallel= value doesn't match FUZZ_PARALLEL=${FUZZ_PARALLEL}: $*" >&2
+		exit 96
+		;;
+	esac
 fi
 
 count=0
@@ -127,6 +143,7 @@ run_fuzz() {
 	env MOCK_MODE="${mode}" MOCK_STATE="${state}" \
 		PATH="${bin}:${PATH}" \
 		FUZZ_OUTPUT_FILE="${output}" \
+		MOCK_EXPECT_TARGET="FuzzTarget" MOCK_EXPECT_FUZZTIME="1s" \
 		"$@" \
 		bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >"${fixture}/stdout" 2>"${fixture}/stderr" || status=$?
 	echo "${status}"
@@ -180,12 +197,20 @@ expect "a SIGTERM'd run" 4 infra "" "${status}"
 status="$(run_fuzz flake-then-pass FUZZ_RETRIES=1)"
 expect "a boundary flake with no retry budget left" 3 flake "" "${status}"
 
+# FUZZ_PARALLEL is forwarded as -parallel=<value>. None of the scenarios
+# above set it, which would otherwise leave the go shim's -parallel
+# assertion (fuzz-run-script-test.sh's own check that fuzz-run.sh actually
+# passes the value through) dead code that never runs.
+status="$(run_fuzz pass FUZZ_PARALLEL=3)"
+expect "a passing run with FUZZ_PARALLEL set" 0 pass "" "${status}"
+
 # FUZZ_LOG_FILE accumulates every attempt's raw output, not just the last one
 # — scripts/ci/go-fuzz.sh depends on this for its own artifacts/go-fuzz
 # fuzz.log.
 log="${fixture}/accumulated.log"
 rm -f "${log}" "${fixture}/state"
 MOCK_MODE=flake-then-pass MOCK_STATE="${fixture}/state" PATH="${bin}:${PATH}" \
+	MOCK_EXPECT_TARGET="FuzzTarget" MOCK_EXPECT_FUZZTIME="1s" \
 	FUZZ_RETRIES=2 FUZZ_LOG_FILE="${log}" bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >/dev/null 2>&1
 grep -q "context deadline exceeded" "${log}" ||
 	fail "FUZZ_LOG_FILE must include the first (failed) attempt's output"
@@ -200,6 +225,7 @@ record_attempt() { echo "attempt=$1" >>"${hook_log}"; }
 export -f record_attempt
 export hook_log
 MOCK_MODE=flake-exhausted MOCK_STATE="${fixture}/state" PATH="${bin}:${PATH}" \
+	MOCK_EXPECT_TARGET="FuzzTarget" MOCK_EXPECT_FUZZTIME="1s" \
 	FUZZ_RETRIES=2 FUZZ_ATTEMPT_HOOK=record_attempt bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >/dev/null 2>&1 || true
 [ "$(wc -l <"${hook_log}" | tr -d ' ')" = "2" ] ||
 	fail "FUZZ_ATTEMPT_HOOK must fire once per failed attempt (2 attempts here)"
@@ -215,6 +241,7 @@ for bad_retries in 0 -1 abc; do
 	status=0
 	env MOCK_MODE=pass MOCK_STATE="${state}" PATH="${bin}:${PATH}" \
 		FUZZ_OUTPUT_FILE="${output}" FUZZ_RETRIES="${bad_retries}" \
+		MOCK_EXPECT_TARGET="FuzzTarget" MOCK_EXPECT_FUZZTIME="1s" \
 		bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >"${fixture}/stdout" 2>"${fixture}/stderr" || status=$?
 	expect "FUZZ_RETRIES=${bad_retries} rejected up front" 2 error "" "${status}"
 	[ -f "${state}" ] &&
@@ -240,6 +267,7 @@ rm -f "${state}" "${output}"
 status=0
 env MOCK_MODE=pass MOCK_STATE="${state}" PATH="${mktemp_bin}:${bin}:${PATH}" \
 	FUZZ_OUTPUT_FILE="${output}" \
+	MOCK_EXPECT_TARGET="FuzzTarget" MOCK_EXPECT_FUZZTIME="1s" \
 	bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >"${fixture}/stdout" 2>"${fixture}/stderr" || status=$?
 expect "tee failing to write the attempt log" 2 error "" "${status}"
 
@@ -259,12 +287,13 @@ rm -f "${state}" "${output}"
 mutation_status=0
 env MOCK_MODE=pass MOCK_STATE="${state}" PATH="${bin}:${PATH}" \
 	FUZZ_OUTPUT_FILE="${output}" \
+	MOCK_EXPECT_TARGET="FuzzTarget" MOCK_EXPECT_FUZZTIME="1s" \
 	bash "${mutated}" "./internal/fixture/" "FuzzTarget" "1s" >"${fixture}/stdout" 2>"${fixture}/stderr" || mutation_status=$?
 [ "${mutation_status}" -ne 0 ] ||
 	fail "a copy of fuzz-run.sh missing -fuzz= from its go test invocation must be caught by the go shim, but it exited 0"
 # The shim's own rejection message is `go test`'s stdout, which fuzz-run.sh
 # tees straight through to its own stdout — not its stderr.
-grep -q "missing -fuzz=" "${fixture}/stdout" ||
+grep -q "missing exact" "${fixture}/stdout" ||
 	fail "the go shim must report why it rejected a fuzz-run.sh invocation missing -fuzz="
 
 if [ "${failures}" -ne 0 ]; then
