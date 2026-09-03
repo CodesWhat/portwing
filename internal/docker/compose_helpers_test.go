@@ -593,6 +593,116 @@ func TestStatRootedEnvFile_ErrorsWhenStacksDirMissing(t *testing.T) {
 	}
 }
 
+// TestStatRootedEnvFile_NonNotExistStatErrorIsWrapped exercises the
+// `case err != nil:` branch: a Stat failure that is NOT "file does not
+// exist" (here, permission denied on the containing directory) must be
+// wrapped and returned, not treated the same as a missing file.
+//
+// Note: not parallel because it depends on real filesystem permission bits,
+// which root or a permissive CI user can bypass; skipped in that case
+// instead of racing other tests over a shared assumption.
+func TestStatRootedEnvFile_NonNotExistStatErrorIsWrapped(t *testing.T) {
+	dir := t.TempDir()
+	stackDir := filepath.Join(dir, "app")
+	if err := os.MkdirAll(stackDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stackDir, ".env.drydock"), []byte("X=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Strip all permissions from the stack dir so Stat-ing a file inside it
+	// fails with permission-denied rather than not-exist.
+	if err := os.Chmod(stackDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(stackDir, 0o750) }) //nolint:errcheck,gosec // restoring a directory's own mode, not creating a file
+
+	cm := &ComposeManager{stacksDir: dir}
+	envFile, err := cm.statRootedEnvFile("app")
+	if err == nil {
+		if envFile == "" {
+			t.Skip("running with elevated privileges that bypass permission bits; boundary not observable")
+		}
+		t.Fatalf("statRootedEnvFile: expected a permission error, got envFile=%q", envFile)
+	}
+	if !strings.Contains(err.Error(), "checking env file") {
+		t.Fatalf("statRootedEnvFile error = %v, want it to mention 'checking env file'", err)
+	}
+}
+
+// ---- mkdirRootedNoSymlinks ----
+
+func TestMkdirRootedNoSymlinks_ExistingDirComponentsAreSkipped(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	// Both "a" and "a/b" already exist as directories: mkdirRootedNoSymlinks
+	// must walk through them without error (the "case err == nil: continue"
+	// branch), not try to create them again.
+	if err := mkdirRootedNoSymlinks(root, "a/b"); err != nil {
+		t.Fatalf("mkdirRootedNoSymlinks: unexpected error for pre-existing directories: %v", err)
+	}
+}
+
+func TestMkdirRootedNoSymlinks_NonDirectoryComponentRejected(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	err = mkdirRootedNoSymlinks(root, "a/b")
+	if err == nil {
+		t.Fatal("mkdirRootedNoSymlinks: expected error when a path component is a regular file")
+	}
+	if !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("mkdirRootedNoSymlinks error = %v, want it to mention 'is not a directory'", err)
+	}
+}
+
+func TestMkdirRootedNoSymlinks_SymlinkComponentRejected(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real")
+	if err := os.MkdirAll(target, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	err = mkdirRootedNoSymlinks(root, "link/sub")
+	if err == nil {
+		t.Fatal("mkdirRootedNoSymlinks: expected error for a symlink path component")
+	}
+	if !strings.Contains(err.Error(), "refusing symlink directory") {
+		t.Fatalf("mkdirRootedNoSymlinks error = %v, want it to mention 'refusing symlink directory'", err)
+	}
+}
+
 // containsAll returns true if slice contains all the given strings.
 func containsAll(slice []string, targets ...string) bool {
 	for _, target := range targets {

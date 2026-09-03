@@ -1,11 +1,14 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -457,6 +460,82 @@ func TestEventStream_run_ErrorLogging(t *testing.T) {
 		cancel()
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for event after reconnect")
+	}
+}
+
+// TestEventStream_run_LogsOnlyOnConnectionError exercises the negation
+// boundary of the "err != nil" check that guards the slog.Warn call: it
+// must log only when readEvents actually returned an error, not on every
+// reconnect. Not parallel: swaps the global slog default logger for the
+// test's duration (see TestCloseConn_Error in client_unix_test.go for why
+// that's safe with the surrounding serial/parallel test ordering).
+func TestEventStream_run_LogsOnlyOnConnectionError(t *testing.T) {
+	var callCount atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := callCount.Add(1)
+		if n == 1 {
+			// First connection: error, so the disconnect log SHOULD fire.
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		// Second connection: succeeds, decodes one event, then hits EOF —
+		// readEvents returns nil, so the disconnect log must NOT fire for it.
+		w.WriteHeader(http.StatusOK)
+		enc := json.NewEncoder(w)
+		enc.Encode(DockerEvent{ID: "ctr1", Action: "start"}) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(orig)
+
+	c := newTestClient(srv)
+	es := &EventStream{
+		client:       c,
+		initialDelay: 10 * time.Millisecond,
+		maxDelay:     20 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	ch, err := es.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("channel closed before receiving event")
+		}
+		if ev.Action != "start" {
+			t.Fatalf("Action = %q, want %q", ev.Action, "start")
+		}
+		cancel()
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for event after reconnect")
+	}
+	<-ch // drain until run() closes the channel after cancellation
+
+	logged := buf.String()
+	got := strings.Count(logged, "docker event stream disconnected")
+	if got != 1 {
+		t.Fatalf("disconnect log count = %d, want exactly 1 (only the errored connection), log:\n%s", got, logged)
+	}
+	// The one log line must carry the actual connection error (from the 403
+	// response), not a nil error: a mutant that flips the guard to fire on
+	// success (err == nil) instead of failure would still log exactly once,
+	// but with error=<nil> for the successful second connection instead of
+	// the forbidden-response error for the first.
+	if !strings.Contains(logged, "docker error (status 403)") {
+		t.Fatalf("expected the disconnect log to carry the 403 connection error, got:\n%s", logged)
+	}
+	if strings.Contains(logged, "error=<nil>") {
+		t.Fatalf("disconnect log fired with a nil error, want it only on the failed connection:\n%s", logged)
 	}
 }
 
