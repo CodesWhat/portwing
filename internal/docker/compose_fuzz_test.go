@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,6 +12,21 @@ import (
 	"strings"
 	"testing"
 )
+
+// newTestComposeManager creates a ComposeManager with a temp stacksDir for
+// validation tests. It mirrors the approach in compose_test.go (direct struct
+// literal) — the compose binary detection is irrelevant for validateRequest.
+//
+// It lives in the fuzz file rather than compose_validate_test.go because
+// ClusterFuzzLite builds this target with go-118-fuzz-build, which lifts only
+// the single _test.go file holding the Fuzz function into a normal package
+// build. A helper in a sibling _test.go file is undefined there, so the target
+// has to be self-contained. Ordinary tests are unaffected: same package, so
+// compose_validate_test.go still sees it.
+func newTestComposeManager(t *testing.T) *ComposeManager {
+	t.Helper()
+	return &ComposeManager{stacksDir: t.TempDir()}
+}
 
 // The fuzz target's stacks directory sits one level below a sentinel parent so
 // that an escape has an observable place to land:
@@ -39,23 +55,26 @@ const (
 // privileges for os.Symlink, so the trap is skipped there the same way
 // compose_test.go's symlink cases are; the lexical half of the oracle still
 // runs.
-func plantEscapeTree(tb testing.TB, parent string) bool {
-	tb.Helper()
-
+//
+// It returns an error rather than taking a testing.TB and calling Fatalf,
+// because this file is also compiled outside the test binary: the
+// ClusterFuzzLite tier builds it with go-118-fuzz-build, whose drop-in testing
+// package defines T and F but no TB interface, and whose F has no Fatalf.
+func plantEscapeTree(parent string) (bool, error) {
 	if err := os.MkdirAll(filepath.Join(parent, fuzzStacksDirName), 0o750); err != nil {
-		tb.Fatalf("creating stacks directory: %v", err)
+		return false, fmt.Errorf("creating stacks directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(parent, fuzzOutsideDirName), 0o750); err != nil {
-		tb.Fatalf("creating sentinel directory: %v", err)
+		return false, fmt.Errorf("creating sentinel directory: %w", err)
 	}
 	if runtime.GOOS == "windows" {
-		return false
+		return false, nil
 	}
 	link := filepath.Join(parent, fuzzStacksDirName, fuzzEscapeLinkName)
 	if err := os.Symlink(filepath.Join(parent, fuzzOutsideDirName), link); err != nil {
-		tb.Fatalf("planting escape symlink %q: %v", link, err)
+		return false, fmt.Errorf("planting escape symlink %q: %w", link, err)
 	}
-	return true
+	return true, nil
 }
 
 // assertNoEscape is the fuzz target's real containment oracle: nothing may
@@ -163,7 +182,13 @@ func isWriteStackFilesRejection(err error) bool {
 // component.
 func FuzzComposeRequestValidate(f *testing.F) {
 	parent := f.TempDir()
-	trapPlanted := plantEscapeTree(f, parent)
+	trapPlanted, err := plantEscapeTree(parent)
+	if err != nil {
+		// The seeding scope has no Fatalf under the ClusterFuzzLite testing
+		// shim, and a harness that could not plant its trap must not fuzz on
+		// anyway: it would report success while blind to a symlink escape.
+		panic(err)
+	}
 	stacksDir := filepath.Join(parent, fuzzStacksDirName)
 	cm := &ComposeManager{stacksDir: stacksDir}
 	// stacksDir is shared by every iteration in this worker process, so
@@ -250,7 +275,9 @@ func FuzzComposeRequestValidate(f *testing.F) {
 			if err := os.RemoveAll(stacksDir); err != nil {
 				t.Fatalf("resetting stacksDir: %v", err)
 			}
-			plantEscapeTree(t, parent)
+			if _, err := plantEscapeTree(parent); err != nil {
+				t.Fatalf("replanting the escape tree: %v", err)
+			}
 			filesWritten = 0
 		}
 	})

@@ -1,0 +1,7 @@
+# ClusterFuzzLite project metadata. Read by OSS-Fuzz's helper.py when building
+# this integration locally; the GitHub Actions lanes pass `language` as an
+# action input instead, so the two must agree.
+#
+# `address` is the only sanitizer OSS-Fuzz supports for Go. Adding `undefined`
+# or `memory` here would build nothing new and fail the run.
+language: go

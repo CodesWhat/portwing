@@ -60,7 +60,7 @@ assert_rejected \
 reset_fixture
 sed -i.bak 's/^    types: \[completed\]$/      - "Quality: Extra Lane"\n&/' "${fixture}"
 assert_rejected \
-	"workflow_run trigger must list exactly 7 workflows, found 8" \
+	"workflow_run trigger must list exactly 9 workflows, found 10" \
 	"contract must reject a trigger list with an extra, unaccounted-for lane"
 
 # Trigger fires on more than just completed runs.

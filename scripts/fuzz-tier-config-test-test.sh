@@ -8,17 +8,24 @@ trap 'rm -rf "${fixture}"' EXIT
 # leave a broken file behind and make the next one pass for the wrong reason.
 seed_fixture() {
 	rm -rf "${fixture:?}"/*
-	mkdir -p "${fixture}/scripts/ci" "${fixture}/.github/workflows"
+	mkdir -p "${fixture}/scripts/ci" "${fixture}/.github/workflows" "${fixture}/.clusterfuzzlite"
 	cp scripts/fuzz-tier-config-test.sh "${fixture}/scripts/"
 	cp scripts/ci/go-fuzz.sh scripts/ci/fuzz-run.sh "${fixture}/scripts/ci/"
 	cp lefthook.yml "${fixture}/"
 	cp .github/workflows/ci-verify.yml "${fixture}/.github/workflows/"
 	cp .github/workflows/quality-fuzz-nightly.yml "${fixture}/.github/workflows/"
 	cp .github/workflows/quality-fuzz-monthly.yml "${fixture}/.github/workflows/"
+	cp .clusterfuzzlite/build.sh "${fixture}/.clusterfuzzlite/"
 	while IFS= read -r corpus_dir; do
 		mkdir -p "${fixture}/${corpus_dir}"
 		cp "${corpus_dir}"/* "${fixture}/${corpus_dir}/"
 	done < <(find internal -type d -path '*/testdata/fuzz/*')
+	# The files that declare the targets, so the inventory-vs-tree check has a
+	# tree to read. Only the declaring files; nothing else compiles here.
+	while IFS= read -r fuzz_file; do
+		mkdir -p "${fixture}/$(dirname "${fuzz_file}")"
+		cp "${fuzz_file}" "${fixture}/${fuzz_file}"
+	done < <(grep -rlE '^func Fuzz[A-Za-z0-9_]*\(' --include='*_test.go' internal cmd || true)
 }
 
 expect_pass() {
@@ -254,5 +261,40 @@ sed 's|^      cancel-in-progress: false$|      cancel-in-progress: true|' \
 	"${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "a corpus-touching job's concurrency group with cancel-in-progress: true must not satisfy the contract"
+
+seed_fixture
+# A target dropped from the ClusterFuzzLite build while the four Go-engine tiers
+# still run it. This is the drift the tier is most likely to acquire, because
+# build.sh is the only inventory that is not a workflow file.
+grep -v '^build_fuzzer internal/auth FuzzParseKeyLine$' \
+	.clusterfuzzlite/build.sh >"${fixture}/.clusterfuzzlite/build.sh"
+expect_fail "a fuzzer missing from .clusterfuzzlite/build.sh must not satisfy the contract"
+
+seed_fixture
+# An eleventh target built for libFuzzer that no other tier runs. Every
+# per-fuzzer check still passes; only the count notices.
+{
+	cat .clusterfuzzlite/build.sh
+	echo 'build_fuzzer internal/auth FuzzUnrelated'
+} >"${fixture}/.clusterfuzzlite/build.sh"
+expect_fail "an extra, unaccounted-for ClusterFuzzLite target must not satisfy the contract"
+
+seed_fixture
+# The right target built from the wrong package.
+sed 's|^build_fuzzer internal/server FuzzParsePHC$|build_fuzzer internal/servers FuzzParsePHC|' \
+	.clusterfuzzlite/build.sh >"${fixture}/.clusterfuzzlite/build.sh"
+expect_fail "a ClusterFuzzLite target built from the wrong package must not satisfy the contract"
+
+seed_fixture
+# An eleventh target declared in the tree and listed in no tier at all. Every
+# per-fuzzer check still passes, because they all iterate the inventory.
+printf '\nfunc FuzzUnlisted(f *testing.F) {}\n' >>"${fixture}/internal/auth/keys_fuzz_test.go"
+expect_fail "a Fuzz target declared in the tree but listed in no tier must not satisfy the contract"
+
+seed_fixture
+# The other direction: an inventory entry whose target no longer exists. The
+# workflow greps still find its name in every tier, so only this check notices.
+rm -f "${fixture}/internal/auth/keys_fuzz_test.go"
+expect_fail "an inventory entry with no declaration left in the tree must not satisfy the contract"
 
 echo "Fuzz tier contract self-tests passed."
