@@ -553,7 +553,7 @@ curl -s -X POST \
 | `400` | Bad request — invalid body or parameters |
 | `401` | Missing, invalid, or burned token |
 | `405` | Method not allowed |
-| `409` | Conflict — audit export cursor is outside the retained buffer |
+| `409` | Conflict — audit export cursor is outside the retained buffer, or a Docker conflict response passed through on container log/delete routes |
 | `413` | Payload too large — request body exceeds its limit (64 KiB enrollment, 1 MiB signed request, 10 MB exec/attach upgrade) |
 | `429` | Rate limit exceeded (10 failures/min/IP) |
 | `500` | Internal error |

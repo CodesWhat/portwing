@@ -46,9 +46,11 @@ This starts sockguard and Portwing as two separate containers sharing a filtered
 # a fully compromised agent is constrained to the explicit API allowlist in
 # sockguard.yaml.
 #
-# The bundled sockguard.yaml is a copy of sockguard's own portwing.yaml preset:
+# The bundled sockguard.yaml tracks sockguard's own portwing.yaml preset:
 # container lifecycle, image pull/inspect/remove, events, and narrow network/
-# volume reads. Exec is denied by this preset — swap in sockguard's
+# volume reads. Check upstream for the current version:
+# https://github.com/CodesWhat/sockguard/blob/main/app/configs/portwing.yaml
+# Exec is denied by this preset — swap in sockguard's
 # portwing-with-exec.yaml to opt into interactive exec sessions. Compose stack
 # deploys through Portwing need broader rules (network create, volume create,
 # build) — extend sockguard.yaml deliberately if you use stacks, rather than
@@ -119,7 +121,7 @@ volumes:
 ```
 
 <Callout type="info">
-If you manage Docker Compose stacks through Portwing, the bundled `sockguard.yaml` is a copy of sockguard's `portwing.yaml` preset (container lifecycle, image ops, events, narrow network/volume reads). Compose deploys require additional rules — extend `sockguard.yaml` deliberately (network create, volume create, build) rather than bypassing the filter. That preset also denies exec: `POST /containers/*/exec` matches no allow rule and returns 403. For interactive exec, swap in sockguard's `portwing-with-exec.yaml`, shipped here as [`examples/sockguard-with-exec.yaml`](https://github.com/CodesWhat/portwing/blob/main/examples/sockguard-with-exec.yaml); for Drydock's edge exec feature use [`examples/docker-compose.edge-with-exec.yml`](https://github.com/CodesWhat/portwing/blob/main/examples/docker-compose.edge-with-exec.yml), which pairs edge mode with that preset.
+If you manage Docker Compose stacks through Portwing, the bundled `sockguard.yaml` tracks sockguard's `portwing.yaml` preset (container lifecycle, image ops, events, narrow network/volume reads) — check [upstream](https://github.com/CodesWhat/sockguard/blob/main/app/configs/portwing.yaml) for the current version. Compose deploys require additional rules — extend `sockguard.yaml` deliberately (network create, volume create, build) rather than bypassing the filter. That preset also denies exec: `POST /containers/*/exec` matches no allow rule and returns 403. For interactive exec, swap in sockguard's `portwing-with-exec.yaml`, shipped here as [`examples/sockguard-with-exec.yaml`](https://github.com/CodesWhat/portwing/blob/main/examples/sockguard-with-exec.yaml); for Drydock's edge exec feature use [`examples/docker-compose.edge-with-exec.yml`](https://github.com/CodesWhat/portwing/blob/main/examples/docker-compose.edge-with-exec.yml), which pairs edge mode with that preset.
 </Callout>
 
 ---
