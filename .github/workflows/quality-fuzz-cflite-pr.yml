@@ -68,6 +68,18 @@ run-name: >-
 # there rather than guessing. storage.googleapis.com is for the gcr.io blob
 # layers, and proxy.golang.org/sum.golang.org carry both the modules and the
 # go1.27.0 toolchain that base-builder-go's Go 1.25.0 downloads on first use.
+#
+# The three artifact hosts (*.actions.githubusercontent.com,
+# results-receiver.actions.githubusercontent.com, *.blob.core.windows.net) are
+# what @actions/artifact talks to, and they are needed on EVERY lane here, not
+# just the two that write the corpus. Setting storage-repo does not take the
+# GitHub Actions filestore out of the picture: filestore_utils.get_filestore
+# builds a GitFilestore WRAPPING a GithubActionsFilestore, and GitFilestore's
+# upload_crashes delegates straight back to it. So the corpus goes to the
+# branch, but a crash reproducer goes out as a workflow artifact. Without these
+# hosts the fuzzing still runs and the job can still go red, and the one thing
+# needed to reproduce the finding is the thing that silently fails to upload.
+# Same three entries as quality-fuzz-nightly.yml and quality-fuzz-monthly.yml.
 
 on:
   pull_request:
@@ -112,12 +124,15 @@ jobs:
         with:
           egress-policy: block
           allowed-endpoints: >
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
             api.github.com:443
             gcr.io:443
             github.com:443
             objects.githubusercontent.com:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
             storage.googleapis.com:443
             sum.golang.org:443
 

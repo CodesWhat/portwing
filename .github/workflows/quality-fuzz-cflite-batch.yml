@@ -92,12 +92,15 @@ jobs:
         with:
           egress-policy: block
           allowed-endpoints: >
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
             api.github.com:443
             gcr.io:443
             github.com:443
             objects.githubusercontent.com:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
             storage.googleapis.com:443
             sum.golang.org:443
 

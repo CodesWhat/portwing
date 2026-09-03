@@ -14,6 +14,10 @@ batch_workflow="${2:-.github/workflows/quality-fuzz-cflite-batch.yml}"
 prune_workflow="${3:-.github/workflows/quality-fuzz-cflite-prune.yml}"
 dockerfile="${4:-.clusterfuzzlite/Dockerfile}"
 build_script="${5:-.clusterfuzzlite/build.sh}"
+# Read only for their cron lines, to derive the schedules these lanes must stay
+# off. Nothing else about them is this file's business.
+nightly_workflow="${6:-.github/workflows/quality-fuzz-nightly.yml}"
+monthly_workflow="${7:-.github/workflows/quality-fuzz-monthly.yml}"
 
 corpus_branch="clusterfuzzlite-corpus"
 corpus_concurrency_group="quality-fuzz-cflite-corpus"
@@ -27,7 +31,8 @@ fail() {
 	failures=$((failures + 1))
 }
 
-for required in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}" "${dockerfile}" "${build_script}"; do
+for required in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}" "${dockerfile}" \
+	"${build_script}" "${nightly_workflow}" "${monthly_workflow}"; do
 	if [ ! -f "${required}" ]; then
 		fail "file not found: ${required}"
 		echo "${failures} ClusterFuzzLite contract check(s) failed" >&2
@@ -159,6 +164,18 @@ for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
 			fail "${workflow}: every harden-runner allow-list must include ${endpoint} (${occurrences} of ${harden_count})"
 		fi
 	done
+
+	# The artifact hosts @actions/artifact needs. storage-repo does not remove
+	# the GitHub Actions filestore: get_filestore wraps a GithubActionsFilestore
+	# in the GitFilestore, and upload_crashes delegates back to it, so a crash
+	# reproducer leaves as a workflow artifact on every lane here. Blocked, the
+	# job still reports the crash and loses the input that reproduces it.
+	for endpoint in '*.actions.githubusercontent.com:443' 'results-receiver.actions.githubusercontent.com:443' '*.blob.core.windows.net:443'; do
+		occurrences="$(grep -Fc "            ${endpoint}" "${workflow}" || true)"
+		if [ "${occurrences}" -ne "${harden_count}" ]; then
+			fail "${workflow}: every harden-runner allow-list must include ${endpoint} so a crash reproducer can be uploaded (${occurrences} of ${harden_count})"
+		fi
+	done
 done
 
 # --- PR lane: trigger, permissions, budget ----------------------------------
@@ -188,6 +205,26 @@ assert_with "${pr_workflow}" code-change-fuzz build "keep-unaffected-fuzz-target
 
 # --- scheduled lanes: schedules, budgets, write scope -----------------------
 
+# The schedules these lanes must stay off, read out of the two Go-native
+# scheduled fuzz workflows rather than written down here. A literal went stale
+# the same day #264 moved the monthly lane from 08:30 to 02:30, which is the
+# exact drift this guard exists to catch, so it can't be one.
+# Per file, not pooled: if only one of the two stops yielding a cron, the guard
+# quietly protects half of what it claims to, and every case still passes.
+taken_crons=()
+for taken_workflow in "${nightly_workflow}" "${monthly_workflow}"; do
+	taken_found=0
+	while IFS= read -r taken_cron; do
+		[ -n "${taken_cron}" ] || continue
+		taken_crons+=("${taken_cron}")
+		taken_found=1
+	done < <(awk -F"'" '/^[[:space:]]*- cron: /{print $2}' "${taken_workflow}")
+
+	if [ "${taken_found}" -eq 0 ]; then
+		fail "no cron found in ${taken_workflow}; the collision guard would silently stop covering that lane"
+	fi
+done
+
 assert_single_schedule() {
 	local workflow="$1"
 	local expected_cron="$2"
@@ -204,9 +241,7 @@ assert_single_schedule() {
 		fail "${workflow}: expected exactly 1 schedule, found ${cron_count}"
 	fi
 
-	# The two scheduled fuzz lanes these must not collide with: the nightly deep
-	# fuzz at 09:30 and the monthly at 08:30 on day 1.
-	for taken in '30 9 * * *' '30 8 1 * *'; do
+	for taken in ${taken_crons[@]+"${taken_crons[@]}"}; do
 		if grep -Fq -- "- cron: '${taken}'" "${workflow}"; then
 			fail "${workflow}: schedule '${taken}' collides with an existing deep-fuzz lane"
 		fi

@@ -25,6 +25,36 @@ fuzzers=(
 	"FuzzParseKeyLine|./internal/auth/"
 )
 
+# --- the array above has to be the whole truth ------------------------------
+#
+# Every other check in this file works outward from `fuzzers`, so a target
+# added to the tree and listed nowhere is invisible to all of them: it runs in
+# no tier, and nothing says so. Compare the array against what the source
+# actually declares, in both directions.
+declared_fuzzers="$(
+	for source_dir in internal cmd; do
+		[ -d "${source_dir}" ] || continue
+		grep -rHoE '^func Fuzz[A-Za-z0-9_]*\(' --include='*_test.go' "${source_dir}" || true
+	done | awk -F: '{
+		file = $1
+		name = $2
+		sub(/^func /, "", name)
+		sub(/\($/, "", name)
+		sub(/\/[^\/]*$/, "", file)
+		printf "%s|./%s/\n", name, file
+	}' | sort
+)"
+
+listed_fuzzers="$(printf '%s\n' "${fuzzers[@]}" | sort)"
+
+if [ "${declared_fuzzers}" != "${listed_fuzzers}" ]; then
+	fail "the Fuzz* targets declared under internal/ and cmd/ do not match this file's inventory"
+	echo "--- declared in the tree, missing from the inventory ---" >&2
+	comm -23 <(printf '%s\n' "${declared_fuzzers}") <(printf '%s\n' "${listed_fuzzers}") >&2
+	echo "--- in the inventory, not declared in the tree ---" >&2
+	comm -13 <(printf '%s\n' "${declared_fuzzers}") <(printf '%s\n' "${listed_fuzzers}") >&2
+fi
+
 lefthook_fuzz_entries="$(
 	awk '
 		/^[[:space:]]*for entry in \\[[:space:]]*$/ { in_entries = 1 }

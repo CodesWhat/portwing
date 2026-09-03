@@ -17,6 +17,8 @@ batch_fixture="${test_root}/batch.yml"
 prune_fixture="${test_root}/prune.yml"
 dockerfile_fixture="${test_root}/Dockerfile"
 build_fixture="${test_root}/build.sh"
+nightly_fixture="${test_root}/nightly.yml"
+monthly_fixture="${test_root}/monthly.yml"
 
 reset_fixtures() {
 	cp .github/workflows/quality-fuzz-cflite-pr.yml "${pr_fixture}"
@@ -24,6 +26,8 @@ reset_fixtures() {
 	cp .github/workflows/quality-fuzz-cflite-prune.yml "${prune_fixture}"
 	cp .clusterfuzzlite/Dockerfile "${dockerfile_fixture}"
 	cp .clusterfuzzlite/build.sh "${build_fixture}"
+	cp .github/workflows/quality-fuzz-nightly.yml "${nightly_fixture}"
+	cp .github/workflows/quality-fuzz-monthly.yml "${monthly_fixture}"
 }
 
 # BSD and GNU sed disagree about `\n` in a replacement, and this suite has to
@@ -55,7 +59,8 @@ insert_before() {
 
 run_contract() {
 	(cd "${test_root}" && bash scripts/cflite-config-test.sh \
-		pr.yml batch.yml prune.yml Dockerfile build.sh 2>&1)
+		pr.yml batch.yml prune.yml Dockerfile build.sh \
+		nightly.yml monthly.yml 2>&1)
 }
 
 assert_passes() {
@@ -262,6 +267,24 @@ assert_rejected \
 	"expected exactly 1 schedule, found 2" \
 	"contract must reject a second schedule slipped into a lane"
 
+# The monthly deep-fuzz slot, which is 02:30 on day 1 rather than the 08:30 it
+# used to be. A hardcoded taken-list in the contract went stale the day that
+# moved and let this through; the list is read out of the workflow now.
+reset_fixtures
+sed -i.bak "s|- cron: '30 10 \* \* 3'|- cron: '30 2 1 * *'|" "${prune_fixture}"
+assert_rejected \
+	"collides with an existing deep-fuzz lane" \
+	"contract must reject a schedule that lands on the monthly deep-fuzz slot"
+
+# The taken-list is only as good as the files it reads. One of the two going
+# quiet must be an error, not a smaller list that still passes everything.
+reset_fixtures
+grep -v "^[[:space:]]*- cron: " "${monthly_fixture}" >"${monthly_fixture}.tmp"
+mv "${monthly_fixture}.tmp" "${monthly_fixture}"
+assert_rejected \
+	"no cron found in monthly.yml" \
+	"a monthly workflow missing its cron must not silently shrink the collision guard"
+
 # --- egress ------------------------------------------------------------------
 
 # A lane losing a host from its allow-list fails as an opaque timeout inside a
@@ -277,6 +300,22 @@ sed -i.bak 's|^          egress-policy: block$|          egress-policy: audit|' 
 assert_rejected \
 	"must set egress-policy: block" \
 	"contract must reject an egress policy that only audits"
+
+# The artifact hosts are the easiest ones to think this lane does not need,
+# because storage-repo makes the corpus go to a branch. The crash reproducer
+# still leaves as a workflow artifact, on every lane, including the read-only
+# PR one.
+reset_fixtures
+sed -i.bak '/            \*.blob.core.windows.net:443/d' "${pr_fixture}"
+assert_rejected \
+	"so a crash reproducer can be uploaded" \
+	"contract must reject a lane that drops the artifact blob host"
+
+reset_fixtures
+sed -i.bak '/            results-receiver.actions.githubusercontent.com:443/d' "${batch_fixture}"
+assert_rejected \
+	"must include results-receiver.actions.githubusercontent.com:443" \
+	"contract must reject a lane that drops the artifact results receiver"
 
 # --- build integration -------------------------------------------------------
 

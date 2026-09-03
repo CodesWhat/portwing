@@ -20,6 +20,12 @@ seed_fixture() {
 		mkdir -p "${fixture}/${corpus_dir}"
 		cp "${corpus_dir}"/* "${fixture}/${corpus_dir}/"
 	done < <(find internal -type d -path '*/testdata/fuzz/*')
+	# The files that declare the targets, so the inventory-vs-tree check has a
+	# tree to read. Only the declaring files; nothing else compiles here.
+	while IFS= read -r fuzz_file; do
+		mkdir -p "${fixture}/$(dirname "${fuzz_file}")"
+		cp "${fuzz_file}" "${fixture}/${fuzz_file}"
+	done < <(grep -rlE '^func Fuzz[A-Za-z0-9_]*\(' --include='*_test.go' internal cmd || true)
 }
 
 expect_pass() {
@@ -241,5 +247,17 @@ seed_fixture
 sed 's|^build_fuzzer internal/server FuzzParsePHC$|build_fuzzer internal/servers FuzzParsePHC|' \
 	.clusterfuzzlite/build.sh >"${fixture}/.clusterfuzzlite/build.sh"
 expect_fail "a ClusterFuzzLite target built from the wrong package must not satisfy the contract"
+
+seed_fixture
+# An eleventh target declared in the tree and listed in no tier at all. Every
+# per-fuzzer check still passes, because they all iterate the inventory.
+printf '\nfunc FuzzUnlisted(f *testing.F) {}\n' >>"${fixture}/internal/auth/keys_fuzz_test.go"
+expect_fail "a Fuzz target declared in the tree but listed in no tier must not satisfy the contract"
+
+seed_fixture
+# The other direction: an inventory entry whose target no longer exists. The
+# workflow greps still find its name in every tier, so only this check notices.
+rm -f "${fixture}/internal/auth/keys_fuzz_test.go"
+expect_fail "an inventory entry with no declaration left in the tree must not satisfy the contract"
 
 echo "Fuzz tier contract self-tests passed."

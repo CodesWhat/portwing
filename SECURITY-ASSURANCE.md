@@ -115,13 +115,16 @@ engine: 5 seconds per target on pre-push, 60 seconds on every push and pull
 request, 5 minutes nightly, and an hour per target on the first of the month.
 The fifth rebuilds the identical targets against libFuzzer and
 AddressSanitizer through OSS-Fuzz's toolchain (ClusterFuzzLite). It adds two
-things the other four do not have: a different mutation engine, so the inputs
-it reaches are not the ones Go's engine reaches, and a corpus that cannot
-expire, committed to an orphan branch of this repository rather than held in
-the Actions cache the two scheduled Go-engine lanes share, where an entry is
-evicted after seven days without a hit. AddressSanitizer is on as well, though
-on a codebase this close to pure Go its reach is limited to the runtime
-boundary.
+things the other four do not have. It explores differently: a second mutation
+engine and a sanitizer-instrumented build take a different path through the
+same input space, and it adds ASan-class detection on top of the panics and
+assertion failures the Go engine reports. The overlap with what Go's engine
+finds is not measured, and no claim is made that either reaches inputs the
+other cannot. It also keeps a corpus that cannot expire, committed to an orphan
+branch of this repository rather than held in the Actions cache the two
+scheduled Go-engine lanes share, where an entry is evicted after seven days
+without a hit. On a codebase this close to pure Go, AddressSanitizer's reach is
+limited to the runtime boundary.
 
 Evidence: [`.github/workflows/ci-verify.yml`](.github/workflows/ci-verify.yml),
 [`.github/workflows/quality-fuzz-cflite-pr.yml`](.github/workflows/quality-fuzz-cflite-pr.yml),
