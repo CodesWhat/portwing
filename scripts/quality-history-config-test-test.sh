@@ -200,6 +200,12 @@ assert_rejected \
 	"the matrix leg must never see the write credential" \
 	"contract must reject a credential handed back to the Gremlins matrix"
 
+reset_fixtures
+sed -i.bak "s|^          elif jq -e 'type == \"object\"' mutation-report.json|          elif jq -e . mutation-report.json|" "${mutation}"
+assert_rejected \
+	"the gated-mode test must require a JSON object" \
+	"contract must reject a gated-mode test that accepts any JSON value"
+
 # --- the appender's own locks ------------------------------------------------
 
 reset_fixtures

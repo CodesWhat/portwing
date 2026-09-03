@@ -262,21 +262,25 @@ jobs:
           # scripts/ci/mutation-gate.sh gated on, so the recorded efficacy is
           # by construction the number the lane passed or failed against.
           #
-          # `jq -e .` rather than `[ -s ]`. A truncated or corrupt report is
-          # non-empty, so a size check passes it, every field then reads as
-          # null, and the series grows a row that says "measured, and every
-          # number was zero" for a run that measured nothing. That is the same
-          # green-means-nothing failure PW-6.1 was about, so it gets its own
-          # mode instead.
+          # `jq -e 'type == "object"'` rather than `[ -s ]`. A truncated or
+          # corrupt report is non-empty, so a size check passes it, every field
+          # then reads as null, and the series grows a row that says "measured,
+          # and every number was zero" for a run that measured nothing. That is
+          # the same green-means-nothing failure PW-6.1 was about, so it gets
+          # its own mode instead. The type check is the whole test rather than
+          # a bare `jq -e .`, which exits 0 for an array, a string or a number:
+          # those are valid JSON and are not Gremlins reports, the metric
+          # extraction below then errors into `{}`, and the row still claims
+          # mode "gated". scripts/ci/mutation-gate.sh rejects the same inputs.
           if [ "${ZERO_MUTANTS}" = "true" ]; then
             mode="zero-mutants"
           elif [ ! -f mutation-report.json ]; then
             mode="unmeasured"
-          elif jq -e . mutation-report.json >/dev/null 2>&1; then
+          elif jq -e 'type == "object"' mutation-report.json >/dev/null 2>&1; then
             mode="gated"
           else
             mode="unparseable"
-            echo "::warning::mutation-report.json is not readable JSON; recording ${PACKAGE_NAME} as unparseable."
+            echo "::warning::mutation-report.json is not a readable Gremlins JSON object; recording ${PACKAGE_NAME} as unparseable."
           fi
 
           # Gremlins counts TIMED OUT mutants but never writes the count to

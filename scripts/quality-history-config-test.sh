@@ -161,6 +161,18 @@ if grep -Fq "QUALITY_HISTORY_CREDENTIAL" <<<"$(strip_comments <<<"${mutation_gre
 	fail "mutation: the matrix leg must never see the write credential"
 fi
 
+# A bare `jq -e .` exits 0 for an array, a string or a number. Those are valid
+# JSON and are not Gremlins reports: the metric extraction errors into `{}` and
+# the row still claims it was gated on a real measurement. The type check is
+# the only thing standing between that and a lying series.
+# shellcheck disable=SC2016 # asserting the workflow's literal jq program text
+if grep -Fq "elif jq -e . mutation-report.json" <<<"${mutation_gremlins}"; then
+	fail "mutation: the gated-mode test must require a JSON object, not any JSON value"
+fi
+# shellcheck disable=SC2016 # same, the expected form
+grep -Fq "elif jq -e 'type == \"object\"' mutation-report.json" <<<"${mutation_gremlins}" ||
+	fail "mutation: the gated-mode test must be jq -e 'type == \"object\"'"
+
 # The advisory and canary jobs measure things and record nothing. Naming them
 # keeps the "only the recording job can write" property from decaying into
 # "some job in this file can write".
