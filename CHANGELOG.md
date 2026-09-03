@@ -132,10 +132,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   advisory needs an unauthenticated peer fragmenting HTTP/2 DATA frames at a
   gRPC server, and the only gRPC server Compose can run is BuildKit's session
   over the hijacked Docker `/session` connection, never a network listener;
-  portwing also spawns Compose as a short-lived subprocess per request, so a
-  reached OOM would be bounded to one invocation. Suppressed in `.grype.yaml`
-  scoped to that binary and pinned to v1.83.0, so the next grpc Wolfi ships
-  forces a re-review, with a contract test that fails if the scope is widened.
+  portwing also spawns Compose as a short-lived subprocess per request, but that
+  subprocess shares portwing's memory cgroup rather than one of its own, so a
+  cgroup-level OOM kill could still take the whole container down. The argument
+  here is unreachability, not isolation. Suppressed in `.grype.yaml` scoped to
+  that binary and pinned to v1.83.0, so the ignore won't silently follow
+  whatever grpc Wolfi ships next; the weekly rescan just stops matching once it
+  drifts, which is why the entry carries a review-by date of 2026-11-15 and a
+  contract test that fails if the scope is widened.
   Compose's `main` is already on grpc v1.83.2, so the real fix lands with the
   next Compose release.
 - **`golang.org/x/crypto` bumped to v0.56.0**, clearing GO-2026-6354 and

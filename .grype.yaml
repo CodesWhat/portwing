@@ -161,13 +161,18 @@ ignore:
   # not exist. Its gRPC clients dial only operator-configured endpoints:
   # buildkitd through that same daemon, and the OTLP trace exporter, which this
   # image sets no endpoint for. Portwing runs Compose as a short-lived
-  # subprocess per request (internal/docker/compose.go, buildCommand), so even a
-  # reached OOM is bounded to one invocation and cannot take the agent down.
+  # subprocess per request (internal/docker/compose.go, buildCommand) via
+  # exec.CommandContext, sharing this container's memory cgroup rather than one
+  # of its own, so a cgroup-level OOM kill can take down the whole container,
+  # not just Compose. The argument here is not isolation, it's reachability:
+  # there is no listener for an unauthenticated peer to hit.
   #
-  # Version-scoped, so the next grpc the Wolfi Compose package embeds forces
-  # this back through review whether or not it is the fixed line. Review when
-  # Wolfi ships a Compose past v5.5.0, or by 2026-11-15 alongside the
-  # docker/docker entries above, whichever is sooner.
+  # Version-scoped, so the pin keeps this ignore from silently following
+  # whatever grpc Wolfi's Compose package embeds next; once the version drifts,
+  # the weekly rescan stops matching and this entry goes dead rather than
+  # forcing a review on its own. The dated review deadline is what actually
+  # drives cleanup: review when Wolfi ships a Compose past v5.5.0, or by
+  # 2026-11-15 alongside the docker/docker entries above, whichever is sooner.
   - vulnerability: GHSA-vp52-pcj8-j9qc
     reason: "Embedded in the Wolfi docker-compose binary; Compose's only gRPC server is BuildKit's session over the hijacked Docker /session connection, never a network listener, and its gRPC clients dial only operator-configured endpoints. No fixed Compose release exists yet (v5.5.0 pins grpc v1.83.0; compose@main is already on v1.83.2). Review when Wolfi ships a Compose past v5.5.0, or by 2026-11-15."
     package:

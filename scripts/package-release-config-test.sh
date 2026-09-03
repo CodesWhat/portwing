@@ -548,6 +548,7 @@ require_scoped_compose_advisory_alias "GO-2026-4887"
 require_scoped_compose_grpc_advisory() {
 	local advisory_id="$1"
 	local block
+	local scrubbed_block
 	local count
 
 	count="$(grep -Fc -- "  - vulnerability: ${advisory_id}" .grype.yaml || true)"
@@ -558,12 +559,18 @@ require_scoped_compose_grpc_advisory() {
 		}
 		capture { print }
 	' .grype.yaml)"
+	# A field commented out (e.g. "#      location: ...") is absent as far
+	# as YAML and grype are concerned, but a plain substring grep over the
+	# raw block still sees the text and passes. Strip full comment lines and
+	# trailing comments before matching, then anchor each field to a key at
+	# the start of a line so a comment can no longer stand in for scope.
+	scrubbed_block="$(sed -e 's/[[:space:]]#.*$//' -e '/^[[:space:]]*#/d' <<<"${block}")"
 
 	if [ "${count}" -ne 1 ] ||
-		! grep -Fq 'name: google.golang.org/grpc' <<<"${block}" ||
-		! grep -Fq 'version: v1.83.0' <<<"${block}" ||
-		! grep -Fq 'type: go-module' <<<"${block}" ||
-		! grep -Fq 'location: "**/usr/bin/docker-compose"' <<<"${block}"; then
+		! grep -Eq '^[[:space:]]+name: google\.golang\.org/grpc[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+version: v1\.83\.0[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+type: go-module[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+location: "\*\*/usr/bin/docker-compose"[[:space:]]*$' <<<"${scrubbed_block}"; then
 		echo "FAIL: .grype.yaml must contain exactly one ${advisory_id} ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" >&2
 		failures=$((failures + 1))
 	fi

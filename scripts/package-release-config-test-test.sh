@@ -288,6 +288,33 @@ type|unknown
 location|"**/usr/bin/*"
 EOF
 
+# A scope field commented out (rather than changed) removes it from grype's
+# and YAML's view of the entry just as effectively as deleting it, so the
+# guard has to reject that too, not just a substring match on the captured
+# block.
+while IFS= read -r scope_field; do
+	awk -v scope_field="${scope_field}:" '
+		$1 == "-" && $2 == "vulnerability:" { target = ($3 == "GHSA-vp52-pcj8-j9qc") }
+		target && $1 == scope_field && !changed {
+			print "#" $0
+			changed = 1
+			next
+		}
+		{ print }
+		END { if (!changed) exit 1 }
+	' "${fixture}/.grype.yaml" >"${fixture}/.grype.yaml.tmp"
+	mv "${fixture}/.grype.yaml.tmp" "${fixture}/.grype.yaml"
+	expect_release_contract_failure \
+		"FAIL: .grype.yaml must contain exactly one GHSA-vp52-pcj8-j9qc ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" \
+		"the package release contract must reject commenting out the GHSA-vp52-pcj8-j9qc ${scope_field} scope"
+	cp .grype.yaml "${fixture}/"
+done <<'EOF'
+name
+version
+type
+location
+EOF
+
 prefix_version="${release_version}0"
 
 awk -v from="VERSION=${release_version}" -v to="VERSION=${prefix_version}" '
