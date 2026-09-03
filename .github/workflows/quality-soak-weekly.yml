@@ -51,6 +51,17 @@ jobs:
     # 4-hour soak; well under the 6-hour github-hosted ceiling.
     timeout-minutes: 270
 
+    # Deliberately read-only. This job builds and runs the agent under load
+    # for four hours, so it is the last place a write-scoped credential
+    # belongs; the `history` job below does the writing and runs nothing but
+    # checkout, an artifact download, jq and git. What that job needs from
+    # here travels as job outputs and as the soak-output.txt artifact.
+    outputs:
+      duration: ${{ steps.params.outputs.duration }}
+      concurrency: ${{ steps.params.outputs.concurrency }}
+      rss_threshold: ${{ steps.params.outputs.rss_threshold }}
+      outcome: ${{ steps.soak.outcome }}
+
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
@@ -155,3 +166,123 @@ jobs:
             tail -n 20 soak-output.txt 2>/dev/null || echo "(no output captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # PW-5.5. Everything the soak job produces is visible for exactly one run:
+  # the step summary belongs to the run, and soak-output.txt is a 90-day
+  # artifact you have to know to go looking for. An RSS leak that grows a few
+  # MiB a week never trips the 64 MiB threshold on any single run and is
+  # invisible in all of them, which is the regression this lane is supposed to
+  # catch. Appending the headline numbers to the quality-history branch is what
+  # makes the fourth run comparable to the first.
+  #
+  # This is a separate job, and that is the whole point of it. `contents:
+  # write` has to live somewhere for the push to work, and the soak job spends
+  # four hours building and running the agent, loadgen and a mock daemon from
+  # the workspace. A write-scoped credential in that job would be reachable by
+  # anything those steps could have rewritten, including the append script
+  # itself. This job checks the tree out fresh at the run's own SHA and then
+  # runs nothing but an artifact download, jq and git, so the credential never
+  # coexists with executed product code. The downloaded artifact is data: it is
+  # validated as JSON and passed as an argument, never sourced or evaluated.
+  #
+  # always(), because a soak that blew its budget is the run whose numbers
+  # matter most; the record carries the outcome so a reader can tell.
+  history:
+    name: "Record the soak run in the quality history"
+    needs: soak
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          # The union of two endpoint sets already proven in this repository:
+          # ci-verify.yml's coverage job downloads an artifact with
+          # results-receiver, and this workflow's own soak job lists the blob
+          # host for artifact traffic. github.com carries the checkout and the
+          # git push; there is no other network call in this job.
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the soak output
+        id: output
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: soak-output-${{ github.run_id }}
+          path: .
+
+      - name: Append the run to the quality history
+        env:
+          QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}
+          QUALITY_HISTORY_EVENT: ${{ github.event_name }}
+          SOAK_DURATION: ${{ needs.soak.outputs.duration }}
+          SOAK_CONCURRENCY: ${{ needs.soak.outputs.concurrency }}
+          SOAK_RSS_THRESHOLD: ${{ needs.soak.outputs.rss_threshold }}
+          SOAK_OUTCOME: ${{ needs.soak.outputs.outcome || needs.soak.result }}
+        run: |
+          # The RSS numbers are read back from the line scripts/soak.sh already
+          # prints, not recomputed: soak.sh owns the baseline/final sampling
+          # and the growth arithmetic, and a second implementation here would
+          # be free to disagree with the number the lane actually gated on.
+          baseline=""
+          final=""
+          growth=""
+          headline="$(grep -E '^soak: baseline=' soak-output.txt 2>/dev/null | tail -n 1 || true)"
+          if [[ "${headline}" =~ baseline=([0-9]+)\ KiB[[:space:]]+final=([0-9]+)\ KiB[[:space:]]+growth=(-?[0-9]+)\ B ]]; then
+            baseline="${BASH_REMATCH[1]}"
+            final="${BASH_REMATCH[2]}"
+            growth="${BASH_REMATCH[3]}"
+          else
+            echo "::warning::No 'soak: baseline=' line in soak-output.txt; recording the run without RSS numbers."
+          fi
+
+          # loadgen writes one JSON object per scenario into the same output,
+          # so the request and error totals come for free. A soak that grew
+          # nothing because it served almost nothing is a green run that
+          # measured nothing, and these two columns are what makes that
+          # visible in the series.
+          totals='{}'
+          scenarios="$(grep -E '^\{' soak-output.txt 2>/dev/null || true)"
+          if [ -n "${scenarios}" ]; then
+            totals="$(printf '%s\n' "${scenarios}" | jq -cs '{
+              total_requests: (map(.total_requests // 0) | add),
+              error_requests: (map(.error_requests // 0) | add)
+            }' 2>/dev/null || echo '{}')"
+          fi
+
+          numbers="$(jq -cn \
+            --arg duration "${SOAK_DURATION}" \
+            --arg concurrency "${SOAK_CONCURRENCY}" \
+            --arg threshold "${SOAK_RSS_THRESHOLD}" \
+            --arg baseline "${baseline}" \
+            --arg final "${final}" \
+            --arg growth "${growth}" \
+            --arg outcome "${SOAK_OUTCOME}" \
+            --argjson totals "${totals}" \
+            '{
+              duration: $duration,
+              concurrency: ($concurrency | tonumber? // null),
+              rss_threshold_bytes: ($threshold | tonumber? // null),
+              baseline_rss_kib: ($baseline | tonumber? // null),
+              final_rss_kib: ($final | tonumber? // null),
+              rss_growth_bytes: ($growth | tonumber? // null),
+              outcome: (if $outcome == "" then "skipped" else $outcome end)
+            } + $totals')"
+
+          scripts/ci/quality-history-append.sh soak "${numbers}"
