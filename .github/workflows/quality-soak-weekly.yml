@@ -51,6 +51,16 @@ jobs:
     # 4-hour soak; well under the 6-hour github-hosted ceiling.
     timeout-minutes: 270
 
+    # Scoped to this job rather than the workflow, and used by exactly one
+    # step: the final append to the `quality-history` orphan branch (PW-5.5).
+    # The workflow default above stays contents: read, so a job added here
+    # later starts read-only. Checkout runs with persist-credentials: false,
+    # so no step in this job carries an ambient git credential; the append
+    # step is handed one through env and puts it in a temporary clone that is
+    # deleted when the script exits.
+    permissions:
+      contents: write
+
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
@@ -155,3 +165,74 @@ jobs:
             tail -n 20 soak-output.txt 2>/dev/null || echo "(no output captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # PW-5.5. Everything above this step is visible for exactly one run: the
+      # step summary belongs to the run, and soak-output.txt is a 90-day
+      # artifact you have to know to go looking for. An RSS leak that grows a
+      # few MiB a week never trips the 64 MiB threshold on any single run and
+      # is invisible in all of them, which is the regression this lane is
+      # supposed to catch. Appending the headline numbers to the
+      # quality-history branch is what makes the fourth run comparable to the
+      # first.
+      #
+      # always(), because a soak that blew its budget is the run whose numbers
+      # matter most; the record carries the outcome so a reader can tell.
+      - name: Append the run to the quality history
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        env:
+          QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}
+          SOAK_DURATION: ${{ steps.params.outputs.duration }}
+          SOAK_CONCURRENCY: ${{ steps.params.outputs.concurrency }}
+          SOAK_RSS_THRESHOLD: ${{ steps.params.outputs.rss_threshold }}
+          SOAK_OUTCOME: ${{ steps.soak.outcome }}
+        run: |
+          # The RSS numbers are read back from the line scripts/soak.sh already
+          # prints, not recomputed: soak.sh owns the baseline/final sampling
+          # and the growth arithmetic, and a second implementation here would
+          # be free to disagree with the number the lane actually gated on.
+          baseline=""
+          final=""
+          growth=""
+          headline="$(grep -E '^soak: baseline=' soak-output.txt 2>/dev/null | tail -n 1 || true)"
+          if [[ "${headline}" =~ baseline=([0-9]+)\ KiB[[:space:]]+final=([0-9]+)\ KiB[[:space:]]+growth=(-?[0-9]+)\ B ]]; then
+            baseline="${BASH_REMATCH[1]}"
+            final="${BASH_REMATCH[2]}"
+            growth="${BASH_REMATCH[3]}"
+          else
+            echo "::warning::No 'soak: baseline=' line in soak-output.txt; recording the run without RSS numbers."
+          fi
+
+          # loadgen writes one JSON object per scenario into the same output,
+          # so the request and error totals come for free. A soak that grew
+          # nothing because it served almost nothing is a green run that
+          # measured nothing, and these two columns are what makes that
+          # visible in the series.
+          totals='{}'
+          scenarios="$(grep -E '^\{' soak-output.txt 2>/dev/null || true)"
+          if [ -n "${scenarios}" ]; then
+            totals="$(printf '%s\n' "${scenarios}" | jq -cs '{
+              total_requests: (map(.total_requests // 0) | add),
+              error_requests: (map(.error_requests // 0) | add)
+            }' 2>/dev/null || echo '{}')"
+          fi
+
+          numbers="$(jq -cn \
+            --arg duration "${SOAK_DURATION}" \
+            --arg concurrency "${SOAK_CONCURRENCY}" \
+            --arg threshold "${SOAK_RSS_THRESHOLD}" \
+            --arg baseline "${baseline}" \
+            --arg final "${final}" \
+            --arg growth "${growth}" \
+            --arg outcome "${SOAK_OUTCOME}" \
+            --argjson totals "${totals}" \
+            '{
+              duration: $duration,
+              concurrency: ($concurrency | tonumber? // null),
+              rss_threshold_bytes: ($threshold | tonumber? // null),
+              baseline_rss_kib: ($baseline | tonumber? // null),
+              final_rss_kib: ($final | tonumber? // null),
+              rss_growth_bytes: ($growth | tonumber? // null),
+              outcome: (if $outcome == "" then "skipped" else $outcome end)
+            } + $totals')"
+
+          scripts/ci/quality-history-append.sh soak "${numbers}"

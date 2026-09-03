@@ -62,3 +62,30 @@ go test -run='^$' -fuzz='^FuzzMCPHandler$' -fuzztime=5s ./internal/mcp/
 ## CI map
 
 `ci-verify.yml` calls the organization Go and Node workflows by a full commit SHA; fixed commands live in `scripts/ci/`, while Portwing keeps its fuzz inventory, CodeQL category, and dependency review locally. It runs lint, test -race, the coverage floor, fuzz smoke, web builds, workflow security, and release-config checks on every applicable push/PR. `quality-fuzz-nightly.yml` (5m per fuzzer) · `quality-integration.yml` (real dockerd) · `quality-integration-engines.yml` (weekly, the same suite against a pinned Docker Engine matrix) · `quality-mutation-monthly.yml` (Gremlins) · `security-grype.yml` (Grype, gosec) · `security-scorecard.yml` (OpenSSF) · `release-cut.yml` → `release.yml` (GoReleaser + cosign + provenance, plus a per-platform Grype scan of the actual published image; see RELEASING.md). `greptile.json` pins Greptile to `skipReview: AUTOMATIC` so it never reviews on its own; `greptile.yml` summons it as an on-demand second opinion when a PR gets the `second-opinion` label, alongside CodeRabbit's automatic review.
+
+### Quality lane history
+
+The scheduled quality lanes print their headline numbers to one run's log and
+step summary and nothing else, so a regression that is slow enough to stay
+inside its threshold every single week is invisible in every single run. The
+`quality-soak-weekly.yml` and `quality-mutation-monthly.yml` lanes each end
+with a step that appends that run's numbers to `quality-history`, an orphan
+branch in this repository holding one append-only JSONL file per lane
+(`soak.jsonl`, `mutation.jsonl`, and `fuzz-nightly.jsonl`/`bench.jsonl` when
+those lanes adopt it).
+
+Read a lane's series with `scripts/quality-history.sh <lane> [--last N]`, which
+fetches the branch into a throwaway clone and prints a table; `--json` gives
+the raw records. Records are written by `scripts/ci/quality-history-append.sh`,
+which is deliberately incapable of failing its caller: an append that cannot
+reach the remote warns and exits 0, because a trend surface must never be able
+to turn a green quality lane red. Only `schedule` and `workflow_dispatch` runs
+append, gated both in the workflow `if:` and in the script.
+
+The branch is never merged and never released. Nothing on a trunk branch
+changes when a lane runs, which is what keeps the house rule that committed
+generated artifacts only move at a release cut. `contents: write` is scoped to
+the single job that appends in each lane; `scripts/quality-history-config-test.sh`
+holds both lanes to that, and `scripts/quality-history-script-test.sh` drives
+the appender against a real git remote (bootstrap, append, and a push rejected
+by a concurrent writer).

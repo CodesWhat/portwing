@@ -36,6 +36,17 @@ jobs:
     name: "Quality: Gremlins (${{ matrix.name }})"
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+
+    # Scoped to this job, and used by exactly one step: the final append to
+    # the `quality-history` orphan branch (PW-5.5). The workflow default
+    # stays contents: read, and the other two jobs in this file keep it —
+    # mutation-advisory and gate-canary record nothing and must not be able
+    # to write. Checkout runs with persist-credentials: false, so none of the
+    # Gremlins steps carry a git credential; the append step is handed one
+    # through env and confines it to a temporary clone.
+    permissions:
+      contents: write
+
     strategy:
       fail-fast: false
       matrix:
@@ -174,6 +185,7 @@ jobs:
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@"${GREMLINS_VERSION}"
 
       - name: Run Gremlins mutation testing
+        id: gremlins
         shell: bash
         run: |
           set -euo pipefail
@@ -230,6 +242,88 @@ jobs:
             mutation-report.json
           if-no-files-found: warn
           retention-days: 30
+
+      # PW-5.5/PW-2.5. The report artifact expires in 30 days on a lane that
+      # runs every 30, so the previous run's numbers are gone by the time the
+      # next one lands and "did adapter's efficacy drift?" has no answer that
+      # doesn't involve re-running it. This step keeps the headline numbers
+      # (not the surviving mutants themselves) on the quality-history branch,
+      # one record per package per run, alongside the floor they were measured
+      # against so a ratchet edit is visible in the same series.
+      #
+      # always(), because the run that fell below its floor is precisely the
+      # one worth having in the history.
+      - name: Append the package to the quality history
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        env:
+          QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_NAME: ${{ matrix.name }}
+          PACKAGE_PATH: ${{ matrix.package }}
+          EFFICACY_FLOOR: ${{ matrix.efficacy || '' }}
+          MCOVER_FLOOR: ${{ matrix.mcover || '' }}
+          ZERO_MUTANTS: ${{ matrix.zero_mutants || false }}
+          GREMLINS_OUTCOME: ${{ steps.gremlins.outcome }}
+        run: |
+          # Read back from the same mutation-report.json that
+          # scripts/ci/mutation-gate.sh gated on, so the recorded efficacy is
+          # by construction the number the lane passed or failed against.
+          if [ "${ZERO_MUTANTS}" = "true" ]; then
+            mode="zero-mutants"
+          elif [ -s mutation-report.json ]; then
+            mode="gated"
+          else
+            mode="unmeasured"
+          fi
+
+          # Gremlins counts TIMED OUT mutants but never writes the count to
+          # its JSON report (MutantsTotal is lived+killed+notViable), and a
+          # package whose mutants all time out scores 0.00/0.00 as if it had
+          # been measured. internal/pool and internal/protocol both did.
+          # The text report is the only place the count exists, so it is
+          # parsed from there and left null when the line isn't present.
+          timed_out=""
+          if [ -f mutation-report.txt ]; then
+            timed_out="$(grep -oE 'Timed out: [0-9]+' mutation-report.txt | tail -n 1 | grep -oE '[0-9]+' || true)"
+          fi
+
+          envelope="$(jq -cn \
+            --arg name "${PACKAGE_NAME}" \
+            --arg package "${PACKAGE_PATH}" \
+            --arg mode "${mode}" \
+            --arg outcome "${GREMLINS_OUTCOME}" \
+            --arg efficacy_floor "${EFFICACY_FLOOR}" \
+            --arg mcover_floor "${MCOVER_FLOOR}" \
+            --arg timed_out "${timed_out}" \
+            '{
+              name: $name,
+              package: $package,
+              mode: $mode,
+              outcome: (if $outcome == "" then "skipped" else $outcome end),
+              efficacy_floor: ($efficacy_floor | tonumber? // null),
+              mutator_coverage_floor: ($mcover_floor | tonumber? // null),
+              timed_out: ($timed_out | tonumber? // null)
+            }')"
+
+          measured='{}'
+          if [ "${mode}" = "gated" ]; then
+            measured="$(jq -c '{
+              efficacy: (.test_efficacy // null),
+              mutator_coverage: (.mutations_coverage // null),
+              mutants_total: (.mutants_total // null),
+              killed: (.mutants_killed // null),
+              lived: (.mutants_lived // null),
+              not_covered: (.mutants_not_covered // null),
+              not_viable: (.mutants_not_viable // null),
+              elapsed_seconds: (.elapsed_time // null)
+            }' mutation-report.json 2>/dev/null || echo '{}')"
+          fi
+
+          numbers="$(jq -cn \
+            --argjson envelope "${envelope}" \
+            --argjson measured "${measured}" \
+            '$envelope + $measured')"
+
+          scripts/ci/quality-history-append.sh mutation "${numbers}"
 
   # PW-6.8: Gremlins ships 11 mutator types and enables 5 of them. The 6 it
   # leaves off by default (invert-logical, invert-bitwise, invert-bwassign,

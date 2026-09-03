@@ -74,6 +74,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the new baseline. `allocs/op` is measured and reported but not gated: it is
   a small integer, so the smallest possible change is often more than 10% and a
   percentage threshold says nothing useful about it.
+- **The weekly soak and monthly mutation lanes now keep a queryable history of
+  their headline numbers instead of only the most recent run's.** Both lanes
+  print to the run log and step summary and nothing else, so a leak that adds
+  a few MiB of RSS a week never trips the 64 MiB budget on any single run and
+  is invisible in all of them; the same is true of a mutation score drifting
+  down inside its floor. Each lane now ends with a step that appends that run's
+  numbers to `quality-history`, an orphan branch in this repository holding one
+  append-only JSONL file per lane: baseline/final/growth RSS with the request
+  and error totals for soak, and per-package efficacy, mutator coverage, mutant
+  counts and the floor they were measured against for mutation. Read a series
+  with `scripts/quality-history.sh <lane> [--last N]`. Only `schedule` and
+  `workflow_dispatch` runs record, `contents: write` is scoped to the one job
+  in each lane that appends, and an append that cannot reach the remote emits a
+  warning and exits 0 rather than turning a green quality lane red. The branch
+  shares no history with `main` or any `dev/*` branch and is never merged, so
+  no tracked file changes on a cron and nothing here reaches a released tree.
 
 ### Fixed
 

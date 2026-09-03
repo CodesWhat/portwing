@@ -402,9 +402,15 @@ test("mutation contract rejects swallowed Gremlins failures", () => {
 
 for (const value of ["true", expressionTrue]) {
   test(`mutation contract rejects step-level continue-on-error: ${value}`, () => {
+    // Anchored on the step's name line alone, not on the name plus whatever
+    // key currently follows it. The step gained an `id:` for PW-5.5, and a
+    // two-line anchor turned into a no-op replace: the unmodified workflow
+    // then passed the contract, assert.throws saw no exception, and the
+    // failure read as "the contract stopped rejecting continue-on-error"
+    // rather than "the fixture stopped being built".
     const source = workflow.replace(
-      "      - name: Run Gremlins mutation testing\n        shell: bash",
-      `      - name: Run Gremlins mutation testing\n        continue-on-error: ${value}\n        shell: bash`,
+      "      - name: Run Gremlins mutation testing\n",
+      `      - name: Run Gremlins mutation testing\n        continue-on-error: ${value}\n`,
     );
     assertMutationFailure(source, "Gremlins failures must not be ignored at step level");
   });
