@@ -9,13 +9,14 @@
 #   5. Qlty full-repository check
 #   6. go test -race
 #   7. govulncheck (reachable CVEs in deps + stdlib)
-#   8. Go fuzz smoke (5 s per fuzzer, all 7 fuzzers) — tier 0 of the fuzz
+#   8. Go fuzz smoke (5 s per fuzzer, all 10 fuzzers) — tier 0 of the fuzz
 #      strategy. Catches broken fuzz drivers and stale seed corpora before
 #      the push leaves the machine. Real coverage tiers live in
 #      .github/workflows/ci-verify.yml (60 s, every push/PR) and
 #      quality-fuzz-nightly.yml (5 m, daily).
 #   9. actionlint + zizmor (workflow correctness + security)
-#  10. Web analytics contract, lint, and production static build
+#  10. Web analytics contract, lint, knip dead-code scan, and production
+#      static build
 #
 # Tools that may not be installed locally (goreleaser, govulncheck,
 # actionlint, zizmor) are skipped when absent — CI still enforces them.
@@ -100,7 +101,7 @@ pre-push:
       priority: 6
       timeout: 2m
 
-    # Fuzz smoke — 5 s per fuzzer, all 7 in series. Keep a finite Go
+    # Fuzz smoke — 5 s per fuzzer, all 10 in series. Keep a finite Go
     # watchdog above the tiny smoke budget so a hung input fails with a
     # stack dump instead of consuming the hook timeout.
     #
@@ -117,24 +118,11 @@ pre-push:
         cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
         workers=$(( cores > 1 ? cores - 1 : 1 ))
         [ "$workers" -gt 4 ] && workers=4
-        # Retry once on the coordinator-starvation flake ("context deadline
-        # exceeded" with no failing input) — mirrors the backstop in
-        # ci-verify.yml. Never retry a real crash ("Failing input written").
-        run_fuzz() {
-          fuzzer="$1"; pkg="$2"; attempt=1
-          while [ "$attempt" -le 2 ]; do
-            if out="$(go test -run='^$' -fuzz="^${fuzzer}\$" -fuzztime=5s -timeout=1m -parallel="$workers" "$pkg" 2>&1)"; then
-              echo "$out"; return 0
-            fi
-            echo "$out"
-            echo "$out" | grep -q "Failing input written" && return 1
-            if [ "$attempt" -eq 1 ] && echo "$out" | grep -q "context deadline exceeded"; then
-              echo "fuzz ${fuzzer}: coordinator-starvation flake — retrying once"
-              attempt=2; continue
-            fi
-            return 1
-          done
-        }
+        # Retry-once-on-flake and crash classification live in
+        # scripts/ci/fuzz-run.sh (PW-5.10), shared with scripts/ci/go-fuzz.sh
+        # and the nightly/monthly deep-fuzz workflows. `set -e` above stops
+        # this loop at the first fuzzer whose call exits non-zero, same as
+        # the inline retry loop this replaced.
         for entry in \
           "FuzzParsePHC ./internal/server/" \
           "FuzzParseTrustedProxies ./internal/server/" \
@@ -142,9 +130,12 @@ pre-push:
           "FuzzParseLabels ./internal/adapter/drydock/" \
           "FuzzMCPHandler ./internal/mcp/" \
           "FuzzEnvelope ./internal/protocol/" \
-          "FuzzVerifyRequest ./internal/auth/"; do
+          "FuzzVerifyRequest ./internal/auth/" \
+          "FuzzDecodeContainerLogStream ./internal/docker/" \
+          "FuzzComposeRequestValidate ./internal/docker/" \
+          "FuzzParseKeyLine ./internal/auth/"; do
           set -- $entry
-          run_fuzz "$1" "$2"
+          FUZZ_RETRIES=2 FUZZ_TIMEOUT=1m FUZZ_PARALLEL="$workers" bash scripts/ci/fuzz-run.sh "$2" "$1" 5s
         done
       priority: 7
       timeout: 3m
@@ -165,6 +156,12 @@ pre-push:
       priority: 9
       timeout: 30s
 
+    # Runs check:web, which chains version-contract, tests, biome lint,
+    # knip (dead files/exports/unlisted deps across website, docs,
+    # analytics — config in knip.json), build, page-weight budget, and
+    # lighthouse. CI's node-ci "Web Contract" job runs the same
+    # check:web script, so knip is gated there too without a second,
+    # duplicate invocation here.
     web:
       run: npm run check:web
       priority: 10

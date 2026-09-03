@@ -104,15 +104,44 @@ and the public [security model](https://portwing.codeswhat.com/docs/security-mod
 ### Common weakness, test, and release controls
 
 CI applies formatting, vetting, static security analysis, dependency and image
-vulnerability scans, race-enabled tests, integration tests, fuzzing, and a 96%
+vulnerability scans, race-enabled tests, integration tests, fuzzing, and a 97%
 coverage floor. The release workflow creates signed images and archives,
 CycloneDX SBOMs, and provenance, then verifies the published artifacts against
 the expected workflow identity.
 
+Fuzzing runs in five tiers over the same ten targets, so a finding is reachable
+from a laptop and from a scheduled lane alike. Four of them run Go's native
+engine: 5 seconds per target on pre-push, 60 seconds on every push and pull
+request, 5 minutes nightly, and an hour per target on the first of the month.
+The fifth rebuilds the identical targets against libFuzzer and
+AddressSanitizer through OSS-Fuzz's toolchain (ClusterFuzzLite). It adds two
+things the other four do not have. It explores differently: a second mutation
+engine and a sanitizer-instrumented build take a different path through the
+same input space, and it adds ASan-class detection on top of the panics and
+assertion failures the Go engine reports. The overlap with what Go's engine
+finds is not measured, and no claim is made that either reaches inputs the
+other cannot. It also keeps a corpus that cannot expire, committed to an orphan
+branch of this repository rather than held in the Actions cache the two
+scheduled Go-engine lanes share, where an entry is evicted after seven days
+without a hit. On a codebase this close to pure Go, AddressSanitizer's reach is
+limited to the runtime boundary.
+
 Evidence: [`.github/workflows/ci-verify.yml`](.github/workflows/ci-verify.yml),
+[`.github/workflows/quality-fuzz-cflite-pr.yml`](.github/workflows/quality-fuzz-cflite-pr.yml),
+[`.github/workflows/quality-fuzz-cflite-batch.yml`](.github/workflows/quality-fuzz-cflite-batch.yml),
+[`.github/workflows/quality-fuzz-cflite-prune.yml`](.github/workflows/quality-fuzz-cflite-prune.yml),
 [`.github/workflows/release.yml`](.github/workflows/release.yml), the public
 [coverage report](https://qlty.sh/gh/CodesWhat/projects/portwing), and
 [`docs/content/docs/verification.mdx`](docs/content/docs/verification.mdx).
+
+The scheduled lanes also record what they measured, not only whether they
+passed. The weekly RSS-growth soak and the monthly mutation matrix each append
+their headline numbers to `quality-history`, an orphan branch carrying one
+append-only JSONL file per lane, so a leak or a mutation-score decline that
+stays inside its threshold on every individual run is still visible as a trend
+across them. Reading a lane's series is
+[`scripts/quality-history.sh`](scripts/quality-history.sh); the branch is never
+merged and is not part of any released tree.
 
 ## Residual risk
 

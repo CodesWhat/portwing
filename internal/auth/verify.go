@@ -29,6 +29,15 @@ const (
 	SignatureVersion2      = "2"
 )
 
+// timeNow is the clock VerifyRequest measures timestamp skew against. Tests pin
+// it to a fixed whole second so they can construct a skew that lands exactly on
+// a window or warn boundary. The wire timestamp is a whole number of seconds,
+// so a skew read off the real wall clock always carries the sub-second
+// remainder time.Now().Unix() discarded at signing time, which puts every
+// measurement a fraction short of any whole-second target and makes a test that
+// aims at one depend on how fast it runs. Production never reassigns it.
+var timeNow = time.Now
+
 // Sentinel errors returned by VerifyRequest. Callers can use errors.Is.
 var (
 	ErrMissingHeaders = errors.New("ed25519: missing required signature headers")
@@ -156,7 +165,7 @@ func VerifyRequest(
 	if err != nil {
 		return "", ErrTimestampSkew
 	}
-	skew := time.Since(time.Unix(tsUnix, 0))
+	skew := timeNow().Sub(time.Unix(tsUnix, 0))
 	maxSkew := time.Duration(maxSkewSeconds) * time.Second
 	if skew < -maxSkew || skew > maxSkew {
 		return "", ErrTimestampSkew

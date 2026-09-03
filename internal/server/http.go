@@ -68,6 +68,57 @@ func stripPortwingAuthHeaders(h http.Header) {
 // the "exec body (10 MB)" limit documented in SECURITY.md.
 const maxHijackBodyBytes = 10 * 1024 * 1024 // 10 MB
 
+// concurrencyLimiter admits a bounded number of concurrent sessions, mirroring
+// edge mode's maxStreams/maxExecSessions semaphores (internal/edge/client.go).
+//
+// A nil limiter is unbounded. Servers assembled as struct literals rather than
+// through NewServer never allocate one, so failing closed on nil would reject
+// every stream those servers proxy.
+type concurrencyLimiter struct {
+	slots chan struct{}
+}
+
+// newConcurrencyLimiter returns nil for a non-positive limit: an operator whose
+// controller legitimately runs more concurrent streams than the default needs a
+// way to turn the bound off.
+func newConcurrencyLimiter(limit int) *concurrencyLimiter {
+	if limit <= 0 {
+		return nil
+	}
+	return &concurrencyLimiter{slots: make(chan struct{}, limit)}
+}
+
+// acquire takes a slot without blocking and reports whether one was free. The
+// caller rejects rather than queues, so a saturated agent answers immediately
+// instead of holding the connection open.
+func (l *concurrencyLimiter) acquire() bool {
+	if l == nil {
+		return true
+	}
+	select {
+	case l.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// release returns a slot taken by a successful acquire. Calls are paired with a
+// defer at every acquire site.
+func (l *concurrencyLimiter) release() {
+	if l == nil {
+		return
+	}
+	<-l.slots
+}
+
+func (l *concurrencyLimiter) limit() int {
+	if l == nil {
+		return 0
+	}
+	return cap(l.slots)
+}
+
 // Server is the standard-mode HTTP server that exposes Docker API proxy
 // endpoints, adapter-specific routes, and health checks.
 type Server struct {
@@ -85,6 +136,11 @@ type Server struct {
 	auditor      *audit.Logger
 	httpServer   *http.Server
 	startTime    time.Time
+
+	// streamSem bounds concurrent streaming proxy responses; execSem bounds
+	// concurrent hijacked exec/attach sessions. Both are nil when unbounded.
+	streamSem *concurrencyLimiter
+	execSem   *concurrencyLimiter
 
 	// pollCtx bounds the pollContainers goroutine started by ListenAndServe;
 	// pollCancel stops it on Shutdown. Both are set at construction so a
@@ -170,7 +226,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		dockerClient: dockerClient,
 		adapter:      a,
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
-		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
+		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
 		metrics:      metrics.NewRegistry(),
 		rateLimiter:  NewRateLimiter(),
 		verifier:     verifier,
@@ -181,6 +237,8 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		hupDone:      make(chan struct{}),
 		handlerDone:  make(chan struct{}),
 		hijackConns:  make(map[net.Conn]struct{}),
+		streamSem:    newConcurrencyLimiter(cfg.MaxStreamSessions),
+		execSem:      newConcurrencyLimiter(cfg.MaxExecSessions),
 	}
 	s.pollCtx, s.pollCancel = context.WithCancel(context.Background())
 
@@ -270,9 +328,15 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Enrollment endpoint: reachable WITHOUT auth (it IS the bootstrap), but
 	// rate-limited. Registered only when ENROLLMENT_TOKEN is configured.
+	//
+	// Registered WITHOUT a method prefix so this exact-path pattern also
+	// catches non-POST methods: the bare pattern outranks the "/" catch-all
+	// in ServeMux precedence (exact path beats subtree wildcard), so a
+	// wrong-method request lands here instead of falling through to the
+	// Docker proxy. Enroller.ServeHTTP already replies 405 for non-POST.
 	if s.enroller != nil {
 		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller, s.metrics)
-		mux.Handle("POST /api/portwing/enroll", enrollHandler)
+		mux.Handle("/api/portwing/enroll", enrollHandler)
 	}
 
 	// Auth required - wrap with audit-aware auth middleware (with Ed25519 support).
@@ -289,10 +353,26 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mcpHandler := authWrap(func(w http.ResponseWriter, r *http.Request) {
 		mcp.NewHandler(s.dockerClient, s.collector).ServeHTTP(w, r)
 	})
-	mux.Handle("POST /_portwing/mcp", mcpHandler)
+	// Registered WITHOUT a method prefix (see the enroll route above for
+	// why): mcp.Handler.ServeHTTP already dispatches POST to the JSON-RPC
+	// handler and replies 405 for every other method, but that method
+	// switch was dead code while only "POST /_portwing/mcp" was registered,
+	// letting the "/" catch-all serve wrong-method requests instead.
+	mux.Handle("/_portwing/mcp", mcpHandler)
 
-	// Adapter-specific routes.
-	s.adapter.RegisterRoutes(mux, authWrap)
+	// Adapter-specific routes. Long-lived adapter streams (SSE, follow-mode
+	// log tails) share s.streamSem with the Docker-proxy streaming path
+	// (SPEC 7.3) rather than getting their own limiter: Go 1.22+ ServeMux
+	// dispatches each request to exactly one handler, so an adapter route
+	// never also reaches handleDockerProxy and a single request can never be
+	// admitted twice.
+	admitStream := adapter.StreamAdmitter(func() (func(), bool) {
+		if !s.streamSem.acquire() {
+			return nil, false
+		}
+		return s.streamSem.release, true
+	})
+	s.adapter.RegisterRoutes(mux, authWrap, admitStream)
 
 	// Docker API proxy - catch-all (must be last).
 	mux.Handle("/", authWrap(s.handleDockerProxy))
@@ -425,6 +505,18 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Bound concurrent streams (SPEC 7.3). Checked after the hijack branch so
+	// an upgraded exec takes an exec slot rather than one of each, and only for
+	// streaming paths so a short proxied request is never turned away.
+	if isStream {
+		if !s.streamSem.acquire() {
+			slog.Warn("concurrent stream limit reached, rejecting", "max", s.streamSem.limit())
+			http.Error(w, "agent busy: too many concurrent streams", http.StatusServiceUnavailable)
+			return
+		}
+		defer s.streamSem.release()
+	}
+
 	// Build Docker API request.
 	dockerURL := fmt.Sprintf("http://localhost%s", r.URL.RequestURI())
 	// #nosec G704 -- URL is fixed to localhost for the Docker socket proxy; RequestURI only selects the Docker API path/query.
@@ -479,6 +571,16 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 		execID := parts[len(parts)-2]
 		s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID)
 	}
+
+	// Bound concurrent exec/attach sessions (SPEC 7.3) before the body read and
+	// the hijack, so a rejected session costs nothing and can still be answered
+	// with a normal HTTP response.
+	if !s.execSem.acquire() {
+		slog.Warn("exec session limit reached, rejecting", "max", s.execSem.limit())
+		http.Error(w, "agent busy: exec session limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.execSem.release()
 
 	var body []byte
 	if r.Body != nil {

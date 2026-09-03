@@ -449,6 +449,86 @@ func TestRun_VersionDispatchBeforeConfig(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// run — --help / -h / --version / -V / unrecognized flags
+// ---------------------------------------------------------------------------
+
+func TestRun_HelpFlag_ExitsZeroWithoutDockerConnection(t *testing.T) {
+	// Setting both TOKEN and TOKEN_HASH makes config.Load() fail, and there's
+	// no docker socket to connect to. If --help fell through to the agent
+	// startup path (as it did before this fix), run() would return 1 here
+	// instead of 0, proving --help short-circuits before config/docker.
+	setenv(t, "TOKEN", "abc")
+	setenv(t, "TOKEN_HASH", "$argon2id$v=19$m=19456,t=2,p=1$fakesalt$fakehash")
+	setenv(t, "DOCKER_SOCKET", "/nonexistent/portwing-test-no-docker.sock")
+
+	for _, flag := range []string{"--help", "-h"} {
+		t.Run(flag, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"portwing", flag}, strings.NewReader(""), &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("want exit 0, got %d; stderr: %s", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "Usage: portwing") {
+				t.Fatalf("expected usage on stdout, got: %s", stdout.String())
+			}
+			if !strings.Contains(stdout.String(), "hash-token") || !strings.Contains(stdout.String(), "keygen") {
+				t.Fatalf("expected usage to list subcommands, got: %s", stdout.String())
+			}
+			if stderr.String() != "" {
+				t.Fatalf("expected no stderr output, got: %s", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRun_VersionFlag_MatchesVersionSubcommand(t *testing.T) {
+	t.Parallel()
+
+	var wantOut bytes.Buffer
+	var wantErr bytes.Buffer
+	wantCode := run([]string{"portwing", "version"}, strings.NewReader(""), &wantOut, &wantErr)
+
+	for _, flag := range []string{"--version", "-V"} {
+		t.Run(flag, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"portwing", flag}, strings.NewReader(""), &stdout, &stderr)
+			if code != wantCode {
+				t.Fatalf("exit code = %d, want %d", code, wantCode)
+			}
+			if stdout.String() != wantOut.String() {
+				t.Fatalf("stdout = %q, want %q", stdout.String(), wantOut.String())
+			}
+		})
+	}
+}
+
+func TestRun_UnknownFlag_ExitsNonZero(t *testing.T) {
+	// Same invalid config + missing docker socket as the --help test above,
+	// so a code path that fell through to agent startup would also return
+	// non-zero here, but for the wrong reason (config error, not a usage
+	// error) and without ever printing usage.
+	setenv(t, "TOKEN", "abc")
+	setenv(t, "TOKEN_HASH", "$argon2id$v=19$m=19456,t=2,p=1$fakesalt$fakehash")
+	setenv(t, "DOCKER_SOCKET", "/nonexistent/portwing-test-no-docker.sock")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"portwing", "--bogus"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("want non-zero exit for unrecognized flag, got 0")
+	}
+	if !strings.Contains(stderr.String(), "--bogus") {
+		t.Fatalf("expected stderr to name the bad flag, got: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Usage: portwing") {
+		t.Fatalf("expected usage on stderr, got: %s", stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("expected no stdout output, got: %s", stdout.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
 // run — server.NewServer failure (bad TOKEN_HASH with valid docker)
 // ---------------------------------------------------------------------------
 

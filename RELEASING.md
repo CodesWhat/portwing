@@ -43,7 +43,7 @@
 
 6. **No source version bump needed** — the binary's version is injected at build time via GoReleaser ldflags (`-X github.com/codeswhat/portwing/internal/protocol.AgentVersion={{.Version}}`). `AgentVersion` in `internal/protocol/version.go` must stay a `var`: `-X` silently does nothing to a `const`.
 
-7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → goreleaser snapshot → lint → Qlty → test (-race) → govulncheck → fuzz smoke → actionlint → zizmor. The push is blocked if any step fails.
+7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → release contract (`scripts/package-release-config-test.sh`) → goreleaser snapshot → lint → Qlty → test (-race) → govulncheck → fuzz smoke → actionlint → zizmor → web (`npm run check:web`). The push is blocked if any step fails.
 
 ---
 
@@ -162,7 +162,7 @@ git push origin v<version>
    have. So on a private repo the `arm/v7` findings exist only in that job's
    log, which is the one case where report-only is close to invisible.
 
-   **The `arm/v7` exception, and when it ends.** Wolfi publishes no armv7 repo, so `Dockerfile.release` builds that leg from `alpine:3.24` using Alpine's prebuilt `docker-cli` and `docker-cli-compose` instead of Wolfi's `docker-compose`. Those packages are compiled with Go 1.26.3 and carry ~29 Critical/High stdlib advisories that are all fixed in Go 1.26.6. Portwing's own `go.mod` pins `toolchain go1.26.6` and portwing's binary carries **zero** findings on all three platforms — the vulnerable toolchain is Alpine's, not this repo's, and no Alpine branch ships a `go >= 1.26.6`-built docker package yet (edge is on 1.26.5, one patch short). `musl` additionally carries CVE-2026-40200 with no fix anywhere.
+   **The `arm/v7` exception, and when it ends.** Wolfi publishes no armv7 repo, so `Dockerfile.release` builds that leg from `alpine:3.24` using Alpine's prebuilt `docker-cli` and `docker-cli-compose` instead of Wolfi's `docker-compose`. Those packages are compiled with Go 1.26.3 and carry ~29 Critical/High stdlib advisories that are all fixed in Go 1.26.6. Portwing's own `go.mod` pins `toolchain go1.27.0` and portwing's binary carries **zero** findings on all three platforms — the vulnerable toolchain is Alpine's, not this repo's, and no Alpine branch ships a `go >= 1.26.6`-built docker package yet (edge is on 1.26.5, one patch short). `musl` additionally carries CVE-2026-40200 with no fix anywhere.
 
    Suppressing those to force the leg green would hide real, fixable CVEs behind an entry nobody would revisit, so the gap is left visible instead. **Flip `gate: none` to `gate: high` in the matrix once Alpine ships those packages**, then delete this paragraph. Do not quietly drop `linux/arm/v7` from the matrix to quiet the job — `scripts/package-release-config-test.sh` asserts all three platforms and their exact gate values, so changing one is a deliberate edit to that list, this table, and the matrix comment together.
 4. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.

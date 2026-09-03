@@ -338,9 +338,9 @@ func TestEscapeLabelValue(t *testing.T) {
 		{`a\b"c` + "\nd", `a\\b\"c\nd`},
 	}
 	for _, c := range cases {
-		got := escapeLabelValue(c.in)
+		got := metrics.EscapeLabelValue(c.in)
 		if got != c.want {
-			t.Errorf("escapeLabelValue(%q) = %q, want %q", c.in, got, c.want)
+			t.Errorf("EscapeLabelValue(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

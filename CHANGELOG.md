@@ -7,6 +7,337 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.12] - 2026-09-03
+
+### Added
+
+- **ClusterFuzzLite now fuzzes the same ten targets against libFuzzer and
+  AddressSanitizer.** The four existing tiers all run Go's native engine, and
+  the two scheduled ones keep their corpus in the Actions cache, which evicts an
+  entry after seven days without a hit. This one rebuilds the identical
+  `func Fuzz*(f *testing.F)` targets through OSS-Fuzz's base-builder-go
+  (`.clusterfuzzlite/`), runs a second mutation engine over them, and commits
+  what it finds to a branch, so the corpus does not expire. 300 seconds
+  across all ten on a pull request that touches Go, an hour every Saturday, and
+  a corpus prune on Wednesday, which are separate workflows so a green prune
+  cannot close the tracking issue a crashing batch run opened. The corpus lives
+  on an orphan `clusterfuzzlite-corpus` branch of this repository, written with
+  the workflow's own `GITHUB_TOKEN`, so there is no new secret and no second
+  repository to keep. Only the two scheduled jobs can write; the pull-request
+  lane reads the corpus and has `contents: read`, and the trigger is
+  `pull_request` rather than `pull_request_target`, so a fork's token stays
+  read-only. No fuzz body changed; two `internal/docker` test helpers moved into
+  the fuzz files that use them, because this tier compiles a target's `_test.go`
+  file on its own.
+- **Edge mode agents can now accept a streamed request body via the new
+  `edge-request-body-stream` capability (issue #205).** `request.body` is a
+  JSON `RawMessage`, so it could never carry a binary or otherwise non-JSON
+  body (a tar build context, or any payload too large for a single 16 MB
+  WebSocket frame). A controller that has seen this token in the agent's
+  `hello.capabilities` can now send `request.bodyStream: true` with the body
+  omitted, followed by one or more `stream` chunks and a terminal
+  `stream_end`, all keyed by the request's `requestId`; the agent reassembles
+  them before dispatching the request to Docker, bounded three ways: 512 MB
+  per request, 1 GB summed across every streamed body the agent is holding in
+  memory, and 100 concurrent reassemblies. The aggregate byte budget is the
+  one that bounds agent memory, since a per-request cap multiplies by however
+  many requests are open, and it spans both stages: the buffers still
+  reassembling and the reassembled bodies already dispatched, which keep
+  their bytes until the Docker round trip ends. Charging only the reassembly
+  stage would let a controller send `stream_end` on everything pending to
+  drop the total to zero and immediately refill it. A reassembly doesn't
+  claim a stream session slot until its `stream_end` lands. Over either
+  limit, or past the 30s idle timeout between chunks, the agent answers with
+  an `error` frame naming the `requestId` rather than dropping the request
+  silently. Purely additive: a controller
+  that never sends `bodyStream: true` is unaffected, and this does not by
+  itself fix any controller that doesn't yet send it. Note: the matching
+  controller-side chunker this depends on to actually close out #205 lives
+  in a different repo and is not part of this change.
+- **Standard mode now enforces the concurrent exec and stream session limits
+  that SPEC 7.3 has always documented.** `MAX_STREAM_SESSIONS` and
+  `MAX_EXEC_SESSIONS` (both default `100`, matching edge mode's fixed limits)
+  bound concurrent streaming Docker proxy responses and hijacked exec/attach
+  sessions respectively; a saturated agent answers with `503` instead of
+  accepting an unbounded number of goroutines. Either variable can be set to a
+  non-positive value to disable its bound, for a controller that legitimately
+  drives more sessions than the default. `/api/events` SSE and follow-mode
+  container log streaming share the stream bound too: both adapters check for a
+  free slot before the stream starts, so a rejected SSE client is never
+  registered with the broadcaster and a rejected log follow never reaches the
+  daemon. Non-follow log reads are a single bounded response and stay ungated.
+- **`portwing --help` and `portwing --version` now work at the top level.**
+  Previously only the `hash-token`, `keygen`, and `version` subcommands were
+  recognized; a bare `--help` or an unrecognized flag started the full agent and
+  tried to connect to Docker instead of printing usage.
+- **Web analytics captures UTM campaign labels and the referring domain.** The
+  five `utm_*` parameters and `$referring_domain` now pass through the
+  cookieless PostHog pipeline on an explicit allowlist; unrelated click-id
+  parameters (`gclid`, `fbclid`, `msclkid`, ...) remain unreachable rather than
+  filtered, and a `$referring_domain` that isn't a bare hostname or `$direct` is
+  dropped.
+- **The monthly benchmark lane now fails on a regression instead of only
+  recording one.** `quality-bench-monthly.yml` compares each run against the
+  `benchmark-results.txt` artifact of an earlier successful run using benchstat,
+  and fails the job when `sec/op` or `B/op` regresses by more than 10% and
+  benchstat calls the difference statistically significant, or when a metric
+  that used to be zero starts allocating (benchstat reports that as `?` rather
+  than a percentage, so a percentage-only check would miss the zero-allocation
+  path that is most worth catching). The comparison table lands in the run
+  summary with the regressing rows called out. The baseline is a prior artifact
+  rather than a file the lane commits, so nothing writes to the repository on a
+  cron; artifacts last 90 days against a monthly cadence, so a skipped month
+  still leaves one in reach. GitHub-hosted runners rotate CPU models and
+  benchstat will not compare across hardware, so the lane walks back through
+  recent successful runs for one that matches and reports without gating when
+  none does. Dispatching with `accept_new_baseline` records an intended slowdown
+  as the new baseline. `allocs/op` is measured and reported but not gated: it is
+  a small integer, so the smallest possible change is often more than 10% and a
+  percentage threshold says nothing useful about it.
+- **A local `CODE_OF_CONDUCT.md` is back at the repository root.** v0.9.7
+  removed it in favour of the organisation-wide document the `.github`
+  repository serves to any repo without its own. It returns as the full
+  Contributor Covenant 2.1 verbatim rather than the fifteen-line summary that
+  was there before, so the text a contributor reads lives in the repository
+  they are contributing to. `README.md` and `CONTRIBUTING.md` link to it by
+  relative path and the reporting address is unchanged at
+  `security@codeswhat.com`.
+- **The weekly soak and monthly mutation lanes now keep a queryable history of
+  their headline numbers instead of only the most recent run's.** Both lanes
+  print to the run log and step summary and nothing else, so a leak that adds
+  a few MiB of RSS a week never trips the 64 MiB budget on any single run and
+  is invisible in all of them; the same is true of a mutation score drifting
+  down inside its floor. Each lane now ends with a separate job that appends
+  that run's numbers to `quality-history`, an orphan branch in this repository
+  holding one append-only JSONL file per lane: baseline/final/growth RSS with
+  the request and error totals for soak, and per-package efficacy, mutator
+  coverage, mutant counts and the floor they were measured against for
+  mutation. Read a series with `scripts/quality-history.sh <lane> [--last N]`.
+  Only `schedule` and `workflow_dispatch` runs record. `contents: write` is
+  scoped to that recording job alone, which builds nothing and runs no product
+  code, so the credential never sits in the job that spends four hours running
+  the agent or the one that executes mutated source. An append that cannot
+  reach the remote emits a warning and exits 0 rather than turning a green
+  quality lane red, and a record already present is never written twice. The
+  branch shares no history with `main` or any `dev/*` branch and is never
+  merged, so no tracked file changes on a cron and nothing here reaches a
+  released tree.
+
+### Fixed
+
+- **Host disk metrics use the Docker daemon's real data root and report a
+  failed reading instead of a fake zero.** `host_metrics` and the Prometheus
+  host series previously assumed `/var/lib/docker`; the data root is now
+  resolved from the daemon's `/info` on first collection (2s timeout, retried
+  at most once per 30s on failure, unaffected by `SKIP_DF_COLLECTION`). A
+  `statfs` failure — wrong data root, unreadable filesystem — no longer reports
+  0 bytes as though the disk were empty: the snapshot carries
+  `diskMetricsAvailable: false` and a `diskError` string, and `/metrics` reports
+  `portwing_host_disk_metrics_available 0` with the disk byte series omitted.
+  `portwing_host_metrics_supported` continues to track only the `/proc`-backed
+  fields (CPU, memory, network, uptime); disk collection runs after that pass
+  and is skipped when it fails, so disk is never available while it reports 0.
+- **`host_metrics` reports a missing procfs instead of a zero-filled
+  snapshot.** A native macOS install (including the Homebrew cask) previously
+  got back `isError:false` with `memoryTotal`, `diskTotal`, and `uptime` all
+  `0` — indistinguishable from a real reading of an idle host. The MCP tool now
+  returns an explicit error, and `/metrics` reports
+  `portwing_host_metrics_supported 0` with the host resource series omitted
+  rather than a flat zero line.
+- **`GET /api/containers/{id}/logs` (both adapters) now maps Docker's 404 and
+  409 through instead of collapsing both to 500.** The sibling delete handler
+  already mapped these correctly; the log handlers didn't share the fix. The status is
+  now carried on a typed Docker API error rather than pattern-matched out of
+  the formatted error message, which a container literally named `status 404`
+  could previously spoof into the wrong HTTP status.
+- **Wrong-method requests to `/_portwing/mcp` and `/api/portwing/enroll` return
+  405 instead of a bare Docker-proxy 404.** Both were registered as exact
+  method+path patterns, which lets Go's `ServeMux` fall through to the
+  Docker-proxy catch-all on any other method instead of reaching the handler's
+  own 405 response.
+- **The docs and marketing site footer copyright year no longer causes a hydration
+  mismatch.** It was computed with `new Date().getFullYear()` at both build
+  time and in the browser, which disagree for a visitor whose local clock
+  crosses into January before the static export is rebuilt. The year is now
+  baked into the build once and shared by server and client output.
+- **UTM values can no longer smuggle a path, query string, fragment, or
+  percent-escaped separator through the analytics allowlist.** The guard
+  missed `?`, `#`, and `\`, and only decoded a value once, so a doubly-encoded
+  separator (e.g. `%252Facme`) reached the sanitizer looking harmless while a
+  downstream decode would have rebuilt the real path. A bare `%` still passes,
+  so values like "50% off" are unaffected.
+- **A closed edge exec session leaves the session registry before its `done`
+  channel is signalled.** `ExecSession.Close` closed `done`, closed the
+  connection, and drained the inbox before unregistering, so a waiter that saw
+  `done` closed could still find the session registered and the session held
+  one of the `maxExecSessions` slots for the length of the drain. The
+  unregister now runs inside the same locked section, ahead of `close(done)`,
+  so a waiter that observes `done` closed will not find the session still
+  registered. This does not stop all enqueueing: `HandleInput` can no longer
+  enqueue once `closed` is set, but a racing `HandleResize` may still land a
+  zero-reservation item that `inputWriter` picks over `done`; that item is
+  harmless because `doResize` then runs against the already-cancelled session
+  context and aborts. The exec ID is released at the same point, which
+  slightly widens the window in which a controller reusing that ID could see
+  the old read loop's last frames.
+
+### Security
+
+- **Adjudicated GHSA-vp52-pcj8-j9qc (CVE-2026-84304, HIGH) in the published
+  container image.** The first live run of the weekly published-image rescan
+  failed both gating legs of v0.9.11 on `google.golang.org/grpc` v1.83.0. The
+  carrier is not portwing, which has no grpc in its module graph at all: it is
+  the Wolfi-packaged `docker-compose` binary the image ships so stacks can be
+  deployed. There is nothing to bump to. Compose's newest release, v5.5.0, pins
+  grpc v1.83.0, Wolfi's newest package still embeds it, and the advisory's
+  vulnerable range is `<= 1.83.0`, so an older Compose is no better. The
+  advisory needs an unauthenticated peer fragmenting HTTP/2 DATA frames at a
+  gRPC server, and the only gRPC server Compose can run is BuildKit's session
+  over the hijacked Docker `/session` connection, never a network listener;
+  portwing also spawns Compose as a short-lived subprocess per request, but that
+  subprocess shares portwing's memory cgroup rather than one of its own, so a
+  cgroup-level OOM kill could still take the whole container down. The argument
+  here is unreachability, not isolation. Suppressed in `.grype.yaml` scoped to
+  that binary and pinned to v1.83.0, so the ignore won't silently follow
+  whatever grpc Wolfi ships next; the weekly rescan just stops matching once it
+  drifts, which is why the entry carries a review-by date of 2026-11-15 and a
+  contract test that fails if the scope is widened.
+  Compose's `main` is already on grpc v1.83.2, so the real fix lands with the
+  next Compose release.
+- **Dropped the stale `.grype.yaml` OpenSSL suppression entries for
+  CVE-2026-54876 and CVE-2026-14456.** Wolfi shipped `libcrypto3`/`libssl3`
+  3.6.4-r0 and Alpine shipped 3.5.8-r0, both past the entries' pinned
+  3.6.3-r4/3.5.7-r0 versions, and a fresh `grype` scan of the published
+  0.9.11 image confirms neither CVE matches at the current versions on any
+  scanned platform (amd64, arm64, armv7). The six dead entries (two CVEs
+  across the Wolfi pin and, for CVE-2026-14456, the separate armv7 Alpine
+  pin) are removed rather than left matching nothing.
+- **`golang.org/x/crypto` bumped to v0.56.0**, clearing GO-2026-6354 and
+  GO-2026-6355 (CVE-2026-78662, CVE-2026-56855), two `x/crypto/ssh` channel
+  deadlock advisories. Same shape as the v0.55.0 move below: portwing imports
+  only `x/crypto/argon2` and `govulncheck` reports zero called
+  vulnerabilities, so this clears the scanner gate rather than a live
+  exposure. The `.grype.yaml` GO-2026-5932 pins moved in lockstep.
+- **`golang.org/x/crypto` bumped to v0.55.0**, clearing GO-2026-6303
+  (CVE-2026-56854). The advisory is scoped to `x/crypto/ssh`; portwing imports
+  only `x/crypto/argon2`, and `govulncheck` reported zero called vulnerabilities
+  before and after. The `.grype.yaml` exclusions for portwing's own module and
+  binary move to v0.55.0 in lockstep; the entry covering the Wolfi-packaged
+  `docker-compose` binary's own embedded `x/crypto` is unaffected.
+
+### Changed
+
+- **Evaluated ML-DSA for the edge hello and the standard-mode request
+  signature, and deferred it.** `docs/design/mldsa-edge-auth.md` records the
+  decision with measured numbers: ML-DSA-87 costs 4,627 signature bytes and
+  2,592 public-key bytes against Ed25519's 64 and 32, which is affordable once
+  per connection on the hello and roughly +6,084 bytes on every standard-mode
+  request. It sketches hybrid Ed25519 + ML-DSA-87 on the hello once Drydock
+  ships a verifier that stores both public keys on one identity record, guards
+  the new signature field separately from the existing one, and carries a
+  per-identity flag making the post-quantum signature mandatory; that rollout is
+  controller-first and is not backward compatible. It rejects a per-request
+  post-quantum signature outright, and names a key rotation cadence as the
+  mitigation that matches the threat today, with a documented caveat that
+  zero-downtime rotation works in standard mode but not in edge mode.
+- **Documented four real gaps between the API reference/OpenAPI spec and the
+  handlers.** `GET /api/log/entries` and `POST /_portwing/mcp` were live,
+  auth-required routes the reference omitted; the OpenAPI spec was missing the
+  MCP handler's `202`/`400` responses; and the reference wrongly implied the
+  MCP endpoint was available in edge mode, which never registers it.
+- **The Prometheus label escaper has one implementation.** `server.go`,
+  `edge/client.go`, and their tests each carried a copy of the same
+  backslash/quote/newline escape; all now call the single exported
+  `metrics.EscapeLabelValue`. No metric name, label, or value changes.
+- **Removed dead code found with no production callers:** `docker.DemuxLogStream`
+  (superseded by `DecodeContainerLogStream`) and `auth.checkFilePermissions`
+  (a byte-for-byte duplicate of `openCredentialFile`'s permission check, which
+  callers already use directly), along with the tests that existed solely to
+  exercise them.
+- **`protocol.MetricsMessage` matches `metrics.HostMetrics` again.**
+  `DiskMetricsAvailable` and `DiskError` were added to `HostMetrics` without
+  being mirrored on the message type that documents the host-metrics wire
+  shape. The wire never regressed: `sendMetrics` and `toolHostMetrics` both
+  marshal the collector's `HostMetrics` value directly and nothing in the agent
+  ever constructs a `MetricsMessage`, so both fields have been going out over
+  the tunnel all along. Nothing type-checked the declaration against the struct
+  it documents, which is how it drifted unnoticed. A reflection-based parity
+  test now fails on a JSON field or tag option present on one type and not the
+  other, in either direction, backed by a wire-level round trip that pins
+  `diskMetricsAvailable` as always present and `diskError` as `omitempty`.
+- **Competitive claims re-verified against primary sources.** The market audit
+  moved from its 2026-07-28 snapshot to 2026-08-29. Komodo Periphery is repinned
+  to v2.3.2 and Arcane Agent to v2.9.0; Hawser stays at v0.2.46, still its
+  latest release. The Komodo authentication claim is corrected: v2.0.0 replaced
+  passkey auth outright rather than supplementing it, and Core and Periphery now
+  use automatically generated public/private key pairs exchanged over a
+  Noise-protocol handshake. The docs-site table regained the verifiable release
+  artifacts and credential rotation rows it had dropped, and the matrix header
+  now stamps the current v0.9.11 instead of v0.8.1.
+- **Arcane repinned to v2.10.1, and the edge agent auth row is no longer a
+  tie.** Arcane v2.10.0 moved session tokens, OIDC verification, passkeys, and
+  edge mTLS to ML-DSA-87, the FIPS 204 post-quantum signature scheme, so all
+  three comparison surfaces (the repo matrix, the docs-site table, and the
+  `/compare/arcane` page) stamp v2.10.1 instead of v2.9.0, and the
+  `/compare/arcane` "Agent authentication" verdict moves from `tie` to
+  `competitor`. The claim is
+  bounded on both sides. Arcane's edge mTLS is still opt-in, its agent token
+  still bootstraps the first enrollment, and an existing ECDSA P-384 CA keeps
+  issuing P-384 client certificates, so only a freshly generated CA is
+  ML-DSA-87. Portwing's Ed25519 hello and per-request signatures are not weaker
+  against any attacker that exists today, but they are classical and Portwing
+  has no post-quantum option on any surface, which is the difference the row
+  now records.
+- **Direction parity is scoped to direction support, not robustness.** Every
+  reviewed peer does support both inbound and outbound modes, so that claim
+  stands, but two maintainer-confirmed gaps are now recorded alongside it:
+  Hawser's edge mode still binds an HTTP listener on port 2376 across all
+  interfaces unless `BIND_ADDRESS` is set, and Komodo's outbound leg ignores
+  `https_proxy` and can stall reconnection on a hardcoded handshake timeout.
+  Portwing's own edge listener defaults to loopback and refuses a non-loopback
+  bind unless the operator sets `ALLOW_UNAUTHENTICATED_REMOTE`.
+- **Corrected four authentication and TLS claims the docs stated as fact.** The
+  authentication page said Drydock's bundled `AgentClient` does not implement
+  Ed25519 request signing, leaving standard-mode signing available only to
+  custom clients; it does, through `DD_AGENT_{name}_AUTHMODE=ed25519` with
+  `SIGNINGKEYID` and `SIGNINGKEY`. Both Drydock integration pages named
+  `X-Dd-Agent-Secret` and `X-Portwing-Token` as the only accepted credentials,
+  omitting `Authorization: Bearer`, the five `X-Portwing-*` signature headers,
+  and the rate-limited `POST /api/portwing/enroll` bootstrap exception that
+  authenticates with the one-use enrollment token in its body. The edge
+  connection sequence still offered a token SHA-256 hash as the fallback when
+  `PRIVATE_KEY_FILE` is unset, which startup rejects outright: edge mode is
+  Ed25519-only. And `security-grype.yml` justified having no testssl job with
+  "Portwing does not operate a TLS listener of its own", which standard mode's
+  `TLS_CERT`/`TLS_KEY` contradict.
+- **Soak coverage is credited to the workflow that actually provides it.** The
+  README and five docs pages attributed edge mode's multi-agent reconnect,
+  exec, backpressure, and continuous-log soak to Portwing; that gate is
+  Drydock's cross-repo `quality-portwing-fleet-soak.yml`. Portwing's own
+  `quality-soak-weekly.yml` covers the standard/generic HTTP path and SSE
+  connect/hold/disconnect churn, and it samples resident set size and nothing
+  else — `scripts/soak.sh` fails when growth from the post-warmup baseline
+  exceeds 64 MiB and never reads a thread or goroutine count, so both the "zero
+  RSS/goroutine growth" wording and the "RSS + thread drift" job name
+  overclaimed what the run measures. The job is renamed to "Soak (portwing RSS
+  growth)"; the soak itself is unchanged.
+- **Moved the Go toolchain to 1.27.0.** `go.mod`'s `toolchain` directive and the
+  digest-pinned `golang:*-alpine` builder images in `Dockerfile`,
+  `Dockerfile.armv7`, and `Dockerfile.dev` now match, as the release contract
+  check requires. The CI lint script also moves to golangci-lint v2.13.2; this
+  part isn't a routine version bump, since v2.12.2's vendored staticcheck
+  panicked on Go 1.27's stdlib (`buildir: package "poll" ... unexpected expr:
+  *ast.KeyValueExpr`) instead of reporting lint errors, and v2.13.2 is the
+  first release built against a staticcheck that parses it.
+- **Release archives are byte-reproducible.** GoReleaser stamps the binary with
+  `mod_timestamp: {{ .CommitTimestamp }}`, and the `LICENSE*`, `README*` and
+  `CHANGELOG*` entries are now named explicitly so each one's mtime pins to the
+  commit date. They were auto-included with their own filesystem mtimes, which
+  defeated the binary's pin and left two builds of the same tag producing
+  different bytes. Archive contents are unchanged. `Dependency Review` also
+  runs on pushes to the dev branch now, not only on pull requests, so a change
+  that reaches the branch outside a PR is still scanned.
+
 ## [v0.9.11] - 2026-08-27
 
 ### Fixed

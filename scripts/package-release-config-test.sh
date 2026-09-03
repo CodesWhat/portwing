@@ -14,6 +14,32 @@ require_text() {
 	fi
 }
 
+# grep -Fq matches anywhere in the file, comments included, which is a false
+# pass waiting to happen for a pinned release value: a stale
+# `# was GRYPE_VERSION: "0.118.0"` line satisfies it while the active
+# assignment says something else, and so does a second assignment that YAML
+# would actually be the one to use. Match active lines only and require exactly
+# one, so a stale comment and a duplicate key both fail here.
+active_lines() {
+	grep -vE '^[[:space:]]*#' "$1"
+}
+
+require_exactly_one_active() {
+	local file="$1"
+	local pattern="$2"
+	local text="$3"
+	local description="$4"
+	local total
+	local matching
+
+	total="$(active_lines "$file" | grep -cE -- "$pattern" || true)"
+	matching="$(active_lines "$file" | grep -cF -- "$text" || true)"
+	if [ "${total}" -ne 1 ] || [ "${matching}" -ne 1 ]; then
+		echo "FAIL: ${description} (${file} must contain exactly one active: ${text})" >&2
+		failures=$((failures + 1))
+	fi
+}
+
 require_file() {
 	local file="$1"
 	local description="$2"
@@ -142,6 +168,36 @@ require_block_text() {
 	fi
 }
 
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*mod_timestamp:' \
+	'mod_timestamp: "{{ .CommitTimestamp }}"' \
+	"release binaries must be byte-reproducible (mod_timestamp pinned to the commit)"
+
+# The binary's mtime being pinned doesn't make the archive reproducible on its
+# own: GoReleaser auto-includes LICENSE*/README*/CHANGELOG* with the source
+# file's own filesystem mtime whenever `files:` is unset. An explicit `files:`
+# entry per glob, each carrying its own commit-pinned mtime, is what actually
+# closes that gap — so assert each entry individually (require_exactly_one_active
+# so a commented-out or duplicated entry still fails) and assert the mtime
+# override count separately, since the same "{{ .CommitDate }}" line repeats
+# once per entry and require_exactly_one_active can't express "exactly three".
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: LICENSE\*$' \
+	'- src: LICENSE*' \
+	"release archives must include LICENSE* with a pinned mtime"
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: README\*$' \
+	'- src: README*' \
+	"release archives must include README* with a pinned mtime"
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: CHANGELOG\*$' \
+	'- src: CHANGELOG*' \
+	"release archives must include CHANGELOG* with a pinned mtime"
+archive_mtime_overrides="$(active_lines ".goreleaser.yml" | grep -cF 'mtime: "{{ .CommitDate }}"' || true)"
+if [ "${archive_mtime_overrides}" -ne 3 ]; then
+	echo "FAIL: release archives must pin all three LICENSE*/README*/CHANGELOG* entries' mtime to the commit date (.goreleaser.yml has ${archive_mtime_overrides} active mtime: \"{{ .CommitDate }}\" line(s), want 3)" >&2
+	failures=$((failures + 1))
+fi
 require_text ".goreleaser.yml" "nfpms:" "GoReleaser must define native Linux packages"
 require_text ".goreleaser.yml" "formats: [deb, rpm]" "GoReleaser must build deb and rpm packages"
 require_text ".goreleaser.yml" "src: scripts/portwing.service" "native packages must include the systemd unit"
@@ -242,7 +298,7 @@ require_current_release_examples "docs/content/docs/api-reference.mdx" \
 	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"API reference response examples must identify the current release"
 require_current_release_examples "docs/content/docs/standalone-mode.mdx" \
-	'"agentVersion"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"standalone-mode response examples must identify the current release"
 require_current_release_examples "docs/content/docs/observability.mdx" \
 	'"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
@@ -285,6 +341,36 @@ require_text ".github/workflows/release.yml" "fedora:42@sha256:" "the rpm smoke 
 # shellcheck disable=SC2016 # The workflow expands GITHUB_REF_NAME.
 require_text ".github/workflows/release.yml" 'release.yml@refs/tags/${GITHUB_REF_NAME}' "release verification must bind the signer identity to the exact release tag"
 reject_text ".github/workflows/release.yml" "certificate-identity-regexp" "release verification must not accept an unanchored signer identity"
+
+expected_scan_action_ref="anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439"
+scan_action_count="$(awk -v expected="${expected_scan_action_ref}" \
+	'$1 == "uses:" && $2 == expected && $3 == "#" && $4 == "v7.4.2" { count++ } END { print count + 0 }' \
+	.github/workflows/security-grype.yml)"
+# Counting only the lines that match would still pass with a fourth scanner lane
+# pinned to an older scan-action sitting beside the three correct ones, which is
+# the shape a partial bump actually takes. Count every scan-action use as well,
+# so an added lane has to be at the reviewed pin or fail here.
+#
+# Three lanes since the published-release re-scan landed: grype-image (built
+# from the branch), grype-deps (lockfiles), and grype-published-release (the
+# GHCR manifest users actually pull). The count is deliberately exact rather
+# than a floor — a lane silently dropped is as much a regression as one added
+# off-pin, and this is the only place that would notice.
+scan_action_total="$(awk \
+	'$1 == "uses:" && $2 ~ /^anchore\/scan-action@/ { count++ } END { print count + 0 }' \
+	.github/workflows/security-grype.yml)"
+if [ "${scan_action_count}" -ne 3 ] || [ "${scan_action_total}" -ne 3 ]; then
+	echo "FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in all three scanner lanes" >&2
+	failures=$((failures + 1))
+fi
+require_exactly_one_active ".github/workflows/release.yml" \
+	'^[[:space:]]*GRYPE_VERSION:' \
+	'GRYPE_VERSION: "0.118.0"' \
+	"release Grype version must match anchore/scan-action@v7.4.2's Grype v0.118.0"
+require_exactly_one_active ".github/workflows/release.yml" \
+	'--certificate-identity[= ]"?https://github\.com/anchore/grype/' \
+	'--certificate-identity "https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main"' \
+	"release Grype checksum verification must use the exact Anchore Grype release workflow identity"
 
 # Publishing holds contents, packages, identity, and attestation write access.
 # Keep all provenance checks in a separate read-only job, then make the
@@ -458,6 +544,45 @@ require_scoped_compose_advisory_alias "GHSA-pxq6-2prw-chj9"
 require_scoped_compose_advisory_alias "GO-2026-4883"
 require_scoped_compose_advisory_alias "GHSA-x744-4wpc-v9h2"
 require_scoped_compose_advisory_alias "GO-2026-4887"
+
+# The Compose grpc suppression is a reachability argument about one third-party
+# binary, not a claim about Portwing. Portwing's own module graph carries no
+# google.golang.org/grpc at all, so an ignore that lost its package, version or
+# location scope would quietly cover a real future grpc import into the agent
+# itself. Version-scoped for the same reason the entries above are: the next
+# grpc the Wolfi Compose package embeds has to come back through review.
+require_scoped_compose_grpc_advisory() {
+	local advisory_id="$1"
+	local block
+	local scrubbed_block
+	local count
+
+	count="$(grep -Fc -- "  - vulnerability: ${advisory_id}" .grype.yaml || true)"
+	block="$(awk -v advisory_id="${advisory_id}" '
+		$1 == "-" && $2 == "vulnerability:" {
+			if (capture) exit
+			capture = ($3 == advisory_id)
+		}
+		capture { print }
+	' .grype.yaml)"
+	# A field commented out (e.g. "#      location: ...") is absent as far
+	# as YAML and grype are concerned, but a plain substring grep over the
+	# raw block still sees the text and passes. Strip full comment lines and
+	# trailing comments before matching, then anchor each field to a key at
+	# the start of a line so a comment can no longer stand in for scope.
+	scrubbed_block="$(sed -e 's/[[:space:]]#.*$//' -e '/^[[:space:]]*#/d' <<<"${block}")"
+
+	if [ "${count}" -ne 1 ] ||
+		! grep -Eq '^[[:space:]]+name: google\.golang\.org/grpc[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+version: v1\.83\.0[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+type: go-module[[:space:]]*$' <<<"${scrubbed_block}" ||
+		! grep -Eq '^[[:space:]]+location: "\*\*/usr/bin/docker-compose"[[:space:]]*$' <<<"${scrubbed_block}"; then
+		echo "FAIL: .grype.yaml must contain exactly one ${advisory_id} ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+require_scoped_compose_grpc_advisory "GHSA-vp52-pcj8-j9qc"
 require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/daemon/pkg/plugin" \
 	"the Compose advisory exclusion must stay guarded against linking Docker Engine's daemon plugin package"
 require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/pkg/authorization" \

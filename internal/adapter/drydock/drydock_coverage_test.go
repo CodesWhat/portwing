@@ -288,48 +288,54 @@ func TestSSEServeHTTP_ChannelClosed_ExitsLoop(t *testing.T) {
 // adapter.go — spawnMessageHandler: goroutine ctx.Err() check (line 351-353)
 // ---------------------------------------------------------------------------
 
-// TestSpawnMessageHandler_GoroutineCancelAfterAcquire verifies the inner
-// ctx.Err() check inside the goroutine body (line 351). We saturate the
-// semaphore then cancel the context, leaving fn uncalled — but we need the
-// goroutine itself to reach line 351.
-// Strategy: fill the sem, acquire it from outside so the sem has capacity 1
-// and one slot is taken, then release so spawnMessageHandler can acquire, but
-// cancel ctx first.
-func TestSpawnMessageHandler_GoroutineCancelAfterAcquire(t *testing.T) {
+// TestSpawnMessageHandlerWithCancelCleanup_SkipsFnWhenContextAlreadyCanceled
+// verifies the inner ctx.Err() check inside the spawned goroutine: when ctx is
+// already canceled before spawnMessageHandlerWithCancelCleanup is called, the
+// outer select (sem acquire vs ctx.Done()) races and may pick either branch,
+// but whenever it does acquire the semaphore and spawn the goroutine, that
+// goroutine's own ctx.Err() check is deterministic (a canceled context stays
+// canceled) and must run cancelCleanup instead of fn. We retry until the sem
+// branch wins at least once, then assert on that exercise.
+func TestSpawnMessageHandlerWithCancelCleanup_SkipsFnWhenContextAlreadyCanceled(t *testing.T) {
 	t.Parallel()
 
-	// Semaphore of capacity 1.
-	a := &Adapter{
-		messageSem: make(chan struct{}, 1),
-	}
-
-	// Cancel context before calling spawnMessageHandler so that when the
-	// goroutine fires and checks ctx.Err(), it returns non-nil.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel
 
-	called := make(chan struct{})
-	fnCalled := false
+	const maxAttempts = 500
+	spawned := false
+	for i := 0; i < maxAttempts && !spawned; i++ {
+		a := &Adapter{
+			messageSem: make(chan struct{}, 1),
+		}
 
-	// spawnMessageHandler should still acquire the semaphore (it's empty),
-	// spawn a goroutine, and the goroutine should exit without calling fn.
-	a.spawnMessageHandler(ctx, "test:type", func() {
-		fnCalled = true
-		close(called)
-	})
+		fnCalled := make(chan struct{})
+		cleanupCalled := make(chan struct{})
 
-	// Give the goroutine time to run and check ctx.Err().
-	select {
-	case <-called:
-		// fn was called — the ctx was cancelled but perhaps ctx.Err() was
-		// checked *before* context propagated. This is a timing-dependent
-		// race; if fn ran it just means the goroutine didn't observe cancel.
-		// That's acceptable — we just want line 351 to be hit at least once.
-	case <-time.After(200 * time.Millisecond):
-		// Goroutine exited without calling fn — line 351 ctx.Err()!=nil branch hit.
+		ok := a.spawnMessageHandlerWithCancelCleanup(ctx, "test:type",
+			func() { close(fnCalled) },
+			func() { close(cleanupCalled) },
+		)
+		if !ok {
+			// Outer select picked the ctx.Done() branch; no goroutine was
+			// spawned this time. Retry to exercise the other branch.
+			continue
+		}
+		spawned = true
+
+		select {
+		case <-fnCalled:
+			t.Fatal("fn was called even though the context was already canceled")
+		case <-cleanupCalled:
+			// Expected: the goroutine observed ctx.Err() != nil and ran cleanup.
+		case <-time.After(time.Second):
+			t.Fatal("neither fn nor cancelCleanup ran within timeout")
+		}
 	}
 
-	_ = fnCalled // either outcome is acceptable for coverage
+	if !spawned {
+		t.Fatalf("spawnMessageHandlerWithCancelCleanup never won the semaphore race in %d attempts", maxAttempts)
+	}
 }
 
 // ---------------------------------------------------------------------------

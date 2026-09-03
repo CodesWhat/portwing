@@ -16,7 +16,7 @@ Drydock supports two agent connectivity patterns. Portwing implements both.
 **Edge Mode** (stable `portwing/1.0`): Portwing dials outbound to the Drydock controller's `/api/portwing/ws` WebSocket endpoint. All communication is multiplexed over the single connection. This works behind NAT and dynamic IPs.
 
 <Callout type="info">
-Edge Mode is implemented on both sides and is covered by a real multi-agent reconnect/load soak. Drydock `v1.6.0-rc.11+` is the minimum for Portwing v0.9.0's complete controller-owned watcher/update behavior. Older 1.6 prereleases and Drydock 1.5 may remain wire-compatible, but do not provide that full feature contract.
+Edge Mode is implemented on both sides. Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers it with real Portwing processes under multi-agent reconnect, exec, continuous-log, and controller-backpressure load; Portwing's separate weekly soak covers Standard/generic HTTP and SSE RSS growth. Drydock `v1.6.0-rc.11+` is the minimum for Portwing v0.9.0's complete controller-owned watcher/update behavior. Older 1.6 prereleases and Drydock 1.5 may remain wire-compatible, but do not provide that full feature contract.
 </Callout>
 
 ---
@@ -37,7 +37,7 @@ When a Drydock controller connects to a Portwing agent in Standard Mode, the fol
 
 ## Endpoints Portwing Serves (Standard Mode)
 
-All `/api/*` endpoints require an `X-Dd-Agent-Secret` or `X-Portwing-Token` header. The `/health` endpoint is unauthenticated.
+All authenticated `/api/*` endpoints accept an `Authorization: Bearer`, `X-Dd-Agent-Secret`, or `X-Portwing-Token` header, or a valid Ed25519 request signature in the five `X-Portwing-*` headers. `POST /api/portwing/enroll` is the bootstrap exception when `ENROLLMENT_TOKEN` is configured: it is rate-limited but authenticates with the one-use enrollment token in its request body. The `/health` endpoint is unauthenticated.
 
 | Drydock Call | Portwing Endpoint | Method | Notes |
 |---|---|---|---|
@@ -269,7 +269,7 @@ Handshake sequence:
     "hostname": "my-server",
     "capabilities": [
       "compose", "exec", "metrics", "events",
-      "edge-response-body-b64",
+      "edge-response-body-b64", "edge-request-body-stream",
       "dd:container-sync", "dd:logs"
     ],
     "drydockCompat": "1.4.0",
@@ -294,6 +294,17 @@ such as the plain-text `OK` from `GET /_ping` cross the wire. When the welcome
 carries no `capabilities` — any controller before Drydock support landed — the
 agent keeps the legacy `body` encoding, so the capability degrades gracefully
 without a `portwing/1.0` protocol-version bump.
+
+`edge-request-body-stream` runs the opposite direction, and unlike
+`edge-response-body-b64` it is not negotiated against `welcome.capabilities`:
+the agent always advertises it in `hello.capabilities`, and that advertisement
+is the controller's only signal that it may send a `request` with
+`bodyStream: true` and no inline `body`, delivering the body instead as
+follow-up `stream` frames carrying base64 chunks plus a terminal `stream_end`,
+all sharing the request's `requestId`. The agent reassembles the chunks in
+memory, under per-request, aggregate, and concurrency bounds, before
+dispatching the request to Docker. A controller that doesn't recognize the
+token simply never sets `bodyStream`, so it costs nothing to advertise.
 
 ### Edge Mode Message Types
 
@@ -474,12 +485,12 @@ Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`, `app/agent
 
 | Feature | Status | Notes |
 |---|---|---|
-| `GET /api/events` SSE stream | Compatible | `sse.go:48`; `AgentClient.ts:717` |
-| `dd:ack` on connect | Compatible | `sse.go:74`; `AgentClient.ts:1299` |
+| `GET /api/events` SSE stream | Compatible | `sse.go:ServeHTTP`; `AgentClient.ts:717` |
+| `dd:ack` on connect | Compatible | `sse.go:ServeHTTP` (initial `dd:ack` write); `AgentClient.ts:1299` |
 | `dd:ack` field set | Compatible | All fields Drydock reads (`AgentClient.ts:744–763`) are present |
 | `dd:ack memoryGb=0` | Compatible | Drydock treats 0 as valid |
-| `dd:container-added` SSE | Compatible | `sse.go:174`; `AgentClient.ts:1303` |
-| `dd:container-updated` SSE | Compatible | `sse.go:187`; `AgentClient.ts:1303` |
+| `dd:container-added` SSE | Compatible | `sse.go:BroadcastContainerAdded`; `AgentClient.ts:1303` |
+| `dd:container-updated` SSE | Compatible | `sse.go:BroadcastContainerUpdated`; `AgentClient.ts:1303` |
 | `dd:container-removed` SSE | Compatible | Drydock only reads `.id`; extra `name` field is harmless |
 | `dd:watcher-snapshot` SSE | Compatible | Emitted after every poll cycle and on SSE connect |
 | `GET /api/containers` returns `[]Container` | Compatible | `routes.go:27`; `AgentClient.ts:519` |
@@ -488,15 +499,15 @@ Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`, `app/agent
 | `GET /api/watchers/{type}/{name}` single descriptor | Compatible | `routes.go:handleWatcherGet`; `AgentClient.ts:1552` |
 | `GET /api/triggers` returns `[]` | Compatible | Portwing advertises no remote trigger; Drydock uses its controller-owned update trigger through the Docker proxy |
 | `GET /api/containers/{id}/logs` plain text | Compatible | Drydock accepts both plain text and `{"logs":"..."}` |
-| `DELETE /api/containers/{id}` returns 204 | Compatible | `routes.go:92`; `AgentClient.ts:1543` |
+| `DELETE /api/containers/{id}` returns 204 | Compatible | `routes.go:handleContainerDelete`; `AgentClient.ts:1543` |
 | `POST /api/watchers/{type}/{name}` | Compatible (501) | Legacy route; Drydock runs its watcher through the transparent Docker proxy |
 | `POST /api/watchers/{type}/{name}/container/{id}` | Compatible (501) | Same controller-owned execution path |
 | `POST /api/triggers/{type}/{name}` | Compatible (501) | No Portwing remote trigger is advertised; Drydock applies updates through the proxy |
 | `POST /api/triggers/{type}/{name}/batch` | Compatible (501) | Same compatibility behavior |
 | `GET /api/log/entries` returns `[]` | Compatible | `routes.go:handleLogEntries`; `AgentClient.ts:1503` |
 | `X-Dd-Agent-Secret` authentication | Compatible | `server/http.go` auth middleware; `AgentClient.ts:73` |
-| `/health` unauthenticated | Compatible | `routes.go:handleSimpleHealth`; `AgentClient.ts:152` |
-| Edge Mode WebSocket `/api/portwing/ws` | Stable (`portwing/1.0`) | Ed25519-only; correlated `request`/`response` messages carry controller-owned watcher/update Docker API calls. Continuous logs and the real fleet-soak gate require Portwing 0.8+. |
+| `/health` unauthenticated | Compatible | `server/http.go:handleSimpleHealth`; `AgentClient.ts:152` |
+| Edge Mode WebSocket `/api/portwing/ws` | Stable (`portwing/1.0`) | Ed25519-only; correlated `request`/`response` messages carry controller-owned watcher/update Docker API calls. Continuous logs require Portwing 0.8+; the real cross-repo gate is Drydock's `quality-portwing-fleet-soak.yml`. |
 
 ---
 

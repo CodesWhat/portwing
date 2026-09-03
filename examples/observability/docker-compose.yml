@@ -7,7 +7,7 @@
 name: portwing-observability
 
 x-portwing-runtime: &portwing-runtime
-  image: ghcr.io/codeswhat/portwing:0.9.11
+  image: ghcr.io/codeswhat/portwing:0.9.12
   restart: unless-stopped
   read_only: true
   cap_drop: [ALL]
@@ -96,8 +96,13 @@ services:
     environment:
       DRYDOCK_URL: "${DRYDOCK_URL:-https://drydock.example.com}"
       # Explicit opt-in: Prometheus and the audit forwarder reach this listener
-      # only through the private portwing-observability network.
+      # only through the private portwing-observability network. Edge mode
+      # defaults this unauthenticated listener to loopback and refuses to start
+      # on a non-loopback bind unless ALLOW_UNAUTHENTICATED_REMOTE is also set,
+      # so both lines are required. Safe here only because no host port is
+      # published and nothing untrusted is attached to this network.
       BIND_ADDRESS: "0.0.0.0"
+      ALLOW_UNAUTHENTICATED_REMOTE: "true"
       PRIVATE_KEY_FILE: /run/secrets/portwing_key
       AGENT_NAME: "${AGENT_NAME:-edge-host-01}"
       AUDIT_LOG: /var/log/portwing/audit.ndjson

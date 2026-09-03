@@ -18,14 +18,24 @@ type DockerMetricsClient interface {
 }
 
 // WriteHostPrometheus appends host resource metrics when collection succeeds.
+//
+// A host with no procfs cannot produce these numbers, so the resource series
+// are omitted there rather than written as zeros, which a scraper could not
+// tell apart from a real reading of a completely idle machine.
+// portwing_host_metrics_supported carries that distinction explicitly, so a
+// dashboard can show "unsupported" instead of a flat zero line.
 func WriteHostPrometheus(b *strings.Builder, collector *Collector) {
 	if collector == nil {
 		return
 	}
 	host, err := collector.Collect()
+	fmt.Fprintf(b, "# HELP portwing_host_metrics_supported Whether host resource metrics are available on this platform (1) or not (0).\n")
+	fmt.Fprintf(b, "# TYPE portwing_host_metrics_supported gauge\n")
 	if err != nil || host == nil {
+		fmt.Fprintf(b, "portwing_host_metrics_supported 0\n")
 		return
 	}
+	fmt.Fprintf(b, "portwing_host_metrics_supported 1\n")
 
 	fmt.Fprintf(b, "# HELP portwing_host_cpu_usage_percent Host CPU usage percentage.\n")
 	fmt.Fprintf(b, "# TYPE portwing_host_cpu_usage_percent gauge\n")
@@ -36,18 +46,38 @@ func WriteHostPrometheus(b *strings.Builder, collector *Collector) {
 	fmt.Fprintf(b, "# HELP portwing_host_memory_used_bytes Host used memory in bytes.\n")
 	fmt.Fprintf(b, "# TYPE portwing_host_memory_used_bytes gauge\n")
 	fmt.Fprintf(b, "portwing_host_memory_used_bytes %d\n", host.MemoryUsed)
-	fmt.Fprintf(b, "# HELP portwing_host_disk_total_bytes Host total disk space in bytes.\n")
-	fmt.Fprintf(b, "# TYPE portwing_host_disk_total_bytes gauge\n")
-	fmt.Fprintf(b, "portwing_host_disk_total_bytes %d\n", host.DiskTotal)
-	fmt.Fprintf(b, "# HELP portwing_host_disk_used_bytes Host used disk space in bytes.\n")
-	fmt.Fprintf(b, "# TYPE portwing_host_disk_used_bytes gauge\n")
-	fmt.Fprintf(b, "portwing_host_disk_used_bytes %d\n", host.DiskUsed)
+	writeHostDiskPrometheus(b, host)
 	fmt.Fprintf(b, "# HELP portwing_host_network_receive_bytes_total Host network bytes received (all non-lo interfaces).\n")
 	fmt.Fprintf(b, "# TYPE portwing_host_network_receive_bytes_total counter\n")
 	fmt.Fprintf(b, "portwing_host_network_receive_bytes_total %d\n", host.NetworkRxBytes)
 	fmt.Fprintf(b, "# HELP portwing_host_network_transmit_bytes_total Host network bytes transmitted (all non-lo interfaces).\n")
 	fmt.Fprintf(b, "# TYPE portwing_host_network_transmit_bytes_total counter\n")
 	fmt.Fprintf(b, "portwing_host_network_transmit_bytes_total %d\n", host.NetworkTxBytes)
+}
+
+// writeHostDiskPrometheus appends the disk series, guarded by its own
+// availability gauge.
+//
+// Disk needs no procfs but does need a readable Docker data root, so it fails
+// independently of everything portwing_host_metrics_supported covers and needs
+// its own signal. When the statfs fails the byte series are omitted rather than
+// written as zeros, which a scraper cannot tell apart from an empty disk; the
+// gauge is what stays behind so their absence is legible instead of silent.
+func writeHostDiskPrometheus(b *strings.Builder, host *HostMetrics) {
+	fmt.Fprintf(b, "# HELP portwing_host_disk_metrics_available Whether host disk usage could be read from the Docker data root (1) or not (0).\n")
+	fmt.Fprintf(b, "# TYPE portwing_host_disk_metrics_available gauge\n")
+	if !host.DiskMetricsAvailable {
+		fmt.Fprintf(b, "portwing_host_disk_metrics_available 0\n")
+		return
+	}
+	fmt.Fprintf(b, "portwing_host_disk_metrics_available 1\n")
+
+	fmt.Fprintf(b, "# HELP portwing_host_disk_total_bytes Host total disk space in bytes.\n")
+	fmt.Fprintf(b, "# TYPE portwing_host_disk_total_bytes gauge\n")
+	fmt.Fprintf(b, "portwing_host_disk_total_bytes %d\n", host.DiskTotal)
+	fmt.Fprintf(b, "# HELP portwing_host_disk_used_bytes Host used disk space in bytes.\n")
+	fmt.Fprintf(b, "# TYPE portwing_host_disk_used_bytes gauge\n")
+	fmt.Fprintf(b, "portwing_host_disk_used_bytes %d\n", host.DiskUsed)
 }
 
 // WriteContainerPrometheus appends per-container Docker metrics. Collection is

@@ -10,6 +10,13 @@
 *.out
 coverage.out
 
+# Gremlins mutation reports (written into the repo root by
+# quality-mutation-monthly.yml and by any local reproduction of it)
+mutation-report.txt
+mutation-report.json
+canary-report.txt
+canary-report.json
+
 # Build
 dist/
 output.tar

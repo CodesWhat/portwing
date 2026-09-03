@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1085,3 +1086,618 @@ func TestBufferedConn_Read(t *testing.T) {
 		t.Fatalf("bufferedConn.Read: got %q, want %q", string(buf[:n]), "hello")
 	}
 }
+
+// errTransport always returns a network error, simulating connection failures.
+type errTransport struct{ err error }
+
+func (e *errTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, e.err
+}
+
+// newErrClient returns a Client whose both httpClient and streamClient always
+// return a transport-level error (not a bad HTTP status).
+func newErrClient() *Client {
+	rt := &errTransport{err: fmt.Errorf("connection refused")}
+	return &Client{
+		socketPath:   "/var/run/docker.sock",
+		apiVersion:   "v1.44",
+		httpClient:   &http.Client{Transport: rt},
+		streamClient: &http.Client{Transport: rt},
+	}
+}
+
+// ---- Request-level errors (transport fails) ----
+
+func TestGetVersion_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.GetVersion(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestPing_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	err := c.Ping(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestListContainers_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.ListContainers(context.Background(), true)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestInspectContainer_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.InspectContainer(context.Background(), "abc123")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRemoveContainer_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	err := c.RemoveContainer(context.Background(), "abc123", false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestGetContainerLogs_RequestError_NoFollow(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.GetContainerLogs(context.Background(), "abc123", "", "", "", false, false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestGetContainerLogs_RequestError_Follow(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.GetContainerLogs(context.Background(), "abc123", "", "", "", true, false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestCreateExec_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.CreateExec(context.Background(), "abc123", []string{"sh"}, "", false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestResizeExec_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	err := c.ResizeExec(context.Background(), "exec-id-123", 80, 24)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestGetEvents_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.GetEvents(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestGetDockerInfo_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.GetDockerInfo(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestContainerStats_RequestError(t *testing.T) {
+	t.Parallel()
+	c := newErrClient()
+	_, err := c.ContainerStats(context.Background(), "abc123")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---- Do/DoStream request creation error (invalid method character) ----
+
+func TestDo_InvalidMethod(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	// A null byte in the method name causes http.NewRequest to return an error.
+	resp, err := c.Do(context.Background(), "INVALID\x00METHOD", "/path", nil)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected error for invalid method, got nil")
+	}
+	if !strings.Contains(err.Error(), "creating Docker API request") {
+		t.Fatalf("error = %q, want request-construction context", err)
+	}
+}
+
+func TestDoStream_InvalidMethod(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	resp, err := c.DoStream(context.Background(), "INVALID\x00METHOD", "/path", nil)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected error for invalid method, got nil")
+	}
+	if !strings.Contains(err.Error(), "creating Docker API request") {
+		t.Fatalf("error = %q, want request-construction context", err)
+	}
+}
+
+func TestDo_TransportErrorIncludesOperation(t *testing.T) {
+	t.Parallel()
+
+	c := newErrClient()
+	resp, err := c.Do(context.Background(), http.MethodGet, "/containers/json", nil)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected transport error, got nil")
+	}
+	if !strings.Contains(err.Error(), "sending Docker API request GET /containers/json") {
+		t.Fatalf("error = %q, want request-operation context", err)
+	}
+}
+
+// ---- RemoveContainer returns 200 OK (treated as success) ----
+
+func TestRemoveContainer_StatusOK(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	if err := c.RemoveContainer(context.Background(), "abc123", false); err != nil {
+		t.Fatalf("RemoveContainer with 200: %v", err)
+	}
+}
+
+// ---- ResizeExec body read error ----
+
+// errBodyTransport serves a response where the body errors when read.
+type errBodyTransport struct {
+	status  int
+	bodyErr error
+}
+
+type errBody struct{ err error }
+
+func (b *errBody) Read(_ []byte) (int, error) { return 0, b.err }
+func (b *errBody) Close() error               { return nil }
+
+func (t *errBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: t.status,
+		Body:       &errBody{err: t.bodyErr},
+		Header:     make(http.Header),
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+	}, nil
+}
+
+func TestResizeExec_BodyReadError(t *testing.T) {
+	t.Parallel()
+
+	rt := &errBodyTransport{status: http.StatusNotFound, bodyErr: fmt.Errorf("body read failed")}
+	c := &Client{
+		socketPath:   "/var/run/docker.sock",
+		apiVersion:   "v1.44",
+		httpClient:   &http.Client{Transport: rt},
+		streamClient: &http.Client{Transport: rt},
+	}
+	err := c.ResizeExec(context.Background(), "exec-id-123", 80, 24)
+	if err == nil {
+		t.Fatal("expected error on body read failure, got nil")
+	}
+	// The body couldn't be read, so no message is available; the error still
+	// carries the status code via the shared dockerError helper.
+	if !strings.Contains(err.Error(), "404") {
+		t.Fatalf("error = %q, expected to contain status 404", err.Error())
+	}
+}
+
+// ---- DoStream with nil body (no Content-Type) ----
+
+func TestDoStream_NoContentTypeForNilBody(t *testing.T) {
+	t.Parallel()
+
+	var gotContentType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	resp, err := c.DoStream(context.Background(), http.MethodGet, "/stream/path", nil)
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	resp.Body.Close()
+
+	if gotContentType != "" {
+		t.Fatalf("expected no Content-Type for nil body, got %q", gotContentType)
+	}
+}
+
+// ---- negotiateAPIVersion request error ----
+
+func TestNegotiateAPIVersion_RequestError(t *testing.T) {
+	t.Parallel()
+
+	c := newErrClient()
+	// Should return an error (version request fails)
+	err := c.negotiateAPIVersion(context.Background())
+	if err == nil {
+		t.Fatal("expected error from negotiateAPIVersion, got nil")
+	}
+}
+
+// ---- extractDockerErrorMessage ----
+
+func TestExtractDockerErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body []byte
+		want string
+	}{
+		{
+			name: "docker JSON message is extracted",
+			body: []byte(`{"message":"exec denied: no commands are allowlisted"}`),
+			want: "exec denied: no commands are allowlisted",
+		},
+		{
+			name: "raw non-JSON body is trimmed and returned as-is",
+			body: []byte("  no such container\n"),
+			want: "no such container",
+		},
+		{
+			name: "empty body yields empty message",
+			body: []byte(""),
+			want: "",
+		},
+		{
+			name: "whitespace-only body yields empty message",
+			body: []byte("   \n\t  "),
+			want: "",
+		},
+		{
+			name: "valid JSON with empty message falls back to raw trimmed body",
+			body: []byte(`  {"message":""}  `),
+			want: `{"message":""}`,
+		},
+		{
+			name: "sockguard verbose denial: message and reason are combined",
+			body: []byte(`{"message":"request denied by sockguard policy","method":"POST","path":"/containers/create","reason":"not allowed by portwing preset"}`),
+			want: "request denied by sockguard policy: not allowed by portwing preset",
+		},
+		{
+			name: "reason-only body yields the reason",
+			body: []byte(`{"reason":"exec denied: privileged exec is not allowed"}`),
+			want: "exec denied: privileged exec is not allowed",
+		},
+		{
+			name: "identical message and reason are not duplicated",
+			body: []byte(`{"message":"same text","reason":"same text"}`),
+			want: "same text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractDockerErrorMessage(tt.body)
+			if got != tt.want {
+				t.Errorf("extractDockerErrorMessage(%q) = %q, want %q", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---- dockerError ----
+
+func TestDockerError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		action string
+		status int
+		body   []byte
+		want   string
+	}{
+		{
+			name:   "message present",
+			action: "create exec",
+			status: http.StatusForbidden,
+			body:   []byte(`{"message":"exec denied: no commands are allowlisted"}`),
+			want:   "create exec: docker error (status 403): exec denied: no commands are allowlisted",
+		},
+		{
+			name:   "empty body yields bare status error",
+			action: "resize exec",
+			status: http.StatusNotFound,
+			body:   nil,
+			want:   "resize exec: docker error (status 404)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := dockerError(tt.action, tt.status, tt.body)
+			if err == nil {
+				t.Fatal("expected non-nil error")
+			}
+			if err.Error() != tt.want {
+				t.Errorf("dockerError(...) = %q, want %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+// ---- Call-site propagation: the extracted body message reaches the caller ----
+
+func TestCreateExec_DockerError_MessageBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"exec denied: no commands are allowlisted"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.CreateExec(context.Background(), "abc123", []string{"sh"}, "", false)
+	if err == nil {
+		t.Fatal("expected error on 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error = %q, expected to contain status 403", err.Error())
+	}
+	if !strings.Contains(err.Error(), "exec denied: no commands are allowlisted") {
+		t.Errorf("error = %q, expected to contain the docker error message", err.Error())
+	}
+}
+
+func TestResizeExec_DockerError_MessageBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"exec denied: no commands are allowlisted"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	err := c.ResizeExec(context.Background(), "exec-id-123", 80, 24)
+	if err == nil {
+		t.Fatal("expected error on 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error = %q, expected to contain status 403", err.Error())
+	}
+	if !strings.Contains(err.Error(), "exec denied: no commands are allowlisted") {
+		t.Errorf("error = %q, expected to contain the docker error message", err.Error())
+	}
+}
+
+func TestGetContainerLogs_DockerError_MessageBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"exec denied: no commands are allowlisted"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.GetContainerLogs(context.Background(), "abc123", "", "", "", false, false)
+	if err == nil {
+		t.Fatal("expected error on 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error = %q, expected to contain status 403", err.Error())
+	}
+	if !strings.Contains(err.Error(), "exec denied: no commands are allowlisted") {
+		t.Errorf("error = %q, expected to contain the docker error message", err.Error())
+	}
+}
+
+func TestCreateExec_DockerError_MessageAndReasonBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"request denied by sockguard policy","method":"POST","path":"/containers/abc123/exec","reason":"exec denied: privileged exec is not allowed"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.CreateExec(context.Background(), "abc123", []string{"sh"}, "", false)
+	if err == nil {
+		t.Fatal("expected error on 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error = %q, expected to contain status 403", err.Error())
+	}
+	if !strings.Contains(err.Error(), "request denied by sockguard policy: exec denied: privileged exec is not allowed") {
+		t.Errorf("error = %q, expected to contain the combined message and reason", err.Error())
+	}
+}
+
+// ---- Truncation: the error body is bounded to maxDockerErrorBodyBytes ----
+
+func TestCreateExec_DockerError_BodyTruncated(t *testing.T) {
+	t.Parallel()
+
+	const tailMarker = "TAIL_MARKER_SHOULD_NOT_APPEAR"
+	oversized := strings.Repeat("a", maxDockerErrorBodyBytes+1024) + tailMarker
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(oversized)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.CreateExec(context.Background(), "abc123", []string{"sh"}, "", false)
+	if err == nil {
+		t.Fatal("expected error on 403, got nil")
+	}
+	if strings.Contains(err.Error(), tailMarker) {
+		t.Errorf("error = %q, expected the body to be truncated before the tail marker", err.Error())
+	}
+	// The message portion of the error can carry at most maxDockerErrorBodyBytes
+	// of body content; the rest of the error text (action/status wrapper) is
+	// fixed overhead, so bound the whole error generously above that.
+	if len(err.Error()) > maxDockerErrorBodyBytes+128 {
+		t.Errorf("error length = %d, expected roughly bounded by maxDockerErrorBodyBytes (%d)", len(err.Error()), maxDockerErrorBodyBytes)
+	}
+}
+
+// ---- StatusCodeForError ----
+
+func TestStatusCodeForError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{
+			name: "404 maps to not found",
+			err:  dockerError("remove container", http.StatusNotFound, []byte(`{"message":"No such container: abc"}`)),
+			want: http.StatusNotFound,
+		},
+		{
+			name: "409 maps to conflict",
+			err:  dockerError("remove container", http.StatusConflict, []byte(`{"message":"container is running"}`)),
+			want: http.StatusConflict,
+		},
+		{
+			name: "other docker statuses collapse to 500",
+			err:  dockerError("get logs", http.StatusBadRequest, []byte(`{"message":"bad parameter"}`)),
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "a non-docker error collapses to 500",
+			err:  errors.New("dial unix /var/run/docker.sock: connect: connection refused"),
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "a nil error collapses to 500 without panicking",
+			err:  nil,
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "a wrapped docker error is still resolved",
+			err:  fmt.Errorf("getting logs: %w", dockerError("get logs", http.StatusNotFound, nil)),
+			want: http.StatusNotFound,
+		},
+		{
+			// The status used to be recovered by searching the formatted
+			// message for "status 404". That message embeds the Docker error
+			// body, which echoes the caller-supplied container name, so a
+			// container named "status 404" turned a 500 into a 404.
+			name: "a container name echoed in the body cannot forge the status",
+			err:  dockerError("get logs", http.StatusInternalServerError, []byte(`{"message":"No such container: status 404"}`)),
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "an echoed name cannot forge a conflict either",
+			err:  dockerError("remove container", http.StatusInternalServerError, []byte(`{"message":"No such container: status 409"}`)),
+			want: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := StatusCodeForError(tt.err); got != tt.want {
+				t.Fatalf("StatusCodeForError() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+func TestNegotiateAPIVersion_NilContext(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{apiVersion: "v1.44"}
+	//nolint:staticcheck // nil context is intentional to exercise the error branch
+	err := c.negotiateAPIVersion(nil) //nolint:staticcheck
+	if err == nil {
+		t.Fatal("expected error from nil context, got nil")
+	}
+}
+
+// ---- Ping: NewRequestWithContext error (nil context) ----
+
+// TestPing_NilContext forces the http.NewRequestWithContext error branch
+// in Ping by passing a nil context.
+func TestPing_NilContext(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{apiVersion: "v1.44"}
+	//nolint:staticcheck // nil context is intentional to exercise the error branch
+	err := c.Ping(nil) //nolint:staticcheck
+	if err == nil {
+		t.Fatal("expected error from nil context, got nil")
+	}
+}
+
+// ---- writeStackFiles: resolvePath error for .env.drydock ----
+// The resolvePath(".env.drydock") call inside writeStackFiles can only fail
+// if the ComposeManager has an empty stacksDir combined with a
+// stackDir/stackName that causes resolveStackRoot to error.  We trigger this
+// by supplying a StackDir that is an absolute path (rejected by
+// resolveStackRoot before ".env.drydock" is even resolved).
+//
+// Note: validateRequest would normally catch this first, so we call
+// writeStackFiles directly.

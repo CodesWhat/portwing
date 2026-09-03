@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "ignoreDependencies": ["posthog-js"]
+    },
+    "docs": {},
+    "website": {
+      "entry": ["scripts/gen-bird-png.mjs"],
+      "ignoreIssues": { "src/components/ui/**": ["exports", "types"] },
+      "ignoreBinaries": ["magick"]
+    },
+    "analytics": {}
+  }
+}

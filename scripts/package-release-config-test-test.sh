@@ -18,6 +18,10 @@ restore_release_workflows() {
 	cp .github/workflows/release-cut.yml "${fixture}/.github/workflows/"
 }
 
+restore_grype_workflow() {
+	cp .github/workflows/security-grype.yml "${fixture}/.github/workflows/"
+}
+
 git archive HEAD | tar -x -C "${fixture}"
 cp scripts/package-release-config-test.sh "${fixture}/scripts/"
 cp scripts/verify-scanner-exclusions.sh "${fixture}/scripts/"
@@ -30,6 +34,7 @@ cp docs/content/docs/security-model.mdx "${fixture}/docs/content/docs/"
 mkdir -p "${fixture}/scripts/ci"
 cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/"
 restore_release_workflows
+restore_grype_workflow
 git -C "${fixture}" init -q
 git -C "${fixture}" add .
 
@@ -54,6 +59,76 @@ if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null)
 	echo "FAIL: complete package release fixture must pass" >&2
 	exit 1
 fi
+
+sed 's/GRYPE_VERSION: "0.118.0"/GRYPE_VERSION: "0.118.1"/' \
+	"${fixture}/.github/workflows/release.yml" >"${fixture}/.github/workflows/release.yml.tmp"
+mv "${fixture}/.github/workflows/release.yml.tmp" "${fixture}/.github/workflows/release.yml"
+expect_release_contract_failure \
+	"FAIL: release Grype version must match anchore/scan-action@v7.4.2's Grype v0.118.0" \
+	"the package release contract must reject a Grype version that disagrees with scan-action v7.4.2"
+restore_release_workflows
+
+sed 's#https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main#https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/release#' \
+	"${fixture}/.github/workflows/release.yml" >"${fixture}/.github/workflows/release.yml.tmp"
+mv "${fixture}/.github/workflows/release.yml.tmp" "${fixture}/.github/workflows/release.yml"
+expect_release_contract_failure \
+	"FAIL: release Grype checksum verification must use the exact Anchore Grype release workflow identity" \
+	"the package release contract must reject a near-miss Grype signing identity"
+restore_release_workflows
+
+# The three fixtures below cover the ways a substring check passes while the
+# value the tool actually reads is wrong: a stale comment carrying the expected
+# text, a duplicate key that YAML resolves to the later value, and an extra
+# scanner lane beside two correct ones.
+awk '
+	!changed && $1 == "GRYPE_VERSION:" {
+		print "  # was GRYPE_VERSION: \"0.118.0\""
+		print "  GRYPE_VERSION: \"0.110.0\""
+		changed = 1
+		next
+	}
+	{ print }
+	END { if (!changed) exit 1 }
+' "${fixture}/.github/workflows/release.yml" >"${fixture}/.github/workflows/release.yml.tmp"
+mv "${fixture}/.github/workflows/release.yml.tmp" "${fixture}/.github/workflows/release.yml"
+expect_release_contract_failure \
+	"FAIL: release Grype version must match anchore/scan-action@v7.4.2's Grype v0.118.0" \
+	"the package release contract must reject a stale comment standing in for the active Grype version"
+restore_release_workflows
+
+awk '
+	!changed && $1 == "GRYPE_VERSION:" {
+		print
+		print "  GRYPE_VERSION: \"0.110.0\""
+		changed = 1
+		next
+	}
+	{ print }
+	END { if (!changed) exit 1 }
+' "${fixture}/.github/workflows/release.yml" >"${fixture}/.github/workflows/release.yml.tmp"
+mv "${fixture}/.github/workflows/release.yml.tmp" "${fixture}/.github/workflows/release.yml"
+expect_release_contract_failure \
+	"FAIL: release Grype version must match anchore/scan-action@v7.4.2's Grype v0.118.0" \
+	"the package release contract must reject a duplicate GRYPE_VERSION assignment"
+restore_release_workflows
+
+awk '
+	!changed && $1 == "uses:" && $2 ~ /^anchore\/scan-action@/ {
+		print
+		indent = $0
+		sub(/[^[:space:]].*$/, "", indent)
+		print indent "uses: anchore/scan-action@0000000000000000000000000000000000000000  # v7.0.0"
+		changed = 1
+		next
+	}
+	{ print }
+	END { if (!changed) exit 1 }
+' "${fixture}/.github/workflows/security-grype.yml" >"${fixture}/.github/workflows/security-grype.yml.tmp"
+mv "${fixture}/.github/workflows/security-grype.yml.tmp" "${fixture}/.github/workflows/security-grype.yml"
+expect_release_contract_failure \
+	"FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in all three scanner lanes" \
+	"the package release contract must reject an extra scan-action pinned outside the reviewed version"
+restore_grype_workflow
 
 sed '/bash scripts\/package-release-config-test.sh/d' \
 	"${fixture}/scripts/ci/go-release-check.sh" >"${fixture}/scripts/ci/go-release-check.sh.tmp"
@@ -178,6 +253,66 @@ name|github.com/docker/other
 version|v28.5.3+incompatible
 type|unknown
 location|"**/usr/bin/*"
+EOF
+
+awk '
+	$1 == "-" && $2 == "vulnerability:" { skip = ($3 == "GHSA-vp52-pcj8-j9qc") }
+	!skip { print }
+' "${fixture}/.grype.yaml" >"${fixture}/.grype.yaml.tmp"
+mv "${fixture}/.grype.yaml.tmp" "${fixture}/.grype.yaml"
+expect_release_contract_failure \
+	"FAIL: .grype.yaml must contain exactly one GHSA-vp52-pcj8-j9qc ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" \
+	"the package release contract must reject removal of the scoped Compose grpc suppression"
+cp .grype.yaml "${fixture}/"
+
+while IFS='|' read -r scope_field replacement; do
+	awk -v scope_field="${scope_field}:" -v replacement="${replacement}" '
+		$1 == "-" && $2 == "vulnerability:" { target = ($3 == "GHSA-vp52-pcj8-j9qc") }
+		target && $1 == scope_field && !changed {
+			print "      " scope_field " " replacement
+			changed = 1
+			next
+		}
+		{ print }
+		END { if (!changed) exit 1 }
+	' "${fixture}/.grype.yaml" >"${fixture}/.grype.yaml.tmp"
+	mv "${fixture}/.grype.yaml.tmp" "${fixture}/.grype.yaml"
+	expect_release_contract_failure \
+		"FAIL: .grype.yaml must contain exactly one GHSA-vp52-pcj8-j9qc ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" \
+		"the package release contract must reject changing the GHSA-vp52-pcj8-j9qc ${scope_field} scope"
+	cp .grype.yaml "${fixture}/"
+done <<'EOF'
+name|google.golang.org/other
+version|v1.83.1
+type|unknown
+location|"**/usr/bin/*"
+EOF
+
+# A scope field commented out (rather than changed) removes it from grype's
+# and YAML's view of the entry just as effectively as deleting it, so the
+# guard has to reject that too, not just a substring match on the captured
+# block.
+while IFS= read -r scope_field; do
+	awk -v scope_field="${scope_field}:" '
+		$1 == "-" && $2 == "vulnerability:" { target = ($3 == "GHSA-vp52-pcj8-j9qc") }
+		target && $1 == scope_field && !changed {
+			print "#" $0
+			changed = 1
+			next
+		}
+		{ print }
+		END { if (!changed) exit 1 }
+	' "${fixture}/.grype.yaml" >"${fixture}/.grype.yaml.tmp"
+	mv "${fixture}/.grype.yaml.tmp" "${fixture}/.grype.yaml"
+	expect_release_contract_failure \
+		"FAIL: .grype.yaml must contain exactly one GHSA-vp52-pcj8-j9qc ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" \
+		"the package release contract must reject commenting out the GHSA-vp52-pcj8-j9qc ${scope_field} scope"
+	cp .grype.yaml "${fixture}/"
+done <<'EOF'
+name
+version
+type
+location
 EOF
 
 prefix_version="${release_version}0"

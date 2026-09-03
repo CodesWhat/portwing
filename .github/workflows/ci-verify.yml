@@ -35,7 +35,7 @@ jobs:
       test-check-name: Build & Test
       lint-check-name: Lint
       fuzzers-json: >-
-        ${{ (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && '[{"name":"FuzzParsePHC","pkg":"./internal/server/"},{"name":"FuzzParseTrustedProxies","pkg":"./internal/server/"},{"name":"FuzzParseImageRef","pkg":"./internal/adapter/"},{"name":"FuzzParseLabels","pkg":"./internal/adapter/drydock/"},{"name":"FuzzMCPHandler","pkg":"./internal/mcp/"},{"name":"FuzzEnvelope","pkg":"./internal/protocol/"},{"name":"FuzzVerifyRequest","pkg":"./internal/auth/"}]' || '[]' }}
+        ${{ (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && '[{"name":"FuzzParsePHC","pkg":"./internal/server/"},{"name":"FuzzParseTrustedProxies","pkg":"./internal/server/"},{"name":"FuzzParseImageRef","pkg":"./internal/adapter/"},{"name":"FuzzParseLabels","pkg":"./internal/adapter/drydock/"},{"name":"FuzzMCPHandler","pkg":"./internal/mcp/"},{"name":"FuzzEnvelope","pkg":"./internal/protocol/"},{"name":"FuzzVerifyRequest","pkg":"./internal/auth/"},{"name":"FuzzDecodeContainerLogStream","pkg":"./internal/docker/"},{"name":"FuzzComposeRequestValidate","pkg":"./internal/docker/"},{"name":"FuzzParseKeyLine","pkg":"./internal/auth/"}]' || '[]' }}
       run-govulncheck: true
       run-qlty: ${{ github.event_name != 'schedule' }}
       run-goreleaser: ${{ github.event_name != 'schedule' }}
@@ -174,7 +174,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -224,7 +224,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -285,7 +285,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -303,7 +303,7 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
         with:
           # One non-matrix job on purpose. A matrix appends the leg value to
           # the check-run name even with a single entry (drydock requires
@@ -327,13 +327,17 @@ jobs:
         run: go build ./...
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
         with:
           category: .github/workflows/ci.yml:codeql
 
   dependency-review:
     name: "Dependency Review"
-    if: github.event.repository.visibility == 'public' && github.event_name == 'pull_request'
+    if: >-
+      github.event.repository.visibility == 'public' &&
+      (github.event_name == 'pull_request' ||
+       (github.event_name == 'push' &&
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -341,7 +345,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -355,8 +359,30 @@ jobs:
         with:
           persist-credentials: false
 
+      # The first push that creates a dev/* branch reports github.event.before
+      # as the all-zero SHA, which the compare API can't resolve, hard-failing
+      # the job below. Fall back to the default branch in that case. BEFORE and
+      # DEFAULT_BRANCH are env-passed rather than interpolated into the run:
+      # script directly, since both come from event payload fields.
+      - name: Resolve base ref
+        id: base-ref
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            base="$DEFAULT_BRANCH"
+          else
+            base="$BEFORE"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+        with:
+          base-ref: ${{ github.event_name == 'push' && steps.base-ref.outputs.base || '' }}
+          head-ref: ${{ github.event_name == 'push' && github.sha || '' }}
 
   # scripts/package-release-config-test.sh is also run by release-cut.yml, and
   # that remains the gate that blocks a bad tag. The problem it doesn't solve is
@@ -379,7 +405,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
           allowed-endpoints: >

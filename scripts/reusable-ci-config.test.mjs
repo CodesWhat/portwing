@@ -14,7 +14,7 @@ const FIXED_SCRIPTS = new Map([
   ["go-test.sh", ["go mod verify", "go test -race", "COVERAGE_MIN"]],
   [
     "go-lint.sh",
-    ["golangci-lint/v2/cmd/golangci-lint@v2.12.2", "GOLANGCI_LINT_CACHE", "mktemp -d"],
+    ["golangci-lint/v2/cmd/golangci-lint@v2.13.2", "GOLANGCI_LINT_CACHE", "mktemp -d"],
   ],
   ["go-govulncheck.sh", ["golang.org/x/vuln/cmd/govulncheck@v1.7.0"]],
   ["commit-message.sh", ["validate-commit-range-test.sh", "validate-commit-range.sh"]],
@@ -32,6 +32,9 @@ const FUZZERS = [
   ["FuzzMCPHandler", "./internal/mcp/"],
   ["FuzzEnvelope", "./internal/protocol/"],
   ["FuzzVerifyRequest", "./internal/auth/"],
+  ["FuzzDecodeContainerLogStream", "./internal/docker/"],
+  ["FuzzComposeRequestValidate", "./internal/docker/"],
+  ["FuzzParseKeyLine", "./internal/auth/"],
 ];
 
 // The X1 canary promoted; branch protection now requires only the reusable

@@ -266,8 +266,8 @@ while bad enrollment credentials use the authentication-failure window.
 | Ed25519 auth body read | 10 s deadline | Stop a slow-trickled body from holding a handler slot before authentication |
 | Enrollment request body | 64 KiB | Bound unauthenticated JSON parsing |
 | Cold Argon2id derivations | 2 | Bound memory-hard verification across the agent |
-| Concurrent exec sessions | 100 | Prevent unbounded goroutine growth |
-| Concurrent stream sessions | 100 | Prevent unbounded goroutine growth |
+| Concurrent exec sessions | 100 (edge: fixed; standard: `MAX_EXEC_SESSIONS`, non-positive disables) | Prevent unbounded goroutine growth |
+| Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Excludes adapter `/api/events` and follow-mode logs. | Prevent unbounded goroutine growth |
 | Rate-limiter IP table | 10,000 entries | Prevent rate-limiter map exhaustion |
 
 ---
@@ -320,7 +320,7 @@ Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0
 Verify a release before running it:
 
 ```bash
-VERSION=0.9.11
+VERSION=0.9.12
 
 # Verify the checksums file
 cosign verify-blob \

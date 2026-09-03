@@ -5,24 +5,88 @@ run-name: >-
     format('Quality: Benchmarks — Monthly, manual by {0}', github.actor)
   }}
 
-# Monthly performance-regression signal. Runs every Go benchmark in the tree
+# Monthly performance-regression gate. Runs every Go benchmark in the tree
 # (auth middleware, Argon2id verify, client-IP extraction, the PHC / image-ref /
 # label / trusted-proxy parsers, and the MCP dispatch path) five times so the
-# numbers are stable enough to diff month over month. Deep fuzzing lives in
-# `quality-fuzz-monthly.yml`; this workflow answers the separate question of
-# whether the hot paths got slower or started allocating more. Mirrors
-# sockguard's monthly benchmark tier; same rationale.
+# numbers are stable enough to compare, then diffs them against a previous run
+# with benchstat and fails the job when a hot path got measurably slower or
+# started allocating more. Deep fuzzing lives in `quality-fuzz-monthly.yml`;
+# this workflow answers the separate question of whether the hot paths
+# regressed.
 #
-# Results upload as an artifact (90-day retention) and the top lines are echoed
-# into the run summary so a regression is visible without downloading anything.
+# sockguard has a monthly benchmark tier too, but as of 2026-09 it only archives
+# the numbers: no baseline, no comparison, no gate. The benchstat comparison
+# below is portwing-only, and it is the part that turns this tier from a record
+# into a signal.
+#
+# The design choices are not obvious, so:
+#
+# * Where the baseline lives. It is the `benchmark-results.txt` artifact of an
+#   earlier successful run of this same workflow, fetched with `gh run
+#   download`. The alternative — a rolling baseline file the lane commits — puts
+#   a cron job in the business of writing to the repository, which the house
+#   rules forbid: committed generated artifacts regenerate at a release cut,
+#   never on a schedule. A release asset or a dedicated branch is the same
+#   problem in a different costume. Artifacts expire at 90 days against a
+#   monthly cadence, so two or three baselines are normally in reach; when none
+#   is, the run records itself as the first baseline and passes. Candidates are
+#   always drawn from the default branch, which is where the schedule runs, so a
+#   manual dispatch off a dev branch compares against main rather than leaving
+#   its own numbers in the pool.
+#
+# * Which baseline. benchstat groups results by the configuration Go prints
+#   (goos/goarch/pkg/cpu) and will not compare across groups, so a run on a
+#   different CPU model produces no comparison at all rather than a bogus one.
+#   GitHub-hosted runners rotate between AMD and Intel SKUs, so the lane walks
+#   back through recent successful runs and uses the newest one whose hardware
+#   matches. If none matches it warns and does not gate, because a
+#   cross-hardware delta measures Azure's fleet, not this repository.
+#
+# * Noise. Two guards, deliberately different in kind. benchstat's significance
+#   test comes first: with -count=5 on both sides the two sample sets have to
+#   barely overlap before it prints a percentage at all, and it prints "~"
+#   otherwise. The threshold then sits on top of that, so the gate fires on a
+#   step change — an added allocation, a lost fast path — and not on the
+#   few-percent drift a shared runner produces. Tightening alpha is not the
+#   lever it looks like: at n=5 the smallest p-value the test can produce is
+#   about 0.008, so an alpha under that rejects everything.
+#
+# * What is gated. sec/op and B/op. allocs/op is measured and reported but does
+#   not fail the job, because it is a small integer: the smallest possible
+#   change is often more than 10%, so a percentage threshold says nothing useful
+#   about it. Gating allocs/op wants an absolute rule this lane does not have.
+#
+# An intended slowdown would otherwise keep the lane red forever, since the next
+# run compares against the last run that passed. Dispatching with
+# `accept_new_baseline` skips the comparison once and lets that run become the
+# baseline.
+#
+# Results and the comparison upload as an artifact (90-day retention) and the
+# comparison is written into the run summary, so a regression is visible without
+# downloading anything.
 
 on:
   workflow_dispatch:
+    inputs:
+      accept_new_baseline:
+        description: "Skip the comparison and record this run as the new baseline (for an intended slowdown)"
+        required: false
+        default: false
+        type: boolean
   schedule:
-    - cron: '45 7 1 * *'  # Monthly on day 1 at 07:45 UTC (between mutation 06:30 and deep fuzz 08:30)
+    - cron: '45 7 1 * *'  # Monthly on day 1 at 07:45 UTC (after mutation at 06:30; deep fuzz now starts 02:30, see quality-fuzz-monthly.yml)
 
 permissions:
   contents: read
+
+env:
+  # golang.org/x/perf publishes no semantic version tags, so benchstat pins to a
+  # module pseudo-version. Roll it deliberately; never track a branch.
+  BENCHSTAT_VERSION: v0.0.0-20260825160852-19be9d8e6c70
+  # Gate tunables. Reasoning for the values is in the design notes above.
+  BENCH_REGRESSION_THRESHOLD_PERCENT: '10'
+  BENCH_GATED_UNITS: "sec/op,B/op"
+  BENCH_BASELINE_MAX_CANDIDATES: '6'
 
 concurrency:
   group: quality-bench-monthly-${{ github.workflow }}
@@ -33,18 +97,27 @@ jobs:
     name: "Go benchmarks (hot paths)"
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      # gh run list / gh run download, to read the baseline artifact.
+      actions: read
+      contents: read
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
+          # sum.golang.org is for `go install benchstat`; the Azure blob
+          # wildcard is where the Actions artifact API 302s a download to, and
+          # is the same entry quality-soak-weekly.yml already relies on.
           allowed-endpoints: >
             api.github.com:443
             dl.google.com:443
             github.com:443
             go.dev:443
+            *.blob.core.windows.net:443
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            sum.golang.org:443
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -55,6 +128,9 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@"${BENCHSTAT_VERSION}"
 
       - name: Run benchmarks
         # shell: bash (rather than the default `bash -e {0}`) is required here:
@@ -68,19 +144,81 @@ jobs:
           go test -run='^$' -bench=. -benchmem -count=5 -timeout=20m ./... \
             | tee benchmark-results.txt
 
+      - name: Fetch baseline candidates
+        if: ${{ inputs.accept_new_baseline != true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          : >baseline-candidates.txt
+          # Baselines always come from the default branch, never from whatever
+          # ref this run sits on. A scheduled run is on the default branch
+          # anyway; a manual dispatch from a dev branch then measures itself
+          # against what the default branch last recorded, and cannot leave a
+          # dev branch's numbers in the pool for the next scheduled run.
+          baseline_ref="${DEFAULT_BRANCH:-}"
+          if [ -z "${baseline_ref}" ]; then
+            baseline_ref="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')"
+          fi
+          # Successful runs of this workflow, newest first. The current run is
+          # still in progress, so it can never select itself, and a run that
+          # failed on a regression is never adopted as a baseline.
+          runs="$(gh run list \
+            --workflow quality-bench-monthly.yml \
+            --branch "${baseline_ref}" \
+            --status success \
+            --limit "${BENCH_BASELINE_MAX_CANDIDATES}" \
+            --json databaseId,createdAt,headSha \
+            --jq '.[] | "\(.databaseId)\t\(.createdAt) \(.headSha[0:7])"')"
+          while IFS=$'\t' read -r run_id stamp; do
+            [ -n "${run_id}" ] || continue
+            if ! gh run download "${run_id}" --dir "baselines/${run_id}" >/dev/null 2>&1; then
+              echo "run ${run_id}: no artifact (expired, or the run uploaded none)" >&2
+              continue
+            fi
+            results="$(find "baselines/${run_id}" -name benchmark-results.txt -print -quit)"
+            if [ -z "${results}" ]; then
+              echo "run ${run_id}: artifact holds no benchmark-results.txt" >&2
+              rm -rf "baselines/${run_id}"
+              continue
+            fi
+            printf '%s\t%s\trun %s (%s)\n' \
+              "${run_id}" "${results}" "${run_id}" "${stamp}" >>baseline-candidates.txt
+          done <<<"${runs}"
+          echo "Baseline candidates, newest first:"
+          cat baseline-candidates.txt
+
+      - name: Compare against baseline
+        env:
+          ACCEPT_NEW_BASELINE: ${{ inputs.accept_new_baseline }}
+        run: >-
+          scripts/benchstat-walk-baselines.sh
+          baseline-candidates.txt benchmark-results.txt bench-comparison.md
+
       - name: Upload benchmark results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: benchmark-results-${{ github.run_id }}
-          path: benchmark-results.txt
+          path: |
+            benchmark-results.txt
+            bench-comparison.md
+          if-no-files-found: warn
           retention-days: 90
 
       - name: Summarize
         if: always()
         run: |
+          if [ -s bench-comparison.md ]; then
+            cat bench-comparison.md >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           {
             echo "### Go benchmarks (monthly)"
+            echo ""
+            echo "The comparison did not run. Raw benchmark lines from this run:"
             echo ""
             echo '```'
             grep -E '^Benchmark' benchmark-results.txt | head -60 || echo "No benchmark results captured."

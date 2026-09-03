@@ -14,7 +14,7 @@ export const SITE_CONFIG = {
   /** Brand name shown in the header, footer, and metadata. */
   name: "Portwing",
   /** Current release version shown in the hero badge. */
-  version: "0.9.11",
+  version: "0.9.12",
   /** Short product tagline used in page titles and OG metadata. */
   tagline: "Security-first remote Docker agent",
   /**
@@ -50,7 +50,7 @@ export const SITE_CONFIG = {
   aurora: "violet" as AuroraPalette,
 } as const;
 
-export type SiteConfig = typeof SITE_CONFIG;
+type SiteConfig = typeof SITE_CONFIG;
 
 /** "owner/repo" slug — used in shields.io / OpenSSF scorecard badge URLs. */
 export const REPO_SLUG = `${SITE_CONFIG.githubOwner}/${SITE_CONFIG.githubRepo}`;

@@ -499,6 +499,20 @@ func (s *ExecSession) Close() {
 		s.mu.Lock()
 		s.closed = true
 		conn := s.conn
+		// Unregister before done is observable. A waiter that sees done closed
+		// and then checks the registry (the write-failure teardown test does
+		// exactly that) must not find this session, and unregistering only
+		// after the conn close and inbox drain below left a window where it
+		// did. Once closed is set HandleInput can no longer enqueue. A racing
+		// HandleResize may still land a zero-reservation item in the inbox and
+		// inputWriter may pick it over done; doResize then runs against the
+		// already-cancelled session context and aborts, so nothing leaks. The
+		// maxExecSessions slot and the exec ID are released at closed=true
+		// rather than at the end of the drain: a dead session should not hold
+		// a slot while its conn finishes closing, at the cost of a slightly
+		// wider window in which a controller reusing the same exec ID could
+		// see the old readLoop's last frames.
+		s.client.execSessions.CompareAndDelete(s.execID, s)
 		close(s.done)
 		s.mu.Unlock()
 
@@ -512,7 +526,6 @@ func (s *ExecSession) Close() {
 			case item := <-s.inbox:
 				s.releaseInputBytes(item.reservedBytes)
 			default:
-				s.client.execSessions.CompareAndDelete(s.execID, s)
 				return
 			}
 		}

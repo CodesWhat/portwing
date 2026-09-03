@@ -2,5 +2,4 @@
 6c50344ff610d32bfe39740a7e187778900fdcbd:docs/content/docs/observability.mdx:curl-auth-header:154
 df9d93bb140676540cc83421424ebc21704c5582:docs/content/docs/api-reference.mdx:generic-api-key:373
 df9d93bb140676540cc83421424ebc21704c5582:docs/content/docs/observability.mdx:curl-auth-header:154
-docs/content/docs/observability.mdx:curl-auth-header:224
 website/src/components/cli-demo.tsx:private-key:504

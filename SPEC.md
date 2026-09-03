@@ -28,7 +28,7 @@ Portwing independently — handshake on `/api/containers`, then a long-lived SSE
 stream on `/api/events`. sockguard is the recommended socket filter between
 Portwing and the Docker Engine.
 
-**Language:** Go 1.26+ (module), built with Go 1.26 (CI)
+**Language:** Go 1.26+ (module), built with Go 1.27 (CI)
 **Dependencies:** `gorilla/websocket`, `google/uuid` -- zero Docker SDK dependency (raw HTTP over Unix socket)
 
 ## 2. Connection Modes
@@ -36,9 +36,11 @@ Portwing and the Docker Engine.
 ### 2.1 Mode Detection
 
 ```text
-DRYDOCK_URL set + (TOKEN or AUTHORIZED_KEYS or PRIVATE_KEY_FILE) set  ->  Edge Mode (outbound WebSocket)
-Otherwise                                                              ->  Standard Mode (inbound HTTP server)
+DRYDOCK_URL set + PRIVATE_KEY_FILE set  ->  Edge Mode (outbound WebSocket)
+DRYDOCK_URL unset                       ->  Standard Mode (inbound HTTP server)
 ```
+
+`PRIVATE_KEY_FILE` is mandatory whenever `DRYDOCK_URL` is set: the controller's edge endpoint is Ed25519-only and rejects token-only agents. `TOKEN` or `AUTHORIZED_KEYS` may also be set, but neither satisfies the edge-mode requirement on its own, and the checks are ordered: `TOKEN_HASH` set without `TOKEN` or `AUTHORIZED_KEYS` fails first with a `TOKEN_HASH`-specific error (`requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone`), even if `PRIVATE_KEY_FILE` is also set. Past that check, `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is a fatal startup error (`edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents`), not a silent fallback to Standard Mode.
 
 ### 2.2 Standard Mode
 
@@ -95,7 +97,7 @@ sequenceDiagram
     "dockerVersion": "27.0.3",
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
-                      "edge-response-body-b64",
+                      "edge-response-body-b64", "edge-request-body-stream",
                       "dd:container-sync", "dd:logs"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
@@ -117,6 +119,25 @@ which lets non-JSON bodies such as the plain-text `OK` from `GET /_ping` cross
 the wire. A welcome without the value keeps the legacy `body` encoding, so
 older controllers interoperate without a protocol-version bump.
 
+`edge-request-body-stream` gates the opposite direction: it tells a
+controller the agent can accept a `request` whose body is not carried inline
+in `body` but instead follows as one or more `stream` frames (each carrying a
+base64 chunk) and a terminal `stream_end`, all sharing the request's
+`requestId`. Set `request.bodyStream: true` and omit `body` to use it; the
+agent reassembles the chunks in memory (bounded per request, in aggregate, and
+by concurrent count, see §7.3 and §11.3) before dispatching the request.
+Sending `bodyStream: true` to an agent whose `hello.capabilities` does not
+contain the `edge-request-body-stream` token is undefined behavior a
+controller must not rely on: that token is the only signal that the agent
+will hold the request open for the follow-up frames rather than dispatch it
+with no body at all. This exists because `request.body` is a JSON
+`RawMessage`: it must be valid JSON to
+marshal, which rules out a binary or otherwise non-JSON request body (a tar
+build context, or any payload too large for a single WebSocket frame). A
+controller that doesn't send `bodyStream: true` is unaffected; this is purely
+additive, gated by the agent's own hello advertisement rather than a version
+bump.
+
 All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
@@ -129,10 +150,10 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 |------|-----------|---------|
 | `hello` | Agent -> Server | Auth + capability exchange |
 | `welcome` | Server -> Agent | Connection accepted; carries `capabilities` on controllers that negotiate them |
-| `request` | Server -> Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls |
+| `request` | Server -> Agent | Docker API request (with `requestId`), including controller-owned watcher/update calls; `bodyStream: true` (see `edge-request-body-stream` above) defers the body to follow-up `stream`/`stream_end` frames instead of inline `body` |
 | `response` | Agent -> Server | Docker API response (correlated by `requestId`) |
-| `stream` | Bidirectional | Streaming data (logs, exec, build) |
-| `stream_end` | Bidirectional | End of stream |
+| `stream` | Bidirectional | Streaming data (logs, exec, build); also carries a chunk of a `bodyStream: true` request body, keyed by that request's `requestId` |
+| `stream_end` | Bidirectional | End of stream; also the terminal frame for a `bodyStream: true` request body |
 | `metrics` | Agent -> Server | Host metrics payload |
 | `container_event` | Agent -> Server | Docker lifecycle event; used instead of a duplicate controller event stream |
 | `ping` / `pong` | Either | Keepalive (30s default) |
@@ -203,7 +224,7 @@ and container identifiers.
 
 `/*` (all other paths) -> Transparent proxy to Docker Engine API.
 
-- Streaming detection for `/logs`, `/attach`, `/exec/*/start`, `/events`, `/build`, `/images/create`, `/images/push`
+- Streaming detection for `/logs`, `/attach`, `/exec/*/start`, `/events`, `/build`, `/images/create`, `/images/push`, `/export`, `/images/get`, and `/images/*/get`; `/containers/*/archive` is method-sensitive and streams on `GET` only (a `PUT` upload returns no tar body)
 - Connection hijacking for interactive exec (`Upgrade: tcp`)
 - Hop-by-hop header stripping
 - Binary response auto-detection
@@ -303,8 +324,9 @@ sequenceDiagram
 
 ### 7.3 Limits
 
-- Max 100 concurrent exec sessions
-- Max 100 concurrent stream sessions
+- Max 100 concurrent exec sessions (edge mode: fixed; standard mode: `MAX_EXEC_SESSIONS`, default 100, non-positive disables the bound)
+- Max 100 concurrent stream sessions (edge mode: fixed; standard mode: `MAX_STREAM_SESSIONS`, default 100, non-positive disables the bound). Covers the streaming Docker proxy responses and the adapter routes that bypass the proxy handler (`/api/events` SSE and follow-mode container logs), which share the same bound. A rejected adapter stream answers `503` with the same body as a rejected proxy stream. Non-follow log reads are a single bounded response and are never gated.
+- Max 100 concurrent streamed request body reassemblies (edge mode, fixed; see `edge-request-body-stream` in §3.2 and the limits in §11.3). A `bodyStream: true` request does not claim a stream session slot until its `stream_end` arrives, so this is a separate bound on the reassembly stage, matched to the stream session limit because every pending reassembly claims one of those slots the moment it completes. Streamed bodies are also capped at 1 GB summed across every one the agent is holding in memory, which is what bounds agent memory: the 512 MB per-request cap multiplies by the number of concurrent requests without it. That sum spans both stages, the buffers still reassembling and the reassembled bodies already dispatched to Docker, which keep their bytes until the round trip ends. Charging only the reassembly stage would let a controller send `stream_end` on every pending request to drop the total to zero and immediately refill it, leaving the real ceiling at the concurrent stream session limit times the per-request cap. Either rejection answers with an `error` frame naming the `requestId`, the same shape as a duplicate-`requestId` rejection.
 - Exec body size limit: 10 MB
 - Retry loop for write/resize (up to 10 attempts, 50ms intervals)
 
@@ -324,11 +346,16 @@ In addition to host/container metrics, the Prometheus endpoints (`/_portwing/met
   "diskTotal": 107374182400,
   "diskUsed": 53687091200,
   "diskFree": 53687091200,
+  "diskMetricsAvailable": true,
   "networkRxBytes": 1048576,
   "networkTxBytes": 524288,
   "uptime": 86400
 }
 ```
+
+`diskMetricsAvailable` is `false` when the `statfs` read on the Docker data root fails or reports an unusable block size, and also when `SKIP_DF_COLLECTION` is set, in which case `diskError` is empty because no read was attempted. On a failed read the disk fields above stay zero and `diskError` carries the path and the failing error; a successful read populates them and leaves `diskError` empty.
+
+Its relationship to `ErrHostMetricsUnsupported`/`portwing_host_metrics_supported` (which cover the `/proc`-derived fields) is one-directional, not independent: a broken data root leaves the `/proc` fields intact, but a missing `/proc` short-circuits collection before `statfs` runs, so no disk figure is reported on a host without procfs even though `statfs` would have worked there.
 
 | Metric | Source | Platform |
 |--------|--------|----------|
@@ -339,7 +366,7 @@ In addition to host/container metrics, the Prometheus endpoints (`/_portwing/met
 | Network | `/proc/net/dev` (all non-lo interfaces) | Linux |
 | Uptime | `/proc/uptime` | Linux |
 
-`SKIP_DF_COLLECTION` env var disables disk metrics.
+`dockerDataRoot` is resolved from the Docker daemon's `/info` (`DockerRootDir`) on first collection, bounded by a 2s timeout and retried at most once per 30s on failure; it falls back to `/var/lib/docker` until a lookup succeeds. `SKIP_DF_COLLECTION` env var disables disk metrics entirely, skipping both the lookup and the `statfs` call.
 
 ## 9. Container Event Streaming
 
@@ -502,11 +529,12 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 |----------|-------|
 | WebSocket read | 16 MB |
 | Response body read | 100 MB |
+| Streamed request body (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every streamed body held in memory, reassembling and already dispatched alike, the latter until its Docker round trip ends; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |
-| Concurrent exec sessions | 100 |
-| Concurrent stream sessions | 100 |
+| Concurrent exec sessions | 100 (edge: fixed; standard: `MAX_EXEC_SESSIONS`, non-positive disables) |
+| Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Shared by streaming proxy responses and the adapter `/api/events` SSE and follow-mode log routes; a rejected adapter stream answers `503`. Non-follow log reads are not gated. |
 
 ## 12. Configuration
 

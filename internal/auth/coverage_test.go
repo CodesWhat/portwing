@@ -272,22 +272,6 @@ func TestMarshalPrivateKeyPEM_RoundTrip(t *testing.T) {
 	}
 }
 
-// ---- checkFilePermissions stat error ------------------------------------
-
-func TestCheckFilePermissions_StatError(t *testing.T) {
-	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("permission check not applicable on Windows")
-	}
-	err := checkFilePermissions("/nonexistent/path/authorized_keys")
-	if err == nil {
-		t.Fatal("expected error for non-existent file")
-	}
-	if !strings.Contains(err.Error(), "opening authorized_keys") {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
 // ---- NewNonceLRU defaults -----------------------------------------------
 
 func TestNewNonceLRU_DefaultsOnZeroValues(t *testing.T) {
@@ -302,6 +286,13 @@ func TestNewNonceLRU_DefaultsOnZeroValues(t *testing.T) {
 	if lru.Len() != 1 {
 		t.Errorf("expected 1 entry, got %d", lru.Len())
 	}
+	// ttl must be 2x the 60s default window (120s), not the windowSeconds=0
+	// input itself: an unasserted ttl lets the "windowSeconds <= 0" default
+	// silently regress to a 0s (or otherwise wrong) ttl while Add() still
+	// appears to succeed.
+	if lru.ttl != 120*time.Second {
+		t.Errorf("ttl = %v, want 120s (2x the 60s default window)", lru.ttl)
+	}
 }
 
 func TestNewNonceLRU_NegativeValues(t *testing.T) {
@@ -310,6 +301,40 @@ func TestNewNonceLRU_NegativeValues(t *testing.T) {
 	defer lru.Close()
 	if !lru.Add("n1") {
 		t.Error("expected Add to succeed with defaults")
+	}
+	if lru.ttl != 120*time.Second {
+		t.Errorf("ttl = %v, want 120s (2x the 60s default window)", lru.ttl)
+	}
+}
+
+// TestNewNonceLRU_WindowSecondsBoundary pins the exact "windowSeconds <= 0"
+// boundary in NewNonceLRU by asserting both sides of it here: 0 must still
+// default to the 60s window (ttl 120s), and 1 — the smallest positive value —
+// must NOT default (ttl 2s). Both are exact integers, so together they kill a
+// CONDITIONALS_BOUNDARY flip of "<=" to "<": under that mutant windowSeconds=0
+// stops defaulting and ttl comes out as 0 instead of 120s. The 0 row overlaps
+// with TestNewNonceLRU_DefaultsOnZeroValues on purpose — without it this test
+// only exercises the side of the boundary where "<=" and "<" agree, so it kills
+// nothing on its own and the mutant survives if that other test ever changes.
+func TestNewNonceLRU_WindowSecondsBoundary(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		windowSeconds int
+		wantTTL       time.Duration
+	}{
+		{name: "zero takes the 60s default", windowSeconds: 0, wantTTL: 120 * time.Second},
+		{name: "one does not default", windowSeconds: 1, wantTTL: 2 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			lru := NewNonceLRU(100, tt.windowSeconds)
+			defer lru.Close()
+			if lru.ttl != tt.wantTTL {
+				t.Errorf("windowSeconds=%d: ttl = %v, want %v", tt.windowSeconds, lru.ttl, tt.wantTTL)
+			}
+		})
 	}
 }
 

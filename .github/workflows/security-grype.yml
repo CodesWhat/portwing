@@ -44,7 +44,7 @@ jobs:
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
           # 9236a389bd48b984df91adc1bc924620.r2.cloudflarestorage.com is the R2
@@ -75,7 +75,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
 
       - name: Build image for scanning
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
@@ -97,7 +97,7 @@ jobs:
           ./scripts/verify-scanner-exclusions.sh /tmp/portwing /tmp/docker-compose
 
       - name: Run Grype vulnerability scanner
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
         id: grype
         with:
           image: portwing:grype-scan
@@ -109,7 +109,7 @@ jobs:
       - name: Upload Grype SARIF to code scanning
         # Code scanning uploads require GHAS, not available on free private repos.
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype-image
@@ -132,7 +132,7 @@ jobs:
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
           # dl.google.com and go.dev are for setup-go below, which the
@@ -178,7 +178,7 @@ jobs:
         # lockfile-resolved versions (not the full module requirement graph),
         # so it does not emit the phantom-dependency findings a manifest-graph
         # SCA reports for modules the binary never links in.
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
         id: grype-deps
         with:
           path: .
@@ -189,7 +189,7 @@ jobs:
 
       - name: Upload Grype dependency SARIF
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
         with:
           sarif_file: ${{ steps.grype-deps.outputs.sarif }}
           category: grype-deps
@@ -212,7 +212,7 @@ jobs:
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920  # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -226,7 +226,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Gosec
-        uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3  # v2.28.0
+        uses: securego/gosec@deb54465fea23d19a77f037e11e6589021f8501d  # v2.29.0
         with:
           # -no-fail keeps gosec itself from deciding the job's outcome. gosec
           # has no native severity cutoff (unlike severity-cutoff: high on the
@@ -240,7 +240,7 @@ jobs:
 
       - name: Upload Gosec SARIF
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
         with:
           sarif_file: gosec-results.sarif
           category: gosec
@@ -280,6 +280,223 @@ jobs:
             exit 1
           fi
 
-  # NOTE: testssl job omitted. Portwing does not operate a TLS listener of its own
-  # (TLS is handled by a reverse proxy in front). Re-add if Portwing gains direct
-  # TLS termination.
+  resolve-latest-release:
+    name: "Security: Resolve Latest Published Release"
+    # grype-image above only ever scans an image `docker build` produces from
+    # the current branch: one platform, a digest nobody pulls, and base-image
+    # layers that are not the ones users are running. release.yml's
+    # grype-published-image job does scan the real multi-arch manifest, but it
+    # is gated on `push: tags: v*`, so it fires exactly once, at tag-cut time.
+    # Between releases nothing re-pulls the published image, so a CVE disclosed
+    # against it after the cut stays invisible until the next release ships.
+    # This job resolves the currently-published tag so the scan below can
+    # re-check it every Monday whether or not a release went out that week.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.latest_release.outputs.version }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          # Narrower than the sibling jobs on purpose: this one only calls the
+          # REST API through gh. No checkout, no scanner, no registry.
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - name: Resolve latest published, non-prerelease tag
+        id: latest_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # --exclude-pre-releases is load-bearing rather than tidiness: the
+          # house flow cuts -rc.N tags on the dev branch, and a release
+          # candidate is not what users have installed. --exclude-drafts for
+          # the same reason from the other direction — a draft release has no
+          # published GHCR image behind it at all.
+          tag="$(gh release list --repo "${REPOSITORY}" --exclude-drafts --exclude-pre-releases \
+            --limit 1 --json tagName --jq '.[0].tagName')"
+          if [ -z "${tag}" ]; then
+            # Skip, do not fail. "This repo has never cut a GA release" is a
+            # true fact about the repo, not a security regression, and a
+            # weekly red X that means that is how a lane gets ignored. The
+            # scan job below is gated on a non-empty version.
+            echo "::notice::No published non-prerelease release in ${REPOSITORY}; nothing to re-scan."
+            {
+              echo "### Grype Published Release Re-scan"
+              echo "- Skipped: ${REPOSITORY} has no published, non-prerelease release yet."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Latest published release: ${tag}"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+  grype-published-release:
+    name: "Security: Grype Published Release Image (${{ matrix.platform }})"
+    needs: resolve-latest-release
+    # An empty version means resolve-latest-release found no GA release and
+    # already said so in the step summary. A skipped `needs` job skips this one
+    # too, so the pull_request case is covered without repeating the event
+    # check that gates the job above.
+    if: needs.resolve-latest-release.outputs.version != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # amd64 and arm64 only. release.yml's tag-time job carries a third,
+        # linux/arm/v7 leg as report-only (`gate: none`) because Wolfi
+        # publishes no armv7 repo and that leg is built from Alpine.
+        # anchore/scan-action has no per-leg report-only mode short of
+        # fail-build: false, which would un-gate the whole matrix, so this lane
+        # covers the two gating platforms and leaves armv7 to release.yml.
+        include:
+          - platform: linux/amd64
+            slug: linux-amd64
+          - platform: linux/arm64
+            slug: linux-arm64
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        with:
+          egress-policy: block
+          # ghcr.io is the GHCR manifest API and pkg-containers is its blob
+          # storage — the same pair release.yml's grype-published-image job
+          # allows for the same pull. get.anchore.io, github.com and
+          # release-assets.githubusercontent.com are how anchore/scan-action
+          # installs grype; grype.anchore.io and storage.googleapis.com are its
+          # vulnerability DB. Both sets are copied from grype-image above,
+          # which runs the same action. No cosign/sigstore hosts here: unlike
+          # release.yml, this job installs grype through the action instead of
+          # verifying pinned release assets itself.
+          allowed-endpoints: >
+            api.github.com:443
+            get.anchore.io:443
+            ghcr.io:443
+            github.com:443
+            grype.anchore.io:443
+            pkg-containers.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            storage.googleapis.com:443
+
+      - name: Checkout
+        # Only for .grype.yaml. The image under scan comes from the registry,
+        # never from this working tree — that distinction is the whole point
+        # of the job.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        # The package is public today, so the pull would work anonymously.
+        # Same reasoning release.yml records: this job has to keep working if
+        # the repo goes private, which is exactly when a private package would
+        # break the anonymous path. Grype reads these credentials out of the
+        # Docker config this action writes.
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve platform-specific digest
+        id: platform_digest
+        env:
+          IMAGE_TAG: ${{ needs.resolve-latest-release.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          # GHCR rejects mixed-case paths and github.repository preserves the
+          # org's real case (CodesWhat/portwing), so lowercase it rather than
+          # hardcoding the string release.yml hardcodes.
+          repo_lower="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          image_ref="ghcr.io/${repo_lower}:${IMAGE_TAG}"
+          os="${PLATFORM%%/*}"
+          arch="${PLATFORM##*/}"
+
+          manifest="$(docker buildx imagetools inspect "${image_ref}" --raw)"
+          # Resolving the per-platform CHILD digest, not the index digest, is
+          # what lets this work without a --platform flag — which matters
+          # because anchore/scan-action exposes no input for one. A child
+          # digest names a single-platform manifest, so there is nothing left
+          # for the scanner to select and no way for the arm64 leg to silently
+          # scan the runner's native amd64 image instead.
+          #
+          # Collapsed to exactly one match: zero or two-plus both produce an
+          # empty string and fail below, rather than scanning the first of
+          # several or handing grype a two-line digest. The `unknown/unknown`
+          # entries in the index (attestation manifests) match neither.
+          digest="$(printf '%s' "${manifest}" | jq -r --arg os "${os}" --arg arch "${arch}" '
+            [.manifests[]? | select(.platform.os == $os and .platform.architecture == $arch) | .digest]
+            | unique
+            | if length == 1 then .[0] else "" end
+          ')"
+          if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
+            echo "::error::Expected exactly one ${PLATFORM} manifest in ${image_ref}; refusing to scan an ambiguous or missing platform."
+            exit 1
+          fi
+          echo "Resolved ${PLATFORM} to ${digest}"
+          # `registry:` keeps the pull off the Docker daemon, which would
+          # otherwise have to pull a foreign-architecture image on the arm64
+          # leg. release.yml's published-image job uses the same scheme.
+          echo "ref=registry:ghcr.io/${repo_lower}@${digest}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${repo_lower}@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Grype vulnerability scanner
+        # Same policy as grype-image above — HIGH cutoff, fail the build, and
+        # the repo's own .grype.yaml so a finding already adjudicated there
+        # does not re-fire here. A red run on this job means the image users
+        # are currently pulling has an unadjudicated HIGH: either cut a
+        # release, or add a justified, version-scoped ignore.
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
+        id: grype
+        with:
+          image: ${{ steps.platform_digest.outputs.ref }}
+          severity-cutoff: high
+          fail-build: true
+          output-format: sarif
+          config: .grype.yaml
+
+      - name: Upload Grype SARIF to code scanning
+        # Code scanning uploads require GHAS, not available on free private
+        # repos. Only the reporting is conditional; the gate above always runs.
+        # The empty-sarif guard is not in the sibling jobs because they cannot
+        # hit it: this job can fail before grype ever runs (digest resolution),
+        # and uploading a path that was never written just adds a second,
+        # misleading red step on top of the real one.
+        if: always() && github.event.repository.visibility == 'public' && steps.grype.outputs.sarif != ''
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+          category: grype-published-release-${{ matrix.slug }}
+
+      - name: Summarize
+        if: always()
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          IMAGE_REF: ${{ steps.platform_digest.outputs.image }}
+          VERSION: ${{ needs.resolve-latest-release.outputs.version }}
+        run: |
+          {
+            echo "### Grype Published Release Image (${PLATFORM})"
+            echo "- Re-scanned the published GHCR manifest for v${VERSION} at \`${IMAGE_REF}\`"
+            echo "- Catches CVEs disclosed against the shipped image since the release was cut"
+            echo "- Suppressions from .grype.yaml; fails on HIGH and above"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # NOTE: No testssl job is configured here. Standard Mode supports direct TLS
+  # through TLS_CERT/TLS_KEY, while the public site uses Vercel TLS. Add a runtime
+  # TLS scan when CI has a stable agent endpoint to test.

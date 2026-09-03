@@ -156,9 +156,18 @@ func (reg *Registry) ObserveRequestDuration(seconds float64) {
 	reg.histCount++
 }
 
+// EscapeLabelValue escapes a Prometheus label value per the exposition
+// format spec: backslash -> \\, double-quote -> \", newline -> \n.
+func EscapeLabelValue(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
+}
+
 // WritePrometheus appends all application metrics in Prometheus text
-// exposition format v0.0.4 to b. escapeLabel must be the escapeLabelValue
-// function from the calling package so label values are correctly escaped.
+// exposition format v0.0.4 to b. escapeLabel must be EscapeLabelValue (or an
+// equivalent) so label values are correctly escaped.
 func (reg *Registry) WritePrometheus(b *strings.Builder, escapeLabel func(string) string) {
 	// --- portwing_http_requests_total ---
 	fmt.Fprintf(b, "# HELP portwing_http_requests_total Total HTTP requests handled by the agent, labeled by method and status code.\n")

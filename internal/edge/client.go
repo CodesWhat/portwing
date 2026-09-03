@@ -58,6 +58,50 @@ const (
 	writeWait = 10 * time.Second
 )
 
+// maxRequestBodyStream caps the in-memory reassembly buffer for a
+// request.bodyStream=true request (CapRequestBodyStream). This is a simple
+// bounded-buffer design, not a true streaming pipe into dockerd: the whole
+// point of the capability is to get past a real build context's size and
+// non-JSON bytes, and it can only raise the ceiling, not remove it, without
+// also risking a stalled dockerd write blocking the single shared readPump
+// goroutine (and therefore every other multiplexed message type, exec I/O,
+// pings, other requests) on this connection. Larger than maxResponseBody
+// because request bodies in this path are dominated by build contexts. A
+// var, not a const, so tests can shrink it instead of sending 512 MB of
+// filler to exercise the overflow path.
+var maxRequestBodyStream int64 = 512 * 1024 * 1024 // 512 MB
+
+// maxPendingRequestBodies caps how many request.bodyStream=true requests may
+// be reassembling at once. maxRequestBodyStream bounds one buffer; without
+// this the number of buffers is bounded only by how many RequestIDs the
+// controller opens, because registration deliberately defers the streamSem
+// slot until stream_end. Pinned to maxStreams: every pending body is a
+// request that will claim one of those slots the moment its stream_end
+// lands, so the two stages stay symmetric. A var, not a const, so tests can
+// shrink it.
+var maxPendingRequestBodies = maxStreams
+
+// maxStreamedRequestBodyBytes caps the sum of every streamed request body
+// the agent is holding in memory, which is what actually bounds agent memory
+// on this path — a count cap alone would still permit maxStreams *
+// maxRequestBodyStream. It spans both stages: the reassembly buffers still
+// filling, and the reassembled bodies already handed to handleRequestTo,
+// which keep their bytes for the whole Docker round trip. Charging only the
+// first stage would let a controller finish every pending body to zero the
+// count and immediately refill it, so the effective ceiling would be
+// maxStreams * maxRequestBodyStream again. Twice maxRequestBodyStream, so a
+// single largest-allowed body is still reachable and a second one can
+// overlap it. A var, not a const, so tests can shrink it.
+var maxStreamedRequestBodyBytes int64 = 1024 * 1024 * 1024 // 1 GB
+
+// requestBodyStreamIdleTimeout bounds how long a pending BodyStream
+// reassembly waits for the next stream frame (or stream_end) before it is
+// abandoned. Reset on every chunk received, so it only fires against a
+// controller that stalls mid-upload, not a slow-but-steady one. A var, not a
+// const, so tests can shrink it instead of running the idle-timeout path at
+// the real 30s.
+var requestBodyStreamIdleTimeout = 30 * time.Second
+
 type outboundQueueState struct {
 	mu     sync.Mutex
 	bytes  int64
@@ -156,8 +200,48 @@ type Client struct {
 	// so handleRequest's concurrent goroutines read it without a lock.
 	controllerCaps []string
 
+	// pendingBodies tracks in-flight request.bodyStream=true requests
+	// (CapRequestBodyStream) awaiting reassembly, keyed by RequestID. An
+	// entry is created when such a request arrives in readPump and removed
+	// exactly once, by whichever of stream_end, the maxRequestBodyStream
+	// or maxStreamedRequestBodyBytes caps, or requestBodyStreamIdleTimeout
+	// fires first, so a given RequestID is dispatched or errored exactly
+	// once. Entry count is capped by maxPendingRequestBodies. Guarded by
+	// pendingBodiesMu; nil until the first BodyStream request arrives.
+	pendingBodiesMu sync.Mutex
+	pendingBodies   map[string]*pendingRequestBody
+
+	// dispatchingBodies is the second half of the maxStreamedRequestBodyBytes
+	// budget: the reassembled size of every streamed body that has left
+	// pendingBodies for handleRequestTo but is still held in memory as
+	// req.Body until the Docker round trip finishes. Keyed by a monotonic
+	// sequence from nextDispatchSeq rather than by RequestID, so a controller
+	// that reuses a RequestID while the first dispatch is still running
+	// cannot overwrite a live reservation. Guarded by pendingBodiesMu, the
+	// same lock as pendingBodies, so finishPendingBody's handoff between the
+	// two is atomic and the sum never dips between stages. Nil until the
+	// first streamed body is dispatched.
+	dispatchingBodies map[uint64]int64
+	nextDispatchSeq   uint64
+
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
+}
+
+// pendingRequestBody accumulates the stream/stream_end frames that follow a
+// request.bodyStream=true request until it can be dispatched to
+// handleRequestTo with a fully reassembled Body.
+type pendingRequestBody struct {
+	req    protocol.RequestMessage
+	target outboundTarget
+	buf    bytes.Buffer
+	timer  *time.Timer
+	// gen counts how many times the idle timer has been armed for this
+	// entry. time.Timer.Reset does not cancel an AfterFunc whose deadline
+	// already elapsed, so a timeout callback can still be in flight when a
+	// chunk re-arms the timer; each callback carries the gen it was armed
+	// with and no-ops when it no longer matches. Guarded by pendingBodiesMu.
+	gen uint64
 }
 
 // NewClient creates a new edge-mode Client.
@@ -172,7 +256,7 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 		dockerClient: dockerClient,
 		adapter:      a,
 		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
-		collector:    metrics.NewCollector("/var/lib/docker", cfg.SkipDFCollection),
+		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
 		metrics:      registry,
 		auditor:      auditor,
 		startTime:    time.Now(),
@@ -492,6 +576,13 @@ func (c *Client) sendHello(ctx context.Context) error {
 		// direction is welcome.capabilities -> controllerCaps, checked in
 		// handleRequest via hasControllerCap.
 		protocol.CapResponseBodyBase64,
+		// Load-bearing here, unlike CapResponseBodyBase64 above: this tells
+		// the controller the agent can reassemble a request.bodyStream=true
+		// request (see readPump's TypeStream/TypeStreamEnd cases and
+		// pendingRequestBody), so it is safe to send one. A controller that
+		// doesn't recognize this token simply never sends bodyStream=true
+		// and nothing changes for it.
+		protocol.CapRequestBodyStream,
 	}
 	capabilities = append(capabilities, c.adapter.Capabilities()...)
 
@@ -618,6 +709,14 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Warn("invalid request message", "error", err)
 				continue
 			}
+			if req.BodyStream {
+				// The body isn't inline: it arrives as follow-up
+				// TypeStream/TypeStreamEnd frames below, keyed by
+				// RequestID. Defer dispatch (and the streamSem slot it
+				// would consume) until reassembly completes.
+				c.registerPendingBody(req, c.currentOutboundTarget())
+				continue
+			}
 			// Bound concurrent request handlers (maxStreams). Reject rather than
 			// block the read loop, which must keep servicing pings and exec I/O.
 			select {
@@ -672,6 +771,43 @@ func (c *Client) readPump(ctx context.Context) error {
 			}
 			c.EndExec(msg)
 
+		case protocol.TypeStream:
+			var sm protocol.StreamMessage
+			if err := json.Unmarshal(env.Data, &sm); err != nil {
+				slog.Warn("invalid stream message", "error", err)
+				continue
+			}
+			// A chunk for a registered BodyStream request is consumed here;
+			// anything else (an adapter-owned stream, or a chunk with no
+			// matching pending body) falls through unchanged, preserving
+			// existing behavior for any future adapter use of TypeStream.
+			if c.appendPendingBody(sm.RequestID, sm.Data) {
+				continue
+			}
+			if !c.adapter.HandleMessage(ctx, sender, env.Type, env.Data) {
+				slog.Debug("unhandled message type", "type", applog.Sanitize(env.Type))
+			}
+
+		case protocol.TypeStreamEnd:
+			var se protocol.StreamEndMessage
+			if err := json.Unmarshal(env.Data, &se); err != nil {
+				slog.Warn("invalid stream_end message", "error", err)
+				continue
+			}
+			if req, target, reservation, ok := c.finishPendingBody(se.RequestID); ok {
+				// Everything past this point, including the streamSem
+				// admission check an inline-body request does inline above,
+				// belongs to dispatchStreamedBody, which owns the byte
+				// reservation finishPendingBody just made and releases it on
+				// every exit. Doing the admission check here instead would
+				// need a second release site on the rejection branch.
+				go c.dispatchStreamedBody(ctx, req, target, reservation)
+				continue
+			}
+			if !c.adapter.HandleMessage(ctx, sender, env.Type, env.Data) {
+				slog.Debug("unhandled message type", "type", applog.Sanitize(env.Type))
+			}
+
 		case protocol.TypePing:
 			var ping protocol.PingMessage
 			if err := json.Unmarshal(env.Data, &ping); err != nil {
@@ -700,6 +836,270 @@ func (c *Client) readPump(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// registerPendingBody records a request.bodyStream=true request and starts
+// its idle timeout, deferring dispatch until finishPendingBody sees the
+// matching stream_end. A duplicate RequestID (a second bodyStream=true
+// request arriving before the first finished), or a request that would push
+// the agent past maxPendingRequestBodies concurrent reassemblies, is
+// rejected with a TypeError instead of silently clobbering the in-flight
+// reassembly or growing the map without bound.
+func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboundTarget) {
+	if req.RequestID == "" {
+		slog.Warn("streamed request body missing requestId, rejecting")
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message: "streamed request body requires requestId",
+		})
+		return
+	}
+
+	c.pendingBodiesMu.Lock()
+	if c.pendingBodies == nil {
+		c.pendingBodies = make(map[string]*pendingRequestBody)
+	}
+	if _, exists := c.pendingBodies[req.RequestID]; exists {
+		c.pendingBodiesMu.Unlock()
+		slog.Warn("duplicate requestId for streamed request body, rejecting", "request_id", applog.Sanitize(req.RequestID))
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "duplicate requestId for streamed request body",
+			RequestID: req.RequestID,
+		})
+		return
+	}
+	if len(c.pendingBodies) >= maxPendingRequestBodies {
+		c.pendingBodiesMu.Unlock()
+		slog.Warn("concurrent streamed request body limit reached, rejecting", "max", maxPendingRequestBodies, "request_id", applog.Sanitize(req.RequestID))
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "agent busy: too many concurrent streamed request bodies",
+			RequestID: req.RequestID,
+		})
+		return
+	}
+	pb := &pendingRequestBody{req: req, target: target}
+	// gen 0 is the arming generation for this first timer; appendPendingBody
+	// bumps it on every re-arm so a callback that already fired can tell it
+	// lost the race and must not fail a live upload.
+	pb.timer = time.AfterFunc(requestBodyStreamIdleTimeout, func() {
+		c.failPendingBody(req.RequestID, 0)
+	})
+	c.pendingBodies[req.RequestID] = pb
+	c.pendingBodiesMu.Unlock()
+}
+
+// appendPendingBody decodes and appends one stream chunk to the pending body
+// registered under requestID. It reports false when requestID has no
+// registered pending body (an adapter-owned stream, or a chunk that lost its
+// race with an already-finished/failed/timed-out one), leaving env.Data
+// untouched so the caller can fall through to adapter.HandleMessage. It
+// reports true for everything else, including a decode failure or a
+// per-request/aggregate size overflow — all of those fail the request
+// (TypeError) and clean up, but the chunk was still consumed as belonging to
+// this path.
+func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
+	c.pendingBodiesMu.Lock()
+	pb, ok := c.pendingBodies[requestID]
+	if !ok {
+		c.pendingBodiesMu.Unlock()
+		return false
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(encodedChunk)
+	if err != nil {
+		delete(c.pendingBodies, requestID)
+		timer, target := pb.timer, pb.target
+		c.pendingBodiesMu.Unlock()
+		timer.Stop()
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "invalid base64 in streamed request body chunk",
+			RequestID: requestID,
+		})
+		return true
+	}
+
+	// Two ceilings: this body on its own, and every streamed body the agent
+	// is holding added together. The aggregate one is what bounds agent
+	// memory, since the per-request cap multiplies by however many requests
+	// are open, and it counts dispatched bodies too — those bytes are still
+	// resident for the whole Docker round trip.
+	var overflow string
+	switch {
+	case int64(pb.buf.Len()+len(decoded)) > maxRequestBodyStream:
+		overflow = fmt.Sprintf("streamed request body exceeds %d byte limit", maxRequestBodyStream)
+	case c.streamedBodyBytesLocked()+int64(len(decoded)) > maxStreamedRequestBodyBytes:
+		overflow = fmt.Sprintf("streamed request bodies exceed the %d byte aggregate in-memory limit", maxStreamedRequestBodyBytes)
+	}
+	if overflow != "" {
+		delete(c.pendingBodies, requestID)
+		timer, target := pb.timer, pb.target
+		c.pendingBodiesMu.Unlock()
+		timer.Stop()
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   overflow,
+			RequestID: requestID,
+		})
+		return true
+	}
+
+	pb.buf.Write(decoded)
+	// Re-arm on forward progress, so a slow-but-steady multi-chunk upload
+	// isn't held to the same deadline as a stalled one. Reset alone is not
+	// enough: it cannot recall an AfterFunc whose deadline already elapsed,
+	// so a callback queued while this chunk held the lock would still find
+	// the entry and fail an upload that was making progress. Bump gen and
+	// arm a fresh timer, which leaves any in-flight callback stale.
+	pb.gen++
+	gen := pb.gen
+	pb.timer.Stop()
+	pb.timer = time.AfterFunc(requestBodyStreamIdleTimeout, func() {
+		c.failPendingBody(requestID, gen)
+	})
+	c.pendingBodiesMu.Unlock()
+	return true
+}
+
+// streamedBodyBytesLocked sums every streamed request body the agent is
+// currently holding: the reassembly buffers still filling in pendingBodies,
+// plus the reassembled bodies dispatchingBodies is holding open across their
+// Docker round trip. The caller must hold pendingBodiesMu, which is also what
+// makes the sum safe to read: every removal path deletes its entry before
+// releasing the lock, so an entry visible here is one nobody else is writing
+// to.
+//
+// Summing two maps instead of maintaining one int64 counter is deliberate,
+// and the reason survived adding the dispatch stage. pendingBodies has four
+// removal sites (stream_end, a base64 decode failure, either size cap, and
+// the idle timeout) and every one of them already deletes its entry, so no
+// bookkeeping can drift there however many more get added. Only the dispatch
+// stage needs an explicit reservation, and it has exactly one insert
+// (finishPendingBody, under this lock) and one release (the sole defer in
+// dispatchStreamedBody). Don't "simplify" this back into a counter: that puts
+// a decrement on all five paths, and delete is idempotent where a subtraction
+// is not, so a double release here is a no-op instead of silent negative
+// drift. O(len(pendingBodies) + len(dispatchingBodies)); the first is capped
+// by maxPendingRequestBodies and the second by the streamed requests in
+// flight to Docker (streamSem) plus the short-lived rejections readPump has
+// just spawned.
+func (c *Client) streamedBodyBytesLocked() int64 {
+	var total int64
+	for _, pb := range c.pendingBodies {
+		total += int64(pb.buf.Len())
+	}
+	for _, n := range c.dispatchingBodies {
+		total += n
+	}
+	return total
+}
+
+// finishPendingBody removes and returns the reassembled request for
+// requestID, ready for handleRequestTo, when stream_end names a registered
+// pending body. It reports false for an unregistered requestID, so the
+// caller can fall through to adapter.HandleMessage unchanged.
+//
+// The returned reservation is the dispatchingBodies key holding this body's
+// bytes against maxStreamedRequestBodyBytes for as long as the caller keeps
+// req.Body alive. Only dispatchStreamedBody may release it; a caller that
+// takes a reservation and drops it on the floor leaks that many bytes of
+// budget for the life of the process.
+func (c *Client) finishPendingBody(requestID string) (protocol.RequestMessage, outboundTarget, uint64, bool) {
+	c.pendingBodiesMu.Lock()
+	pb, ok := c.pendingBodies[requestID]
+	if !ok {
+		c.pendingBodiesMu.Unlock()
+		return protocol.RequestMessage{}, outboundTarget{}, 0, false
+	}
+	delete(c.pendingBodies, requestID)
+	// Move the reservation from the reassembly stage to the dispatch stage
+	// under the same lock as the delete above, so the aggregate sum never
+	// dips between the two and no concurrent chunk can be admitted into a
+	// gap. buf.Len() is the size the copy below will be, so the charge is
+	// taken without holding this lock across a copy of up to
+	// maxRequestBodyStream bytes. (pb.buf and its copy are both resident for
+	// the length of that copy and the budget charges one, exactly as it did
+	// before the dispatch stage was covered at all.)
+	if c.dispatchingBodies == nil {
+		c.dispatchingBodies = make(map[uint64]int64)
+	}
+	c.nextDispatchSeq++
+	reservation := c.nextDispatchSeq
+	c.dispatchingBodies[reservation] = int64(pb.buf.Len())
+	timer := pb.timer
+	c.pendingBodiesMu.Unlock()
+	timer.Stop()
+
+	req := pb.req
+	// pb.buf.Bytes() aliases the buffer's internal array; copy it so the
+	// request body survives independently of pb, which is discarded here.
+	req.Body = append(json.RawMessage(nil), pb.buf.Bytes()...)
+	req.BodyStream = false
+	return req, pb.target, reservation, true
+}
+
+// releaseDispatchingBody drops the reservation finishPendingBody made for one
+// dispatched body, once the bytes are no longer held. Deleting a map key is
+// idempotent, so a double release is a no-op rather than the negative drift a
+// counter decrement would leave behind.
+func (c *Client) releaseDispatchingBody(reservation uint64) {
+	c.pendingBodiesMu.Lock()
+	delete(c.dispatchingBodies, reservation)
+	c.pendingBodiesMu.Unlock()
+}
+
+// dispatchStreamedBody runs the whole post-reassembly path for one streamed
+// request body and owns the maxStreamedRequestBodyBytes reservation
+// finishPendingBody handed over. The release is a single defer on this
+// function, which is what makes it unleakable: a streamSem rejection, a panic
+// inside handleRequestTo, and a normal return all run it exactly once. That
+// is why the streamSem admission check lives here rather than beside the
+// inline-body one in readPump — there, the rejection branch would need its
+// own release call, which is exactly the drift this shape avoids.
+//
+// Run it in its own goroutine: it must not run on the read pump, which has to
+// keep servicing pings and exec I/O while a body is in Docker. One goroutine
+// per stream_end is cheap even on the rejection branch, because the
+// production send path enqueues without blocking.
+func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestMessage, target outboundTarget, reservation uint64) {
+	defer c.releaseDispatchingBody(reservation)
+
+	// Bound concurrent request handlers (maxStreams), the same admission
+	// check an inline-body request gets in readPump. Reject rather than wait:
+	// the reassembled body is already in memory, so queueing here would hold
+	// it against the aggregate budget for as long as the agent stayed busy.
+	select {
+	case c.streamSem <- struct{}{}:
+		defer func() { <-c.streamSem }()
+		c.handleRequestTo(ctx, req, target)
+	default:
+		slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "agent busy: too many concurrent requests",
+			RequestID: req.RequestID,
+		})
+	}
+}
+
+// failPendingBody is the idle-timeout callback for a pending body: it
+// removes the entry and reports the timeout to the controller as a
+// TypeError, but only when gen still matches the generation the firing timer
+// was armed with. A mismatch means a chunk re-armed the timer after this
+// callback had already fired, so the upload is alive and this firing must be
+// dropped. (The size-cap and decode-failure paths clean up inline in
+// appendPendingBody.)
+func (c *Client) failPendingBody(requestID string, gen uint64) {
+	c.pendingBodiesMu.Lock()
+	pb, ok := c.pendingBodies[requestID]
+	if !ok || pb.gen != gen {
+		c.pendingBodiesMu.Unlock()
+		return
+	}
+	delete(c.pendingBodies, requestID)
+	timer, target := pb.timer, pb.target
+	c.pendingBodiesMu.Unlock()
+	timer.Stop()
+	_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+		Message:   fmt.Sprintf("streamed request body timed out after %s waiting for stream_end", requestBodyStreamIdleTimeout),
+		RequestID: requestID,
+	})
 }
 
 // composeRequestPrefix is the path standard mode's handleCompose (see
@@ -1264,15 +1664,15 @@ func (c *Client) startHealthServer() {
 		var b strings.Builder
 		fmt.Fprintf(&b, "# HELP portwing_build_info Portwing agent build metadata.\n")
 		fmt.Fprintf(&b, "# TYPE portwing_build_info gauge\n")
-		fmt.Fprintf(&b, "portwing_build_info{version=\"%s\"} 1\n", escapePrometheusLabel(protocol.AgentVersion))
+		fmt.Fprintf(&b, "portwing_build_info{version=\"%s\"} 1\n", metrics.EscapeLabelValue(protocol.AgentVersion))
 		fmt.Fprintf(&b, "# HELP portwing_uptime_seconds Seconds since the agent started.\n")
 		fmt.Fprintf(&b, "# TYPE portwing_uptime_seconds gauge\n")
 		fmt.Fprintf(&b, "portwing_uptime_seconds %g\n", time.Since(c.startTime).Seconds())
 		metrics.WriteHostPrometheus(&b, c.collector)
 		if dockerMetrics, ok := c.dockerClient.(metrics.DockerMetricsClient); ok {
-			metrics.WriteContainerPrometheus(r.Context(), &b, dockerMetrics, escapePrometheusLabel)
+			metrics.WriteContainerPrometheus(r.Context(), &b, dockerMetrics, metrics.EscapeLabelValue)
 		}
-		c.metrics.WritePrometheus(&b, escapePrometheusLabel)
+		c.metrics.WritePrometheus(&b, metrics.EscapeLabelValue)
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_, _ = io.WriteString(w, b.String())
 	})
@@ -1330,10 +1730,4 @@ func currentControllerState(connected bool) string {
 		return "connected"
 	}
 	return "disconnected"
-}
-
-func escapePrometheusLabel(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-	return strings.ReplaceAll(value, "\n", `\n`)
 }
