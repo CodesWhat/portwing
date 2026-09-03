@@ -155,6 +155,16 @@ assert_rejected \
 	"must set fail-fast: false" \
 	"contract must reject a matrix that cancels sibling legs"
 
+# A slug duplicated across legs. The platform column still reads as
+# linux/amd64 + linux/arm64, so the platform-equality check alone would miss
+# this; only the arm64 leg's SARIF upload silently overwriting the amd64
+# leg's would show it, and only in the Security tab.
+reset_fixture
+sed -i.bak "${scan_range} s/^            slug: linux-arm64\$/            slug: linux-amd64/" "${fixture}"
+assert_rejected \
+	"matrix entries must have distinct slugs" \
+	"contract must reject a matrix with a duplicated slug"
+
 # --- what actually gets scanned ---------------------------------------------
 
 # Scanner pointed at a tag instead of the resolved per-platform digest. Because
@@ -181,6 +191,18 @@ assert_rejected \
 	"the resolved ref must be a registry: digest ref" \
 	"contract must reject a ref that drops the registry: scheme"
 
+# The digest selector's `and` flipped to `or`. The text check on the literal
+# `.platform.architecture == $arch` substring cannot see this: it is still
+# there, just no longer combined with the os check the way it needs to be.
+# Against the behavioural check's fixture, ORing matches both linux manifests
+# for a single arch, collapses `unique` to more than one entry, and the
+# selector's own `if length == 1` guard returns "" instead of a digest.
+reset_fixture
+sed -i.bak "${scan_range} s/\.platform\.os == \$os and \.platform\.architecture == \$arch/\.platform\.os == \$os or \.platform\.architecture == \$arch/" "${fixture}"
+assert_rejected \
+	"must resolve exactly one digest" \
+	"contract must reject a digest selector that ORs platform fields instead of ANDing them"
+
 # --- scan policy -------------------------------------------------------------
 
 # Cutoff loosened below the policy the in-repo image job uses.
@@ -197,6 +219,15 @@ sed -i.bak "${scan_range} s/fail-build: true/fail-build: false/" "${fixture}"
 assert_rejected \
 	"must fail the build on a finding at or above the cutoff" \
 	"contract must reject a scan that reports without gating"
+
+# fail-build: true left alone, but continue-on-error added to the scan step.
+# It would neutralize the gate above without touching a single word the
+# fail-build assertion looks for.
+reset_fixture
+insert_after "        id: grype" "        continue-on-error: true"
+assert_rejected \
+	"must not use continue-on-error" \
+	"contract must reject a scan step with continue-on-error, which would neutralize fail-build: true"
 
 # .grype.yaml dropped: every adjudicated suppression in the repo stops
 # applying, and the lane goes red on findings that were already reviewed.
@@ -284,6 +315,15 @@ sed -i.bak "/^    - cron: /d" "${fixture}"
 assert_rejected \
 	"workflow must keep a schedule: cron trigger" \
 	"contract must reject a workflow that lost its weekly schedule"
+
+# The cron loosened from weekly to yearly. Still a valid, non-empty cron
+# string, so the old "any cron" check would have passed it; grype-image and
+# the re-scan lane share this one trigger, so drifting off weekly drifts both.
+reset_fixture
+sed -i.bak "s/cron: '15 7 \* \* 1'/cron: '15 7 1 1 *'/" "${fixture}"
+assert_rejected \
+	"the schedule must stay weekly" \
+	"contract must reject a schedule that loosened from weekly to yearly"
 
 # The re-scan opened up to pull requests, where it would scan a published image
 # that has nothing to do with the diff.

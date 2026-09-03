@@ -66,8 +66,21 @@ fi
 # cron trigger. Asserted on the file because the schedule is a workflow-level
 # trigger the whole file shares with the pre-existing jobs.
 
-grep -Eq "^    - cron: '.*'" "${workflow}" ||
+cron_value="$(grep -Eo "cron: '[^']*'" "${workflow}" | head -1 | sed -E "s/^cron: '(.*)'\$/\\1/" || true)"
+if [ -z "${cron_value}" ]; then
 	fail "workflow must keep a schedule: cron trigger for the weekly re-scan"
+else
+	# grype-image (the existing image-scan job) and the re-scan lane both fire
+	# off this one file-level trigger, so validating the cron actually read
+	# from the file — not a hardcoded guess at its value — keeps the two in
+	# lockstep for free. Weekly means day-of-month and month wildcarded and a
+	# single day-of-week picked; a yearly cron (a fixed day-of-month) would
+	# still match the old "any cron" check but not this one.
+	read -r _cron_minute _cron_hour cron_dom cron_month cron_dow <<<"${cron_value}"
+	if [ "${cron_dom}" != "*" ] || [ "${cron_month}" != "*" ] || [ "${cron_dow}" = "*" ]; then
+		fail "the schedule must stay weekly like the image-scan job it shares a trigger with (found cron: '${cron_value}')"
+	fi
+fi
 grep -Eq '^  workflow_dispatch:$' "${workflow}" ||
 	fail "workflow must keep workflow_dispatch so the re-scan can be run on demand"
 
@@ -128,6 +141,26 @@ if [ "${scan_platforms}" != "${expected_platforms}" ]; then
 	fail "grype-published-release must scan exactly linux/amd64 and linux/arm64 (found: $(tr '\n' ' ' <<<"${scan_platforms}"))"
 fi
 
+# The SARIF category below is keyed on matrix.slug. A duplicated slug is
+# invisible in the platform check above (which only sees the platform column)
+# and would make one leg's upload silently overwrite the other's in the
+# Security tab.
+scan_slugs="$(
+	awk '
+        $0 == "        include:" { in_list = 1; next }
+        in_list && /^            slug: / { print $NF; next }
+        in_list && /^          - / { next }
+        in_list && /^            / { next }
+        in_list { in_list = 0 }
+    ' <<<"${scan_block}"
+)"
+
+scan_slug_count="$(grep -c . <<<"${scan_slugs}" || true)"
+unique_slug_count="$(sort -u <<<"${scan_slugs}" | grep -c . || true)"
+if [ "${scan_slug_count}" -eq 0 ] || [ "${scan_slug_count}" -ne "${unique_slug_count}" ]; then
+	fail "grype-published-release matrix entries must have distinct slugs (found: $(tr '\n' ' ' <<<"${scan_slugs}"))"
+fi
+
 # One leg failing must not cancel the other; a CVE on arm64 is still worth
 # knowing about when amd64 has already gone red.
 grep -Fq "fail-fast: false" <<<"${scan_block}" ||
@@ -150,6 +183,35 @@ grep -Fq 'echo "ref=registry:ghcr.io/${repo_lower}@${digest}"' <<<"${scan_block}
 grep -Fq '.platform.architecture == $arch' <<<"${scan_block}" ||
 	fail "digest resolution must select the manifest by platform architecture"
 
+# The text check above only proves the substring survives; it cannot tell an
+# `and` from an `or`, both of which contain the same substring. Extract the
+# actual jq program between the `jq -r --arg os ... '` open and the closing
+# `')"` and run it, so a selector that starts matching more (or fewer) than
+# the intended manifest is caught by what it does, not by what it says.
+digest_jq_filter="$(sed -n "/jq -r --arg os/,/')\"/p" <<<"${scan_block}" | sed '1d;$d')"
+
+digest_fixture='{
+  "manifests": [
+    {"platform": {"os": "linux", "architecture": "amd64"}, "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    {"platform": {"os": "linux", "architecture": "arm64"}, "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    {"platform": {"os": "unknown", "architecture": "unknown"}, "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+  ]
+}'
+
+if [ -z "${digest_jq_filter}" ]; then
+	fail "could not extract the digest-selection jq filter from grype-published-release to test it behaviourally"
+else
+	amd64_selected="$(printf '%s' "${digest_fixture}" | jq -r --arg os linux --arg arch amd64 "${digest_jq_filter}" 2>/dev/null || echo '<jq error>')"
+	if [ "${amd64_selected}" != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]; then
+		fail "digest selection for linux/amd64 must resolve exactly one digest, the amd64 manifest's (got: ${amd64_selected})"
+	fi
+
+	arm64_selected="$(printf '%s' "${digest_fixture}" | jq -r --arg os linux --arg arch arm64 "${digest_jq_filter}" 2>/dev/null || echo '<jq error>')"
+	if [ "${arm64_selected}" != "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]; then
+		fail "digest selection for linux/arm64 must resolve exactly one digest, the arm64 manifest's (got: ${arm64_selected})"
+	fi
+fi
+
 # --- scan policy matches the in-repo image job -------------------------------
 
 grep -Fq "severity-cutoff: high" <<<"${scan_block}" ||
@@ -158,6 +220,13 @@ grep -Fq "fail-build: true" <<<"${scan_block}" ||
 	fail "the published-image scan must fail the build on a finding at or above the cutoff"
 grep -Fq "config: .grype.yaml" <<<"${scan_block}" ||
 	fail "the published-image scan must load the repo's .grype.yaml suppressions"
+
+# fail-build: true only matters if the step is allowed to actually fail the
+# job. continue-on-error: true anywhere in these two jobs would swallow that
+# failure and report green regardless of what the scanner found.
+if grep -Fq "continue-on-error" <<<"${resolve_block}"$'\n'"${scan_block}"; then
+	fail "resolve-latest-release and grype-published-release must not use continue-on-error anywhere; it would neutralize fail-build: true"
+fi
 
 # SARIF has to reach the Security tab, under a category of its own so the
 # weekly re-scan's results do not overwrite release.yml's tag-time analysis.
