@@ -147,6 +147,26 @@ assert_rejected \
 	"notify job condition must be exactly:" \
 	"contract must reject an exclusion that ORs its clauses instead of ANDing them"
 
+# The pull_request exclusion dropped: a green PR run of the engine-matrix lane
+# would close a tracking issue the weekly run is still legitimately failing on.
+reset_fixture
+sed -i.bak "/github.event.workflow_run.event != 'pull_request' &&/d" "${fixture}"
+assert_rejected \
+	"notify job condition must be exactly:" \
+	"contract must reject a condition that lets pull_request runs drive the issue state machine"
+
+# The exclusion narrowed to an allow-list of the two scheduled triggers, which
+# reads equivalent and silently drops quality-fuzz-monthly-rerun.yml, whose own
+# events arrive as workflow_run.
+reset_fixture
+sed -i.bak \
+	-e "s/      github.event.workflow_run.event != 'pull_request' &&/      (github.event.workflow_run.event == 'schedule' ||/" \
+	-e "s/      github.event.workflow_run.event != 'push' &&/       github.event.workflow_run.event == 'workflow_dispatch') \&\&/" \
+	"${fixture}"
+assert_rejected \
+	"notify job condition must be exactly:" \
+	"contract must reject an allow-list that drops the rerun lane's workflow_run events"
+
 # Success branch dropped entirely.
 reset_fixture
 sed -i.bak 's/^          success)$/          not-a-real-conclusion)/' "${fixture}"
