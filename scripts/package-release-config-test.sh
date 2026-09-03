@@ -346,15 +346,21 @@ expected_scan_action_ref="anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c003
 scan_action_count="$(awk -v expected="${expected_scan_action_ref}" \
 	'$1 == "uses:" && $2 == expected && $3 == "#" && $4 == "v7.4.2" { count++ } END { print count + 0 }' \
 	.github/workflows/security-grype.yml)"
-# Counting only the lines that match would still pass with a third scanner lane
-# pinned to an older scan-action sitting beside the two correct ones, which is
+# Counting only the lines that match would still pass with a fourth scanner lane
+# pinned to an older scan-action sitting beside the three correct ones, which is
 # the shape a partial bump actually takes. Count every scan-action use as well,
 # so an added lane has to be at the reviewed pin or fail here.
+#
+# Three lanes since the published-release re-scan landed: grype-image (built
+# from the branch), grype-deps (lockfiles), and grype-published-release (the
+# GHCR manifest users actually pull). The count is deliberately exact rather
+# than a floor — a lane silently dropped is as much a regression as one added
+# off-pin, and this is the only place that would notice.
 scan_action_total="$(awk \
 	'$1 == "uses:" && $2 ~ /^anchore\/scan-action@/ { count++ } END { print count + 0 }' \
 	.github/workflows/security-grype.yml)"
-if [ "${scan_action_count}" -ne 2 ] || [ "${scan_action_total}" -ne 2 ]; then
-	echo "FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in both scanner lanes" >&2
+if [ "${scan_action_count}" -ne 3 ] || [ "${scan_action_total}" -ne 3 ]; then
+	echo "FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in all three scanner lanes" >&2
 	failures=$((failures + 1))
 fi
 require_exactly_one_active ".github/workflows/release.yml" \
