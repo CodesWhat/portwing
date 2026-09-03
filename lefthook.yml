@@ -15,7 +15,8 @@
 #      .github/workflows/ci-verify.yml (60 s, every push/PR) and
 #      quality-fuzz-nightly.yml (5 m, daily).
 #   9. actionlint + zizmor (workflow correctness + security)
-#  10. Web analytics contract, lint, and production static build
+#  10. Web analytics contract, lint, knip dead-code scan, and production
+#      static build
 #
 # Tools that may not be installed locally (goreleaser, govulncheck,
 # actionlint, zizmor) are skipped when absent — CI still enforces them.
@@ -170,6 +171,12 @@ pre-push:
       priority: 9
       timeout: 30s
 
+    # Runs check:web, which chains version-contract, tests, biome lint,
+    # knip (dead files/exports/unlisted deps across website, docs,
+    # analytics — config in knip.json), build, page-weight budget, and
+    # lighthouse. CI's node-ci "Web Contract" job runs the same
+    # check:web script, so knip is gated there too without a second,
+    # duplicate invocation here.
     web:
       run: npm run check:web
       priority: 10

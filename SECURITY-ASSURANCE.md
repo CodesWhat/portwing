@@ -104,7 +104,7 @@ and the public [security model](https://portwing.codeswhat.com/docs/security-mod
 ### Common weakness, test, and release controls
 
 CI applies formatting, vetting, static security analysis, dependency and image
-vulnerability scans, race-enabled tests, integration tests, fuzzing, and a 96%
+vulnerability scans, race-enabled tests, integration tests, fuzzing, and a 97%
 coverage floor. The release workflow creates signed images and archives,
 CycloneDX SBOMs, and provenance, then verifies the published artifacts against
 the expected workflow identity.

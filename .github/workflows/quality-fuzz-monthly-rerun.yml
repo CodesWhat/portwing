@@ -154,6 +154,8 @@ jobs:
       # omitted entirely rather than set to read, because nothing here reads
       # the repository.
       actions: write
+      # Writes the tracking issue for refusals quality-lane-notify.yml structurally cannot see.
+      issues: write
 
     steps:
       - name: Harden Runner
@@ -316,4 +318,56 @@ jobs:
           # mark here would be a second alarm for a failure the upstream run is
           # already red for, and would make a genuine breakage in this
           # workflow's own logic indistinguishable from a crash it correctly
-          # declined to re-run. The verdict lives in the summary above.
+          # declined to re-run. The verdict lives in the summary above, and for
+          # a refusal (kind=crash, kind=error, or kind=none) it also lands in
+          # the quality-lane tracking issue via the step below, since none of
+          # those verdicts produce an attempt 2 for quality-lane-notify.yml to
+          # react to.
+
+      - name: Open or update the quality-lane tracking issue
+        # kind=crash, kind=error and kind=none are refusals: no attempt 2 is
+        # created, so quality-lane-notify.yml never sees a later `completed`
+        # event for the monthly fuzz run, and its attempt-1 exclusion already
+        # skipped the first one. Without this, the case that matters most (a
+        # fuzzer actually found something) is the one case PW-2.2 does not
+        # notify for. The title matches quality-lane-notify.yml's exactly, so
+        # the two never open competing issues and the next green monthly run
+        # closes this one through that workflow's success branch.
+        if: >-
+          steps.triage.outputs.kind == 'crash' ||
+          steps.triage.outputs.kind == 'error' ||
+          steps.triage.outputs.kind == 'none'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          KIND: ${{ steps.triage.outputs.kind }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          TRIAGE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh label create quality-lane \
+            --repo "${REPO}" \
+            --color "d93f0b" \
+            --description "Automated: a scheduled quality lane is failing" \
+            --force
+          TITLE="[quality] ${WORKFLOW_NAME} is failing"
+          # shellcheck disable=SC2016 # The backticks are literal Markdown for the issue body, not command substitution.
+          BODY="$(printf 'Run: %s\nVerdict: `kind=%s` (no re-run)\nTriage: %s\n' \
+            "${RUN_URL}" "${KIND}" "${TRIAGE_URL}")"
+          existing="$(
+            gh issue list \
+              --repo "${REPO}" \
+              --state open \
+              --label quality-lane \
+              --json number,title \
+              --limit 100 |
+              jq -r --arg t "${TITLE}" '.[] | select(.title == $t) | .number' |
+              head -n1
+          )"
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --repo "${REPO}" --body "${BODY}"
+          else
+            gh issue create --repo "${REPO}" --title "${TITLE}" \
+              --label quality-lane --body "${BODY}"
+          fi

@@ -100,10 +100,11 @@ flowchart LR
 | Ed25519 Auth Design | [`docs/design/ed25519-auth.md`](docs/design/ed25519-auth.md) |
 | Watchtower Migration | [`docs/migrating-from-watchtower.md`](docs/migrating-from-watchtower.md) |
 | Drydock Integration | [`docs/drydock-integration.md`](docs/drydock-integration.md) |
+| Benchmarks | [`BENCHMARKS.md`](BENCHMARKS.md) |
 | OpenAPI Spec | [`api/openapi.yaml`](api/openapi.yaml) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Code of Conduct | [Contributor Covenant 2.1](https://github.com/CodesWhat/.github/blob/main/CODE_OF_CONDUCT.md) (organisation-wide) |
+| Code of Conduct | [Contributor Covenant 2.1](CODE_OF_CONDUCT.md) |
 | Governance | [`GOVERNANCE.md`](GOVERNANCE.md) |
 | Security Assurance | [`SECURITY-ASSURANCE.md`](SECURITY-ASSURANCE.md) |
 | Security Policy | [`SECURITY.md`](SECURITY.md) |

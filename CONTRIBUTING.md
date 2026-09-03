@@ -1,6 +1,6 @@
 # Contributing to Portwing
 
-Thanks for your interest in contributing! Whether it is a bug fix, new feature, documentation improvement, or something else — all contributions are welcome.
+Thanks for your interest in contributing! Whether it is a bug fix, new feature, documentation improvement, or something else — all contributions are welcome. Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating.
 
 Questions, ideas, or help? Use [GitHub Discussions](https://github.com/CodesWhat/portwing/discussions) or the [CodesWhat Discord](https://discord.gg/mWHCPJRzSx). GitHub Issues are for bugs and concrete feature requests — see [SECURITY.md](SECURITY.md) instead for reporting a vulnerability.
 
@@ -80,6 +80,15 @@ it is never cached, so git decides what's in it, not a stale cache entry — and
 a crasher found mid-run is recovered from the uploaded failure artifact if it
 isn't committed before the cache is pruned.
 
+### Benchmarks
+
+```bash
+go test -run='^$' -bench=. -benchmem -count=5 -timeout=20m ./...
+```
+
+Methodology, hardware/Go version baseline, and what the monthly benchmark
+gate does and doesn't measure: [`BENCHMARKS.md`](BENCHMARKS.md).
+
 ## Code style
 
 - **Formatter**: `gofmt` (enforced by CI)
@@ -87,6 +96,44 @@ isn't committed before the cache is pruned.
 - Follow [Effective Go](https://go.dev/doc/effective_go) conventions
 - Line length: no hard limit; use judgment
 - **Zero new dependencies**: stdlib + `golang.org/x/crypto` + `github.com/google/uuid` + `github.com/gorilla/websocket`. PRs adding deps require a strong justification.
+
+## Knip
+
+The `website`, `docs`, and `analytics` npm workspaces (plus the root
+`scripts/` workspace) are checked for dead files, unused exports, and
+unlisted/unused dependencies by [knip](https://knip.dev), configured in
+`knip.json`. Run it with `npm run knip`; it also runs as part of
+`npm run check:web` (lefthook pre-push and CI's node-ci "Web Contract" job).
+
+`knip.json` is plain JSON, so the reasons behind each entry live here instead
+of inline comments:
+
+- `.` workspace `ignoreDependencies: ["posthog-js"]` — root's
+  `scripts/web-analytics-source.test.mjs` resolves
+  `posthog-js/dist/extension-bundles.js` via `require.resolve(..., { paths:
+  [...] })` pointed at the `analytics` workspace's `node_modules`, not root's.
+  `posthog-js` is a real dependency of `analytics`, not of the root
+  workspace, so knip correctly sees no root `package.json` entry for it; the
+  ignore documents that the reference is deliberate cross-workspace
+  resolution, not a phantom import.
+- `website` workspace `entry: ["scripts/gen-bird-png.mjs"]` — this script is
+  run manually, not imported by the Next.js app and not referenced from any
+  `npm` script, so knip's Next.js plugin doesn't see it as reachable without
+  being told it's an entry point. `security-headers.mjs` doesn't need the
+  same treatment: it's reached via the `postbuild` script, and its test file
+  is picked up by knip's test-file detection. The root `.` workspace has no
+  entry glob for the same reason — every non-test script under root
+  `scripts/` is already referenced from a `package.json` script, and the
+  `*.test.mjs` files are covered by test-file detection.
+- `website` workspace `ignoreIssues: { "src/components/ui/**": ["exports",
+  "types"] }` — these are shadcn/ui-generated primitives; the unused variant
+  exports (e.g. `badgeVariants`, `CardHeader`) are part of the generator's
+  standard public API, kept for future consumers rather than trimmed to
+  current usage. Scoped to the `exports`/`types` issue types rather than a
+  file-level `ignore`, so a genuinely dead new file in that directory is
+  still reported as unused.
+- `website` workspace `ignoreBinaries: ["magick"]` — `gen-bird-png.mjs`
+  shells out to ImageMagick's `magick` CLI, which isn't an npm dependency.
 
 ## Commit convention
 

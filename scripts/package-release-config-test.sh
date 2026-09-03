@@ -168,6 +168,36 @@ require_block_text() {
 	fi
 }
 
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*mod_timestamp:' \
+	'mod_timestamp: "{{ .CommitTimestamp }}"' \
+	"release binaries must be byte-reproducible (mod_timestamp pinned to the commit)"
+
+# The binary's mtime being pinned doesn't make the archive reproducible on its
+# own: GoReleaser auto-includes LICENSE*/README*/CHANGELOG* with the source
+# file's own filesystem mtime whenever `files:` is unset. An explicit `files:`
+# entry per glob, each carrying its own commit-pinned mtime, is what actually
+# closes that gap — so assert each entry individually (require_exactly_one_active
+# so a commented-out or duplicated entry still fails) and assert the mtime
+# override count separately, since the same "{{ .CommitDate }}" line repeats
+# once per entry and require_exactly_one_active can't express "exactly three".
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: LICENSE\*$' \
+	'- src: LICENSE*' \
+	"release archives must include LICENSE* with a pinned mtime"
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: README\*$' \
+	'- src: README*' \
+	"release archives must include README* with a pinned mtime"
+require_exactly_one_active ".goreleaser.yml" \
+	'^[[:space:]]*- src: CHANGELOG\*$' \
+	'- src: CHANGELOG*' \
+	"release archives must include CHANGELOG* with a pinned mtime"
+archive_mtime_overrides="$(active_lines ".goreleaser.yml" | grep -cF 'mtime: "{{ .CommitDate }}"' || true)"
+if [ "${archive_mtime_overrides}" -ne 3 ]; then
+	echo "FAIL: release archives must pin all three LICENSE*/README*/CHANGELOG* entries' mtime to the commit date (.goreleaser.yml has ${archive_mtime_overrides} active mtime: \"{{ .CommitDate }}\" line(s), want 3)" >&2
+	failures=$((failures + 1))
+fi
 require_text ".goreleaser.yml" "nfpms:" "GoReleaser must define native Linux packages"
 require_text ".goreleaser.yml" "formats: [deb, rpm]" "GoReleaser must build deb and rpm packages"
 require_text ".goreleaser.yml" "src: scripts/portwing.service" "native packages must include the systemd unit"
@@ -268,7 +298,7 @@ require_current_release_examples "docs/content/docs/api-reference.mdx" \
 	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"API reference response examples must identify the current release"
 require_current_release_examples "docs/content/docs/standalone-mode.mdx" \
-	'"agentVersion"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"standalone-mode response examples must identify the current release"
 require_current_release_examples "docs/content/docs/observability.mdx" \
 	'"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
@@ -316,15 +346,21 @@ expected_scan_action_ref="anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c003
 scan_action_count="$(awk -v expected="${expected_scan_action_ref}" \
 	'$1 == "uses:" && $2 == expected && $3 == "#" && $4 == "v7.4.2" { count++ } END { print count + 0 }' \
 	.github/workflows/security-grype.yml)"
-# Counting only the lines that match would still pass with a third scanner lane
-# pinned to an older scan-action sitting beside the two correct ones, which is
+# Counting only the lines that match would still pass with a fourth scanner lane
+# pinned to an older scan-action sitting beside the three correct ones, which is
 # the shape a partial bump actually takes. Count every scan-action use as well,
 # so an added lane has to be at the reviewed pin or fail here.
+#
+# Three lanes since the published-release re-scan landed: grype-image (built
+# from the branch), grype-deps (lockfiles), and grype-published-release (the
+# GHCR manifest users actually pull). The count is deliberately exact rather
+# than a floor — a lane silently dropped is as much a regression as one added
+# off-pin, and this is the only place that would notice.
 scan_action_total="$(awk \
 	'$1 == "uses:" && $2 ~ /^anchore\/scan-action@/ { count++ } END { print count + 0 }' \
 	.github/workflows/security-grype.yml)"
-if [ "${scan_action_count}" -ne 2 ] || [ "${scan_action_total}" -ne 2 ]; then
-	echo "FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in both scanner lanes" >&2
+if [ "${scan_action_count}" -ne 3 ] || [ "${scan_action_total}" -ne 3 ]; then
+	echo "FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in all three scanner lanes" >&2
 	failures=$((failures + 1))
 fi
 require_exactly_one_active ".github/workflows/release.yml" \
