@@ -298,7 +298,7 @@ require_current_release_examples "docs/content/docs/api-reference.mdx" \
 	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"API reference response examples must identify the current release"
 require_current_release_examples "docs/content/docs/standalone-mode.mdx" \
-	'"agentVersion"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"standalone-mode response examples must identify the current release"
 require_current_release_examples "docs/content/docs/observability.mdx" \
 	'"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
