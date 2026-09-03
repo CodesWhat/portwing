@@ -108,9 +108,13 @@ spec:
             - name: DRYDOCK_URL
               value: https://drydock.example.com
             # Explicit opt-in for the NetworkPolicy-isolated operations Service.
-            # Edge mode otherwise defaults this unauthenticated listener to loopback.
+            # Edge mode otherwise defaults this unauthenticated listener to loopback
+            # and refuses to start on a non-loopback bind, so the acknowledgement
+            # below is required alongside it.
             - name: BIND_ADDRESS
               value: "0.0.0.0"
+            - name: ALLOW_UNAUTHENTICATED_REMOTE
+              value: "true"
             - name: PRIVATE_KEY_FILE
               value: /etc/portwing/portwing_ed25519.pem
             - name: AGENT_NAME

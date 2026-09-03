@@ -36,6 +36,14 @@ run-name: >-
 # failures already have a human looking at a PR check, which is the exact
 # silence this workflow exists to break for the others.
 #
+# quality-integration-engines.yml IS in the list even though it also has a
+# `pull_request` trigger, because that trigger is scoped to the workflow file
+# itself. It fires when someone edits the matrix, not when someone edits the
+# code the matrix tests — so a weekly run that goes red because Docker Engine
+# 29.x changed a response shape has no PR attached to it and nobody looking at
+# a check. That is the silence this exists to break, and the narrow trigger is
+# exactly why quality-integration.yml's carve-out doesn't extend to it.
+#
 # quality-fuzz-monthly.yml's first attempt is excluded below. Explained at the
 # job `if:`.
 #
@@ -71,6 +79,7 @@ on:
       - "Quality: Mutation Testing"
       - "Quality: Benchmarks (monthly)"
       - "Quality: Deep Fuzz Infra Rerun"
+      - "Quality: Integration — Engine Matrix"
     types: [completed]
 
 permissions: {}
@@ -114,7 +123,28 @@ jobs:
     # the rerun lane's own step summary and `::error::` annotation are the
     # record for that case. Extending coverage to it needs the same triage
     # logic this workflow deliberately does not duplicate.
+    #
+    # The event filter is the second exclusion, and it arrived with
+    # quality-integration-engines.yml — the first registered lane that also
+    # runs on `pull_request`. The tracking issue is keyed on the workflow NAME
+    # alone, so without this filter a PR run and the weekly run share one
+    # issue: a green PR run would close an issue the weekly lane is still
+    # legitimately failing on, and a red PR run would open one that claims the
+    # weekly lane is broken when it isn't. Neither is recoverable by reading
+    # the issue, since both runs report the same title.
+    #
+    # It is a deny-list, not an allow-list of `schedule`/`workflow_dispatch`,
+    # and that is deliberate. quality-fuzz-monthly-rerun.yml is triggered by
+    # `workflow_run`, so its own completed events carry
+    # `workflow_run.event == 'workflow_run'`; an allow-list of the two
+    # scheduled triggers would silently drop the rerun lane's coverage, which
+    # the `workflows:` note above says we want on purpose. A deny-list also
+    # fails in the safe direction: a lane added later with some novel trigger
+    # still gets notified rather than going quiet, and going quiet is the exact
+    # failure this workflow exists to prevent.
     if: >-
+      github.event.workflow_run.event != 'pull_request' &&
+      github.event.workflow_run.event != 'push' &&
       !(github.event.workflow_run.name == 'Quality: Deep Fuzz (monthly)' &&
         github.event.workflow_run.conclusion == 'failure' &&
         github.event.workflow_run.run_attempt == 1)

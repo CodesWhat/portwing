@@ -126,7 +126,7 @@ awk '
 ' "${fixture}/.github/workflows/security-grype.yml" >"${fixture}/.github/workflows/security-grype.yml.tmp"
 mv "${fixture}/.github/workflows/security-grype.yml.tmp" "${fixture}/.github/workflows/security-grype.yml"
 expect_release_contract_failure \
-	"FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in both scanner lanes" \
+	"FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in all three scanner lanes" \
 	"the package release contract must reject an extra scan-action pinned outside the reviewed version"
 restore_grype_workflow
 
