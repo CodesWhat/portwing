@@ -42,6 +42,11 @@ for path in "${soak_workflow}" "${mutation_workflow}" "${append_script}"; do
 	fi
 done
 
+# A real tab, for assertions about this repo's tab-indented shell. `\t` is not
+# portable in a POSIX ERE and reads as a literal `t` under GNU grep, which
+# makes an assertion pass unconditionally rather than fail loudly.
+tab="$(printf '\t')"
+
 # Comment lines are not code. Every "must not contain" assertion below reads
 # through this, because the jobs explain themselves at length and a job whose
 # comment names soak.sh is not a job that runs soak.sh.
@@ -142,7 +147,14 @@ check_lane() {
 
 	# The measuring job must not have grown a write scope of its own, and
 	# neither may anything else in the file.
-	if job_block "${workflow}" "${measuring_job}" | grep -q '^    permissions:'; then
+	#
+	# Read through a command substitution rather than a pipe. `grep -q` exits
+	# on its first match and closes the pipe, the awk upstream dies of SIGPIPE
+	# with status 141, and under `pipefail` the pipeline reports 141 -- so the
+	# `if` is false and the violation this test exists to catch goes unreported.
+	# It is a race on how much awk had already written, which is why it looked
+	# green on one machine and not another. Nothing here needs to stream.
+	if grep -q '^    permissions:' <<<"$(job_block "${workflow}" "${measuring_job}")"; then
 		fail "${label}: the '${measuring_job}' job must not declare permissions of its own"
 	fi
 
@@ -201,7 +213,7 @@ grep -Fq "elif jq -e -s 'length == 1 and (.[0] | type == \"object\")' mutation-r
 # keeps the "only the recording job can write" property from decaying into
 # "some job in this file can write".
 for job in mutation-advisory gate-canary; do
-	if job_block "${mutation_workflow}" "${job}" | grep -q '^    permissions:'; then
+	if grep -q '^    permissions:' <<<"$(job_block "${mutation_workflow}" "${job}")"; then
 		fail "mutation: the '${job}' job must not declare permissions of its own"
 	fi
 done
@@ -227,7 +239,13 @@ grep -Fq 'trap soft_exit EXIT' "${append_script}" ||
 # The trap runs under errexit, so a cleanup failure inside it would abort
 # before `exit 0` and hand the caller the nonzero status the trap exists to
 # swallow.
-grep -Eq '^\tset \+e$' "${append_script}" ||
+#
+# Matched as a fixed whole line with a real tab rather than as `\t` in an ERE.
+# POSIX ERE has no `\t`: GNU grep reads it as a literal `t`, so the pattern
+# silently becomes `^tset +e$` and the assertion passes on every input. It went
+# green on macOS only because this machine's `grep` is ugrep, which does accept
+# `\t`. Nothing here needs a regex, so nothing here uses one.
+grep -Fxq "${tab}set +e" "${append_script}" ||
 	fail "the append script's exit trap must disable errexit before cleaning up"
 
 # A duplicate row is indistinguishable from a real second measurement once it
@@ -238,7 +256,7 @@ grep -Fq 'grep -Fxq "${record}"' "${append_script}" ||
 
 # seq is not guaranteed present; an empty expansion would skip the retry loop
 # entirely and exit 0 having recorded nothing.
-if strip_comments <"${append_script}" | grep -Fq 'seq 1'; then
+if grep -Fq 'seq 1' <<<"$(strip_comments <"${append_script}")"; then
 	fail "the append script's retry loop must not depend on seq"
 fi
 

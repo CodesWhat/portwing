@@ -164,7 +164,7 @@ grep -Fq "did not land, retrying" <<<"${output}" ||
 	fail "a rejected push must announce the retry (output: ${output})"
 [ "${after}" = "$((before + 2))" ] ||
 	fail "after a rejected push the file must hold both the competitor's line and ours (${before} -> ${after})"
-branch_file soak.jsonl | grep -Fq '"competing":true' ||
+grep -Fq '"competing":true' <<<"$(branch_file soak.jsonl)" ||
 	fail "the retry must replay onto the competitor's commit, not overwrite it"
 [ "$(branch_file soak.jsonl | tail -n1 | jq -r '.rss_growth_bytes')" = "4096" ] ||
 	fail "the retried record must be the last line"
@@ -259,7 +259,7 @@ grep -Fq "::warning::" "${test_root}/unreachable.log" ||
 # --- the query helper reads what the appender wrote --------------------------
 
 table="$(env QUALITY_HISTORY_REMOTE="${bare}" bash "${query}" soak --last 2)"
-head -n1 <<<"${table}" | grep -Fq "timestamp" ||
+grep -Fq "timestamp" <<<"$(head -n1 <<<"${table}")" ||
 	fail "the query helper must print a header row (output: ${table})"
 grep -Fq "4096" <<<"${table}" ||
 	fail "the query helper must show the most recent soak numbers (output: ${table})"
