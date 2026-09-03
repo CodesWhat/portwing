@@ -108,6 +108,19 @@ fuzz_run_script="scripts/ci/fuzz-run.sh"
 crash_pattern_first_discovery="Failing input written to testdata"
 crash_pattern_seed_regression="failure while testing seed corpus entry"
 
+# Every check below runs against comment-stripped content, not the raw file:
+# a caller could otherwise satisfy "must invoke fuzz-run.sh" or "must not
+# reimplement the classifier" by leaving a comment behind — e.g. commenting
+# out the real call while keeping a comment that mentions the script path, or
+# discussing a crash phrase in prose. Both the bash `run:` blocks and the
+# YAML around them use `#` for a full-line comment, so one strip covers all
+# four caller files.
+strip_comments() {
+	grep -Ev '^[[:space:]]*#' "$1"
+}
+
+fuzz_run_script_code="$(strip_comments "${fuzz_run_script}")"
+
 # Anchored to the classifier's own `if grep -q ...` line, not just "appears
 # somewhere in the file": both phrases are echoed again in the script's own
 # human-facing messages, so a bare `grep -Fq` would still pass after the
@@ -117,28 +130,37 @@ crash_classifier_first_discovery='	if grep -q "Failing input written to testdata
 # shellcheck disable=SC2016 # Asserting the literal text of the script.
 crash_classifier_seed_regression='	if grep -q "failure while testing seed corpus entry" "${attempt_log}"; then'
 
-grep -Fxq "${crash_classifier_first_discovery}" "${fuzz_run_script}" ||
+grep -Fxq "${crash_classifier_first_discovery}" <<<"${fuzz_run_script_code}" ||
 	fail "${fuzz_run_script} must classify '${crash_pattern_first_discovery}' as kind=crash in the classifier condition itself"
-grep -Fxq "${crash_classifier_seed_regression}" "${fuzz_run_script}" ||
+grep -Fxq "${crash_classifier_seed_regression}" <<<"${fuzz_run_script_code}" ||
 	fail "${fuzz_run_script} must classify '${crash_pattern_seed_regression}' as kind=crash in the classifier condition itself"
 
 # None of the four callers may reimplement the classifier inline — that is
 # exactly the duplication PW-5.10 removed, and a caller that grows its own
-# copy of either phrase can silently drift from the shared one. This is
-# anchored on a `grep`-of-the-phrase construct, not the bare phrase text: the
+# copy of either phrase can silently drift from the shared one. Matched as
+# "grep" and the phrase on the same non-comment line, in any quoting style
+# (double quotes, single quotes, or none) — not the bare phrase text: the
 # nightly/monthly step-summary steps legitimately echo the same phrases into
-# their human-facing output, and that is reporting, not reclassification.
-# Each caller must instead invoke the shared script, with its retry budget
-# explicit rather than relying on fuzz-run.sh's own default.
+# their human-facing output, and that is reporting, not reclassification, and
+# it never puts the word "grep" on that line.
+#
+# Each caller must instead invoke the shared script. The invocation is
+# anchored to a non-comment line that starts (after leading whitespace) with
+# the FUZZ_RETRIES= env-assignment prefix every caller leads its call with,
+# and separately to a non-comment `bash .../fuzz-run.sh` line — not just "the
+# path or FUZZ_RETRIES=2 appear somewhere in the file", which a stale comment
+# can satisfy on its own once a caller's real call is commented out.
 for caller in lefthook.yml scripts/ci/go-fuzz.sh .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
-	grep -Eq 'grep[^"]*"[^"]*'"${crash_pattern_first_discovery}" "${caller}" &&
+	caller_code="$(strip_comments "${caller}")"
+
+	grep -Eq "grep.*${crash_pattern_first_discovery}" <<<"${caller_code}" &&
 		fail "${caller} must not reimplement the '${crash_pattern_first_discovery}' classifier inline; it must call ${fuzz_run_script}"
-	grep -Eq 'grep[^"]*"[^"]*'"${crash_pattern_seed_regression}" "${caller}" &&
+	grep -Eq "grep.*${crash_pattern_seed_regression}" <<<"${caller_code}" &&
 		fail "${caller} must not reimplement the '${crash_pattern_seed_regression}' classifier inline; it must call ${fuzz_run_script}"
-	grep -Fq "${fuzz_run_script}" "${caller}" ||
+	grep -Eq 'bash[[:space:]]+.*fuzz-run\.sh' <<<"${caller_code}" ||
 		fail "${caller} must invoke ${fuzz_run_script} rather than its own retry/classify loop"
-	grep -Fq "FUZZ_RETRIES=2" "${caller}" ||
-		fail "${caller} must pass FUZZ_RETRIES=2 explicitly to ${fuzz_run_script}"
+	grep -Eq '^[[:space:]]*FUZZ_RETRIES=2([[:space:]]|\\$|"|$)' <<<"${caller_code}" ||
+		fail "${caller} must pass FUZZ_RETRIES=2 explicitly to ${fuzz_run_script}, anchored at the call itself"
 done
 
 for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do

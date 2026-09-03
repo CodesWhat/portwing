@@ -33,6 +33,40 @@ if [ "${1:-}" != "test" ]; then
 	echo "unexpected go command: $*" >&2
 	exit 90
 fi
+
+# Assert the flags fuzz-run.sh is contractually supposed to pass, not just
+# that *something* named `go test` ran — a caller (or fuzz-run.sh itself)
+# silently dropping -fuzz= would leave nightly/monthly running zero fuzz
+# targets while every other check here still reported green.
+saw_run=0
+saw_fuzz=0
+saw_fuzztime=0
+saw_parallel=0
+for arg in "$@"; do
+	case "${arg}" in
+	'-run=^$') saw_run=1 ;;
+	-fuzz=^*'$') saw_fuzz=1 ;;
+	-fuzztime=*) saw_fuzztime=1 ;;
+	-parallel=*) saw_parallel=1 ;;
+	esac
+done
+[ "${saw_run}" -eq 1 ] || {
+	echo "go test missing -run=^\$ in args: $*" >&2
+	exit 92
+}
+[ "${saw_fuzz}" -eq 1 ] || {
+	echo "go test missing -fuzz=^<target>\$ in args: $*" >&2
+	exit 93
+}
+[ "${saw_fuzztime}" -eq 1 ] || {
+	echo "go test missing -fuzztime= in args: $*" >&2
+	exit 94
+}
+if [ -n "${FUZZ_PARALLEL:-}" ] && [ "${saw_parallel}" -ne 1 ]; then
+	echo "go test missing -parallel= in args despite FUZZ_PARALLEL set: $*" >&2
+	exit 95
+fi
+
 count=0
 if [ -f "${MOCK_STATE:-}" ]; then count="$(cat "${MOCK_STATE}")"; fi
 count=$((count + 1))
@@ -169,6 +203,69 @@ MOCK_MODE=flake-exhausted MOCK_STATE="${fixture}/state" PATH="${bin}:${PATH}" \
 	FUZZ_RETRIES=2 FUZZ_ATTEMPT_HOOK=record_attempt bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >/dev/null 2>&1 || true
 [ "$(wc -l <"${hook_log}" | tr -d ' ')" = "2" ] ||
 	fail "FUZZ_ATTEMPT_HOOK must fire once per failed attempt (2 attempts here)"
+
+# FUZZ_RETRIES must be validated before anything runs: 0, negative, or
+# non-numeric used to skip the retry loop's body entirely and either
+# misreport the misconfiguration as kind=flake or abort on an unbound `rc`,
+# depending on the bash build. None of these should ever reach `go test`.
+for bad_retries in 0 -1 abc; do
+	state="${fixture}/state"
+	output="${fixture}/output"
+	rm -f "${state}" "${output}"
+	status=0
+	env MOCK_MODE=pass MOCK_STATE="${state}" PATH="${bin}:${PATH}" \
+		FUZZ_OUTPUT_FILE="${output}" FUZZ_RETRIES="${bad_retries}" \
+		bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >"${fixture}/stdout" 2>"${fixture}/stderr" || status=$?
+	expect "FUZZ_RETRIES=${bad_retries} rejected up front" 2 error "" "${status}"
+	[ -f "${state}" ] &&
+		fail "FUZZ_RETRIES=${bad_retries} must be rejected before invoking go test, but the fake go ran"
+done
+
+# tee losing its write to the attempt log must not be silently treated as a
+# clean `go test` run. Shim `mktemp` to hand fuzz-run.sh a directory instead
+# of a file, so `tee "${attempt_log}"` fails with EISDIR the same way an
+# unwritable path (full disk, permissions) would.
+real_mktemp="$(command -v mktemp)"
+mktemp_bin="${fixture}/mktemp-bin"
+mkdir -p "${mktemp_bin}"
+cat >"${mktemp_bin}/mktemp" <<SHIM
+#!/usr/bin/env bash
+exec "${real_mktemp}" -d
+SHIM
+chmod +x "${mktemp_bin}/mktemp"
+
+state="${fixture}/state"
+output="${fixture}/output"
+rm -f "${state}" "${output}"
+status=0
+env MOCK_MODE=pass MOCK_STATE="${state}" PATH="${mktemp_bin}:${bin}:${PATH}" \
+	FUZZ_OUTPUT_FILE="${output}" \
+	bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >"${fixture}/stdout" 2>"${fixture}/stderr" || status=$?
+expect "tee failing to write the attempt log" 2 error "" "${status}"
+
+# Meta-check: prove the fake go shim's flag assertions actually bite. If
+# fuzz-run.sh silently dropped -fuzz= from its go test invocation, nightly
+# and monthly would run zero fuzz targets per matrix entry and still look
+# green on every other check in this file.
+mutated="${fixture}/fuzz-run-no-fuzz-flag.sh"
+sed 's/-fuzz=[^[:space:]]*//' "${fuzz_run}" >"${mutated}"
+chmod +x "${mutated}"
+grep -q -- '-fuzz=' "${mutated}" &&
+	fail "mutation setup failed: -fuzz= is still present in ${mutated}"
+
+state="${fixture}/state"
+output="${fixture}/output"
+rm -f "${state}" "${output}"
+mutation_status=0
+env MOCK_MODE=pass MOCK_STATE="${state}" PATH="${bin}:${PATH}" \
+	FUZZ_OUTPUT_FILE="${output}" \
+	bash "${mutated}" "./internal/fixture/" "FuzzTarget" "1s" >"${fixture}/stdout" 2>"${fixture}/stderr" || mutation_status=$?
+[ "${mutation_status}" -ne 0 ] ||
+	fail "a copy of fuzz-run.sh missing -fuzz= from its go test invocation must be caught by the go shim, but it exited 0"
+# The shim's own rejection message is `go test`'s stdout, which fuzz-run.sh
+# tees straight through to its own stdout — not its stderr.
+grep -q "missing -fuzz=" "${fixture}/stdout" ||
+	fail "the go shim must report why it rejected a fuzz-run.sh invocation missing -fuzz="
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} fuzz-run.sh check(s) failed" >&2

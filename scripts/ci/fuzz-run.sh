@@ -11,7 +11,13 @@ set -euo pipefail
 #
 # Env:
 #   FUZZ_RETRIES      total attempts before giving up on a boundary flake
-#                      (default 2, matching every current caller)
+#                      (default 2, matching every current caller). Must be a
+#                      positive integer; an unset/empty value falls back to
+#                      the default instead of failing, but 0, a negative
+#                      number, or anything non-numeric is a misconfiguration
+#                      and is rejected up front as kind=error, status=2 —
+#                      never silently treated as "no attempts" and reported
+#                      as kind=flake
 #   FUZZ_TIMEOUT      passed as `go test -timeout`; the flag is omitted when
 #                      this is unset, so `go test`'s own default applies
 #   FUZZ_PARALLEL     passed as `go test -parallel`; omitted when unset
@@ -46,8 +52,34 @@ emit() {
 	fi
 }
 
+# Validate before anything is created (mktemp/trap) or attempted: a
+# malformed FUZZ_RETRIES (0, negative, non-numeric) used to skip the while
+# loop's body entirely and fall straight through to the kind=flake tail
+# with rc still unset, which either misreported a configuration error as a
+# flake or aborted on the unbound variable depending on the bash build.
+case "${retries}" in
+'' | *[!0-9]*)
+	emit "kind=error"
+	emit "status=2"
+	echo "${annotate_prefix}FUZZ_RETRIES must be a positive integer, got '${retries}'." >&2
+	exit 2
+	;;
+esac
+if [ "${retries}" -lt 1 ]; then
+	emit "kind=error"
+	emit "status=2"
+	echo "${annotate_prefix}FUZZ_RETRIES must be a positive integer, got '${retries}'." >&2
+	exit 2
+fi
+
 attempt_log="$(mktemp)"
-trap 'rm -f "${attempt_log}"' EXIT
+# `$?` at the moment the trap fires is this script's own pending exit code
+# (0-4, from whichever `exit N` triggered it) — capture and re-exit with it
+# explicitly. A bare `rm -f "${attempt_log}"` here would otherwise let rm's
+# own exit status silently overwrite it whenever the cleanup itself fails,
+# e.g. tee having turned attempt_log into something rm -f can't remove.
+# shellcheck disable=SC2154 # exit_code is assigned inside the trap string itself.
+trap 'exit_code=$?; rm -rf "${attempt_log}"; exit "${exit_code}"' EXIT
 
 go_test_args=(-run='^$' -fuzz="^${target}\$" -fuzztime="${fuzztime}")
 if [ -n "${FUZZ_TIMEOUT:-}" ]; then
@@ -60,8 +92,25 @@ go_test_args+=("${pkg}")
 
 attempt=1
 while [ "${attempt}" -le "${retries}" ]; do
-	rc=0
-	go test "${go_test_args[@]}" 2>&1 | tee "${attempt_log}" || rc="${PIPESTATUS[0]}"
+	# Capture both sides of the pipe: `go test`'s own exit code (rc, driving
+	# every classification below) and tee's (tee_rc). The old
+	# `... | tee ... || rc=...` only ever saw the pipeline's overall status,
+	# so tee losing its write (a full disk, an unwritable attempt-log path)
+	# silently discarded the attempt's output and this loop classified
+	# whatever was left as if `go test` had run cleanly.
+	set +e
+	go test "${go_test_args[@]}" 2>&1 | tee "${attempt_log}"
+	pipe_status=("${PIPESTATUS[@]}")
+	set -e
+	rc="${pipe_status[0]}"
+	tee_rc="${pipe_status[1]}"
+
+	if [ "${tee_rc}" -ne 0 ]; then
+		emit "kind=error"
+		emit "status=2"
+		echo "${annotate_prefix}${target}: tee to the attempt log failed (exit ${tee_rc}); cannot classify this attempt's output." >&2
+		exit 2
+	fi
 
 	if [ -n "${FUZZ_LOG_FILE:-}" ]; then
 		cat "${attempt_log}" >>"${FUZZ_LOG_FILE}"

@@ -186,6 +186,34 @@ sed '/^FUZZ_RETRIES=2 \\$/d' "${go_fuzz}" >"${go_fuzz}.tmp"
 mv "${go_fuzz}.tmp" "${go_fuzz}"
 expect_fail "scripts/ci/go-fuzz.sh dropping the FUZZ_RETRIES retry env must not satisfy the contract"
 
+seed_fixture
+# A caller commenting out its real call while leaving a comment that
+# mentions fuzz-run.sh's path — a bare "does the path appear in the file"
+# check (or "does FUZZ_RETRIES=2 appear in the file") is satisfiable by the
+# leftover comment alone once the actual invocation is gone.
+awk '
+	/FUZZ_RETRIES=2 FUZZ_TIMEOUT=1m/ {
+		print "        # was: calls scripts/ci/fuzz-run.sh with FUZZ_RETRIES=2"
+		print "        # " $0
+		next
+	}
+	{ print }
+' "${lefthook}" >"${lefthook}.tmp"
+mv "${lefthook}.tmp" "${lefthook}"
+expect_fail "a caller with its real call commented out, and a comment mentioning the script path in its place, must not satisfy the contract"
+
+seed_fixture
+# A caller reimplementing the crash-phrase grep inline with single quotes —
+# the same duplication as above, but in a quoting style the old classifier
+# check (anchored to a double-quoted grep only) would have missed.
+inline_grep_line="grep -q 'failure while testing seed corpus entry' /dev/null && true"
+awk -v ins="${inline_grep_line}" '
+	/FUZZ_RETRIES=2 \\$/ { print; print ins; next }
+	{ print }
+' "${go_fuzz}" >"${go_fuzz}.tmp"
+mv "${go_fuzz}.tmp" "${go_fuzz}"
+expect_fail "a caller reimplementing the crash-phrase grep inline with single quotes must not satisfy the contract"
+
 # --- Monthly/nightly cron overlap (PW codex follow-up #2) -------------------
 
 seed_fixture
