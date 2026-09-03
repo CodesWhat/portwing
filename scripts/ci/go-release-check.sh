@@ -35,3 +35,4 @@ bash scripts/benchstat-gate-script-test.sh
 bash scripts/benchstat-walk-baselines-test.sh
 bash scripts/mutation-gate-script-test.sh
 bash scripts/quality-history-script-test.sh
+bash scripts/quality-history-record-test.sh

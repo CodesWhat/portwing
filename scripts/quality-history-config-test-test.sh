@@ -200,11 +200,43 @@ assert_rejected \
 	"the matrix leg must never see the write credential" \
 	"contract must reject a credential handed back to the Gremlins matrix"
 
+# The gated-mode test, weakened two ways. `jq -e .` accepts any JSON value; the
+# per-value type test is the subtler trap, because jq reflects only the last
+# value in the file and two concatenated documents walk straight through it.
 reset_fixtures
-sed -i.bak "s|^          elif jq -e 'type == \"object\"' mutation-report.json|          elif jq -e . mutation-report.json|" "${mutation}"
+sed -i.bak "s@^          elif jq -e -s .*@          elif jq -e . mutation-report.json >/dev/null 2>\&1; then@" "${mutation}"
 assert_rejected \
-	"the gated-mode test must require a JSON object" \
+	"the gated-mode test must require exactly one JSON object" \
 	"contract must reject a gated-mode test that accepts any JSON value"
+
+reset_fixtures
+sed -i.bak "s@^          elif jq -e -s .*@          elif jq -e 'type == \"object\"' mutation-report.json >/dev/null 2>\&1; then@" "${mutation}"
+assert_rejected \
+	"the gated-mode test must require exactly one JSON object" \
+	"contract must reject a per-value type test that a multi-document report passes"
+
+# Each recording step carries its own gate. Asserting the gate against the job
+# block counts it present when any one step has it, so both are stripped
+# separately here.
+strip_gate_from_step() {
+	awk -v want="      - name: $1" '
+        $0 == want { in_step = 1 }
+        in_step && /^        if: always\(\)/ { in_step = 0; next }
+        { print }
+    ' "${mutation}" >"${mutation}.stripped" && mv "${mutation}.stripped" "${mutation}"
+}
+
+reset_fixtures
+strip_gate_from_step "Upload the quality history record"
+assert_rejected \
+	"the 'Upload the quality history record' step must carry the same schedule/dispatch gate" \
+	"contract must reject a gate stripped from the upload step alone"
+
+reset_fixtures
+strip_gate_from_step "Record this package for the quality history"
+assert_rejected \
+	"the 'Record this package for the quality history' step must carry the same schedule/dispatch gate" \
+	"contract must reject a gate stripped from the record step alone"
 
 # --- the appender's own locks ------------------------------------------------
 

@@ -61,6 +61,18 @@ job_block() {
     ' "$1"
 }
 
+# A named step's own block inside a job block, from its `- name:` line to the
+# next step. Asserting a per-step property against the whole job block counts
+# it satisfied anywhere in the job, so a gate deleted from one step still reads
+# as present because a sibling step carries it.
+step_block() {
+	awk -v want="      - name: $1" '
+        $0 == want { in_step = 1; next }
+        in_step && /^      - / { in_step = 0 }
+        in_step { print }
+    '
+}
+
 # The gate is asserted as one exact string rather than as three substring
 # greps: a substring check cannot tell `||` from `&&`, and the difference
 # between "schedule or dispatch" and "schedule and dispatch" is the
@@ -155,23 +167,35 @@ grep -Fq "      - name: Record this package for the quality history" <<<"${mutat
 	fail "mutation: the matrix leg must write its record for the history job"
 grep -Fq "      - name: Upload the quality history record" <<<"${mutation_gremlins}" ||
 	fail "mutation: the matrix leg must upload its record for the history job"
-grep -Fq "        if: ${gate}" <<<"${mutation_gremlins}" ||
-	fail "mutation: the record steps must carry the same schedule/dispatch gate"
+for step in "Record this package for the quality history" \
+	"Upload the quality history record"; do
+	step_body="$(step_block "${step}" <<<"${mutation_gremlins}")"
+	if [ -z "${step_body}" ]; then
+		fail "mutation: expected a '${step}' step in the gremlins job"
+		continue
+	fi
+	grep -Fq "        if: ${gate}" <<<"${step_body}" ||
+		fail "mutation: the '${step}' step must carry the same schedule/dispatch gate"
+done
 if grep -Fq "QUALITY_HISTORY_CREDENTIAL" <<<"$(strip_comments <<<"${mutation_gremlins}")"; then
 	fail "mutation: the matrix leg must never see the write credential"
 fi
 
-# A bare `jq -e .` exits 0 for an array, a string or a number. Those are valid
-# JSON and are not Gremlins reports: the metric extraction errors into `{}` and
-# the row still claims it was gated on a real measurement. The type check is
-# the only thing standing between that and a lying series.
+# The gated-mode test has to slurp. A bare `jq -e .` exits 0 for an array, a
+# string or a number, and a per-value `jq -e 'type == "object"'` reports only
+# the last value in the file, so a report that is two concatenated documents
+# passes it. Behaviour is covered by scripts/quality-history-record-test.sh;
+# this asserts the literal form, because that is a one-flag edit away from
+# coming back and the behavioural test would then be testing the wrong thing.
+for weak in "elif jq -e . mutation-report.json" \
+	"elif jq -e 'type == \"object\"' mutation-report.json"; do
+	if grep -Fq "${weak}" <<<"${mutation_gremlins}"; then
+		fail "mutation: the gated-mode test must require exactly one JSON object, not '${weak}'"
+	fi
+done
 # shellcheck disable=SC2016 # asserting the workflow's literal jq program text
-if grep -Fq "elif jq -e . mutation-report.json" <<<"${mutation_gremlins}"; then
-	fail "mutation: the gated-mode test must require a JSON object, not any JSON value"
-fi
-# shellcheck disable=SC2016 # same, the expected form
-grep -Fq "elif jq -e 'type == \"object\"' mutation-report.json" <<<"${mutation_gremlins}" ||
-	fail "mutation: the gated-mode test must be jq -e 'type == \"object\"'"
+grep -Fq "elif jq -e -s 'length == 1 and (.[0] | type == \"object\")' mutation-report.json" <<<"${mutation_gremlins}" ||
+	fail "mutation: the gated-mode test must be jq -e -s 'length == 1 and (.[0] | type == \"object\")'"
 
 # The advisory and canary jobs measure things and record nothing. Naming them
 # keeps the "only the recording job can write" property from decaying into

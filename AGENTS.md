@@ -104,6 +104,9 @@ changes when a lane runs, which is what keeps the house rule that committed
 generated artifacts only move at a release cut.
 `scripts/quality-history-config-test.sh` holds both lanes to the write
 scoping, including that the recording job never grows a `setup-go` or a `go
-build`, and `scripts/quality-history-script-test.sh` drives the appender
-against a real git remote (bootstrap, append, a push rejected by a concurrent
-writer, and a repeated identical record that must not become a second row).
+build`; `scripts/quality-history-script-test.sh` drives the appender against a
+real git remote (bootstrap, append, a push rejected by a concurrent writer, and
+a repeated identical record that must not become a second row); and
+`scripts/quality-history-record-test.sh` extracts the mutation lane's record
+step out of the workflow and runs it against fixtures, because deciding whether
+a run counts as measured is where every bug in this feature has been so far.
