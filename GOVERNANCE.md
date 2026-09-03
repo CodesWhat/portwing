@@ -29,9 +29,8 @@ consensus, but the lead maintainer makes the final decision when a timely choice
 is required and records the reason publicly.
 
 Private vulnerability reports follow [`SECURITY.md`](SECURITY.md). Conduct
-reports follow the organisation-wide
-[Code of Conduct](https://github.com/CodesWhat/.github/blob/main/CODE_OF_CONDUCT.md),
-which reaches the same address.
+reports follow [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), which reaches the
+same address.
 
 ## Change and release control
 

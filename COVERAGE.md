@@ -58,41 +58,34 @@ exec-subprocess round-trip that adds no meaningful signal.
 
 ### `internal/adapter/drydock/sse.go` — `json.Marshal` error branches
 
-`buildAckPayload` (line ~175), `BroadcastWatcherSnapshot` (line ~204),
-`BroadcastContainerAdded` (line ~214), `BroadcastContainerUpdated` (line ~228),
-`BroadcastContainerRemoved` (line ~242): all call `json.Marshal` on structs or
+`buildAckPayload` (line ~151), `BroadcastWatcherSnapshot` (line ~220),
+`BroadcastContainerAdded` (line ~230), `BroadcastContainerUpdated` (line ~244),
+`BroadcastContainerRemoved` (line ~258): all call `json.Marshal` on structs or
 `map[string]any` values whose fields are `string`, `int`, `[]byte`, and other
 JSON-safe primitives. The Go JSON encoder never returns an error for these types.
 The `if err != nil` guard is a defensive API pattern, not a reachable path.
 
-### `internal/adapter/drydock/adapter.go` — `json.Marshal` error in `sendContainerEvent` (line ~308)
+### `internal/adapter/drydock/adapter.go` — `json.Marshal` error in `sendContainerEvent` (line ~665)
 
 ```go
-data, err := json.Marshal(container)
+data, err := json.Marshal(toDrydockContainer(container))
 if err != nil { ... }
 ```
 
 `adapter.Container` marshals cleanly (all string/int/bool fields). The error
 branch is a defensive guard; unreachable in practice.
 
-### `internal/adapter/drydock/adapter.go` — `sendComponentSync` (line ~281)
-
-`sendComponentSync` is called only from the live WebSocket message handler. The
-uncovered lines are inside a branch where `json.Marshal` would fail on
-`protocol.DDComponentSyncMessage`, which contains only string fields. Same
-defensive-guard category as above.
-
 ### `internal/auth/keygen.go` — `crypto/rand` failure branches
 
-`MarshalPrivateKeyPEM` (line 50): `x509.MarshalPKCS8PrivateKey` error on a
+`MarshalPrivateKeyPEM` (line 51): `x509.MarshalPKCS8PrivateKey` error on a
 valid in-memory Ed25519 key is unreachable.
 
-`GenerateKeyPair` (line 63): `ed25519.GenerateKey(rand.Reader)` can only fail if
+`GenerateKeyPair` (line 64): `ed25519.GenerateKey(rand.Reader)` can only fail if
 `crypto/rand` returns an error — a kernel-level failure not reachable in tests.
 
-`NewNonce` (line 95): same `rand.Read` failure category.
+`NewNonce` (line 96): same `rand.Read` failure category.
 
-### `internal/auth/keys.go` — `checkFilePermissions` GOOS=windows branch (line 190)
+### `internal/auth/keys.go` — `validateCredentialPermissions` GOOS=windows branch (line 199)
 
 ```go
 if runtime.GOOS == "windows" {
@@ -103,13 +96,13 @@ if runtime.GOOS == "windows" {
 This branch is compile-time dead on linux/darwin. It is the correct defensive
 pattern for cross-platform code and is not testable without `GOOS=windows`.
 
-### `internal/auth/enroll.go` — `appendKeyLine` close-error branch (line ~153)
+### `internal/auth/enroll.go` — `appendKeyLine` close-error branch (line ~205)
 
 The deferred `f.Close()` error surfacing path is structurally unreachable: the
 kernel returns a close error only when a dirty page cannot be flushed (e.g. on
 NFS). Not reproducible in unit tests without low-level filesystem mocking.
 
-### `internal/edge/client.go` — `sendMetrics` error branch (line ~727)
+### `internal/edge/client.go` — `sendMetrics` error branch (line ~1373)
 
 ```go
 m, err := c.collector.Collect()
@@ -120,7 +113,7 @@ if err != nil { ... }
 Covering the error path requires injecting a failing `MetricsCollector`, which
 is only wired up in the integration-test binary. The branch is 1 statement.
 
-### `internal/edge/client.go` — `sendPump` `SetWriteDeadline` error (line ~798)
+### `internal/edge/client.go` — `sendPump` `SetWriteDeadline` error (line ~1539)
 
 ```go
 if err := conn.SetWriteDeadline(...); err != nil {
@@ -133,7 +126,7 @@ if err := conn.SetWriteDeadline(...); err != nil {
 descriptor is already closed. Triggering this without a data race requires
 OS-level fd manipulation. Not testable cleanly in unit tests.
 
-### `internal/generic/events.go` — `ServeHTTP` heartbeat branch (line ~97)
+### `internal/generic/events.go` — `ServeHTTP` heartbeat branch (line ~112)
 
 ```go
 case <-heartbeat.C:
@@ -143,13 +136,13 @@ The heartbeat ticker fires every 30 seconds. Covering this branch in a unit test
 requires waiting 30 s or injecting a mock ticker, neither of which is worth the
 fragility trade-off. The branch is 3 statements.
 
-### `internal/mcp/mcp.go` — `writeToolResult` json.Marshal error (line ~517)
+### `internal/mcp/mcp.go` — `writeToolResult` json.Marshal error (line ~637)
 
 `writeToolResult` marshals `any` data — in practice always a well-formed struct
 or map. The `err != nil` guard is a defensive pattern; not triggered by any
 production call site.
 
-### `internal/server/middleware.go` — `cleanup` 5-minute ticker (line ~89)
+### `internal/server/middleware.go` — `cleanup` 5-minute ticker (line ~122)
 
 ```go
 case <-ticker.C:

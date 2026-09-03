@@ -29,12 +29,17 @@ go test -race ./...                 # all tests (race detector is mandatory)
 golangci-lint run                   # lint (config: .golangci.yml, v2 schema)
 go test -tags integration ./internal/integration/   # needs a real dockerd
 
-# Fuzzers (5s smoke; CI runs 60s, nightly runs 5m):
+# Fuzzers (5s smoke, all 10; CI runs 60s, nightly 5m, monthly 1h):
 go test -run='^$' -fuzz='^FuzzParsePHC$' -fuzztime=5s ./internal/server/
 go test -run='^$' -fuzz='^FuzzParseTrustedProxies$' -fuzztime=5s ./internal/server/
 go test -run='^$' -fuzz='^FuzzParseImageRef$' -fuzztime=5s ./internal/adapter/
 go test -run='^$' -fuzz='^FuzzParseLabels$' -fuzztime=5s ./internal/adapter/drydock/
 go test -run='^$' -fuzz='^FuzzMCPHandler$' -fuzztime=5s ./internal/mcp/
+go test -run='^$' -fuzz='^FuzzEnvelope$' -fuzztime=5s ./internal/protocol/
+go test -run='^$' -fuzz='^FuzzVerifyRequest$' -fuzztime=5s ./internal/auth/
+go test -run='^$' -fuzz='^FuzzDecodeContainerLogStream$' -fuzztime=5s ./internal/docker/
+go test -run='^$' -fuzz='^FuzzComposeRequestValidate$' -fuzztime=5s ./internal/docker/
+go test -run='^$' -fuzz='^FuzzParseKeyLine$' -fuzztime=5s ./internal/auth/
 
 # Live drydock-compat smoke (agent must be running):
 ./scripts/drydock-compat-check.sh http://localhost:3000 <token>
@@ -61,4 +66,4 @@ go test -run='^$' -fuzz='^FuzzMCPHandler$' -fuzztime=5s ./internal/mcp/
 
 ## CI map
 
-`ci-verify.yml` calls the organization Go and Node workflows by a full commit SHA; fixed commands live in `scripts/ci/`, while Portwing keeps its fuzz inventory, CodeQL category, and dependency review locally. It runs lint, test -race, the coverage floor, fuzz smoke, web builds, workflow security, and release-config checks on every applicable push/PR. `quality-fuzz-nightly.yml` (5m per fuzzer) · `quality-integration.yml` (real dockerd) · `quality-mutation-monthly.yml` (Gremlins) · `security-grype.yml` (Grype, gosec) · `security-scorecard.yml` (OpenSSF) · `release-cut.yml` → `release.yml` (GoReleaser + cosign + provenance, plus a per-platform Grype scan of the actual published image; see RELEASING.md). `greptile.json` pins Greptile to `skipReview: AUTOMATIC` so it never reviews on its own; `greptile.yml` summons it as an on-demand second opinion when a PR gets the `second-opinion` label, alongside CodeRabbit's automatic review.
+`ci-verify.yml` calls the organization Go and Node workflows by a full commit SHA; fixed commands live in `scripts/ci/`, while Portwing keeps its fuzz inventory, CodeQL category, and dependency review locally. It runs lint, test -race, the coverage floor, fuzz smoke, web builds, workflow security, and release-config checks on every applicable push/PR. `quality-fuzz-nightly.yml` (Tier 2, 5m per fuzzer, daily) · `quality-fuzz-monthly.yml` (Tier 3, 1h per fuzzer, monthly) · `quality-fuzz-monthly-rerun.yml` (re-runs the monthly fuzz only when its runner was torn down, never on a fuzz finding) · `quality-integration.yml` (real dockerd) · `quality-mutation-monthly.yml` (Gremlins) · `quality-bench-monthly.yml` (benchstat hot-path regression gate, monthly) · `quality-soak-weekly.yml` (RSS-growth soak, Sundays) · `quality-lane-notify.yml` (one `workflow_run` listener over every scheduled quality lane: opens or comments on a `quality-lane`-labelled tracking issue when a lane fails, closes it when the lane goes green) · `security-grype.yml` (Grype, gosec) · `security-scorecard.yml` (OpenSSF) · `security-zap-baseline.yml` (passive DAST baseline for the static sites, weekly) · `release-cut.yml` → `release.yml` (GoReleaser + cosign + provenance, plus a per-platform Grype scan of the actual published image; see RELEASING.md) · `main-is-released.yml` (daily cron watching that main's HEAD is a tagged release; deliberately not a required check) · `starchart.yml` (regenerates the committed star-history SVG on a `v*` tag push, never on a cron). `greptile.json` pins Greptile to `skipReview: AUTOMATIC` so it never reviews on its own; `greptile.yml` summons it as an on-demand second opinion when a PR gets the `second-opinion` label, alongside CodeRabbit's automatic review.
