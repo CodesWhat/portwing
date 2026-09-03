@@ -96,10 +96,10 @@ jobs:
             github.com:443
             go.dev:443
             objects.githubusercontent.com:443
-            raw.githubusercontent.com:443
             production.cloudflare.docker.com:443
             production.cloudfront.docker.com:443
             proxy.golang.org:443
+            raw.githubusercontent.com:443
             registry-1.docker.io:443
             release-assets.githubusercontent.com:443
 
