@@ -1,8 +1,8 @@
 # Competitive Landscape
 
-> Research snapshot: 2026-08-29. This document compares published behavior,
-> not private roadmaps. Re-check the linked primary sources before using it for
-> release or purchasing decisions.
+> Research snapshot: 2026-08-29; Arcane re-checked 2026-09-02. This document
+> compares published behavior, not private roadmaps. Re-check the linked
+> primary sources before using it for release or purchasing decisions.
 
 Portwing is a remote Docker access agent, not a fleet-management UI. The useful
 comparison is therefore two-layered:
@@ -21,7 +21,7 @@ agent's privilege and attack surface without improving its core job.
 | --- | --- | --- |
 | Portainer Agent / Edge Agent | Portainer [2.39.5](https://github.com/portainer/portainer/releases/tag/2.39.5) | Mature standard and outbound-edge agents with Docker API proxying, Swarm support, async edge operation, and fleet lifecycle features. |
 | Komodo Periphery | [v2.3.2](https://github.com/moghtech/komodo/releases/tag/v2.3.2) | Remote host agent for containers, Compose, builds, host terminals, automation, and Swarm. Komodo v2 added outbound Periphery and public-key authentication. |
-| Arcane Agent | [v2.9.0](https://github.com/getarcaneapp/arcane/releases/tag/v2.9.0) | Direct and outbound-edge Docker agent with continuous or polling transport, optional mTLS, Swarm, and a broad controller surface. |
+| Arcane Agent | [v2.10.1](https://github.com/getarcaneapp/arcane/releases/tag/v2.10.1) | Direct and outbound-edge Docker agent with continuous or polling transport, optional mTLS, Swarm, and a broad controller surface. v2.10.0 moved its signing surfaces, including edge mTLS, to ML-DSA-87. |
 | Hawser | [v0.2.46](https://github.com/Finsys/hawser/releases/tag/v0.2.46) | The closest scope match: a small Go Docker API proxy for Dockhand with standard and outbound WebSocket modes. |
 
 ### Adjacent products and baselines
@@ -52,7 +52,7 @@ the capability. It is intentionally different from a definitive “no.”
 | General host shell or file browser | No; container exec only | Agent exposes file-browse APIs | Host shell supported | Volume/project file operations | No general host shell documented |
 | Swarm orchestration | No; explicit non-goal | Yes | Yes | Yes | Not documented |
 | Standard-mode agent auth | Ed25519 signature over method, request target, body hash, timestamp, and nonce; token fallback | Claim key exchange; optional shared `AGENT_SECRET` | Public-key authenticated channel | Agent token | Bearer token |
-| Edge agent auth | Ed25519-signed hello over TLS | Edge key, revolving password, optional Business mTLS | Public-key handshake with per-server keys | Agent token; optional or required automatically enrolled mTLS | Token over WSS |
+| Edge agent auth | Ed25519-signed hello over TLS; classical signatures, no post-quantum option | Edge key, revolving password, optional Business mTLS | Public-key handshake with per-server keys | Agent token; optional or required automatically enrolled mTLS. mTLS is off unless `EDGE_MTLS_MODE` is set, and from v2.10.0 a freshly generated edge CA and the certificates it issues use ML-DSA-87 (FIPS 204 post-quantum); an existing ECDSA P-384 CA keeps issuing P-384 client certificates | Token over WSS |
 | Explicit per-request replay defense | Yes for signed HTTP requests | Not documented | Channel handshake; no per-request scheme documented | TLS/channel authentication; no per-request scheme documented | Not documented |
 | Credential rotation | Multiple keys; file update plus SIGHUP; manual operational flow | Revolving Edge password; Edge key lifecycle | Automatic Periphery key rotation | Automatic certificate renewal; environment token can be regenerated | Manual token replacement |
 | Docker socket least privilege | Recommended Sockguard path-and-method allowlist; Portwing need not mount the raw socket | Documented deployment mounts the socket and host paths directly | Documented deployment mounts the socket directly | Optional Tecnativa category-level socket proxy; direct socket is the default simple path | Documented deployment mounts the socket directly |
@@ -75,6 +75,22 @@ advantages:
 - Arcane now supports direct and outbound agents, polling transport, automated
   mTLS enrollment and renewal, optional Docker socket proxying, signed release
   artifacts, and controller-driven upgrades.
+- Arcane v2.10.0 moved session tokens, OIDC verification, passkeys, and edge
+  mTLS to ML-DSA-87, the FIPS 204 post-quantum lattice signature scheme. Only
+  edge mTLS is in this matrix's scope; release-artifact signing is a separate
+  Cosign chain and did not change. Edge mTLS is still opt-in, the agent token
+  still bootstraps the first enrollment, and an existing ECDSA P-384 CA keeps
+  issuing P-384 client certificates, so this is a key-type change inside an
+  optional feature rather than a new authentication mode. It is still a real
+  lead, because Portwing has no post-quantum signing option on any surface.
+  Ed25519 is not weaker than ML-DSA-87 against any attacker that exists
+  today, and nothing here makes the signed hello unsafe. The difference is
+  the horizon: an agent identity key is long-lived and its public half is
+  held by the controller, so a cryptographically relevant quantum computer
+  arriving inside that key's service life would let an attacker recover the
+  private key and impersonate the agent. That is the case ML-DSA-87 answers
+  and Ed25519 does not, which is why this row reads as a difference rather
+  than a tie.
 - Hawser now matches Portwing's broad topology: lightweight Go binary,
   transparent Docker API, Compose, host metrics, standard mode, and outbound
   edge mode.
@@ -174,6 +190,7 @@ observable primitives the controller needs.
 - Portainer: [Agent repository](https://github.com/portainer/agent), [agent security model](https://docs.portainer.io/faqs/getting-started/how-does-portainer-secure-connectivity-to-and-from-agents-and-edge-agents), [Edge Agent architecture](https://docs.portainer.io/advanced/edge-agent), [Edge features](https://docs.portainer.io/faqs/getting-started/why-do-we-recommend-using-the-edge-agent-instead-of-the-traditional-agent), and [activity logs](https://docs.portainer.io/admin/logs/activity)
 - Komodo: [introduction](https://komo.do/docs/intro), [server onboarding and key lifecycle](https://komo.do/docs/setup/connect-servers), [v2 architecture changes](https://komo.do/docs/releases/v2.0.0), [Compose](https://komo.do/docs/deploy/compose), [builds](https://komo.do/docs/build), and [Swarm](https://komo.do/docs/swarm)
 - Arcane: [remote environments](https://getarcane.app/docs/features/environments), [edge mTLS](https://getarcane.app/docs/security/edge-mtls), [socket proxy](https://getarcane.app/docs/setup/socket-proxy), [artifact verification](https://getarcane.app/docs/security/verify-artifacts), and [RBAC capability list](https://getarcane.app/docs/security/rbac)
+- Arcane ML-DSA-87 migration: [v2.10.0 release notes](https://github.com/getarcaneapp/arcane/releases/tag/v2.10.0), [PR #3785](https://github.com/getarcaneapp/arcane/pull/3785), [commit 2993fd3](https://github.com/getarcaneapp/arcane/commit/2993fd316d41fafc110476370870a49b9202969c), and [v2.10.1 release notes](https://github.com/getarcaneapp/arcane/releases/tag/v2.10.1)
 - Hawser: [repository and current feature documentation](https://github.com/Finsys/hawser) and [edge-mode bind-address issue](https://github.com/Finsys/hawser/issues/71)
 - Komodo outbound-leg issues: [proxy env vars ignored](https://github.com/moghtech/komodo/issues/1473) and [hardcoded handshake timeout](https://github.com/moghtech/komodo/issues/1518)
 - Distr: [Docker Agent](https://distr.sh/docs/agents/docker-agent/) and [logs and metrics](https://distr.sh/docs/agents/logs-and-metrics/)

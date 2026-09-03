@@ -22,6 +22,7 @@ expected_workflows=(
 	"Quality: Mutation Testing"
 	"Quality: Benchmarks (monthly)"
 	"Quality: Deep Fuzz Infra Rerun"
+	"Quality: Integration — Engine Matrix"
 )
 
 # --- trigger list: on.workflow_run.workflows -------------------------------
@@ -130,13 +131,22 @@ job_if="$(
 # runs of whitespace, join with single spaces), not four independent
 # substring greps. A substring check can't tell `&&` from `||`, or notice a
 # stray clause; string equality against the whole predicate can.
+#
+# The two leading clauses keep a `pull_request` (or `push`) run of a listed
+# lane out of the tracking-issue state machine. quality-integration-engines.yml
+# runs on both a weekly schedule and `pull_request`, and the issue title is
+# keyed on the workflow name alone, so without them a green PR run closes an
+# issue the weekly run is still failing on. They must stay a deny-list:
+# quality-fuzz-monthly-rerun.yml's own events carry
+# `workflow_run.event == 'workflow_run'`, which an allow-list of
+# schedule/workflow_dispatch would silently drop.
 job_if_normalized="$(
 	sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' <<<"${job_if}" |
 		tr '\n' ' ' |
 		sed -e 's/[[:space:]]\+/ /g' -e 's/[[:space:]]*$//'
 )"
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-expected_job_if="!(github.event.workflow_run.name == 'Quality: Deep Fuzz (monthly)' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1)"
+expected_job_if="github.event.workflow_run.event != 'pull_request' && github.event.workflow_run.event != 'push' && !(github.event.workflow_run.name == 'Quality: Deep Fuzz (monthly)' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1)"
 if [ "${job_if_normalized}" != "${expected_job_if}" ]; then
 	fail "notify job condition must be exactly: ${expected_job_if}"
 fi
