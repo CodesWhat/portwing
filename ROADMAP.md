@@ -85,6 +85,19 @@ calendar date:
 - **Completed for v0.9 — Edge audit export hardening.** Standard and Edge
   modes share one exporter implementation; public docs and Kubernetes examples
   explicitly isolate Edge Mode's unauthenticated operations listener.
+- **Docs stay current-only until v1.0.** `docs/content/docs/` is a single flat
+  tree tracking the latest release, with no per-version archive. That's
+  deliberate through `v0.9.x`. The v1.0.0 release-cut PR is the trigger to
+  decide whether the semver guarantees in [STABILITY.md](STABILITY.md) need a
+  versioned docs archive — e.g. drydock's `content/docs/{current,v1.x}` split
+  plus `archive-provenance.json` and its release-docs-archive tests — before
+  v1.0 ships.
+- **SLSA Build L2 is the ceiling for now.** Provenance attestation (see
+  [RELEASING.md](RELEASING.md)) stays at Build L2 because GoReleaser, cosign,
+  and attest all run inline inside `release.yml`. Build L3 needs an isolated,
+  org-shared reusable release workflow in `CodesWhat/.github`; none exists yet
+  for any CodesWhat repo. The trigger is that workflow landing — portwing's
+  release job moves onto it then, not before.
 
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,
