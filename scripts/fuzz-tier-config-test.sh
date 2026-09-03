@@ -25,6 +25,36 @@ fuzzers=(
 	"FuzzParseKeyLine|./internal/auth/"
 )
 
+# --- the array above has to be the whole truth ------------------------------
+#
+# Every other check in this file works outward from `fuzzers`, so a target
+# added to the tree and listed nowhere is invisible to all of them: it runs in
+# no tier, and nothing says so. Compare the array against what the source
+# actually declares, in both directions.
+declared_fuzzers="$(
+	for source_dir in internal cmd; do
+		[ -d "${source_dir}" ] || continue
+		grep -rHoE '^func Fuzz[A-Za-z0-9_]*\(' --include='*_test.go' "${source_dir}" || true
+	done | awk -F: '{
+		file = $1
+		name = $2
+		sub(/^func /, "", name)
+		sub(/\($/, "", name)
+		sub(/\/[^\/]*$/, "", file)
+		printf "%s|./%s/\n", name, file
+	}' | sort
+)"
+
+listed_fuzzers="$(printf '%s\n' "${fuzzers[@]}" | sort)"
+
+if [ "${declared_fuzzers}" != "${listed_fuzzers}" ]; then
+	fail "the Fuzz* targets declared under internal/ and cmd/ do not match this file's inventory"
+	echo "--- declared in the tree, missing from the inventory ---" >&2
+	comm -23 <(printf '%s\n' "${declared_fuzzers}") <(printf '%s\n' "${listed_fuzzers}") >&2
+	echo "--- in the inventory, not declared in the tree ---" >&2
+	comm -13 <(printf '%s\n' "${declared_fuzzers}") <(printf '%s\n' "${listed_fuzzers}") >&2
+fi
+
 lefthook_fuzz_entries="$(
 	awk '
 		/^[[:space:]]*for entry in \\[[:space:]]*$/ { in_entries = 1 }
@@ -53,6 +83,13 @@ for spec in "${fuzzers[@]}"; do
 	pkg="${spec#*|}"
 	fuzzer_regex="$(escape_ere "${fuzzer}")"
 	pkg_regex="$(escape_ere "${pkg}")"
+	# The Go-engine tiers spell the package as a `go test` argument
+	# (./internal/server/); .clusterfuzzlite/build.sh spells it as a path under
+	# the module (internal/server). Derive one from the other so the two can
+	# never drift independently.
+	cflite_pkg="${pkg#./}"
+	cflite_pkg="${cflite_pkg%/}"
+	cflite_entry="^build_fuzzer[[:space:]]+$(escape_ere "${cflite_pkg}")[[:space:]]+${fuzzer_regex}\$"
 	workflow_mapping="^[[:space:]]*-[[:space:]]*\\{[[:space:]]*name:[[:space:]]*${fuzzer_regex}[[:space:]]*,[[:space:]]*pkg:[[:space:]]*${pkg_regex}[[:space:]]*\\}[[:space:]]*$"
 	caller_mapping="{\"name\":\"${fuzzer}\",\"pkg\":\"${pkg}\"}"
 	lefthook_entry="^[[:space:]]*\"${fuzzer_regex}[[:space:]]+${pkg_regex}\"([[:space:]]+\\\\|;[[:space:]]*do)[[:space:]]*$"
@@ -65,6 +102,8 @@ for spec in "${fuzzers[@]}"; do
 		fail "quality-fuzz-nightly.yml must run ${fuzzer} in ${pkg}"
 	grep -Eq "${workflow_mapping}" .github/workflows/quality-fuzz-monthly.yml ||
 		fail "quality-fuzz-monthly.yml must run ${fuzzer} in ${pkg}"
+	grep -Eq "${cflite_entry}" .clusterfuzzlite/build.sh ||
+		fail ".clusterfuzzlite/build.sh must build ${fuzzer} from ${cflite_pkg}"
 
 	corpus_dir="${pkg#./}"
 	corpus_dir="${corpus_dir%/}/testdata/fuzz/${fuzzer}"
@@ -84,6 +123,16 @@ for spec in "${fuzzers[@]}"; do
 		done < <(find "${corpus_dir}" -type f)
 	fi
 done
+
+# ClusterFuzzLite is the one tier that does not read the inventory from a
+# workflow file, so a target added to the four Go-engine tiers and forgotten
+# here would just never be built for libFuzzer. Count as well as match: the
+# per-fuzzer loop above cannot see an ELEVENTH build_fuzzer line for a target
+# nobody else runs.
+cflite_entry_count="$(grep -Ec '^build_fuzzer[[:space:]]' .clusterfuzzlite/build.sh || true)"
+if [ "${cflite_entry_count}" -ne "${#fuzzers[@]}" ]; then
+	fail ".clusterfuzzlite/build.sh must build exactly ${#fuzzers[@]} fuzzers, found ${cflite_entry_count}"
+fi
 
 # Corpus persistence across the two scheduled lanes. Everything below is a
 # mechanical line the workflows have to agree on; the reasoning for each choice

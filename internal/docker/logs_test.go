@@ -11,14 +11,6 @@ import (
 	"time"
 )
 
-func dockerLogFrame(streamType byte, payload []byte) []byte {
-	frame := make([]byte, 8+len(payload))
-	frame[0] = streamType
-	binary.BigEndian.PutUint32(frame[4:8], uint32(len(payload)))
-	copy(frame[8:], payload)
-	return frame
-}
-
 func TestDecodeContainerLogStreamEmitsShortRawDataBeforeEOF(t *testing.T) {
 	t.Parallel()
 

@@ -7,8 +7,9 @@ run-name: >-
            github.event.workflow_run.run_attempt)
   }}
 
-# PW-2.2. The scheduled quality lanes (soak, nightly/monthly fuzz, monthly
-# mutation, monthly bench) only surface a red run in the Actions tab. On a
+# PW-2.2. The scheduled quality lanes (soak, nightly/monthly fuzz, weekly
+# ClusterFuzzLite batch and prune, monthly mutation, monthly bench) only
+# surface a red run in the Actions tab. On a
 # monthly cadence that means a red run can sit unnoticed for weeks — exactly
 # what happened to the monthly mutation lane, caught by a manual sweep on
 # 2026-09-02 rather than by anything watching it. This workflow is the thing
@@ -80,6 +81,8 @@ on:
       - "Quality: Benchmarks (monthly)"
       - "Quality: Deep Fuzz Infra Rerun"
       - "Quality: Integration — Engine Matrix"
+      - "Quality: ClusterFuzzLite (batch)"
+      - "Quality: ClusterFuzzLite (prune)"
     types: [completed]
 
 permissions: {}
