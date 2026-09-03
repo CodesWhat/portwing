@@ -765,16 +765,13 @@ test("mutation contract rejects a ratchet job with a write scope", () => {
     "  ratchet:\n    name: \"Quality: Mutation floor ratchet proposal\"\n    needs: [gremlins, history]\n    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: read\n",
     "  ratchet:\n    name: \"Quality: Mutation floor ratchet proposal\"\n    needs: [gremlins, history]\n    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: write\n",
   );
-  assertMutationFailure(
-    source,
-    "the ratchet job's permissions must be exactly contents: read",
-  );
+  assertMutationFailure(source, "the ratchet job's permissions must be exactly contents: read");
 });
 
 test("mutation contract rejects a ratchet job that runs Gremlins itself", () => {
   const source = workflow.replace(
     "      - name: Propose floor ratchets\n        run: |\n          set -euo pipefail\n",
-    "      - name: Propose floor ratchets\n        run: |\n          set -euo pipefail\n          gremlins unleash --tags=\"\" ./internal/edge\n",
+    '      - name: Propose floor ratchets\n        run: |\n          set -euo pipefail\n          gremlins unleash --tags="" ./internal/edge\n',
   );
   assertMutationFailure(source, "the ratchet job must not run 'gremlins unleash'; it only reads");
 });
