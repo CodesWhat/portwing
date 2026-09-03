@@ -70,14 +70,18 @@ protocol.
 
 ## Sockguard preset compatibility
 
-All three presets below are validated against the Portwing agent's Docker API
-usage as of the Portwing version in the row above:
+The presets below are sockguard's Portwing-targeted presets as of sockguard
+v2.0.0. The first three are validated against the Portwing agent's Docker API
+usage as of the Portwing version in the row above; the two build presets extend
+`portwing-with-compose.yaml` and are not part of that validated row:
 
 | Preset | Purpose |
 |---|---|
 | `app/configs/portwing.yaml` | Base preset: container lifecycle, image pull/inspect/remove, `/events`, narrow network/volume/distribution/service reads. No exec, no compose-stack network/volume creation, no build. |
 | `app/configs/portwing-with-exec.yaml` | `portwing.yaml` plus the exec/attach paths Portwing's interactive terminal feature needs. |
-| `app/configs/portwing-with-compose.yaml` | `portwing.yaml` plus `POST /networks/create`, `POST /networks/*/connect`, `DELETE /networks/*`, `POST /networks/*/disconnect`, `POST /volumes/create`, `DELETE /volumes/*` — what compose-stack deploys through Portwing need. Still denies `/build`; BuildKit fallback needs `/session` + `/grpc`, which no preset here models yet. |
+| `app/configs/portwing-with-compose.yaml` | `portwing.yaml` plus `POST /networks/create`, `POST /networks/*/connect`, `DELETE /networks/*`, `POST /networks/*/disconnect`, `POST /volumes/create`, `DELETE /volumes/*` — what compose-stack deploys through Portwing need. Still denies `/build`, `/session` and `/grpc` — use one of the two build presets below for either builder transport. |
+| `app/configs/portwing-with-build.yaml` | `portwing-with-compose.yaml` plus classic `POST /build` only. `/session` and `/grpc` stay denied, so a default (BuildKit) `docker compose build` fails by design; set `DOCKER_BUILDKIT=0` in the client environment to use this transport. |
+| `app/configs/portwing-with-mediated-build.yaml` | `portwing-with-compose.yaml` plus mediated BuildKit: sockguard terminates `POST /session` and `POST /grpc` as h2c and inspects every gRPC message crossing them (sockguard issue #185) rather than hijacking the streams. Classic `POST /build` stays denied. This is the preset a stock `docker compose build` / `up --build` needs with no client-side env var. |
 
 Portwing's `examples/sockguard.yaml` is a manually-synced copy of sockguard's
 `app/configs/portwing.yaml` (the no-exec, no-compose base preset) — update

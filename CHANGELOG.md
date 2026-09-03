@@ -92,6 +92,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the new baseline. `allocs/op` is measured and reported but not gated: it is
   a small integer, so the smallest possible change is often more than 10% and a
   percentage threshold says nothing useful about it.
+- **A local `CODE_OF_CONDUCT.md` is back at the repository root.** v0.9.7
+  removed it in favour of the organisation-wide document the `.github`
+  repository serves to any repo without its own. It returns as the full
+  Contributor Covenant 2.1 verbatim rather than the fifteen-line summary that
+  was there before, so the text a contributor reads lives in the repository
+  they are contributing to. `README.md` and `CONTRIBUTING.md` link to it by
+  relative path and the reporting address is unchanged at
+  `security@codeswhat.com`.
 
 ### Fixed
 
@@ -136,6 +144,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separator (e.g. `%252Facme`) reached the sanitizer looking harmless while a
   downstream decode would have rebuilt the real path. A bare `%` still passes,
   so values like "50% off" are unaffected.
+- **A closed edge exec session leaves the session registry before its `done`
+  channel is signalled.** `ExecSession.Close` closed `done`, closed the
+  connection, and drained the inbox before unregistering, so a waiter that saw
+  `done` closed could still find the session registered and the session held
+  one of the `maxExecSessions` slots for the length of the drain. The
+  unregister now runs inside the same locked section, ahead of `close(done)`,
+  so a waiter that observes `done` closed will not find the session still
+  registered. This does not stop all enqueueing: `HandleInput` can no longer
+  enqueue once `closed` is set, but a racing `HandleResize` may still land a
+  zero-reservation item that `inputWriter` picks over `done`; that item is
+  harmless because `doResize` then runs against the already-cancelled session
+  context and aborts. The exec ID is released at the same point, which
+  slightly widens the window in which a controller reusing that ID could see
+  the old read loop's last frames.
 
 ### Security
 
@@ -272,6 +294,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   panicked on Go 1.27's stdlib (`buildir: package "poll" ... unexpected expr:
   *ast.KeyValueExpr`) instead of reporting lint errors, and v2.13.2 is the
   first release built against a staticcheck that parses it.
+- **Release archives are byte-reproducible.** GoReleaser stamps the binary with
+  `mod_timestamp: {{ .CommitTimestamp }}`, and the `LICENSE*`, `README*` and
+  `CHANGELOG*` entries are now named explicitly so each one's mtime pins to the
+  commit date. They were auto-included with their own filesystem mtimes, which
+  defeated the binary's pin and left two builds of the same tag producing
+  different bytes. Archive contents are unchanged. `Dependency Review` also
+  runs on pushes to the dev branch now, not only on pull requests, so a change
+  that reaches the branch outside a PR is still scanned.
 
 ## [v0.9.11] - 2026-08-27
 
