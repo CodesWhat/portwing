@@ -118,6 +118,19 @@ test("check:web runs knip so dead-code coverage travels with the same gate", () 
     "website workspace must scope the shadcn exemption via ignoreIssues",
   );
   assert.deepEqual(website.ignoreIssues["src/components/ui/**"], ["exports", "types"]);
+
+  assert.deepEqual(
+    website.entry,
+    ["scripts/gen-bird-png.mjs"],
+    "website workspace entry must be narrowed to the one manually run script, not a glob " +
+      "that also swallows security-headers.mjs (reached via postbuild) and its test file",
+  );
+  assert.equal(
+    knipConfig.workspaces["."].entry,
+    undefined,
+    "root workspace must not use an entry glob; every non-test scripts/*.mjs file is " +
+      "already referenced from a package.json script, and *.test.mjs is covered by test detection",
+  );
 });
 
 test("Vercel deploys main while disabling automatic preview deployments", () => {

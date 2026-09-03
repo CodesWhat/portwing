@@ -2,12 +2,11 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs"],
       "ignoreDependencies": ["posthog-js"]
     },
     "docs": {},
     "website": {
-      "entry": ["scripts/*.mjs"],
+      "entry": ["scripts/gen-bird-png.mjs"],
       "ignoreIssues": { "src/components/ui/**": ["exports", "types"] },
       "ignoreBinaries": ["magick"]
     },

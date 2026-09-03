@@ -96,11 +96,15 @@ of inline comments:
   workspace, so knip correctly sees no root `package.json` entry for it; the
   ignore documents that the reference is deliberate cross-workspace
   resolution, not a phantom import.
-- `website` workspace `entry: ["scripts/*.mjs"]` — these scripts
-  (`gen-bird-png.mjs`, `security-headers.mjs`) are run manually or from
-  `npm` script hooks, not imported by the Next.js app, so knip's Next.js
-  plugin doesn't see them as reachable without being told they're entry
-  points.
+- `website` workspace `entry: ["scripts/gen-bird-png.mjs"]` — this script is
+  run manually, not imported by the Next.js app and not referenced from any
+  `npm` script, so knip's Next.js plugin doesn't see it as reachable without
+  being told it's an entry point. `security-headers.mjs` doesn't need the
+  same treatment: it's reached via the `postbuild` script, and its test file
+  is picked up by knip's test-file detection. The root `.` workspace has no
+  entry glob for the same reason — every non-test script under root
+  `scripts/` is already referenced from a `package.json` script, and the
+  `*.test.mjs` files are covered by test-file detection.
 - `website` workspace `ignoreIssues: { "src/components/ui/**": ["exports",
   "types"] }` — these are shadcn/ui-generated primitives; the unused variant
   exports (e.g. `badgeVariants`, `CardHeader`) are part of the generator's
