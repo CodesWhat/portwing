@@ -93,6 +93,46 @@ test("pre-push mirrors the root web lane", () => {
   assert.equal(packageJson.engines.node, ">=24.0.0");
 });
 
+test("check:web runs knip so dead-code coverage travels with the same gate", () => {
+  assert.equal(packageJson.scripts.knip, "knip");
+  assert.match(packageJson.scripts["check:web"], /npm run knip &&/);
+  assert.ok(packageJson.devDependencies.knip, "knip must be a pinned devDependency");
+
+  const knipConfig = JSON.parse(fs.readFileSync(path.join(ROOT, "knip.json"), "utf8"));
+  for (const workspace of ["website", "docs", "analytics"]) {
+    assert.ok(
+      Object.hasOwn(knipConfig.workspaces ?? {}, workspace),
+      `knip.json must cover the ${workspace} workspace`,
+    );
+  }
+
+  const website = knipConfig.workspaces.website;
+  assert.equal(
+    website.ignore,
+    undefined,
+    "website workspace must not use a file-level ignore for src/components/ui/** " +
+      "(it exempts dead files too, not just the shadcn variant exports)",
+  );
+  assert.ok(
+    Object.hasOwn(website.ignoreIssues ?? {}, "src/components/ui/**"),
+    "website workspace must scope the shadcn exemption via ignoreIssues",
+  );
+  assert.deepEqual(website.ignoreIssues["src/components/ui/**"], ["exports", "types"]);
+
+  assert.deepEqual(
+    website.entry,
+    ["scripts/gen-bird-png.mjs"],
+    "website workspace entry must be narrowed to the one manually run script, not a glob " +
+      "that also swallows security-headers.mjs (reached via postbuild) and its test file",
+  );
+  assert.equal(
+    knipConfig.workspaces["."].entry,
+    undefined,
+    "root workspace must not use an entry glob; every non-test scripts/*.mjs file is " +
+      "already referenced from a package.json script, and *.test.mjs is covered by test detection",
+  );
+});
+
 test("Vercel deploys main while disabling automatic preview deployments", () => {
   const deploymentEnabled = vercelConfig.git?.deploymentEnabled;
   assert.deepEqual(deploymentEnabled, { "**": false, main: true });
