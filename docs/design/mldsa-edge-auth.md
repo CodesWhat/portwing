@@ -6,14 +6,30 @@
 **Date:** 2026-09-03  
 **Related:** `docs/design/ed25519-auth.md`, `docs/security-model.md`, `COMPETITIVE-LANDSCAPE.md`
 
-**Revised 2026-09-03 after review.** The decision is unchanged. Six corrections
-landed and each is marked in place rather than quietly rewritten, because
-several were overclaims and the record of what was wrong is worth keeping: the
-scope of what a hybrid hello buys (§4.2), the identity binding a hybrid
-composition requires (§5.2, §6.3), the impossibility of negotiating on the
-welcome frame (§6.1), the fact that Go's post-quantum certificate support has
-already landed (§7.3), the edge-mode rotation sequence (§8.2), and three
-measurement or framing errors (§3.1, §3.2, §3.4).
+**Revised twice on 2026-09-03 after review. The decision is unchanged.**
+Corrections are marked in place rather than quietly rewritten, because most were
+overclaims and the record of what was wrong is the useful part.
+
+First round: the scope of what a hybrid hello buys (§4.2), the identity binding
+a hybrid composition requires (§5.2, §6.3), the impossibility of negotiating on
+the welcome frame (§6.1), Go's post-quantum certificate support having already
+landed (§7.3), the edge-mode rotation sequence (§8.2), and three measurement
+errors (§3.1, §3.2, §3.4).
+
+Second round, all of it compatibility: section 6 is now a **sketch with open
+questions** (§6.6) rather than a settled design, because a compatibility claim
+is what failed review twice. The pair-derived identity ID from the first
+revision is withdrawn — it broke every un-upgraded controller and bought nothing,
+since the binding lives in the record (§6.3). The rollout is controller-first
+and **not** backward compatible (§6.5). Private key storage for a second key is
+unresolved and the "`PRIVATE_KEY_FILE` does not grow" claim was wrong (§6.7,
+§3.1). Channel binding only works where Drydock terminates TLS, and the relay
+attack stays open behind a terminating proxy (§4.2). The certificate trigger is
+about issuance and ecosystem compatibility, not runtime support (§7.3).
+
+**Standing instruction for the next reader:** every compatibility statement here
+needs re-checking against Drydock at implementation time. Three drafts have now
+asserted one that the code did not support.
 
 ---
 
@@ -108,7 +124,8 @@ The key ID is `hex(SHA-256(raw public key)[:8])`, 16 hex characters
 (`internal/auth/keygen.go:90-93`), and Drydock derives it identically. It
 identifies **a key**, not an agent identity. That is fine while an identity is
 exactly one key, and it is the root of the binding problem in section 5.2 the
-moment an identity is two keys. Section 6 item 3 resolves it.
+moment an identity is two keys. Section 6.3 resolves it, and deliberately does
+so without changing the derivation.
 
 Portwing reloads `authorized_keys` on SIGHUP (`internal/server/http.go:245-266`)
 and the registry holds many keys at once, so **standard mode** supports overlap
@@ -164,9 +181,16 @@ saving 1,318 bytes once per connection buys nothing worth a lower security
 category. So the saving is real and the conclusion is unchanged: if the cost is
 acceptable at all, take the higher category.
 
-One pleasant surprise: a Go `mldsa.PrivateKey` serialises as a **32-byte seed**,
-the same size as an Ed25519 seed. The private key at rest in `PRIVATE_KEY_FILE`
-does not grow. Only the public half and the signature do.
+A Go `mldsa.PrivateKey` serialises as a **32-byte seed**, the same size as an
+Ed25519 seed, so an ML-DSA key is not individually larger at rest than the key
+it would sit beside.
+
+That is as far as the point goes, and an earlier draft took it further than the
+evidence allows by concluding that `PRIVATE_KEY_FILE` does not grow. It does. A
+hybrid identity holds **two** independent private keys, so the stored material
+roughly doubles, and today's loader reads exactly one PEM block and hard-fails
+anything that is not an Ed25519 PKCS#8 key (`internal/auth/keygen.go:31-47`).
+Storage for the second key is an open question, not a solved one; see 6.7.
 
 ### 3.2 Timing
 
@@ -237,7 +261,7 @@ The recommended shape adds a `signaturePq` field beside the existing
 (the 6,170-character base64url value, its quotes, the `"signaturePq":` key, and
 the separating comma), not the 6,084-byte replacement delta used for standard
 mode in 3.3. An earlier draft quoted the replacement figure here, which
-understated the additive design by about 100 bytes.
+understated the added-field shape by about 100 bytes.
 
 The governing limit is **Drydock's**, not Portwing's: the controller's
 `WebSocketServer` is constructed with `maxPayload: MAX_PAYLOAD_BYTES`, 16 MB
@@ -350,11 +374,26 @@ Mutual post-quantum authentication of the edge session would additionally need:
    certificate chain for the controller, so the agent's peer verification does
    not rest on a classical signature. Section 7 trigger 3 covers the toolchain
    side of this, which is further along than expected.
-2. **Channel binding.** The hello canonical string extended to cover a TLS
-   exporter value for the connection, so a relayed hello is invalid on any
-   channel but the one it was signed for. This is cheap and worth doing on its
-   own merits, independent of any post-quantum work, because it closes the relay
-   above against a classical machine-in-the-middle too.
+2. **Channel binding, where the deployment allows it.** The hello canonical
+   string extended to cover an RFC 9266 `tls-exporter` value, so a relayed hello
+   is invalid on any channel but the one it was signed for. Both ends must pin
+   the same exporter label, context, and output length, and TLS 1.3 is a
+   minimum: the RFC 9266 construction is not defined for TLS 1.2, which
+   Portwing's edge dial currently still permits
+   (`internal/edge/client.go:347`).
+
+   **This only works when Drydock terminates TLS itself, and it often does
+   not.** Drydock's server TLS is off by default (`tls.enabled` defaults to
+   `false`, `app/configuration/index.ts:508`), and the common deployment puts it
+   behind a TLS-terminating reverse proxy. In that topology the controller
+   process never sees the TLS connection the agent signed against, so it cannot
+   derive the exporter value, and a proxy-forwarded binding is worthless because
+   the proxy is exactly the position the attacker occupies in this scenario.
+   There is no fallback that preserves the property: for proxied deployments
+   **the relay attack in this section stays open**, and the honest answer is to
+   say so rather than to ship a header that looks like a binding. Closing it
+   there would need the agent to authenticate the proxy's certificate as the
+   controller identity, which is a different design.
 3. **Post-quantum session integrity**, or an explicit decision that TLS record
    integrity is sufficient once the endpoints are authenticated.
 
@@ -398,103 +437,194 @@ broken: an attacker holding a victim's CRQC-recovered Ed25519 key and their own
 legitimately enrolled ML-DSA key presents one of each, both verify against their
 respective registered keys, and the AND passes. The composition is then only as
 strong as its weakest key, which is the opposite of the intended property.
-Section 6 item 3 fixes this by deriving the identity's ID over both public keys
-at once, so a key ID resolves to a pair and keys from two records cannot be
-combined. With that binding in place the composition survives both a CRQC and a
-lattice break, which is the correct posture for a primitive this young.
+Section 6.3 fixes this by storing both public keys on **one identity record**,
+so the ML-DSA key is reachable only through the record the Ed25519 key ID
+resolves to, and keys from two records cannot be combined. The fix is the shared
+record, not a change to how key IDs are derived; an intermediate draft also
+re-derived the ID over both keys, which bought no extra security and broke every
+un-upgraded controller (6.3). With the record binding in place the composition
+survives both a CRQC and a lattice break, which is the correct posture for a
+primitive this young.
 
-It is also the only shape that can be deployed additively, since the existing
-86-character `signature` field stays valid and the post-quantum material goes in
-a new field Drydock currently ignores.
+It is also the only shape that leaves the classical path intact while a fleet
+migrates, since the existing 86-character `signature` field keeps its meaning
+and an old controller ignores the new one. **That is not the same as being
+backward compatible, and two earlier drafts of this note confused the two.**
+The key store and the `authorized_keys` format both have to change first;
+section 6.5 sets out the controller-first order and why the rollout breaks
+without it.
 
-The temptation is to ship the additive half now so the fleet already emits it
-when Drydock catches up. **That is a trap, for two reasons.** An emitted but
-unverified signature provides exactly zero security while costing bytes and CPU,
-and it would read in a changelog as post-quantum protection that does not exist.
-More seriously, it would commit Portwing to a wire shape before the counterparty
-has designed theirs, and the counterparty's design is the one that must carry the
-key ID domain-separation fix from section 2.3. Two independently invented
-"hybrid" formats is a worse outcome than waiting.
+The temptation is to ship the agent half now so the fleet already emits the
+second signature when Drydock catches up. **That is a trap, for two reasons.**
+An emitted but unverified signature provides exactly zero security while costing
+bytes and CPU, and it would read in a changelog as post-quantum protection that
+does not exist. More seriously, it would commit Portwing to a wire shape before
+the counterparty has designed theirs, and the counterparty's design is the one
+that has to carry the identity record, the separate length guard, and the
+per-identity policy flag that the property actually depends on. Two
+independently invented "hybrid" formats is a worse outcome than waiting.
 
 ### 5.3 Defer
 
-**Chosen.** With the target design settled in section 6 and triggers in
+**Chosen.** With the target shape sketched in section 6, its open questions
+recorded in 6.6, and triggers in
 section 7, so this is a scheduled change rather than an open question.
 
 ---
 
-## 6. Target design, for when the trigger fires
+## 6. Target sketch, for when the trigger fires
 
-Recorded now so the evaluation is not repeated.
+**This is a sketch, not a settled design.** It records the shape the evaluation
+points at so the analysis is not repeated, and it is written down mainly so the
+open questions in 6.6 are visible. Two earlier drafts of this section each
+claimed backward compatibility that the Drydock code does not support, so treat
+every compatibility statement below as needing to be re-checked against Drydock
+at implementation time, and treat 6.5 as a hard constraint rather than a detail.
 
-1. **Edge hello: hybrid, additive, sent unconditionally.** Add `signaturePq`
-   to `HelloMessage` alongside the existing `signature`, which keeps its
-   meaning and its 86-character size. There is no second key ID field; see
-   item 3. The agent sends both signatures on every hello whenever it holds a
-   hybrid identity, and does **not** try to negotiate first.
+### 6.1 Edge hello: a second signature field, sent unconditionally
 
-   An earlier draft gated this on a controller capability in the welcome
-   frame. That is not implementable: `internal/edge/client.go:393` sends the
-   hello and only then waits for the welcome at `:398`, so nothing about the
-   controller is known when the hello is built. Sending unconditionally is
-   safe against older controllers, which was verified rather than assumed:
-   Drydock parses the hello with a bare `JSON.parse` and per-field `typeof`
-   checks (`app/api/portwing-ws.ts:545-560`), with no schema validator, no
-   `strict`, and no unknown-key rejection anywhere in that path, so extra
-   fields are ignored. Its auth-mode detector inspects only the four classic
-   fields, so a hybrid hello still takes the Ed25519 path on an old controller.
+Add `signaturePq` to `HelloMessage` beside the existing `signature`, which keeps
+its meaning and its 86-character size. The agent sends both whenever it holds a
+hybrid identity and does **not** try to negotiate first.
 
-   One concrete gotcha for the implementer: the existing 200-character
-   signature guard at `app/api/portwing-ws.ts:668-674` is specific to
-   `hello.signature`. `signaturePq` needs its own length guard, sized for a
-   6,170-character value, or it is an unbounded allocation from
-   attacker-controlled input.
-2. **Verification is fail-closed AND, and downgrade protection is policy, not
-   negotiation.** Both signatures must verify, and one valid signature beside
-   one invalid signature is a rejection, never a pass.
+Negotiation is not available: `internal/edge/client.go:393` sends the hello and
+only then waits for the welcome at `:398`, so nothing about the controller is
+known when the hello is built. An earlier draft gated the post-quantum fields on
+a controller capability in the welcome frame, which cannot work.
 
-   Be honest about where downgrade safety comes from. Because the hello is the
-   first frame and old controllers silently ignore the post-quantum fields,
-   **the wire cannot protect against downgrade at all.** An attacker holding a
-   CRQC-recovered Ed25519 key simply omits `signaturePq`. The only thing that
-   stops that is the controller refusing a classical-only hello for an identity
-   its own records mark as hybrid. That check lives entirely in Drydock's key
-   store and is the single most important part of this design to get right.
-3. **The key ID identifies the identity, not a key.** This is the correction to
-   section 5.2's binding gap and it replaces the "algorithm domain separation"
-   framing an earlier draft used, which was too weak a fix.
+An old controller ignores the extra field. That much is verified rather than
+assumed: Drydock parses the hello with a bare `JSON.parse` and per-field
+`typeof` checks (`app/api/portwing-ws.ts:545-560`), with no schema validator, no
+`strict`, and no unknown-key rejection in that path. Its auth-mode detector
+inspects only the four classic fields. **That is the limit of what old
+controllers tolerate, and it is not enough on its own** — see 6.5.
 
-   Registering two independently-identified keys would be unsafe: an attacker
-   with a victim's CRQC-recovered Ed25519 key plus their own legitimately
-   enrolled ML-DSA key could present one of each and satisfy a naive AND. So a
-   hybrid identity is **one record carrying both public keys**, and its ID is
-   derived over both at once, with a version label to keep it disjoint from
-   today's IDs:
+Implementer's gotcha: the 200-character guard at `app/api/portwing-ws.ts:671`
+is specific to `hello.signature`. `signaturePq` needs its own guard sized for a
+6,170-character value, or it is an unbounded allocation from attacker-controlled
+input. It must be a separate guard; raising the existing one would weaken the
+check on the classical field.
 
-   ```text
-   hex(SHA-256("portwing-identity-v2" || ed25519_pub || mldsa87_pub)[:8])
-   ```
+### 6.2 Verification is fail-closed AND, and downgrade protection is policy
 
-   A key ID then resolves to a pair, both signatures are checked against that
-   one record's two keys, and there is no way to combine keys from two records.
-   The binding is in the identifier itself, so no separate cross-signature is
-   needed.
-4. **`authorized_keys` gains a hybrid line type**, not a second independent
-   line. One line carries both public keys so the file cannot express the
-   unsafe two-record shape:
+Both signatures must verify. One valid signature beside one invalid signature is
+a rejection, never a pass.
 
-   ```text
-   hybrid-ed25519-mldsa87 <base64 ed25519 pub> <base64 mldsa87 pub> [comment]
-   ```
+Where downgrade safety comes from matters more than the AND. Because the hello
+is the first frame and old controllers silently ignore the post-quantum fields,
+**the wire cannot protect against downgrade at all.** An attacker holding a
+CRQC-recovered Ed25519 key simply omits `signaturePq`. The only thing that stops
+that is the controller refusing a classical-only hello for an identity its own
+records mark as hybrid. That is a per-identity policy flag in Drydock's key
+store, and it is the single most important part of this sketch to get right.
 
-   Both parsers keep the existing 32-byte check for the first key and add a
-   2,592-byte check for the second. Two separate lines sharing a comment,
-   which an earlier draft proposed, is exactly the shape item 3 rules out.
-5. **Standard mode stays Ed25519.** If a post-quantum identity is ever required
-   there, do it as a post-quantum authenticated session or mTLS handshake that
-   issues a short-lived credential. A credential with a service life measured
-   in minutes is not a CRQC concern, which is exactly the property section 4
-   establishes. Do not put ML-DSA in a per-request header.
+### 6.3 The binding lives in the record, and the key ID does not change
+
+The security requirement from section 5.2 is that both public keys belong to one
+identity, so an attacker cannot pair a victim's Ed25519 key with their own
+ML-DSA key. **That requirement is satisfied by one record carrying both public
+keys.** It does not require changing how the key ID is derived.
+
+An earlier draft additionally derived a new pair-based ID over both keys. That
+was unnecessary and actively harmful: Drydock derives key IDs from the raw
+32-byte Ed25519 public key alone (`app/store/agent-keys.ts:52`) and looks them up
+by exact match (`app/api/portwing-ws.ts:685`), so a pair-derived ID is simply
+unknown to every controller that has not been upgraded, and a rolling upgrade or
+a rollback fails with `unknown-key`, which Portwing treats as terminal.
+
+So `pubKeyId` keeps its current derivation and its current value. Lookup finds
+the identity record; if that record is hybrid, both keys in it are used. The
+attack in 5.2 is still closed, because the ML-DSA key is reachable only through
+the record the Ed25519 key ID resolves to, and never independently.
+
+### 6.4 `authorized_keys` gains a hybrid line type
+
+One line carries both public keys, so the file cannot express the unsafe
+two-record shape:
+
+```text
+hybrid-ed25519-mldsa87 <base64 ed25519 pub> <base64 mldsa87 pub> [comment]
+```
+
+Both parsers keep the existing 32-byte check for the first key and add a
+2,592-byte check for the second.
+
+### 6.5 Migration is controller-first, and this is not backward compatible
+
+Drydock's `authorized_keys` importer skips any line whose first field is not
+literally `ed25519` (`app/store/agent-keys.ts:185`), and Portwing's parser does
+the same (`internal/auth/keys.go:149`). A hybrid line is therefore invisible to
+both until both are upgraded. **Do not describe this rollout as additive.** The
+required order is:
+
+1. Ship the controller: import hybrid lines, store both keys on one record,
+   verify `signaturePq` when present, and add the per-identity hybrid policy
+   flag from 6.2 defaulted off.
+2. Enrol hybrid identities and confirm the classical path still verifies.
+3. Ship agents that send `signaturePq`.
+4. Only then turn the per-identity policy flag on, which is the step that
+   actually buys the security property. Before this step the deployment has the
+   costs and none of the benefit.
+
+Rollback from step 3 to a pre-step-1 controller is safe only because
+`pubKeyId` is unchanged (6.3). Rollback past step 4 silently drops the property.
+
+### 6.6 Open design questions
+
+These are unresolved. None is a blocker for the defer decision, and all of them
+have to be answered before any of the above is implemented.
+
+1. **Private key storage.** Unresolved; see 6.7.
+2. **Does the per-identity policy flag belong in Drydock's key store or in an
+   agent-side assertion?** This sketch puts it in Drydock, which is the only
+   place it can be enforced, but that means the security property depends
+   entirely on a repo Portwing does not own.
+3. **What re-enrolment looks like for an existing agent.** Moving an identity
+   from classical to hybrid changes the record, not the key ID, so it may avoid
+   the section 8.2 disconnect. That is a hypothesis from reading the code, not
+   something demonstrated, and it needs testing against a real controller.
+4. **Whether the ML-DSA signature should cover a context string.** Go's
+   `mldsa.Options.Context` is free and would domain-separate hello signatures
+   from any future use of the same key. Probably yes, but it has to be agreed
+   on both sides before first deployment because it cannot change afterwards.
+5. **Whether this should wait for channel binding** (section 4.2 item 2)
+   instead, or ship alongside it, given that channel binding closes a live
+   classical attack while this closes a future one.
+
+### 6.7 Private key storage is unresolved
+
+A hybrid identity needs **two independent private keys**, and today's storage
+holds exactly one. `auth.ParsePrivateKeyPEM` decodes a single PEM block, requires
+type `PRIVATE KEY`, and hard-fails anything that is not an Ed25519 PKCS#8 key
+(`internal/auth/keygen.go:31-47`); `signHello` loads only that
+(`internal/edge/client.go:648`).
+
+This also corrects a claim in section 3.1. It is true that an ML-DSA-87 private
+key serialises as a 32-byte seed, so it is not individually larger than an
+Ed25519 seed. It is **not** true that `PRIVATE_KEY_FILE` does not grow: a hybrid
+identity stores two keys instead of one, so the material roughly doubles.
+
+Two options, neither chosen:
+
+- **Two PEM blocks in one file.** Keeps one path and one permission check.
+  Requires looping `pem.Decode` over the remaining bytes instead of reading the
+  first block, and deciding what an unexpected extra block means.
+- **A second env var**, `PRIVATE_KEY_PQ_FILE`. Simpler to parse, but doubles the
+  mount and permission surface and makes a half-configured agent possible.
+
+**Non-negotiable either way: the ML-DSA seed must be generated independently and
+must never be derived from the Ed25519 seed.** Deriving one from the other would
+make a CRQC recovery of the Ed25519 key yield the ML-DSA key too, which collapses
+the hybrid to its weakest component and silently un-does the entire point of the
+design.
+
+### 6.8 Standard mode stays Ed25519
+
+If a post-quantum identity is ever required there, do it as a post-quantum
+authenticated session or mTLS handshake that issues a short-lived credential. A
+credential with a service life measured in minutes is not a CRQC concern, which
+is exactly the property section 4 establishes. Do not put ML-DSA in a
+per-request header.
 
 ---
 
@@ -502,12 +632,23 @@ Recorded now so the evaluation is not repeated.
 
 Any one of these reopens the decision. Each is checkable rather than a vibe.
 
-1. **Drydock ships an ML-DSA verifier.** Concretely: the hardcoded Ed25519
-   SPKI prefix constant in `app/api/portwing-ws.ts` gains a second algorithm,
-   the 200-character hello signature guard is raised, and the `agent-keys`
-   record grows an algorithm field beside its 32-byte public key check. This is
-   the primary trigger and the cheapest to hit, because section 3.5 shows no
-   new dependency is needed on either side.
+1. **Drydock ships a hybrid verifier.** This is the primary trigger, and
+   section 3.5 shows it needs no new dependency on either side. An earlier
+   draft described it as adding a second algorithm to the existing single-key
+   record and raising the 200-character guard; that describes a design section
+   6 has since rejected. What to actually watch for, matching section 6:
+
+   - `app/store/agent-keys.ts` stores **two public keys on one record**, with
+     the ML-DSA key reachable only through the Ed25519-derived key ID, which
+     `deriveKeyId` at `:52` keeps unchanged.
+   - The importer at `app/store/agent-keys.ts:185` accepts a
+     `hybrid-ed25519-mldsa87` line in addition to `ed25519`.
+   - `app/api/portwing-ws.ts` verifies a `signaturePq` field under its **own**
+     length guard, leaving the 200-character guard on `hello.signature` at
+     `:671` untouched.
+   - The key record carries a **per-identity hybrid-required flag**, which is
+     the only thing that prevents the downgrade in section 6.2 and is therefore
+     the part that actually matters.
 2. **A user or compliance requirement lands** that names FIPS 204 on the agent
    identity. CNSA 2.0 is the date anchor worth watching even though it binds
    National Security Systems rather than a self-hosted Docker agent; its
@@ -523,13 +664,24 @@ Any one of these reopens the decision. Each is checkable rather than a vibe.
    (`crypto/x509/x509.go:401-403`), parses ML-DSA public keys and PKCS#8
    private keys (`crypto/x509/parser.go:366-374`, `crypto/x509/pkcs8.go:83-111`),
    and carries the matching `MLDSA44`/`MLDSA65`/`MLDSA87` TLS signature schemes
-   with `directSigning` (`crypto/tls/auth.go:145-146, 161-162`). So the agent's
-   own stack could already verify a post-quantum controller certificate today.
-   The live blocker is the other end: the controller's Node TLS stack and the
-   CA tooling that would issue such a certificate. When that lands, section 4.2
-   item 1 becomes available, and mTLS with a post-quantum certificate is a
-   better answer for standard mode than an application-layer header, so target
-   design item 5 should be revisited before anything else here.
+   with `directSigning` (`crypto/tls/auth.go:145-146, 161-162`).
+
+   **The runtime on the other end is not a blocker either**, which narrows this
+   trigger further than the previous revision did. Drydock requires Node >= 24
+   (`app/package.json:5-7`) and serves TLS through `https.createServer` when
+   configured (`app/api/index.ts:260-270`), and section 3.5 measured that this Node
+   and OpenSSL combination does ML-DSA-87 natively. A TLS 1.3 handshake with an
+   ML-DSA-87 certificate is within reach of both stacks as they ship today.
+
+   So the real trigger is **certificate issuance and ecosystem compatibility**,
+   not runtime support: a CA path that will issue an ML-DSA leaf (public CAs
+   will not, so this means an internal CA), plus every intermediary in the
+   deployment tolerating a certificate chain roughly two orders of magnitude
+   larger than an Ed25519 one, plus browsers and other clients that hit the same
+   Drydock endpoint still working. That last constraint is the one most likely
+   to bite, and it is a deployment question rather than a library question. When
+   it is answerable, section 4.2 item 1 becomes available and section 6.8 should
+   be revisited before anything else here.
 4. **A credible CRQC estimate lands inside the rotation window** established in
    section 8. If keys rotate annually, an estimate that moves inside that
    horizon collapses the argument that rotation is sufficient.
