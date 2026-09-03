@@ -180,6 +180,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   context and aborts. The exec ID is released at the same point, which
   slightly widens the window in which a controller reusing that ID could see
   the old read loop's last frames.
+- **The shipped edge examples start again under the non-loopback bind guard.**
+  `examples/kubernetes/edge.yaml` and the `edge` profile in
+  `examples/observability/docker-compose.yml` set `BIND_ADDRESS=0.0.0.0`
+  alongside `DRYDOCK_URL` without `ALLOW_UNAUTHENTICATED_REMOTE`, which the
+  edge operations listener's non-loopback bind guard rejects: the agent exits
+  1 before serving anything. Both now set `ALLOW_UNAUTHENTICATED_REMOTE` to
+  `true` next to the bind, with a comment on the trade-off, and the stale
+  comments describing the old single-variable opt-in are corrected. A copy
+  taken from either example before this release needs the variable added by
+  hand; upgrading the agent does not repair it.
 
 ### Security
 

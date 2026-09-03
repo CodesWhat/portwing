@@ -28,8 +28,15 @@ const INSTALL_CTA: Record<Tab, CtaId> = {
 // Runs read_only, drops all caps, and delivers the token as a
 // Docker secret instead of an inline environment variable.
 const dockerCompose = `# Portwing — standard mode, hardened defaults.
-# Generate a token first:
+# The image runs as the non-root portwing user (UID 65532). Generate a token
+# it can read, and export the numeric group ID of your Docker socket:
 #   openssl rand -hex 32 > portwing_token.txt
+#   sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+#
+# This plaintext example publishes only on host loopback. For remote access,
+# configure Portwing TLS before changing this bind, or keep the plaintext
+# listener private behind a TLS-terminating reverse proxy.
 
 services:
   portwing:
@@ -42,8 +49,11 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    group_add:
+      - "\${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks

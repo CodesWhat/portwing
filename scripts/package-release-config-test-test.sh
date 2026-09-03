@@ -363,4 +363,12 @@ expect_stale_release_example_failure "docs/content/docs/standalone-mode.mdx" '{"
 expect_stale_release_example_failure "docs/content/docs/observability.mdx" 'portwing_build_info{version="0.0.1"} 1'
 expect_stale_release_example_failure "docs/content/docs/security-model.mdx" 'VERSION=0.0.1'
 
+gitleaksignore_backup="${fixture}/.gitleaksignore.backup"
+cp "${fixture}/.gitleaksignore" "${gitleaksignore_backup}"
+printf '%s\n' "website/src/components/cli-demo.tsx:private-key:508" >>"${fixture}/.gitleaksignore"
+expect_release_contract_failure \
+	"FAIL: .gitleaksignore entries must be commit-pinned" \
+	"the package release contract must reject a line-pinned .gitleaksignore working-tree fingerprint"
+mv "${gitleaksignore_backup}" "${fixture}/.gitleaksignore"
+
 echo "Package release contract self-tests passed."

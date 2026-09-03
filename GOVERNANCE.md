@@ -34,10 +34,12 @@ same address.
 
 ## Change and release control
 
-Changes branch from and merge back into `main` through pull requests. CI runs
-the race-enabled test suite, linting, vulnerability analysis, integration and
-fuzz coverage, and release checks. Tagged releases are created by the repository
-release workflow and are signed and attested with GitHub Actions OIDC.
+Changes branch from and merge back into the active integration branch
+(currently `dev/v0.9`) through pull requests; `main` advances only through
+release promotions of that branch. CI runs the race-enabled test suite,
+linting, vulnerability analysis, integration and fuzz coverage, and release
+checks. Tagged releases are created by the repository release workflow and are
+signed and attested with GitHub Actions OIDC.
 
 ## Access continuity
 

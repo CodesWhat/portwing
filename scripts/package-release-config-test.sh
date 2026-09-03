@@ -940,6 +940,22 @@ if [ -n "$grype_pr_paths" ]; then
 	failures=$((failures + 1))
 fi
 
+# A .gitleaksignore entry pinned to a working-tree fingerprint (file:rule:line)
+# addresses a line number in the current tree. The PR Secrets check restores
+# the ignore policy from the base ref before scanning, so any later commit
+# that shifts that line number makes the pin stop matching and the same
+# finding fails again — which is exactly the failure this check exists to
+# rule out permanently, not repin around. A commit-pinned entry (SHA:file:...)
+# doesn't have that problem: the SHA addresses an immutable blob, so it never
+# drifts. Require every active line to be commit-pinned.
+gitleaksignore_bad_entries="$(grep -vE '^[[:space:]]*(#|$)' .gitleaksignore |
+	grep -vE '^[0-9a-f]{40}:' || true)"
+if [ -n "${gitleaksignore_bad_entries}" ]; then
+	echo "FAIL: .gitleaksignore entries must be commit-pinned (a 40-hex commit SHA followed by ':'), not a bare file:rule:line working-tree fingerprint; a line-pinned entry breaks the base-ref policy restore on promotion PRs once the pinned line shifts. Fix the flagged content instead of repinning. Offending line(s):" >&2
+	echo "${gitleaksignore_bad_entries}" >&2
+	failures=$((failures + 1))
+fi
+
 if [ "$failures" -ne 0 ]; then
 	echo "${failures} package release contract check(s) failed" >&2
 	exit 1

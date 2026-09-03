@@ -16,7 +16,7 @@ Portwing v0.9.12 is a supported pre-v1 release. Its HTTP API, environment variab
 - Hardened runtime: ships to run read_only, cap_drop ALL, no-new-privileges, tokens as Docker secrets
 - Sockguard integration: optionally layer Sockguard as a sibling container filtering the raw Docker socket — even a fully compromised Portwing agent is then constrained to an explicit API allowlist
 - Docker Compose lifecycle management via /_portwing/compose (up, down, pull, etc.) with per-operation audit records
-- Interactive exec tunnels: start with POST /exec/{container}; each session recorded as an exec_start audit event
+- Interactive exec tunnels: proxied through the Docker Engine API (POST /containers/{id}/exec to create, then POST /exec/{id}/start with Upgrade: tcp); each session recorded as an exec_start audit event
 - Rate limiting: per-actor token-bucket rate limits; blocked requests produce rate_limited audit events
 - Health endpoint: GET /_portwing/health (available even when WebSocket is down in edge mode)
 - MCP server: read-only Model Context Protocol endpoint exposes host and container state to MCP-aware agents
