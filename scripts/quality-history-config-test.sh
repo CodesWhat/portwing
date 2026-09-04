@@ -102,7 +102,29 @@ check_lane() {
 		return
 	fi
 
-	grep -Fq "    needs: ${measuring_job}" <<<"${block}" ||
+	# Accepts both `needs: X` and `needs: [X, Y]`: the mutation lane's
+	# history job needs both gremlins and mutation-advisory (PW-2.5), while
+	# soak and fuzz still declare a single measuring job. A missing
+	# `needs:` line is folded into the same failure as a `needs:` that
+	# names the wrong job, rather than a separate message: either way the
+	# job does not run after the measuring job.
+	local needs_line needs_value found job
+	needs_line="$(grep -E '^    needs: ' <<<"${block}" | head -1 || true)"
+	found=0
+	if [ -n "${needs_line}" ]; then
+		needs_value="${needs_line#    needs: }"
+		needs_value="${needs_value#\[}"
+		needs_value="${needs_value%\]}"
+		IFS=',' read -ra needs_jobs <<<"${needs_value}"
+		for job in "${needs_jobs[@]}"; do
+			job="$(printf '%s' "${job}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+			if [ "${job}" = "${measuring_job}" ]; then
+				found=1
+				break
+			fi
+		done
+	fi
+	[ "${found}" -eq 1 ] ||
 		fail "${label}: the history job must run after '${measuring_job}'"
 
 	grep -Fq "    if: ${gate}" <<<"${block}" ||
@@ -212,6 +234,29 @@ done
 # shellcheck disable=SC2016 # asserting the workflow's literal jq program text
 grep -Fq "elif jq -e -s 'length == 1 and (.[0] | type == \"object\")' mutation-report.json" <<<"${mutation_gremlins}" ||
 	fail "mutation: the gated-mode test must be jq -e -s 'length == 1 and (.[0] | type == \"object\")'"
+
+# PW-2.5. The mutation-survivors record needs both the gating legs' and the
+# advisory legs' artifacts, and it has to run before the append that
+# consumes it or the history job would push nothing for this lane.
+mutation_history="$(job_block "${mutation_workflow}" "history")"
+grep -Fq "    needs: [gremlins, mutation-advisory]" <<<"${mutation_history}" ||
+	fail "mutation: the history job must need both gremlins and mutation-advisory"
+# shellcheck disable=SC2016 # asserting the workflow's literal ${{ }} syntax
+grep -Fq 'pattern: mutation-history-*-${{ github.run_id }}' <<<"${mutation_history}" ||
+	fail "mutation: the history job must download the per-package records"
+# shellcheck disable=SC2016 # asserting the workflow's literal ${{ }} syntax
+grep -Fq 'pattern: mutation-advisory-*-${{ github.run_id }}' <<<"${mutation_history}" ||
+	fail "mutation: the history job must download the advisory legs' records"
+grep -Fq "scripts/ci/mutation-survivors-record.sh" <<<"${mutation_history}" ||
+	fail "mutation: the history job must run the survivor identity record script"
+grep -Fq "scripts/ci/quality-history-append.sh mutation-survivors " <<<"${mutation_history}" ||
+	fail "mutation: the history job must append the mutation-survivors record"
+
+record_line="$(grep -n "scripts/ci/mutation-survivors-record.sh" <<<"${mutation_history}" | head -1 | cut -d: -f1 || true)"
+append_line="$(grep -n "scripts/ci/quality-history-append.sh mutation-survivors " <<<"${mutation_history}" | head -1 | cut -d: -f1 || true)"
+if [ -n "${record_line}" ] && [ -n "${append_line}" ] && [ "${record_line}" -ge "${append_line}" ]; then
+	fail "mutation: the survivor record script must run before the mutation-survivors append"
+fi
 
 # The advisory and canary jobs measure things and record nothing. Naming them
 # keeps the "only the recording job can write" property from decaying into

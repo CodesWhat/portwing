@@ -278,6 +278,143 @@ set -e
 grep -Fq "has not recorded" "${test_root}/bench.log" ||
 	fail "querying an unrecorded lane must say so (output: $(cat "${test_root}/bench.log"))"
 
+# --- QUALITY_HISTORY_RETAIN and QUALITY_HISTORY_RETAIN_BYTES (PW-2.5) -------
+#
+# A separate bare remote, so the count assertions below are exact rather than
+# relative to whatever the soak/mutation lanes above left behind.
+
+bare2="${test_root}/qh-retain.git"
+git init --quiet --bare "${bare2}"
+
+branch_file2() {
+	git -C "${bare2}" cat-file blob "quality-history:$1" 2>/dev/null || true
+}
+
+run_append2() {
+	local lane="$1" numbers="$2" run_id="$3"
+	shift 3
+	env \
+		QUALITY_HISTORY_REMOTE="${bare2}" \
+		QUALITY_HISTORY_EVENT="schedule" \
+		QUALITY_HISTORY_AUTHOR_NAME="test" \
+		QUALITY_HISTORY_AUTHOR_EMAIL="test@example.invalid" \
+		GITHUB_RUN_ID="${run_id}" \
+		GITHUB_RUN_ATTEMPT="1" \
+		GITHUB_RUN_NUMBER="${run_id}" \
+		GITHUB_WORKFLOW="Quality: Test" \
+		GITHUB_SHA="0000000000000000000000000000000000000000" \
+		GITHUB_REF_NAME="dev/v0.9" \
+		"$@" \
+		bash "${append}" "${lane}" "${numbers}" 2>&1
+}
+
+# QUALITY_HISTORY_RETAIN=3 over five appends: the newest 3 lines, in order.
+for marker in 1 2 3 4 5; do
+	run_append2 mutation-survivors "{\"run_marker\":${marker}}" "1${marker}0" \
+		QUALITY_HISTORY_RETAIN=3 >/dev/null || true
+done
+retained="$(branch_file2 mutation-survivors.jsonl)"
+[ "$(grep -c . <<<"${retained}" || true)" = "3" ] ||
+	fail "QUALITY_HISTORY_RETAIN=3 over five appends must leave exactly 3 lines"
+markers="$(jq -r '.run_marker' <<<"${retained}" | paste -sd, -)"
+[ "${markers}" = "3,4,5" ] ||
+	fail "QUALITY_HISTORY_RETAIN must keep the newest records in order, got '${markers}'"
+
+# RETAIN=0 is refused: a warning, and the append still happens unpruned.
+output="$(run_append2 mutation-survivors '{"run_marker":6}' 160 QUALITY_HISTORY_RETAIN=0)"
+grep -Fq "QUALITY_HISTORY_RETAIN must be at least 1" <<<"${output}" ||
+	fail "RETAIN=0 must be refused with a warning (output: ${output})"
+[ "$(grep -c . <<<"$(branch_file2 mutation-survivors.jsonl)" || true)" = "4" ] ||
+	fail "a refused RETAIN must not block the append, only the pruning"
+
+# Unset leaves the file unpruned: one more append grows it by exactly one.
+before_unset="$(grep -c . <<<"$(branch_file2 mutation-survivors.jsonl)" || true)"
+run_append2 mutation-survivors '{"run_marker":7}' 170 >/dev/null || true
+after_unset="$(grep -c . <<<"$(branch_file2 mutation-survivors.jsonl)" || true)"
+[ "${after_unset}" = "$((before_unset + 1))" ] ||
+	fail "an unset RETAIN must not prune (${before_unset} -> ${after_unset})"
+
+# A duplicate record under a cap is still a no-op: the duplicate guard runs
+# before the append and the prune, so a repeat changes nothing.
+dup_numbers='{"run_marker":8}'
+run_append2 mutation-survivors "${dup_numbers}" 180 \
+	QUALITY_HISTORY_RETAIN=3 QUALITY_HISTORY_TIMESTAMP="2026-09-04T00:00:00Z" >/dev/null || true
+count_after_first="$(grep -c . <<<"$(branch_file2 mutation-survivors.jsonl)" || true)"
+output="$(run_append2 mutation-survivors "${dup_numbers}" 180 \
+	QUALITY_HISTORY_RETAIN=3 QUALITY_HISTORY_TIMESTAMP="2026-09-04T00:00:00Z")"
+count_after_second="$(grep -c . <<<"$(branch_file2 mutation-survivors.jsonl)" || true)"
+grep -Fq "already on" <<<"${output}" ||
+	fail "a duplicate record under a cap must still be recognised (output: ${output})"
+[ "${count_after_first}" = "${count_after_second}" ] ||
+	fail "a duplicate record under a cap must not grow the file (${count_after_first} -> ${count_after_second})"
+
+# --- QUALITY_HISTORY_RETAIN_BYTES: oldest-first, never the newest -----------
+
+bare3="${test_root}/qh-bytes.git"
+git init --quiet --bare "${bare3}"
+
+branch_file3() {
+	git -C "${bare3}" cat-file blob "quality-history:$1" 2>/dev/null || true
+}
+
+run_append3() {
+	local lane="$1" numbers="$2" run_id="$3"
+	shift 3
+	env \
+		QUALITY_HISTORY_REMOTE="${bare3}" \
+		QUALITY_HISTORY_EVENT="schedule" \
+		QUALITY_HISTORY_AUTHOR_NAME="test" \
+		QUALITY_HISTORY_AUTHOR_EMAIL="test@example.invalid" \
+		GITHUB_RUN_ID="${run_id}" \
+		GITHUB_RUN_ATTEMPT="1" \
+		GITHUB_RUN_NUMBER="${run_id}" \
+		GITHUB_WORKFLOW="Quality: Test" \
+		GITHUB_SHA="0000000000000000000000000000000000000000" \
+		GITHUB_REF_NAME="dev/v0.9" \
+		"$@" \
+		bash "${append}" "${lane}" "${numbers}" 2>&1
+}
+
+pad="$(printf '%*s' 60 '')"
+pad="${pad// /x}"
+
+for marker in 1 2 3 4 5; do
+	run_append3 mutation-survivors "{\"pad\":\"${pad}\",\"run_marker\":${marker}}" "2${marker}0" \
+		QUALITY_HISTORY_RETAIN=1000 QUALITY_HISTORY_RETAIN_BYTES=500 >/dev/null || true
+done
+retained="$(branch_file3 mutation-survivors.jsonl)"
+grep -Fq '"run_marker":5' <<<"${retained}" ||
+	fail "the byte ceiling must never drop the newest record"
+if grep -Fq '"run_marker":1' <<<"${retained}"; then
+	fail "the byte ceiling must drop the oldest record first"
+fi
+markers="$(jq -r '.run_marker' <<<"${retained}" | paste -sd, -)"
+case "${markers}" in
+5 | 4,5 | 3,4,5 | 2,3,4,5 | 1,2,3,4,5) ;;
+*) fail "the byte ceiling must keep a contiguous run of the newest records, got '${markers}'" ;;
+esac
+lines="$(grep -c . <<<"${retained}" || true)"
+if [ "${lines}" -gt 1 ]; then
+	size="$(printf '%s' "${retained}" | wc -c | tr -d ' ')"
+	[ "${size}" -le 500 ] ||
+		fail "once more than the newest record remains, the file must fit the byte ceiling"
+fi
+
+# A record that alone exceeds the ceiling is still kept, with a warning.
+bigpad="$(printf '%*s' 2000 '')"
+bigpad="${bigpad// /x}"
+output="$(run_append3 mutation-survivors "{\"pad\":\"${bigpad}\",\"run_marker\":99}" 299 \
+	QUALITY_HISTORY_RETAIN=1000 QUALITY_HISTORY_RETAIN_BYTES=500)"
+grep -Fq "::warning::" <<<"${output}" ||
+	fail "a newest record that alone exceeds the ceiling must still warn (output: ${output})"
+grep -Fq "exceeds the 500-byte ceiling" <<<"${output}" ||
+	fail "the ceiling-exceeded warning must name the byte ceiling (output: ${output})"
+retained2="$(branch_file3 mutation-survivors.jsonl)"
+[ "$(grep -c . <<<"${retained2}" || true)" = "1" ] ||
+	fail "an oversized newest record must still drop everything older"
+grep -Fq '"run_marker":99' <<<"${retained2}" ||
+	fail "an oversized newest record must still be kept, not dropped"
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} quality-history script check(s) failed" >&2
 	exit 1

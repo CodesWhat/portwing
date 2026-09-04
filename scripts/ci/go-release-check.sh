@@ -45,3 +45,5 @@ bash scripts/mutation-gate-script-test.sh
 bash scripts/mutation-ratchet-script-test.sh
 bash scripts/quality-history-script-test.sh
 bash scripts/quality-history-record-test.sh
+bash scripts/mutation-survivors-record-test.sh
+bash scripts/mutation-survivors-diff-test.sh

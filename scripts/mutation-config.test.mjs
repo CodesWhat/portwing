@@ -230,6 +230,7 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   assertCanaryJob(source);
   assertAdvisoryJob(source, entries);
   assertAdvisorySummaryJob(source);
+  assertMutationSurvivorsRecordStep(source, entries);
   assertRatchetJob(source);
 }
 
@@ -691,6 +692,36 @@ function assertAdvisorySummaryJob(source) {
     summary,
     /^ {12}exit 1$/mu,
     "the advisory summary job must exit non-zero when a group is missing",
+  );
+}
+
+// PW-2.5. The mutation-survivors record script (scripts/ci/mutation-survivors-record.sh)
+// needs the same name|package set the gating matrix declares, duplicated
+// here for the same reason ADVISORY_GROUP_PACKAGES is duplicated in the
+// advisory summary job above: the history job runs after the matrix and has
+// no access to its context. A package added to the matrix without a
+// matching MUTATION_PACKAGES line would silently record "missing" forever
+// instead of failing this check.
+function assertMutationSurvivorsRecordStep(source, entries) {
+  const history = jobBlock(source, "history", "the history job is missing");
+
+  const envMatch = history.match(/^ {10}MUTATION_PACKAGES: \|\n((?: {12}.+\n)+)/mu);
+  assert.ok(envMatch, "the history job must declare MUTATION_PACKAGES");
+  const declaredPairs = envMatch[1]
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice("            ".length));
+  const expectedPairs = entries.map((entry) => `${entry.name}|${entry.package}`);
+  if (JSON.stringify(declaredPairs) !== JSON.stringify(expectedPairs)) {
+    throw new Error(
+      "the history job's MUTATION_PACKAGES must match the gating matrix's own name|package set exactly",
+    );
+  }
+
+  assert.match(
+    history,
+    /scripts\/ci\/mutation-survivors-record\.sh records advisory \. mutation-packages\.txt/u,
+    "the history job must run the survivor identity record script over both artifact downloads",
   );
 }
 
@@ -1219,10 +1250,14 @@ test("mutation contract rejects an advisory summary job that runs Go tooling", (
 });
 
 test("mutation contract rejects an advisory summary job that stops downloading every leg", () => {
+  // Anchored on the trailing "path: rows" rather than the bare pattern
+  // line: PW-2.5's history job downloads the same artifact pattern into
+  // "path: advisory", and a bare-pattern replace would silently hit that
+  // occurrence first since it now comes earlier in the file.
   assertMutationFailure(
     workflow.replace(
-      `          pattern: mutation-advisory-*-${githubRunId}\n`,
-      `          pattern: mutation-advisory-server-${githubRunId}\n`,
+      `          pattern: mutation-advisory-*-${githubRunId}\n          path: rows\n`,
+      `          pattern: mutation-advisory-server-${githubRunId}\n          path: rows\n`,
     ),
     "the advisory summary job must download every leg's rows artifact",
   );
@@ -1243,10 +1278,14 @@ test("mutation contract rejects an advisory summary job that drops its group inv
 });
 
 test("mutation contract rejects an advisory summary job whose group inventory drifts from the matrix", () => {
+  // Anchored on the preceding "ADVISORY_GROUP_PACKAGES: |" key: the
+  // "server|./internal/server" line by itself is no longer unique in the
+  // file once PW-2.5's history job carries the same pair in its own
+  // MUTATION_PACKAGES block.
   assertMutationFailure(
     workflow.replace(
-      "            server|./internal/server\n",
-      "            server|./internal/serverx\n",
+      "          ADVISORY_GROUP_PACKAGES: |\n            server|./internal/server\n",
+      "          ADVISORY_GROUP_PACKAGES: |\n            server|./internal/serverx\n",
     ),
     "the advisory summary job's ADVISORY_GROUP_PACKAGES must match the advisory matrix's own groups and packages exactly",
   );

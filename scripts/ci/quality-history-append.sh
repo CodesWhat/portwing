@@ -5,8 +5,8 @@
 #
 # Usage: quality-history-append.sh <lane> <json-object>
 #
-#   <lane>         soak | mutation | fuzz-nightly | bench. Names the JSONL
-#                  file on the orphan branch (`<lane>.jsonl`).
+#   <lane>         soak | mutation | mutation-survivors | fuzz-nightly | bench.
+#                  Names the JSONL file on the orphan branch (`<lane>.jsonl`).
 #   <json-object>  A single JSON object of that lane's numbers. The common
 #                  envelope (run id, attempt, workflow, event, sha, UTC
 #                  timestamp) is added here so every lane records it the same
@@ -44,6 +44,21 @@
 #                                   duplicate-suppression path below can be
 #                                   tested: it needs two invocations that
 #                                   produce a byte-identical record.
+#   QUALITY_HISTORY_RETAIN          keep only the newest N records in this
+#                                   lane's file, applied after every append.
+#                                   Unset means today's behaviour for every
+#                                   lane: unbounded. A value below 1 is
+#                                   refused (a warning, pruning skipped for
+#                                   that invocation; the append itself still
+#                                   happens).
+#   QUALITY_HISTORY_RETAIN_BYTES    byte ceiling enforced alongside RETAIN,
+#                                   default 1048576 (1 MiB) once RETAIN is
+#                                   set. Whole oldest records are dropped
+#                                   until the file fits or only the newest
+#                                   record remains; the newest record is
+#                                   never dropped, even if it alone exceeds
+#                                   the ceiling (a `::warning::` is emitted
+#                                   instead).
 
 set -euo pipefail
 export LC_ALL=C
@@ -84,9 +99,9 @@ if [ -z "${lane}" ] || [ -z "${numbers}" ]; then
 fi
 
 case "${lane}" in
-soak | mutation | fuzz-nightly | bench) ;;
+soak | mutation | mutation-survivors | fuzz-nightly | bench) ;;
 *)
-	warn "unknown lane '${lane}'; expected one of soak, mutation, fuzz-nightly, bench"
+	warn "unknown lane '${lane}'; expected one of soak, mutation, mutation-survivors, fuzz-nightly, bench"
 	exit 1
 	;;
 esac
@@ -139,6 +154,37 @@ case "${attempts}" in
 esac
 [ "${attempts}" -ge 1 ] || attempts=1
 
+# QUALITY_HISTORY_RETAIN caps the newest N records this lane keeps; unset
+# means today's unbounded behaviour for every lane. Invalid is refused, not
+# fatal: pruning is skipped for this invocation and the record is still
+# appended, because a bad cap is not a reason to lose the measurement.
+retain="${QUALITY_HISTORY_RETAIN:-}"
+case "${retain}" in
+'') ;;
+*[!0-9]*)
+	warn "QUALITY_HISTORY_RETAIN must be a positive integer, got '${retain}'; not pruning."
+	retain=""
+	;;
+*)
+	if [ "${retain}" -lt 1 ]; then
+		warn "QUALITY_HISTORY_RETAIN must be at least 1, got '${retain}'; not pruning."
+		retain=""
+	fi
+	;;
+esac
+
+retain_bytes="${QUALITY_HISTORY_RETAIN_BYTES:-}"
+if [ -n "${retain}" ] && [ -z "${retain_bytes}" ]; then
+	retain_bytes=1048576
+fi
+case "${retain_bytes}" in
+'') ;;
+*[!0-9]*)
+	warn "QUALITY_HISTORY_RETAIN_BYTES must be a positive integer, got '${retain_bytes}'; not enforcing a byte ceiling."
+	retain_bytes=""
+	;;
+esac
+
 record="$(
 	jq -cn \
 		--argjson numbers "${numbers}" \
@@ -179,6 +225,7 @@ append-only JSONL file per lane, one record per lane run:
 |---|---|---|
 | `soak.jsonl` | `quality-soak-weekly.yml` | weekly |
 | `mutation.jsonl` | `quality-mutation-monthly.yml` | monthly, one record per matrix package |
+| `mutation-survivors.jsonl` | `quality-mutation-monthly.yml` | monthly, one record per run, capped to the newest 12 |
 | `fuzz-nightly.jsonl` | `quality-fuzz-nightly.yml` | nightly |
 | `bench.jsonl` | `quality-bench-monthly.yml` | monthly |
 
@@ -252,10 +299,35 @@ attempt_append() {
 		return 0
 	fi
 
-	if [ ! -f "${repo_dir}/README.md" ]; then
-		readme_text >"${repo_dir}/README.md" || return 1
-	fi
+	# Unconditional: a `[ ! -f ]` guard means an edit to readme_text() never
+	# reaches an existing branch, so a lane added after the branch already
+	# exists (this one included) would go undocumented forever.
+	readme_text >"${repo_dir}/README.md" || return 1
 	printf '%s\n' "${record}" >>"${repo_dir}/${file}" || return 1
+
+	# QUALITY_HISTORY_RETAIN, applied after the append and before staging:
+	# a CAS retry replays this on top of whoever won, so the pruned result
+	# is always relative to the branch's current tip rather than a stale
+	# fetch. Whole oldest records are dropped, never part of one, so every
+	# retained record stays self-consistent; the newest record (the one
+	# this attempt just wrote) is never dropped.
+	if [ -n "${retain}" ]; then
+		local pruned="${repo_dir}/${file}.pruned"
+		tail -n "${retain}" "${repo_dir}/${file}" >"${pruned}" || return 1
+		mv "${pruned}" "${repo_dir}/${file}" || return 1
+
+		if [ -n "${retain_bytes}" ]; then
+			while [ "$(wc -l <"${repo_dir}/${file}")" -gt 1 ] &&
+				[ "$(wc -c <"${repo_dir}/${file}")" -gt "${retain_bytes}" ]; do
+				tail -n +2 "${repo_dir}/${file}" >"${pruned}" || return 1
+				mv "${pruned}" "${repo_dir}/${file}" || return 1
+			done
+
+			if [ "$(wc -c <"${repo_dir}/${file}")" -gt "${retain_bytes}" ]; then
+				echo "::warning::quality-history: the newest ${lane} record alone exceeds the ${retain_bytes}-byte ceiling; keeping it anyway."
+			fi
+		fi
+	fi
 
 	git -C "${repo_dir}" add README.md "${file}" || return 1
 	git -C "${repo_dir}" commit --quiet \
