@@ -534,6 +534,23 @@ awk '
 mv "${monthly}.tmp" "${monthly}"
 expect_fail "a monthly 'Resolve corpus paths' step with no go-list cross-check must not satisfy the contract"
 
+seed_fixture
+# The previous fixture strips the cross-check from every "Resolve corpus
+# paths" occurrence at once, so it can't tell a resolver that only walks the
+# first (leg job) step from one that walks both. Strip it from ONLY the
+# second occurrence (the merge-corpus job's step), leaving the leg job's copy
+# untouched, so this fails only if the contract actually reaches the second
+# occurrence.
+awk '
+	/^      - name: Resolve corpus paths$/ { resolver++ }
+	resolver == 2 && /^          listed="\$\(go list/ { skip = 1 }
+	skip && /^          fi$/ { skip = 0; next }
+	skip { next }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "the merge-corpus resolver must retain its go-list cross-check"
+
 # --- Corpus writer concurrency (review follow-up) ---------------------------
 
 seed_fixture
