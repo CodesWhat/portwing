@@ -1405,6 +1405,13 @@ func TestConnectDropFreesStreamedRequestIDForTheRetry(t *testing.T) {
 	c.connMu.Lock()
 	c.conn = agent
 	c.connMu.Unlock()
+	// connect's own teardown reset sendCh to nil when the dropped connection's
+	// goroutine returned, so this reconnect needs its own pump the way a real
+	// one would get from connect: without it, c.conn set with sendCh nil takes
+	// sendMessageTo's unserialized handshake-only branch, and the retry below
+	// drives handleRequestTo/dispatchStreamedBody, which are more than one
+	// sender.
+	startSendPump(t, c)
 	//nolint:bodyclose // consumed and closed by handleRequestTo, the code under test.
 	fd := &fakeDocker{doResp: mkResp(http.StatusCreated, "application/json", `{"ok":true}`)}
 	c.dockerClient = fd
