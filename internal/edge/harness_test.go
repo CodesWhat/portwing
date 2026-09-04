@@ -140,7 +140,9 @@ func startSendPump(t *testing.T, c *Client) {
 	c.connMu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go c.sendPump(ctx, conn, ch)
+	// context.Background() as the shutdown context: the harness models a live
+	// agent, so a write failure here takes the ordinary eviction path.
+	go c.sendPump(ctx, context.Background(), conn, ch)
 	t.Cleanup(cancel)
 }
 
@@ -244,12 +246,16 @@ const healthServerLivenessTimeout = 10 * time.Second
 // port between allocation and (re)bind.
 func waitForHealthServer(t *testing.T, c *Client, urlPath string) string {
 	t.Helper()
+	// A timed client, not http.DefaultClient: an address that still accepts
+	// connections but never answers would park an untimed Get past the
+	// backstop below instead of failing the iteration and retrying.
+	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(healthServerLivenessTimeout)
 	for time.Now().Before(deadline) {
 		if addr := c.HealthAddr(); addr != nil {
 			url := "http://" + addr.String() + urlPath
 			//nolint:noctx,bodyclose
-			resp, err := http.Get(url) //nolint:gosec
+			resp, err := client.Get(url) //nolint:gosec
 			if err == nil {
 				resp.Body.Close()
 				return url

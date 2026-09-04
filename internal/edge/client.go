@@ -268,7 +268,14 @@ type Client struct {
 	// tests using an OS-assigned port ("0") — discover the real bound
 	// address instead of racing a separate allocate/close/rebind, the same
 	// pattern internal/server.Server.Addr uses for the main HTTP server.
-	healthListenAddr atomic.Value
+	//
+	// A pointer, not an atomic.Value, because startHealthServer has to be
+	// able to reset it: BaseContext only runs on a successful listen, so a
+	// restart that fails to bind would otherwise leave the previous server's
+	// address readable and break HealthAddr's nil-until-bound contract.
+	// atomic.Value cannot store a nil interface, which is what that reset
+	// needs to write.
+	healthListenAddr atomic.Pointer[net.Addr]
 }
 
 // pendingRequestBody accumulates the stream/stream_end frames that follow a
@@ -579,7 +586,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c.sendPump(pumpCtx, conn, sendCh)
+		c.sendPump(pumpCtx, ctx, conn, sendCh)
 	}()
 
 	// Let adapter handle initial sync (container sync, component sync, etc.).
@@ -1660,7 +1667,17 @@ func outboundEnvelopeBytes(env protocol.Envelope) int64 {
 // head-of-line-blocking every sender or stalling the read pump, and a write
 // that can't complete within writeWait evicts the connection rather than
 // blocking forever.
-func (c *Client) sendPump(ctx context.Context, conn *websocket.Conn, sendCh chan protocol.Envelope) {
+//
+// It takes two contexts because they answer different questions. ctx is the
+// per-connection pump context, and cancelling it is how a dropped tunnel
+// stops this pump. shutdownCtx is Run's own context, and its cancellation is
+// the agent exiting. Only the outer one can classify a write failure, and it
+// has to be the outer one: connect closes the conn from a context.AfterFunc
+// on cancel, and that callback runs on its own goroutine, so a write can fail
+// against the closed conn before the pump context has been cancelled. The
+// outer context's error is already set before any child cancellation starts,
+// which makes the check below race-free where a check on ctx would not be.
+func (c *Client) sendPump(ctx, shutdownCtx context.Context, conn *websocket.Conn, sendCh chan protocol.Envelope) {
 	c.connMu.Lock()
 	state := c.sendState
 	if c.sendCh != sendCh {
@@ -1685,6 +1702,13 @@ func (c *Client) sendPump(ctx context.Context, conn *websocket.Conn, sendCh chan
 			}
 			if err := conn.WriteJSON(env); err != nil {
 				state.release(env)
+				if shutdownCtx.Err() != nil {
+					// Shutdown closed the conn out from under this write.
+					// Nothing is wrong and there is no generation left to
+					// evict, so this neither warns nor calls failConn.
+					slog.Debug("websocket write abandoned, shutting down", "type", env.Type, "error", err)
+					return
+				}
 				slog.Warn("websocket write failed", "type", env.Type, "error", err)
 				c.failConn(conn, "write failed")
 				return
@@ -1804,6 +1828,11 @@ func closeWebSocket(conn *websocket.Conn, context string) {
 // metrics server used by Docker, Kubernetes, and Prometheus.
 func (c *Client) startHealthServer() {
 	c.ensureOperationalState()
+	// Every call starts unbound. BaseContext below only fires once the
+	// listener is up, so without this a restart that cannot bind (the port
+	// taken in the gap, say) would leave the previous server's address in
+	// place and HealthAddr would hand out an address nothing is serving.
+	c.healthListenAddr.Store(nil)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1878,7 +1907,8 @@ func (c *Client) startHealthServer() {
 		// the only hook stdlib gives us to learn the bound address without
 		// owning the listener ourselves.
 		BaseContext: func(ln net.Listener) context.Context {
-			c.healthListenAddr.Store(ln.Addr())
+			addr := ln.Addr()
+			c.healthListenAddr.Store(&addr)
 			return context.Background()
 		},
 	}
@@ -1898,8 +1928,10 @@ func (c *Client) startHealthServer() {
 // callers — chiefly tests using an OS-assigned port ("0") — discover the
 // real bound address instead of racing a separate allocate/close/rebind.
 func (c *Client) HealthAddr() net.Addr {
-	addr, _ := c.healthListenAddr.Load().(net.Addr)
-	return addr
+	if addr := c.healthListenAddr.Load(); addr != nil {
+		return *addr
+	}
+	return nil
 }
 
 func (c *Client) ensureOperationalState() {

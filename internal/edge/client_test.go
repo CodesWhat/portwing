@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -826,7 +827,11 @@ const idleCancelBudget = time.Second
 // correct. Run has to return inside idleCancelBudget from either position.
 // It is what makes a regression fail every run instead of most of them: with
 // the cancel landing inside the read, an agent without the AfterFunc seam
-// hangs for the full 60-second read deadline.
+// hangs for the full 60-second read deadline. Should the loop-top ctx check
+// catch a cancel first, this test still passes on a build with no seam at
+// all, so the evidence that the seam carries the behaviour is the mutation
+// run — deleting the AfterFunc and watching this fail — not the assertion on
+// its own.
 const readPumpSettle = 100 * time.Millisecond
 
 // pingUntilPong drives the controller side of the liveness handshake the
@@ -1795,6 +1800,74 @@ func TestStartHealthServerTwiceDoesNotPanic(t *testing.T) {
 	}
 }
 
+// TestStartHealthServerFailedRebindClearsHealthAddr pins HealthAddr's
+// nil-until-bound contract across a restart that cannot bind. BaseContext is
+// the only hook that records the address and it runs on a successful listen,
+// so a second start that fails leaves nothing behind to overwrite the first
+// server's address with. Without the reset in startHealthServer the accessor
+// keeps handing out an address whose listener belongs to a server the Client
+// no longer holds, which reads as a healthy agent to anything polling it.
+//
+// The occupied port is what makes the failure deterministic: the test holds
+// the listener for the rest of the run, so the rebind cannot win a retry.
+func TestStartHealthServerFailedRebindClearsHealthAddr(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		cfg: &config.Config{
+			BindAddress: "127.0.0.1",
+			Port:        "0",
+		},
+	}
+
+	c.startHealthServer()
+	first := c.healthServer
+	firstDone := c.healthServerDone
+	t.Cleanup(func() {
+		_ = first.Close()
+		select {
+		case <-firstDone:
+		case <-time.After(healthServerLivenessTimeout):
+			t.Error("the first ListenAndServe goroutine did not finish")
+		}
+	})
+
+	waitForHealthServer(t, c, "/health")
+	bound := c.HealthAddr()
+	if bound == nil {
+		t.Fatal("HealthAddr() = nil after a successful bind")
+	}
+
+	// Take a port and keep it, so the restart below has nowhere to land.
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen to occupy a port: %v", err)
+	}
+	t.Cleanup(func() { _ = blocker.Close() })
+	_, blockedPort, err := net.SplitHostPort(blocker.Addr().String())
+	if err != nil {
+		t.Fatalf("split the occupied address: %v", err)
+	}
+
+	c.cfg.Port = blockedPort
+	c.startHealthServer()
+	second := c.healthServer
+	t.Cleanup(func() { _ = second.Close() })
+
+	// ListenAndServe returns the bind error before it ever reaches Serve, so
+	// BaseContext does not run and the goroutine closes this straight away.
+	// Waiting on it is the happens-before point for the assertion.
+	select {
+	case <-c.healthServerDone:
+	case <-time.After(healthServerLivenessTimeout):
+		t.Fatal("the failed ListenAndServe goroutine did not finish")
+	}
+
+	if addr := c.HealthAddr(); addr != nil {
+		t.Errorf("HealthAddr() = %v after a failed rebind, want nil (the first server's was %v)", addr, bound)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // connect — welcome with matching compat level (no warning branch)
 // ---------------------------------------------------------------------------
@@ -2300,7 +2373,7 @@ func TestSendPumpWriteJSONError(t *testing.T) {
 	defer cancel()
 	go func() {
 		defer close(pumpDone)
-		c.sendPump(ctx, agentConn, sendCh)
+		c.sendPump(ctx, context.Background(), agentConn, sendCh)
 	}()
 
 	// Enqueue a message; sendPump picks it up and tries to write to the
