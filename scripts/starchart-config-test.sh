@@ -47,6 +47,21 @@ set -euo pipefail
 # "does this look like key X" -- everything that isn't a placeholder is
 # compared as inert text.
 #
+# A fifth round found the golden template's own comparison had two blind
+# spots, both in how bash reads text rather than in the template's shape: a
+# NUL byte embedded in a line is silently dropped by `read`, and a missing
+# final newline is invisible to any comparison built out of "read a line at
+# a time" -- there's no line for a missing trailing newline to differ on.
+# Both pass a line-by-line text comparison while being a real, meaningful
+# difference in the file's actual bytes. So the line-by-line comparison is no
+# longer the gate: it renders the template with the three slots filled in
+# from whatever the real file has at those positions, and `cmp -s`s that
+# rendering against the real file, byte for byte. The line-by-line walk still
+# runs, but only after cmp has already failed, purely to say WHERE and WHY in
+# terms a human edits by; when it can't find a textual difference to explain
+# a cmp failure, it says that too, rather than reporting a clean diff that
+# isn't one.
+#
 # When the workflow file legitimately changes -- a pin roll, a release cut
 # rolling the branch -- the three placeholders absorb it and this contract
 # needs no edit. Anything else is a deliberate edit to both files in the same
@@ -86,7 +101,8 @@ fi
 # --- the golden template ------------------------------------------------------
 
 template_file="$(mktemp "${TMPDIR:-/tmp}/starchart-template.XXXXXX")"
-trap 'rm -f "${template_file}"' EXIT
+rendered_file=""
+trap 'rm -f "${template_file}" "${rendered_file}"' EXIT
 
 cat >"${template_file}" <<'__STARCHART_TEMPLATE_EOF__'
 name: Star Chart
@@ -175,7 +191,12 @@ __STARCHART_TEMPLATE_EOF__
 # heredoc body containing an apostrophe breaks that combination's parser
 # outright (reproduced locally; not present on the bash 5.x this also runs
 # under in CI). A line-at-a-time read loop from a real file is portable to
-# both.
+# both -- but `read` also silently drops an embedded NUL byte, and a loop
+# built out of "read a line at a time" has no representation for "the file
+# is missing its final newline" at all, since that isn't a line. Both stay
+# useful for extracting the three slot values and, further down, for
+# explaining a failure in terms of a specific line -- neither is trusted to
+# decide pass or fail on its own.
 template_lines=()
 while IFS= read -r line || [ -n "${line}" ]; do
 	template_lines+=("${line}")
@@ -189,24 +210,30 @@ done <"${workflow}"
 template_count=${#template_lines[@]}
 actual_count=${#actual_lines[@]}
 
-structural_ok=1
 pin=""
 pin_comment=""
 pin_line=""
+pin_extracted=0
 branch_value=""
+branch_extracted=0
 
 uses_prefix="    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@"
 branch_prefix="      branch: "
 
+# Recover candidate slot values from whatever the real file actually has at
+# each placeholder's position. This is deliberately loose -- it feeds both
+# the slot validation directly below and the rendered-template comparison
+# after it. A prefix that doesn't match at all (the uses: or branch: line
+# moved, was deleted, or is some other key entirely) leaves *_extracted at 0:
+# there is nothing meaningful to validate at that slot, and the byte gate
+# below will independently refuse to match on its own terms.
 i=0
-while [ "${i}" -lt "${template_count}" ] && [ "${i}" -lt "${actual_count}" ]; do
+while [ "${i}" -lt "${template_count}" ]; do
 	t="${template_lines[$i]}"
-	a="${actual_lines[$i]}"
-	line_no=$((i + 1))
-
+	a="${actual_lines[$i]:-}"
 	case "${t}" in
 	*'@PIN@'*)
-		if [ "${a#"${uses_prefix}"}" != "${a}" ]; then
+		if [ "${i}" -lt "${actual_count}" ] && [ "${a#"${uses_prefix}"}" != "${a}" ]; then
 			rest="${a#"${uses_prefix}"}"
 			if [ "${rest#*"  # "}" != "${rest}" ]; then
 				pin="${rest%%"  # "*}"
@@ -216,49 +243,35 @@ while [ "${i}" -lt "${template_count}" ] && [ "${i}" -lt "${actual_count}" ]; do
 				pin_comment=""
 			fi
 			pin_line="${a}"
-		else
-			fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
-			structural_ok=0
+			pin_extracted=1
 		fi
 		;;
 	*'@BRANCH@'*)
-		if [ "${a#"${branch_prefix}"}" != "${a}" ]; then
+		if [ "${i}" -lt "${actual_count}" ] && [ "${a#"${branch_prefix}"}" != "${a}" ]; then
 			branch_value="${a#"${branch_prefix}"}"
-		else
-			fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
-			structural_ok=0
-		fi
-		;;
-	*)
-		if [ "${t}" != "${a}" ]; then
-			fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
-			structural_ok=0
+			branch_extracted=1
 		fi
 		;;
 	esac
-
-	if [ "${structural_ok}" -eq 0 ]; then
-		break
-	fi
 	i=$((i + 1))
 done
 
-if [ "${structural_ok}" -eq 1 ] && [ "${template_count}" -ne "${actual_count}" ]; then
-	fail "starchart.yml deviates from the pinned shape: expected ${template_count} lines, got ${actual_count}"
-	structural_ok=0
-fi
-
 # --- the three slots that are allowed to vary --------------------------------
 #
-# Only reached when every non-placeholder line matched exactly and the line
-# counts agree, so pin, pin_comment, and branch_value were captured from the
-# real file's own uses: and branch: lines, not left at their empty defaults.
+# Validated ahead of the byte gate below, using whatever was just extracted
+# -- but only when extraction actually found that slot's line in the first
+# place. When it didn't (the uses: or branch: line is missing, moved, or
+# replaced by something else entirely), there is nothing meaningful to
+# validate; that is a structural deviation, and the diagnostics below the
+# gate report it on their own terms once cmp has already failed.
 
-if [ "${structural_ok}" -eq 1 ]; then
+if [ "${pin_extracted}" -eq 1 ]; then
 	if ! [[ ${pin} =~ ^[0-9a-f]{40}$ ]] || [ -z "$(printf '%s' "${pin_comment}" | tr -d '[:space:]')" ]; then
 		fail "the starchart-refresh.yml pin must be a full 40-hex commit SHA followed by a non-empty comment: ${pin_line}"
 	fi
+fi
 
+if [ "${branch_extracted}" -eq 1 ]; then
 	case "${branch_value}" in
 	main | master | HEAD | "")
 		fail "branch must not be main/master/HEAD/empty; the reusable workflow refuses these too, but this fails before a run is even needed: got '${branch_value}'"
@@ -278,6 +291,83 @@ if [ "${structural_ok}" -eq 1 ]; then
 		fi
 		;;
 	esac
+fi
+
+# --- the gate: a byte comparison ----------------------------------------------
+#
+# Render the template with the three slots filled in from what was just
+# extracted (empty, for a slot whose line extraction never found), and
+# compare that rendering to the real file byte for byte. `cmp` sees a NUL
+# byte, a missing trailing newline, and anything else the line-based reads
+# above cannot. This is the actual pass/fail decision; the slot validation
+# above and the diagnostics below it exist to explain a failure, not to make
+# one -- a file this rejects can still get a precise message either way.
+
+rendered_file="$(mktemp "${TMPDIR:-/tmp}/starchart-rendered.XXXXXX")"
+
+i=0
+while [ "${i}" -lt "${template_count}" ]; do
+	t="${template_lines[$i]}"
+	case "${t}" in
+	*'@PIN@'*) printf '%s\n' "${uses_prefix}${pin}  # ${pin_comment}" ;;
+	*'@BRANCH@'*) printf '%s\n' "${branch_prefix}${branch_value}" ;;
+	*) printf '%s\n' "${t}" ;;
+	esac
+	i=$((i + 1))
+done >"${rendered_file}"
+
+if ! cmp -s "${rendered_file}" "${workflow}"; then
+	# Diagnostics only, run because the gate above already failed: walk the
+	# same two arrays the extraction step used and say where the two files
+	# first disagree as text. If that walk finds nothing -- every line reads
+	# identically as text, and the counts even agree -- one of two things is
+	# true: a NUL byte or a missing final newline is the real, invisible-to-
+	# text cause (say so), or a slot validation message above already
+	# explained it (a malformed pin or branch line renders differently from
+	# the file's own malformed text; the mismatch is real, but naming it
+	# again here would just repeat what was already said in more useful
+	# terms).
+	deviation_found=0
+	i=0
+	while [ "${i}" -lt "${template_count}" ] && [ "${i}" -lt "${actual_count}" ]; do
+		t="${template_lines[$i]}"
+		a="${actual_lines[$i]}"
+		line_no=$((i + 1))
+
+		case "${t}" in
+		*'@PIN@'*)
+			if [ "${a#"${uses_prefix}"}" = "${a}" ]; then
+				fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
+				deviation_found=1
+			fi
+			;;
+		*'@BRANCH@'*)
+			if [ "${a#"${branch_prefix}"}" = "${a}" ]; then
+				fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
+				deviation_found=1
+			fi
+			;;
+		*)
+			if [ "${t}" != "${a}" ]; then
+				fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
+				deviation_found=1
+			fi
+			;;
+		esac
+
+		if [ "${deviation_found}" -eq 1 ]; then
+			break
+		fi
+		i=$((i + 1))
+	done
+
+	if [ "${deviation_found}" -eq 0 ]; then
+		if [ "${template_count}" -ne "${actual_count}" ]; then
+			fail "starchart.yml deviates from the pinned shape: expected ${template_count} lines, got ${actual_count}"
+		elif [ "${failures}" -eq 0 ]; then
+			fail "starchart.yml deviates from the pinned shape: files differ after line ${template_count}, but every line read identically as text (a NUL byte or a missing trailing newline reads the same through a line-based comparison)"
+		fi
+	fi
 fi
 
 if [ "${failures}" -ne 0 ]; then
