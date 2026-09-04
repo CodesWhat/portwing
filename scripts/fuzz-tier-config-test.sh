@@ -25,6 +25,37 @@ fuzzers=(
 	"FuzzParseKeyLine|./internal/auth/"
 )
 
+# --- seed-replay tier (PW-7.37) ----------------------------------------------
+#
+# FuzzParseImageRef and FuzzParseLabels are saturated: 5.5M and 6.8M
+# executions logged with zero new interesting inputs, and their path
+# derivation was independently verified correct, so this is real saturation,
+# not a bug. Fuzzing them further spends nightly/monthly minutes finding
+# nothing while targets that still produce get the same budget. This is the
+# ONE list that decides tier membership; every check below that cares about
+# the split works outward from it, the same way `fuzzers` above is the one
+# list every other check works outward from.
+replay_tier_fuzzers=(
+	"FuzzParseImageRef"
+	"FuzzParseLabels"
+)
+
+is_replay_tier() {
+	local name="$1" rt
+	for rt in "${replay_tier_fuzzers[@]}"; do
+		[ "${rt}" = "${name}" ] && return 0
+	done
+	return 1
+}
+
+# The exact fromJSON() array literal quality-fuzz-nightly.yml's step-level
+# if: conditions gate on. Built from replay_tier_fuzzers, in the same order,
+# so a target added to or removed from that list without a matching edit to
+# the workflow's gating expression is caught below rather than silently
+# leaving the workflow's actual gate out of sync with this file's inventory.
+replay_tier_json="$(printf '"%s",' "${replay_tier_fuzzers[@]}")"
+replay_tier_json="[${replay_tier_json%,}]"
+
 # --- the array above has to be the whole truth ------------------------------
 #
 # Every other check in this file works outward from `fuzzers`, so a target
@@ -98,10 +129,23 @@ for spec in "${fuzzers[@]}"; do
 		fail "ci-verify.yml must run ${fuzzer} in ${pkg}"
 	grep -Eq "${lefthook_entry}" <<<"${lefthook_fuzz_entries}" ||
 		fail "lefthook.yml must run ${fuzzer} in ${pkg}"
+	# Nightly's matrix still carries every target, replay tier included — the
+	# split happens per-step inside that job (see the "must gate a Replay
+	# step" checks below), not by dropping a target from the matrix.
 	grep -Eq "${workflow_mapping}" .github/workflows/quality-fuzz-nightly.yml ||
 		fail "quality-fuzz-nightly.yml must run ${fuzzer} in ${pkg}"
-	grep -Eq "${workflow_mapping}" .github/workflows/quality-fuzz-monthly.yml ||
-		fail "quality-fuzz-monthly.yml must run ${fuzzer} in ${pkg}"
+	# The monthly matrix is where the tiers actually diverge: a replay-tier
+	# target must NOT get a monthly leg at all (that is the whole savings
+	# this tier exists for), and every other target still must.
+	if is_replay_tier "${fuzzer}"; then
+		grep -Eq "${workflow_mapping}" .github/workflows/quality-fuzz-monthly.yml &&
+			fail "quality-fuzz-monthly.yml must not run replay-tier target ${fuzzer} in its matrix — it is seed-replay-only in the nightly and gets no monthly leg"
+	else
+		grep -Eq "${workflow_mapping}" .github/workflows/quality-fuzz-monthly.yml ||
+			fail "quality-fuzz-monthly.yml must run ${fuzzer} in ${pkg}"
+	fi
+	# ClusterFuzzLite is unaffected by the Go-engine tiers' seed-replay split:
+	# every target, replay tier included, still builds for libFuzzer.
 	grep -Eq "${cflite_entry}" .clusterfuzzlite/build.sh ||
 		fail ".clusterfuzzlite/build.sh must build ${fuzzer} from ${cflite_pkg}"
 
@@ -398,8 +442,29 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	' "${workflow}")"
 	[ -n "${upload_step_block}" ] ||
 		fail "${workflow} must have an 'Upload fuzz corpus on failure or cancel' step"
-	grep -Fxq "        if: failure() || cancelled()" <<<"${upload_step_block}" ||
-		fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
+	if [ "${workflow}" = ".github/workflows/quality-fuzz-nightly.yml" ]; then
+		# The nightly workflow also gates on kind/reason, not just
+		# failure()/cancelled(): a repro is only ever expected for a real
+		# crash or a stale-cache replay (scripts/ci/fuzz-replay.sh's own
+		# reason=stale-cache) — a build or corpus-copy error never produces
+		# new corpus content, so uploading for those would just be a
+		# guaranteed empty artifact. steps.replay only exists on this
+		# workflow's replay tier, so the monthly workflow below (no id:
+		# replay step) keeps the plain failure()/cancelled() guard instead.
+		grep -Fxq "        if: |" <<<"${upload_step_block}" ||
+			fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with a multi-line if: expression"
+		grep -Fxq "          (failure() || cancelled()) &&" <<<"${upload_step_block}" ||
+			fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with failure() || cancelled()"
+		grep -Fxq "          ((steps.fuzz.outputs.kind || steps.replay.outputs.kind) == 'crash' ||" <<<"${upload_step_block}" ||
+			fail "${workflow} must only upload the corpus artifact when kind is crash (steps.fuzz or steps.replay)"
+		grep -Fxq "           (steps.fuzz.outputs.reason || steps.replay.outputs.reason) == 'stale-cache')" <<<"${upload_step_block}" ||
+			fail "${workflow} must also upload the corpus artifact when reason is stale-cache (steps.fuzz or steps.replay)"
+		grep -Fxq "          if-no-files-found: warn" <<<"${upload_step_block}" ||
+			fail "${workflow} must set if-no-files-found: warn on the 'Upload fuzz corpus on failure or cancel' step now that it only runs when a repro was expected"
+	else
+		grep -Fxq "        if: failure() || cancelled()" <<<"${upload_step_block}" ||
+			fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
+	fi
 	grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${upload_step_block}" ||
 		fail "${workflow} must upload the corpus artifact with actions/upload-artifact pinned to ${upload_artifact_sha} in the same step"
 done
@@ -435,6 +500,20 @@ monthly_merge_job="$(job_block_by_name "${monthly_workflow}" "merge-corpus")"
 	fail "${monthly_workflow} must have a top-level 'monthly-fuzz' job"
 [ -n "${monthly_merge_job}" ] ||
 	fail "${monthly_workflow} must have a top-level 'merge-corpus' job that merges the legs' corpora"
+
+# Count as well as match: the per-fuzzer loop above already proves every
+# non-replay-tier target is present and every replay-tier target is absent
+# from each job's matrix individually, but it cannot see an EXTRA entry
+# nobody's inventory accounts for. Both jobs must carry exactly the
+# non-replay-tier count — not the full ten, and not ten minus one.
+want_monthly_entries=$((${#fuzzers[@]} - ${#replay_tier_fuzzers[@]}))
+for job_label in "monthly-fuzz:${monthly_leg_job}" "merge-corpus:${monthly_merge_job}"; do
+	job_name="${job_label%%:*}"
+	job_body="${job_label#*:}"
+	entry_count="$(grep -Ec '^          - \{ name: Fuzz' <<<"${job_body}" || true)"
+	[ "${entry_count}" -eq "${want_monthly_entries}" ] ||
+		fail "${monthly_workflow} '${job_name}' job must matrix exactly ${want_monthly_entries} fuzzers (the ${#fuzzers[@]}-target inventory minus the ${#replay_tier_fuzzers[@]}-target replay tier), found ${entry_count}"
+done
 
 # The per-leg fuzztime default must already be inside the 12-minute cap, not
 # just accepted by the budget step's runtime check — a default above the cap
@@ -578,6 +657,80 @@ grep -Fq 'expected_legs' <<<"${monthly_merge_step}" ||
 	fail "${monthly_workflow} 'Merge chunk corpus and aggregate leg stats' step must compute expected_legs"
 grep -Fq 'kind="infra"' <<<"${monthly_merge_step}" ||
 	fail "${monthly_workflow} 'Merge chunk corpus and aggregate leg stats' step must escalate kind=\"infra\" when fewer than expected_legs legs reported"
+
+# --- Seed-replay tier gating (PW-7.37) ---------------------------------------
+#
+# The nightly matrix carries all ten targets (the per-fuzzer loop above
+# already proved that), but only the non-replay-tier eight spend -fuzz
+# minutes: the two replay_tier_fuzzers targets run through a "Replay" step
+# instead of the "Fuzz" step, gated by the exact fromJSON() array this file
+# derives from replay_tier_fuzzers itself — so a tier list that drifts
+# between this file's inventory and the workflow's own gate is caught here,
+# rather than by two green runs quietly measuring different sets of targets.
+nightly_workflow_for_replay=".github/workflows/quality-fuzz-nightly.yml"
+nightly_gate_negated="        if: \${{ !contains(fromJSON('${replay_tier_json}'), matrix.fuzzer.name) }}"
+nightly_gate_positive="        if: \${{ contains(fromJSON('${replay_tier_json}'), matrix.fuzzer.name) }}"
+
+resolve_budget_block="$(step_block "${nightly_workflow_for_replay}" "Resolve fuzz budget")"
+[ -n "${resolve_budget_block}" ] ||
+	fail "${nightly_workflow_for_replay} must have a 'Resolve fuzz budget' step"
+grep -Fxq "${nightly_gate_negated}" <<<"${resolve_budget_block}" ||
+	fail "${nightly_workflow_for_replay} 'Resolve fuzz budget' step must skip the replay tier (${replay_tier_json}) — it has no -fuzz budget to resolve"
+
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+fuzz_step_block="$(step_block "${nightly_workflow_for_replay}" 'Fuzz ${{ matrix.fuzzer.name }}')"
+[ -n "${fuzz_step_block}" ] ||
+	fail "${nightly_workflow_for_replay} must have a 'Fuzz \${{ matrix.fuzzer.name }}' step"
+grep -Fxq "${nightly_gate_negated}" <<<"${fuzz_step_block}" ||
+	fail "${nightly_workflow_for_replay} 'Fuzz \${{ matrix.fuzzer.name }}' step must skip the replay tier (${replay_tier_json}) — those targets run through 'Replay' instead"
+
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+replay_step_block="$(step_block "${nightly_workflow_for_replay}" 'Replay ${{ matrix.fuzzer.name }}')"
+[ -n "${replay_step_block}" ] ||
+	fail "${nightly_workflow_for_replay} must have a 'Replay \${{ matrix.fuzzer.name }}' step for the seed-replay tier"
+grep -Fxq "${nightly_gate_positive}" <<<"${replay_step_block}" ||
+	fail "${nightly_workflow_for_replay} 'Replay \${{ matrix.fuzzer.name }}' step must run ONLY for the replay tier (${replay_tier_json})"
+grep -Eq 'bash[[:space:]]+scripts/ci/fuzz-replay\.sh' <<<"${replay_step_block}" ||
+	fail "${nightly_workflow_for_replay} 'Replay \${{ matrix.fuzzer.name }}' step must invoke scripts/ci/fuzz-replay.sh"
+
+# The Score/Summarize steps must read whichever of the two mutually-exclusive
+# steps actually ran, or a replay-tier target's kind/reason is silently empty
+# every night once the Fuzz step stops running for it.
+grep -Fq 'steps.fuzz.outputs.kind || steps.replay.outputs.kind' "${nightly_workflow_for_replay}" ||
+	fail "${nightly_workflow_for_replay} must read steps.fuzz.outputs.kind || steps.replay.outputs.kind, not steps.fuzz alone"
+
+fail_count_before_replay_script_check="${failures}"
+if [ ! -f scripts/ci/fuzz-replay.sh ]; then
+	fail "scripts/ci/fuzz-replay.sh must exist; it is what the 'Replay' step above invokes"
+fi
+if [ "${failures}" -eq "${fail_count_before_replay_script_check}" ]; then
+	replay_script_code="$(strip_comments scripts/ci/fuzz-replay.sh)"
+	# The replay script must classify a genuine regression as kind=crash,
+	# reason=seed-regression — the same reason value the -fuzz path's own
+	# seed-corpus-regression case uses (scripts/ci/fuzz-run.sh above) — so
+	# the Summarize step's existing "a previously-fixed crash has regressed"
+	# branch covers both without a third reason value to keep in sync.
+	grep -Fq 'kind=crash' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit kind=crash on a seed-replay regression"
+	grep -Fq 'reason=seed-regression' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit reason=seed-regression on a seed-replay regression"
+	grep -Fq 'kind=replay' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit kind=replay on a clean pass, not kind=pass — that value stays reserved for a run that spent -fuzz minutes"
+
+	# Three more exit paths, each kind=error rather than kind=crash, since
+	# none of them is a finding the committed corpus is responsible for: a
+	# package that no longer builds, a cached GOCACHE entry whose shape no
+	# longer matches the target's current signature, and a failure copying
+	# that cache into testdata in the first place. Collapsing any of these
+	# into reason=seed-regression would send someone hunting a corpus
+	# regression that isn't there.
+	grep -Fq 'reason=build' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit reason=build when the package fails to compile, distinct from a corpus regression"
+	grep -Fq 'reason=stale-cache' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit reason=stale-cache when a cached corpus entry no longer matches the target's signature"
+	grep -Fq 'reason=corpus-copy' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit reason=corpus-copy when copying the generated corpus into testdata fails, rather than swallowing the error into a green kind=replay"
+fi
 
 # --- Spec 2: corpus coverage score step (nightly only) ----------------------
 #

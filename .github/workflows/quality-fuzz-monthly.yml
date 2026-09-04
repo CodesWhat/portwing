@@ -49,10 +49,19 @@ run-name: >-
 # six overlapping directories into one and letting duplicate names collide
 # is exactly as correct as copying one.
 #
-# 1 hour per fuzzer × 10 fuzzers × matrix-parallel = ~10-12 minutes wall time
+# 1 hour per fuzzer × 8 fuzzers × matrix-parallel = ~10-12 minutes wall time
 # per leg, unchanged total CPU-minutes. Crashes upload with 180-day retention
 # so a failing input from an older monthly run stays recoverable long enough
 # to turn into a committed regression test.
+#
+# Only 8 of the repo's 10 fuzz targets appear in the matrix below (PW-7.37).
+# FuzzParseImageRef and FuzzParseLabels are saturated — 5.5M/6.8M executions
+# with zero new interesting inputs, and path derivation was verified correct
+# — so a monthly hour finds nothing for either. They still run every night in
+# quality-fuzz-nightly.yml's seed-replay tier (no -fuzz minutes there
+# either), which is the only tier that owns their regression detection now.
+# scripts/fuzz-tier-config-test.sh's `replay_tier_fuzzers` pins the exclusion
+# from this matrix explicitly, in both jobs below.
 
 on:
   workflow_dispatch:
@@ -103,8 +112,6 @@ jobs:
         fuzzer:
           - { name: FuzzParsePHC,            pkg: ./internal/server/ }
           - { name: FuzzParseTrustedProxies, pkg: ./internal/server/ }
-          - { name: FuzzParseImageRef,       pkg: ./internal/adapter/ }
-          - { name: FuzzParseLabels,         pkg: ./internal/adapter/drydock/ }
           - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
           - { name: FuzzEnvelope,            pkg: ./internal/protocol/ }
           - { name: FuzzVerifyRequest,       pkg: ./internal/auth/ }
@@ -421,8 +428,6 @@ jobs:
         fuzzer:
           - { name: FuzzParsePHC,            pkg: ./internal/server/ }
           - { name: FuzzParseTrustedProxies, pkg: ./internal/server/ }
-          - { name: FuzzParseImageRef,       pkg: ./internal/adapter/ }
-          - { name: FuzzParseLabels,         pkg: ./internal/adapter/drydock/ }
           - { name: FuzzMCPHandler,          pkg: ./internal/mcp/ }
           - { name: FuzzEnvelope,            pkg: ./internal/protocol/ }
           - { name: FuzzVerifyRequest,       pkg: ./internal/auth/ }

@@ -10,7 +10,7 @@ seed_fixture() {
 	rm -rf "${fixture:?}"/*
 	mkdir -p "${fixture}/scripts/ci" "${fixture}/.github/workflows" "${fixture}/.clusterfuzzlite"
 	cp scripts/fuzz-tier-config-test.sh "${fixture}/scripts/"
-	cp scripts/ci/go-fuzz.sh scripts/ci/fuzz-run.sh "${fixture}/scripts/ci/"
+	cp scripts/ci/go-fuzz.sh scripts/ci/fuzz-run.sh scripts/ci/fuzz-replay.sh "${fixture}/scripts/ci/"
 	cp lefthook.yml "${fixture}/"
 	cp .github/workflows/ci-verify.yml "${fixture}/.github/workflows/"
 	cp .github/workflows/quality-fuzz-nightly.yml "${fixture}/.github/workflows/"
@@ -422,8 +422,15 @@ seed_fixture
 # Move the if: guard off the upload-artifact step and onto a neighboring step
 # with a different if:, so a bare "does this string exist anywhere" check
 # would still pass while the artifact upload itself runs unconditionally.
+# The Upload step's own guard is now a multi-line `if: |` block preceded by
+# several comment lines (PW review finding C: kind/reason gating), so a
+# single getline no longer removes it -- skip everything between the name
+# line and the step's `uses:` line instead, however many lines that guard
+# spans.
 awk '
-	/^      - name: Upload fuzz corpus on failure or cancel$/ { print; getline; next }
+	/^      - name: Upload fuzz corpus on failure or cancel$/ { print; skip = 1; next }
+	skip && /^        uses: actions\/upload-artifact/ { skip = 0 }
+	skip { next }
 	/^      - name: Save fuzz corpus$/ { print; print "        if: failure() || cancelled()"; next }
 	{ print }
 ' "${nightly}" >"${nightly}.tmp"
