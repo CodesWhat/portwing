@@ -48,6 +48,16 @@ END {
 		if (count_by_block[block] > 0) {
 			covered += stmts_by_block[block]
 		}
+		# Test-only introspection: the percentage on stdout below is >0-vs-0
+		# per block, so it cannot tell a max-merge from a sum-merge when a
+		# block is covered by every input (3 and 4 both read as "covered").
+		# scripts/fuzz-score-script-test.sh sets this to read the actual
+		# merged count back off stderr and prove it is the max, not a sum.
+		# Never touches stdout, so normal callers (fuzz-score.sh, the nightly
+		# history job) are unaffected either way.
+		if (ENVIRON["FUZZ_COVER_UNION_DEBUG"] == "1") {
+			printf "%s %d %d\n", block, stmts_by_block[block], count_by_block[block] > "/dev/stderr"
+		}
 	}
 	pct = 0
 	if (total > 0) {

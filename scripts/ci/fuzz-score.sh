@@ -72,22 +72,27 @@ fi
 
 coverprofile="fuzz-cover-${target}.out"
 
-# Every cached-<basename> copy this run creates, so cleanup removes exactly
-# what it added and nothing that was already there. Runs on every exit path
-# (the early "no args" one above never reaches this trap, since it exits
-# before the trap is installed and before anything is copied).
-#
-# Expanded as "${copied[@]+"${copied[@]}"}" everywhere below, not
-# "${copied[@]}" alone: under `set -u`, an empty array's [@] expansion is an
-# unbound-variable error on the bash builds this repo's CI and lefthook both
-# run, and the array starts empty on a target with no cached corpus at all.
-copied=()
+# Every cached-<basename> copy this run creates gets its destination path
+# appended to this manifest before anything else can fail, so cleanup below
+# deletes exactly what this run added and nothing that was already there —
+# not a `rm -f "${seed}/cached-"*` glob, which would also remove a cached-*
+# file this run never touched. A plain temp file rather than a bash array:
+# the array only ever lives in this process's memory, and a manifest on disk
+# is what proves (to the test in fuzz-score-script-test.sh) that cleanup read
+# back exactly the list the copy loop wrote, not a guess reconstructed from a
+# glob. Runs on every exit path (the early "no args" one above never reaches
+# this trap, since it exits before the trap is installed and before anything
+# is copied).
+manifest="$(mktemp)"
 # shellcheck disable=SC2317 # Invoked indirectly by the EXIT trap below.
 cleanup() {
 	local f
-	for f in "${copied[@]+"${copied[@]}"}"; do
-		rm -f "${f}" 2>/dev/null || true
-	done
+	if [ -f "${manifest}" ]; then
+		while IFS= read -r f; do
+			[ -n "${f}" ] && rm -f "${f}" 2>/dev/null || true
+		done <"${manifest}"
+		rm -f "${manifest}"
+	fi
 }
 trap cleanup EXIT
 
@@ -101,13 +106,27 @@ if [ -d "${seed}" ]; then
 	done < <(find "${seed}" -maxdepth 1 -type f -print0 2>/dev/null)
 fi
 
+# A cached-* file already tracked in git under the seed dir means either a
+# previous run's cleanup failed to remove it and it got committed, or someone
+# hand-added one — either way, this run must never copy over it or fold it
+# into the replay as if it were this run's own cache. `git ls-files`, not a
+# directory listing, because the risk is specifically a file git considers
+# part of the seed corpus.
+tracked_cached_reason=""
+if [ -n "${seed}" ] && [ -d "${seed}" ]; then
+	tracked_cached="$(git ls-files "${seed}" 2>/dev/null | grep -F 'cached-' || true)"
+	if [ -n "${tracked_cached}" ]; then
+		tracked_cached_reason="tracked cached-* file(s) already exist under ${seed}; refusing to copy the generated corpus over them"
+	fi
+fi
+
 corpus_cached=0
-if [ -n "${generated}" ] && [ -d "${generated}" ] && [ -n "${seed}" ]; then
+if [ -z "${tracked_cached_reason}" ] && [ -n "${generated}" ] && [ -d "${generated}" ] && [ -n "${seed}" ]; then
 	mkdir -p "${seed}" 2>/dev/null || true
 	while IFS= read -r -d '' src; do
 		dest="${seed}/cached-$(basename "${src}")"
 		if cp "${src}" "${dest}" 2>/dev/null; then
-			copied+=("${dest}")
+			printf '%s\n' "${dest}" >>"${manifest}"
 			corpus_cached=$((corpus_cached + 1))
 		fi
 	done < <(find "${generated}" -maxdepth 1 -type f -print0 2>/dev/null)
@@ -116,8 +135,12 @@ corpus_total=$((corpus_seed + corpus_cached))
 
 coverage_status="ok"
 corpus_coverage_pct="null"
+reason=""
 
-if [ "${FUZZ_SCORE_KIND:-}" = "crash" ]; then
+if [ -n "${tracked_cached_reason}" ]; then
+	coverage_status="failed"
+	reason="${tracked_cached_reason}"
+elif [ "${FUZZ_SCORE_KIND:-}" = "crash" ]; then
 	# This run's own Fuzz step already found (and wrote to the seed corpus)
 	# a crashing input. Replaying it here would reach the same failure —
 	# recorded already by that step's classification — so scoring is
@@ -177,6 +200,7 @@ if command -v jq >/dev/null 2>&1; then
 		--arg kind "${kind_arg}" \
 		--arg fuzztime "${fuzztime_arg}" \
 		--arg coverage_status "${coverage_status}" \
+		--arg reason "${reason}" \
 		--argjson corpus_coverage_pct "${corpus_coverage_pct}" \
 		--argjson corpus_seed "${corpus_seed}" \
 		--argjson corpus_cached "${corpus_cached}" \
@@ -194,6 +218,7 @@ if command -v jq >/dev/null 2>&1; then
 			fuzztime: (if $fuzztime == "" then null else $fuzztime end),
 			corpus_coverage_pct: $corpus_coverage_pct,
 			coverage_status: $coverage_status,
+			reason: (if $reason == "" then null else $reason end),
 			corpus_seed: $corpus_seed,
 			corpus_cached: $corpus_cached,
 			corpus_total: $corpus_total,

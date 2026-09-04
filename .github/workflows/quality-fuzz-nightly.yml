@@ -387,6 +387,15 @@ jobs:
       # union) for the whole run's merged statement coverage. The union
       # merges only the profiles from targets that actually scored "ok" —
       # awk, not `go tool covdata`, so this job never needs Go on its PATH.
+      #
+      # The merge itself, and the arithmetic on each record's untrusted
+      # fields, live in scripts/ci/fuzz-history-compute.sh, not inline here,
+      # so scripts/fuzz-history-merge-script-test.sh can run the real thing
+      # against fixture records (including a malformed one) instead of this
+      # only ever executing for real once a night. That script only prints —
+      # this loop is what actually calls quality-history-append.sh, so that
+      # script stays the one and only thing in this repository that pushes to
+      # the quality-history branch.
       - name: Merge target profiles and append the quality history
         env:
           QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}
@@ -394,107 +403,6 @@ jobs:
           TARGETS_EXPECTED: ${{ needs.deep-fuzz.outputs.targets_expected }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          records=(records/*/fuzz-score-*.json)
-
-          if [ "${#records[@]}" -eq 0 ]; then
-            echo "::warning::No per-target fuzz records were downloaded; nothing to append."
-            exit 0
-          fi
-
-          records_downloaded="${#records[@]}"
-          # The matrix size, carried out of deep-fuzz as strategy.job-total. A
-          # leg that died before its upload step ran — cancelled while pending
-          # on the shared per-fuzzer corpus concurrency group, runner lost,
-          # checkout failed — contributes no record at all, so a count of
-          # downloaded records can never notice that it is missing. max(), so
-          # an absent or stale value can only ever fail safe.
-          targets_total="${records_downloaded}"
-          case "${TARGETS_EXPECTED:-}" in
-          '' | *[!0-9]*) ;;
-          *)
-            if [ "${TARGETS_EXPECTED}" -gt "${targets_total}" ]; then
-              targets_total="${TARGETS_EXPECTED}"
-            fi
-            ;;
-          esac
-          profile_args=()
-          packages_file="$(mktemp)"
-          corpus_total_all=0
-          new_interesting_total=0
-
-          # Every record is untrusted input from another job: read as data
-          # through jq and passed as a single argument, the same discipline
-          # quality-mutation-monthly.yml's history job uses for its own
-          # per-package records.
-          for record in "${records[@]}"; do
-            if ! numbers="$(jq -ec 'select(type == "object")' "${record}" 2>/dev/null)"; then
-              echo "::warning::${record} is not a JSON object; skipping it."
-              continue
-            fi
+          while IFS= read -r numbers; do
             scripts/ci/quality-history-append.sh fuzz-nightly "${numbers}"
-
-            status="$(jq -r '.coverage_status // empty' "${record}")"
-            target_name="$(jq -r '.target // empty' "${record}")"
-            pkg="$(jq -r '.package // empty' "${record}")"
-            profile="$(dirname "${record}")/fuzz-cover-${target_name}.out"
-            if [ "${status}" = "ok" ] && [ -s "${profile}" ]; then
-              profile_args+=("${profile}")
-              [ -n "${pkg}" ] && printf '%s\n' "${pkg}" >>"${packages_file}"
-            fi
-
-            corpus_total="$(jq -r '.corpus_total // 0' "${record}")"
-            corpus_total_all=$((corpus_total_all + corpus_total))
-            new_interesting="$(jq -r '.new_interesting // 0' "${record}")"
-            new_interesting_total=$((new_interesting_total + new_interesting))
-          done
-
-          profiles_merged="${#profile_args[@]}"
-          packages=0
-          if [ -s "${packages_file}" ]; then
-            packages="$(sort -u "${packages_file}" | wc -l | tr -d ' ')"
-          fi
-          rm -f "${packages_file}"
-
-          union_coverage_pct="null"
-          if [ "${profiles_merged}" -gt 0 ]; then
-            union_coverage_pct="$(awk -f scripts/ci/fuzz-coverprofile-union.awk "${profile_args[@]}")"
-          fi
-
-          # True whenever a target's coverage could not be folded into the
-          # union — its record never arrived, or it scored anything other
-          # than "ok" — so a reader of the series can tell a lower union
-          # number apart from a run that simply measured fewer targets.
-          # When TARGETS_EXPECTED is absent (every leg failed, so no job
-          # output was published), targets_total falls back to the downloaded
-          # record count and partial behaves as it did before this record
-          # arrived and this field existed.
-          partial="false"
-          if [ "${profiles_merged}" -lt "${targets_total}" ]; then
-            partial="true"
-          fi
-
-          union_json="$(jq -cn \
-            --arg target "ALL" \
-            --argjson union_coverage_pct "${union_coverage_pct}" \
-            --argjson packages "${packages}" \
-            --argjson profiles_merged "${profiles_merged}" \
-            --argjson targets_total "${targets_total}" \
-            --argjson records_downloaded "${records_downloaded}" \
-            --argjson partial "${partial}" \
-            --argjson corpus_total "${corpus_total_all}" \
-            --argjson new_interesting_total "${new_interesting_total}" \
-            '{
-              scope: "union",
-              target: $target,
-              union_coverage_pct: $union_coverage_pct,
-              packages: $packages,
-              profiles_merged: $profiles_merged,
-              targets_total: $targets_total,
-              records_downloaded: $records_downloaded,
-              partial: $partial,
-              corpus_total: $corpus_total,
-              new_interesting_total: $new_interesting_total
-            }')"
-
-          scripts/ci/quality-history-append.sh fuzz-nightly "${union_json}"
+          done < <(bash scripts/ci/fuzz-history-compute.sh records)

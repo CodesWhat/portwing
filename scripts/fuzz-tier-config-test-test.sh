@@ -258,6 +258,37 @@ awk '
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "an if: guard attached to a different step must not satisfy the contract"
 
+# --- Failure-upload before scoring (codex follow-up #3) ---------------------
+
+seed_fixture
+# Duplicate the 'Score corpus coverage' step immediately ahead of 'Upload
+# fuzz corpus on failure or cancel', leaving the original step untouched in
+# its rightful place further down. step_line() takes the FIRST match, so this
+# makes the contract see 'Score corpus coverage' as running before the
+# failure-upload step even though every other check (step exists, runs
+# if: always(), invokes fuzz-score.sh, comes after Save fuzz corpus) still
+# passes — only the ordering check between these two specific steps notices.
+score_block_file="${fixture}/score-block.txt"
+awk '
+	$0 == "      - name: Score corpus coverage" { inside = 1; print; next }
+	inside && /^      - name:/ { exit }
+	inside { print }
+' "${nightly}" >"${score_block_file}"
+# Read the captured block back with getline rather than passing it through
+# -v: awk -v does not accept an embedded newline in the assigned value on
+# every awk this repo has to run under.
+awk -v blockfile="${score_block_file}" '
+	$0 == "      - name: Upload fuzz corpus on failure or cancel" {
+		while ((getline line < blockfile) > 0) {
+			print line
+		}
+		close(blockfile)
+	}
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "'Score corpus coverage' running before 'Upload fuzz corpus on failure or cancel' must not satisfy the contract"
+
 # --- Corpus writer concurrency (review follow-up) ---------------------------
 
 seed_fixture

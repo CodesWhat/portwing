@@ -354,15 +354,29 @@ step_block() {
 }
 
 save_corpus_line="$(step_line "${nightly_workflow}" "Save fuzz corpus")"
+upload_failure_line="$(step_line "${nightly_workflow}" "Upload fuzz corpus on failure or cancel")"
 score_step_line="$(step_line "${nightly_workflow}" "Score corpus coverage")"
 cleanup_step_line="$(step_line "${nightly_workflow}" "Clean up cached corpus copies")"
 
 [ -n "${save_corpus_line}" ] ||
 	fail "${nightly_workflow} must have a 'Save fuzz corpus' step"
+[ -n "${upload_failure_line}" ] ||
+	fail "${nightly_workflow} must have an 'Upload fuzz corpus on failure or cancel' step"
 [ -n "${score_step_line}" ] ||
 	fail "${nightly_workflow} must have a 'Score corpus coverage' step"
 [ -n "${cleanup_step_line}" ] ||
 	fail "${nightly_workflow} must have a 'Clean up cached corpus copies' step"
+
+# The crash-artifact upload has to run BEFORE the score step, not just
+# somewhere in the file: the score step is the one that copies cached-*
+# entries into the seed dir, and that copy step's own `testdata/fuzz/` tree is
+# exactly what the failure-upload step's path glob captures. Scoring first
+# would let a cached-* copy ride along into the crash artifact a human later
+# downloads and commits as a minimized repro.
+if [ -n "${upload_failure_line}" ] && [ -n "${score_step_line}" ]; then
+	[ "${upload_failure_line}" -lt "${score_step_line}" ] ||
+		fail "${nightly_workflow}: 'Upload fuzz corpus on failure or cancel' (line ${upload_failure_line}) must come before 'Score corpus coverage' (line ${score_step_line}) — a cached-* copy must never be able to enter the crash artifact"
+fi
 
 # Every one of the 10 matrix fuzzers is scored by construction: the score
 # step, like every other step in this job, is one step shared across the

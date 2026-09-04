@@ -25,16 +25,33 @@ command -v jq >/dev/null 2>&1 || {
 	exit 1
 }
 
+# field() uses jq -c (compact JSON), not jq -r: -r prints a JSON string and a
+# bare number identically ("4" either way), so a field that regressed from
+# the number 4 to the string "4" — or from a real value to the string "null"
+# instead of JSON null — would read as unchanged. -c keeps the type in the
+# output ("4" for the number, "\"4\"" for the string, "null" only for JSON
+# null), so a type regression fails the assertion instead of slipping past it.
 field() {
-	jq -r --arg k "$2" '.[$k]' "$1"
+	jq -c --arg k "$2" '.[$k]' "$1"
 }
 
-# --- awk union: max, not overwrite --------------------------------------
+# --- awk union: not last-write-wins, and covers-both is max, not sum --------
 #
-# Block A is covered only in profile 1, block B only in profile 2. A last-
-# write-wins (or a plain sum) merge would lose one of them; max keeps both,
-# so the union reports full coverage of both blocks while either profile
-# alone reports half.
+# Two things to prove, and one fixture pair each, because the union's output
+# is a single covered/total percentage and a block only reads as "covered" at
+# all once its merged count is >0 — so a block covered in both inputs cannot
+# tell a max-merge apart from a sum-merge through the percentage alone; 3 and
+# 4 both read as ">0". The count itself has to come off FUZZ_COVER_UNION_DEBUG
+# instead.
+#
+# Fixture 1 (not last-write-wins): block A is covered only in profile 1,
+# block B only in profile 2. A last-write-wins merge would lose whichever
+# block the last-read profile did not cover; keeping the max per block keeps
+# both, so the union reports full coverage of both blocks while either
+# profile alone reports half. (A plain sum would also keep both here — this
+# fixture does not distinguish sum from max; the doc comment used to claim it
+# did, which is the "overclaiming" this rewrite fixes. Fixture 2 below is
+# what actually proves max over sum.)
 
 cat >"${fixture}/prof1.out" <<'EOF'
 mode: set
@@ -53,7 +70,30 @@ solo="$(awk -f "${union_awk}" "${fixture}/prof1.out")"
 
 merged="$(awk -f "${union_awk}" "${fixture}/prof1.out" "${fixture}/prof2.out")"
 [ "${merged}" = "100.00" ] ||
-	fail "awk union of both profiles: expected 100.00 (max per block, not overwrite), got '${merged}'"
+	fail "awk union of both profiles: expected 100.00 (both blocks covered by at least one profile), got '${merged}'"
+
+# Fixture 2 (max, not sum): one block, covered 3 times in profile A and once
+# in profile B. A sum-merge would carry 4 for the merged count; a max-merge
+# carries 3. Read back off FUZZ_COVER_UNION_DEBUG=1's stderr line, since the
+# stdout percentage alone cannot distinguish them (both are ">0").
+cat >"${fixture}/prof-a.out" <<'EOF'
+mode: set
+pkg/file.go:5.1,6.1 5 3
+EOF
+cat >"${fixture}/prof-b.out" <<'EOF'
+mode: set
+pkg/file.go:5.1,6.1 5 1
+EOF
+
+merge_debug="$(FUZZ_COVER_UNION_DEBUG=1 awk -f "${union_awk}" "${fixture}/prof-a.out" "${fixture}/prof-b.out" 2>&1 1>/dev/null)"
+case "${merge_debug}" in
+*'pkg/file.go:5.1,6.1 5 3'*) ;;
+*) fail "awk union must merge a block covered in both profiles to the max count (3), got debug line '${merge_debug}'" ;;
+esac
+case "${merge_debug}" in
+*'pkg/file.go:5.1,6.1 5 4'*) fail "awk union summed the counts (found 4) instead of taking the max (3)" ;;
+*) ;;
+esac
 
 # --- fuzz-score.sh: unreadable profile -> failed, null, exit 0 ----------
 #
@@ -68,10 +108,12 @@ bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "" "" "" "${out
 	fail "fuzz-score.sh must exit 0 even when the underlying go test fails (got ${status})"
 [ -f "${out}" ] || fail "fuzz-score.sh must still write ${out} on a go test failure"
 if [ -f "${out}" ]; then
-	[ "$(field "${out}" coverage_status)" = "failed" ] ||
-		fail "unreadable profile: expected coverage_status=failed, got '$(field "${out}" coverage_status)'"
+	[ "$(field "${out}" coverage_status)" = '"failed"' ] ||
+		fail "unreadable profile: expected coverage_status=\"failed\", got '$(field "${out}" coverage_status)'"
 	[ "$(field "${out}" corpus_coverage_pct)" = "null" ] ||
 		fail "unreadable profile: expected corpus_coverage_pct=null, got '$(field "${out}" corpus_coverage_pct)'"
+	[ "$(field "${out}" corpus_total)" = "0" ] ||
+		fail "unreadable profile: expected corpus_total=0 (a JSON number, not the string \"0\"), got '$(field "${out}" corpus_total)'"
 fi
 
 # --- fuzz-score.sh: FUZZ_SCORE_KIND=crash short-circuits the replay -----
@@ -85,12 +127,12 @@ status=0
 FUZZ_SCORE_KIND=crash bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "" "" "" "${out}" || status=$?
 [ "${status}" -eq 0 ] || fail "fuzz-score.sh must exit 0 on the crash short-circuit (got ${status})"
 if [ -f "${out}" ]; then
-	[ "$(field "${out}" coverage_status)" = "crash" ] ||
-		fail "FUZZ_SCORE_KIND=crash: expected coverage_status=crash, got '$(field "${out}" coverage_status)'"
+	[ "$(field "${out}" coverage_status)" = '"crash"' ] ||
+		fail "FUZZ_SCORE_KIND=crash: expected coverage_status=\"crash\", got '$(field "${out}" coverage_status)'"
 	[ "$(field "${out}" corpus_coverage_pct)" = "null" ] ||
 		fail "FUZZ_SCORE_KIND=crash: expected corpus_coverage_pct=null, got '$(field "${out}" corpus_coverage_pct)'"
-	[ "$(field "${out}" kind)" = "crash" ] ||
-		fail "FUZZ_SCORE_KIND=crash: expected the kind field to round-trip as 'crash'"
+	[ "$(field "${out}" kind)" = '"crash"' ] ||
+		fail 'FUZZ_SCORE_KIND=crash: expected the kind field to round-trip as "crash"'
 fi
 
 # --- fuzz log parsing: last `fuzz: elapsed:` line, or null not 0 --------
@@ -166,8 +208,10 @@ if [ -f "${out}" ]; then
 	seed_count="$(field "${out}" corpus_seed)"
 	[ "${seed_count}" -gt 0 ] 2>/dev/null ||
 		fail "expected corpus_seed > 0 from the committed seed corpus, got '${seed_count}'"
-	[ "$(field "${out}" coverage_status)" = "ok" ] ||
+	[ "$(field "${out}" coverage_status)" = '"ok"' ] ||
 		fail "a real target's replay should score ok, got '$(field "${out}" coverage_status)'"
+	[ "$(field "${out}" reason)" = "null" ] ||
+		fail "expected reason=null on the ok path, got '$(field "${out}" reason)'"
 	pct="$(field "${out}" corpus_coverage_pct)"
 	case "${pct}" in
 	'' | null) fail "expected a numeric corpus_coverage_pct for a real target, got '${pct}'" ;;
@@ -175,6 +219,95 @@ if [ -f "${out}" ]; then
 else
 	fail "fuzz-score.sh did not write ${out}"
 fi
+
+# --- tracked cached-* seed: refuse the copy, record failed + a reason ------
+#
+# A cached-<basename> file already tracked in git under the seed dir means
+# either a previous run's cleanup failed to remove it before it got
+# committed, or someone hand-added one. Either way this run must never copy
+# the generated corpus over it. The only way to make a file "tracked" is a
+# real `git add` + commit, so this runs against a throwaway repo rather than
+# this repository's own tree.
+tracked_repo="${fixture}/tracked-repo"
+mkdir -p "${tracked_repo}/seed"
+(
+	cd "${tracked_repo}"
+	git init --quiet
+	git config user.email test@example.invalid
+	git config user.name test
+	printf 'go test fuzz v1\nstring("preexisting")\n' >seed/cached-preexisting
+	git add seed/cached-preexisting
+	git commit --quiet -m "seed a tracked cached-* file"
+)
+
+tracked_generated="${fixture}/tracked-generated"
+mkdir -p "${tracked_generated}"
+printf 'go test fuzz v1\nstring("new")\n' >"${tracked_generated}/newentry"
+
+out="${fixture}/tracked-cached.json"
+status=0
+(
+	cd "${tracked_repo}"
+	bash "${fuzz_score}" "./nope/" "FuzzNope" "${tracked_generated}" "seed" "" "${out}"
+) || status=$?
+[ "${status}" -eq 0 ] ||
+	fail "fuzz-score.sh must exit 0 when a tracked cached-* seed file is found (got ${status})"
+
+if [ -f "${out}" ]; then
+	[ "$(field "${out}" coverage_status)" = '"failed"' ] ||
+		fail "a tracked cached-* seed file must record coverage_status=\"failed\", got '$(field "${out}" coverage_status)'"
+	reason="$(field "${out}" reason)"
+	[ "${reason}" != "null" ] ||
+		fail "a tracked cached-* seed file must record a non-null reason"
+	[ "$(field "${out}" corpus_cached)" = "0" ] ||
+		fail "a tracked cached-* seed file must skip the copy entirely (expected corpus_cached=0), got '$(field "${out}" corpus_cached)'"
+else
+	fail "fuzz-score.sh did not write ${out}"
+fi
+
+[ ! -e "${tracked_repo}/seed/cached-newentry" ] ||
+	fail "the generated corpus must not be copied into a seed dir that already has a tracked cached-* file"
+
+tracked_status="$(git -C "${tracked_repo}" status --porcelain 2>/dev/null || true)"
+[ -z "${tracked_status}" ] ||
+	fail "the tracked cached-* seed file must be left untouched, got git status: ${tracked_status}"
+
+# --- manifest cleanup: deletes exactly what the copy step created ----------
+#
+# An untracked cached-* file already sitting in the seed dir before this run
+# starts (a survivor of some earlier interrupted run, never committed) is not
+# something this run copied, so the manifest-driven cleanup must leave it
+# alone. A `rm -f "${seed}/cached-"*` glob would have deleted it too; the
+# manifest is what makes cleanup precise instead of blunt.
+manifest_repo="${fixture}/manifest-repo"
+mkdir -p "${manifest_repo}/seed"
+(
+	cd "${manifest_repo}"
+	git init --quiet
+	git config user.email test@example.invalid
+	git config user.name test
+	: >.gitkeep
+	git add .gitkeep
+	git commit --quiet -m "init"
+)
+printf 'go test fuzz v1\nstring("orphan")\n' >"${manifest_repo}/seed/cached-orphan"
+
+manifest_generated="${fixture}/manifest-generated"
+mkdir -p "${manifest_generated}"
+printf 'go test fuzz v1\nstring("fresh")\n' >"${manifest_generated}/freshentry"
+
+out="${fixture}/manifest.json"
+status=0
+(
+	cd "${manifest_repo}"
+	bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "${manifest_generated}" "seed" "" "${out}"
+) || status=$?
+[ "${status}" -eq 0 ] || fail "fuzz-score.sh must exit 0 on the manifest-cleanup fixture (got ${status})"
+
+[ -f "${manifest_repo}/seed/cached-orphan" ] ||
+	fail "cleanup must only remove files the copy step itself created; it deleted a pre-existing cached-* file it never copied"
+[ ! -e "${manifest_repo}/seed/cached-freshentry" ] ||
+	fail "cleanup left this run's own copy (cached-freshentry) behind"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} fuzz-score.sh check(s) failed" >&2
