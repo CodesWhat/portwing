@@ -24,32 +24,36 @@ const advisoryFlags = [
   "--invert-loopctrl",
   "--remove-self-assignments",
 ];
+// The 5 mutators Gremlins enables by default. The gating matrix already
+// measures these, so the advisory job explicitly disables all 5 rather than
+// re-running them alongside the 6 above.
+const defaultMutatorFlags = [
+  "--arithmetic-base=false",
+  "--conditionals-boundary=false",
+  "--conditionals-negation=false",
+  "--increment-decrement=false",
+  "--invert-negatives=false",
+];
 // The advisory job splits the gating matrix's packages across these groups so
 // each leg stays well under the runner's measured CPU-shutdown ceiling.
 // scripts/mutation-config.test.mjs is the only place this partition is
 // written down; the workflow's own matrix.include is checked against it.
 const advisoryGroupPackages = new Map([
   ["server", ["./internal/server"]],
-  ["edge-generic", ["./internal/edge", "./internal/generic"]],
+  ["edge", ["./internal/edge"]],
+  ["generic", ["./internal/generic"]],
   [
     "misc-a",
+    ["./internal/adapter", "./internal/adapter/drydock", "./internal/auth", "./internal/audit"],
+  ],
+  ["misc-b", ["./internal/docker", "./internal/mcp", "./internal/metrics"]],
+  [
+    "misc-c",
     [
       "./cmd/portwing",
-      "./internal/adapter",
-      "./internal/adapter/drydock",
-      "./internal/audit",
-      "./internal/auth",
       "./internal/banner",
       "./internal/config",
-    ],
-  ],
-  [
-    "misc-b",
-    [
-      "./internal/docker",
       "./internal/log",
-      "./internal/mcp",
-      "./internal/metrics",
       "./internal/pool",
       "./internal/protocol",
     ],
@@ -343,15 +347,26 @@ function assertAdvisoryJob(source, entries) {
       `${flag} would invalidate every floor measured without it`,
     );
   }
+  // The 5 default mutators are already measured by the gating matrix, so the
+  // advisory job must explicitly disable every one of them rather than
+  // re-running all 11: that duplication is what pushed a 4-group split over
+  // the runner's CPU ceiling.
+  for (const flag of defaultMutatorFlags) {
+    assert.match(
+      advisory,
+      new RegExp(`^ {12}${escapeForRegExp(flag)}$`, "mu"),
+      `the advisory job must disable ${flag}`,
+    );
+  }
 
   // Declaring advisory_flags is not the same as running with it: a version
   // that keeps the array but drops it from the unleash invocation would still
   // pass every check above while gremlins measured only the 5 default
-  // mutators. The invocation must expand the array literally.
+  // mutators. The invocation must expand both arrays literally.
   assert.match(
     advisory,
-    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
-    "the advisory job must expand advisory_flags on the unleash invocation",
+    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}"\$\{default_mutator_flags\[@\]\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
+    "the advisory job must expand advisory_flags and default_mutator_flags on the unleash invocation",
   );
 
   // mutationRunStep is checked for step-level continue-on-error above, but
@@ -501,8 +516,8 @@ function assertAdvisoryMatrix(advisory, entries) {
     throw new Error("every package in the gating matrix must appear in exactly one advisory group");
   }
 
-  // The specific partition, not just full coverage: server sized ~9 gated
-  // minutes alone, edge and generic sharing a leg at ~5+~6, and the rest
+  // The specific partition, not just full coverage: server, edge and generic
+  // each sized enough (~9, ~5, ~6 gated minutes) to run alone, and the rest
   // spread across two more groups. A future rebalance is fine as long as it
   // is deliberate; this catches a group silently losing or gaining a package.
   const expectedGroupNames = [...advisoryGroupPackages.keys()].sort();
@@ -891,6 +906,13 @@ test("mutation contract rejects a dropped advisory mutator", () => {
   );
 });
 
+test("mutation contract rejects a default mutator left enabled in the advisory job", () => {
+  assertMutationFailure(
+    workflow.replace("            --arithmetic-base=false\n", ""),
+    "the advisory job must disable --arithmetic-base=false",
+  );
+});
+
 test("mutation contract rejects an advisory mutator in the gating run", () => {
   const source = workflow.replace(
     `          if [ "${matrixZeroMutants}" = "true" ]; then`,
@@ -909,7 +931,7 @@ test("mutation contract rejects an advisory job that drops the flags expansion",
   );
   assertMutationFailure(
     source,
-    "the advisory job must expand advisory_flags on the unleash invocation",
+    "the advisory job must expand advisory_flags and default_mutator_flags on the unleash invocation",
   );
 });
 
@@ -945,7 +967,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
       '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
     )
     .replace(
-      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge-generic\n            packages: |\n              ./internal/edge|edge|74.73\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/audit|audit|88.31\n              ./internal/auth|auth|79.17\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/log|log|\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n              ./internal/pool|pool|50.00\n              ./internal/protocol|protocol|100\n",
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/auth|auth|79.17\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00\n              ./internal/protocol|protocol|100\n",
       "",
     );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");
@@ -964,7 +986,7 @@ test("mutation contract rejects an advisory group that duplicates a package", ()
       "              ./internal/protocol|protocol|100\n",
       "              ./internal/protocol|protocol|100\n              ./internal/server|server|77.88\n",
     ),
-    "./internal/server appears in both 'server' and 'misc-b'",
+    "./internal/server appears in both 'server' and 'misc-c'",
   );
 });
 
