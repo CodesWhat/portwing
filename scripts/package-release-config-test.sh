@@ -263,23 +263,38 @@ fi
 # catch that, because the rename still leaves exactly two dated headings in
 # place. Check every locally known "vX.Y.Z" tag instead: each one names a
 # release that already happened, so CHANGELOG.md must still carry that
-# heading. This only sees tags the checkout actually has (a shallow fetch
-# with no tags checks nothing here), which is why it runs locally on
-# pre-push as well as in CI. Releases through v0.6.0 headed the section
-# without a "v" prefix ("## [0.6.0]"); accept either form so this doesn't
-# flag that older, still-correct convention.
+# heading. This only sees tags the checkout actually has, which is why it
+# runs locally on pre-push as well as in CI. Both CI callers of this script
+# (ci-verify.yml and release-cut.yml) check out with fetch-depth: 0, so a
+# real checkout always has at least one release tag; an empty tag list means
+# a shallow checkout slipped in, not that nothing has ever shipped, so it is
+# now a hard failure below rather than a silently vacuous pass. Releases
+# through v0.6.0 headed the section without a "v" prefix ("## [0.6.0]");
+# accept either form so this doesn't flag that older, still-correct
+# convention. The match is anchored to the start of the line and requires a
+# trailing "YYYY-MM-DD" date, so a heading-shaped substring inside prose or a
+# code fence (e.g. "see the old \`## [v0.6.0] -\` format") cannot stand in for
+# a real heading.
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-	missing_tag_headings=""
-	for release_tag in $(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true); do
-		unprefixed_tag="${release_tag#v}"
-		if ! grep -qF -- "## [${release_tag}] -" CHANGELOG.md &&
-			! grep -qF -- "## [${unprefixed_tag}] -" CHANGELOG.md; then
-			missing_tag_headings="${missing_tag_headings} ${release_tag}"
-		fi
-	done
-	if [ -n "${missing_tag_headings}" ]; then
-		echo "FAIL: CHANGELOG.md has no '## [vX.Y.Z] - YYYY-MM-DD' heading for tag(s):${missing_tag_headings} (a prep PR likely renamed an existing heading instead of inserting a new one; restore the missing section(s) with their original entries)" >&2
+	release_tags="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+	if [ -z "${release_tags}" ]; then
+		echo "FAIL: no release tags found (shallow checkout?)" >&2
 		failures=$((failures + 1))
+	else
+		missing_tag_headings=""
+		for release_tag in ${release_tags}; do
+			unprefixed_tag="${release_tag#v}"
+			release_tag_regex="${release_tag//./\\.}"
+			unprefixed_tag_regex="${unprefixed_tag//./\\.}"
+			if ! grep -Eq "^## \[${release_tag_regex}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}\$" CHANGELOG.md &&
+				! grep -Eq "^## \[${unprefixed_tag_regex}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}\$" CHANGELOG.md; then
+				missing_tag_headings="${missing_tag_headings} ${release_tag}"
+			fi
+		done
+		if [ -n "${missing_tag_headings}" ]; then
+			echo "FAIL: CHANGELOG.md has no '## [vX.Y.Z] - YYYY-MM-DD' heading for tag(s):${missing_tag_headings} (a prep PR likely renamed an existing heading instead of inserting a new one; restore the missing section(s) with their original entries)" >&2
+			failures=$((failures + 1))
+		fi
 	fi
 fi
 
@@ -342,16 +357,23 @@ require_current_release_examples "docs/content/docs/security-model.mdx" \
 # catches a half-finished bump: an rpm example sitting next to a checked deb
 # example, a sample JSON payload, an attestation command in a doc. Enumerating
 # surfaces only ever finds the surfaces someone remembered to enumerate.
-# A "since v<previous>" callout is the one deliberate exception: a docs-only
-# patch's release note (README's [!NOTE] block, v0.9.13) names the prior
-# release on purpose to say nothing binary changed since it, which is not a
-# forgotten bump.
+# A "since v<previous>" callout in README.md is the one deliberate exception:
+# a docs-only patch's release note (README's [!NOTE] block, v0.9.13) names the
+# prior release on purpose to say nothing binary changed since it, which is
+# not a forgotten bump. The exemption is scoped to that one file and that
+# exact phrase, so the same stale literal sitting in any other matched file -
+# an rpm example, a doc's attestation command - still fails; a broader
+# file-wide exemption would let a stale version hide behind an unrelated
+# "since v<previous>" line anywhere in the repo.
 stale_previous_version_matches="$(git grep -n -F -- "$previous_version" -- \
 	'*.md' '*.mdx' '*.ts' '*.tsx' '*.yaml' '*.yml' '*.txt' \
 	':(exclude)CHANGELOG.md' \
 	':(exclude)scripts/package-release-config-test.sh' || true)"
 if [ -n "${stale_previous_version_matches}" ]; then
-	stale_previous_version_matches="$(grep -vF -- "since v${previous_version}" <<<"${stale_previous_version_matches}" || true)"
+	stale_previous_version_matches="$(awk -v exempt="since v${previous_version}" '
+		index($0, "README.md:") == 1 && index($0, exempt) { next }
+		{ print }
+	' <<<"${stale_previous_version_matches}")"
 fi
 if [ -n "${stale_previous_version_matches}" ]; then
 	echo "FAIL: stale references to v${previous_version} remain outside the changelog" >&2
