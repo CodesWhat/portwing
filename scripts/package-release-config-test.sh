@@ -265,8 +265,10 @@ fi
 # release that already happened, so CHANGELOG.md must still carry that
 # heading. This only sees tags the checkout actually has, which is why it
 # runs locally on pre-push as well as in CI. Both CI callers of this script
-# (ci-verify.yml and release-cut.yml) check out with fetch-depth: 0, so a
-# real checkout always has at least one release tag; an empty tag list means
+# (ci-verify.yml's Release Contract job and release-cut.yml) check out with
+# fetch-depth: 0 so the tags come along; the first CI run of this guard
+# failed because Release Contract was still a shallow clone. An empty tag
+# list therefore means
 # a shallow checkout slipped in, not that nothing has ever shipped, so it is
 # now a hard failure below rather than a silently vacuous pass. Releases
 # through v0.6.0 headed the section without a "v" prefix ("## [0.6.0]");
