@@ -238,6 +238,12 @@ type Client struct {
 	// tests asserting on that log — a happens-before point instead of
 	// racing the goroutine with a poll loop.
 	healthServerDone chan struct{}
+	// healthServerDoneOnce guards the close of healthServerDone so that a
+	// second startHealthServer call on this Client cannot double-close it:
+	// without it, an in-flight goroutine from an earlier start can read the
+	// reassigned channel at defer time and close the same channel the newer
+	// goroutine also closes.
+	healthServerDoneOnce sync.Once
 }
 
 // pendingRequestBody accumulates the stream/stream_end frames that follow a
@@ -1696,10 +1702,10 @@ func (c *Client) startHealthServer() {
 
 	c.healthServerDone = make(chan struct{})
 	go func() {
-		defer close(c.healthServerDone)
 		if err := c.healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Warn("health server error", "error", err)
 		}
+		c.healthServerDoneOnce.Do(func() { close(c.healthServerDone) })
 	}()
 }
 

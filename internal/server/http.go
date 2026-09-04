@@ -301,6 +301,13 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		// idle keep-alive connections.
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		// BaseContext runs once, right after the listener binds, which is
+		// the only hook stdlib gives us to learn the bound address without
+		// owning the listener ourselves (see ListenAndServe below).
+		BaseContext: func(ln net.Listener) context.Context {
+			s.listenAddr.Store(ln.Addr())
+			return context.Background()
+		},
 	}
 
 	// Configure TLS if certs provided.
@@ -884,16 +891,10 @@ func (s *Server) waitForActiveHandlers(ctx context.Context) error {
 func (s *Server) ListenAndServe() error {
 	go s.pollContainers(s.pollCtx)
 
-	ln, err := net.Listen("tcp", s.httpServer.Addr)
-	if err != nil {
-		return err
-	}
-	s.listenAddr.Store(ln.Addr())
-
 	if s.cfg.TLSCert != "" && s.cfg.TLSKey != "" {
-		return s.httpServer.ServeTLS(ln, s.cfg.TLSCert, s.cfg.TLSKey)
+		return s.httpServer.ListenAndServeTLS(s.cfg.TLSCert, s.cfg.TLSKey)
 	}
-	return s.httpServer.Serve(ln)
+	return s.httpServer.ListenAndServe()
 }
 
 // Addr returns the address ListenAndServe bound, or nil if it hasn't bound
