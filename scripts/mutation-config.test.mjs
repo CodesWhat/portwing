@@ -66,7 +66,7 @@ const expectedFloors = new Map([
   ["./internal/adapter", [84.68, 93.28]],
   ["./internal/adapter/drydock", [82.5, 91.95]],
   ["./internal/audit", [88.31, 100]],
-  ["./internal/auth", [79.17, 97.96]],
+  ["./internal/auth", [88.58, 97.96]],
   ["./internal/banner", [76.92, 38.24]],
   ["./internal/config", [82.22, 100]],
   ["./internal/docker", [90.39, 78.08]],
@@ -74,7 +74,7 @@ const expectedFloors = new Map([
   ["./internal/generic", [85, 100]],
   ["./internal/log", null],
   ["./internal/mcp", [79.49, 79.59]],
-  ["./internal/metrics", [90, 80]],
+  ["./internal/metrics", [90, 83.04]],
   ["./internal/pool", [50, 80]],
   ["./internal/protocol", [100, 100]],
 ]);
@@ -801,14 +801,14 @@ test("mutation contract rejects an undiscovered production package", () => {
 
 test("mutation contract rejects a missing numeric floor", () => {
   assertMutationFailure(
-    workflow.replace("            efficacy: 79.17\n", ""),
+    workflow.replace("            efficacy: 88.58\n", ""),
     "auth is missing efficacy",
   );
 });
 
 test("mutation contract rejects a weakened numeric floor", () => {
   assertMutationFailure(
-    workflow.replace("            efficacy: 79.17\n", "            efficacy: 0\n"),
+    workflow.replace("            efficacy: 88.58\n", "            efficacy: 0\n"),
     "auth efficacy floor is weakened",
   );
 });
@@ -1045,7 +1045,7 @@ test("mutation contract rejects continue-on-error on the advisory step", () => {
 
 test("mutation contract rejects an advisory floor that drifts from the matrix", () => {
   assertMutationFailure(
-    workflow.replace("./internal/auth|auth|79.17", "./internal/auth|auth|79.16"),
+    workflow.replace("./internal/auth|auth|88.58", "./internal/auth|auth|88.57"),
     "auth's advisory row must carry the efficacy floor the matrix measured",
   );
 });
@@ -1081,7 +1081,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
       '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
     )
     .replace(
-      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/auth|auth|79.17\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
       "",
     );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");

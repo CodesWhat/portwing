@@ -67,7 +67,10 @@ jobs:
             mcover: 100
           - name: auth
             package: ./internal/auth
-            efficacy: 79.17
+            # efficacy ratcheted in run 33839463545 (2026-09-04): measured
+            # 89.58 across 3 samples, basis 89.58, 1.00pp buffer. mcover is
+            # untouched.
+            efficacy: 88.58
             mcover: 97.96
           - name: banner
             package: ./internal/banner
@@ -113,8 +116,13 @@ jobs:
             package: ./internal/metrics
             # workers=1 repeats: 91.76/94.44, 92.00/83.33, 91.11/94.74.
             # Floors retain observed slack for Gremlins run-to-run variance.
+            # mcover ratcheted in run 33839463545 (2026-09-04): measured
+            # 95.04, seeded 12.0pp buffer (mutation-ratchet.sh's
+            # metrics:mutator_coverage seed) rather than the observed pool,
+            # since mcover swings run to run and recording is still young.
+            # efficacy is untouched.
             efficacy: 90.00
-            mcover: 80.00
+            mcover: 83.04
             workers: 1
           - name: pool
             package: ./internal/pool
@@ -661,7 +669,7 @@ jobs:
             packages: |
               ./internal/adapter|adapter|84.68
               ./internal/adapter/drydock|adapter-drydock|82.50
-              ./internal/auth|auth|79.17
+              ./internal/auth|auth|88.58
               ./internal/audit|audit|88.31
           - group: misc-b
             packages: |
