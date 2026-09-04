@@ -263,6 +263,11 @@ type pendingRequestBody struct {
 	// already elapsed, so a timeout callback can still be in flight when a
 	// chunk re-arms the timer; each callback carries the gen it was armed
 	// with and no-ops when it no longer matches. Guarded by pendingBodiesMu.
+	//
+	// It separates armings of this entry and nothing more. Every entry
+	// starts at 0, so it cannot separate this entry from a later one
+	// registered under the same RequestID; that is the entry-pointer half of
+	// failPendingBody's match.
 	gen uint64
 }
 
@@ -903,11 +908,16 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 		return
 	}
 	pb := &pendingRequestBody{req: req, target: target}
-	// gen 0 is the arming generation for this first timer; appendPendingBody
-	// bumps it on every re-arm so a callback that already fired can tell it
-	// lost the race and must not fail a live upload.
+	// The callback names the entry it was armed for, not just the RequestID
+	// it is filed under: the ID is freed and re-registered while a callback
+	// for it may already be running (the teardown drain then the controller's
+	// retry, or stream_end then a second request under the same ID), and the
+	// successor starts at gen 0 exactly like this one. gen 0 is this first
+	// timer's arming generation; appendPendingBody bumps it on every re-arm
+	// so a callback that already fired can tell it lost the race and must not
+	// fail a live upload.
 	pb.timer = time.AfterFunc(requestBodyStreamIdleTimeout, func() {
-		c.failPendingBody(req.RequestID, 0)
+		c.failPendingBody(req.RequestID, pb, 0)
 	})
 	c.pendingBodies[req.RequestID] = pb
 	c.pendingBodiesMu.Unlock()
@@ -978,7 +988,7 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 	gen := pb.gen
 	pb.timer.Stop()
 	pb.timer = time.AfterFunc(requestBodyStreamIdleTimeout, func() {
-		c.failPendingBody(requestID, gen)
+		c.failPendingBody(requestID, pb, gen)
 	})
 	c.pendingBodiesMu.Unlock()
 	return true
@@ -1106,15 +1116,36 @@ func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestM
 
 // failPendingBody is the idle-timeout callback for a pending body: it
 // removes the entry and reports the timeout to the controller as a
-// TypeError, but only when gen still matches the generation the firing timer
-// was armed with. A mismatch means a chunk re-armed the timer after this
-// callback had already fired, so the upload is alive and this firing must be
-// dropped. (The size-cap and decode-failure paths clean up inline in
+// TypeError, but only when the entry filed under requestID is still the one
+// this callback was armed for (want), at the generation it was armed with
+// (gen).
+//
+// Both halves of that match are needed, and they cover different races.
+//
+// The entry pointer is what stops a fired callback from killing a successor.
+// time.Timer.Stop does not wait for a callback that has already started, so
+// one can be parked on this mutex while its entry is removed and the same
+// RequestID is registered again: failAllPendingBodies then the controller's
+// retry on the new connection is the reachable case, and finishPendingBody or
+// appendPendingBody's cleanup paths followed by a re-use of the ID is the
+// same shape within one connection. The successor is a fresh entry at gen 0,
+// so requestID and gen alone match it and this callback would delete a live
+// upload and time it out on the wire. Comparing the entry instead cannot
+// match a successor: a successor is always a different allocation, and the
+// closure holds want alive, so its address is not recycled underneath the
+// comparison.
+//
+// The generation covers what identity cannot: the same entry re-arming its
+// timer on every chunk. Reset cannot recall an AfterFunc whose deadline
+// already elapsed, so a callback queued before the chunk landed still points
+// at the live entry and must drop its firing.
+//
+// (The size-cap and decode-failure paths clean up inline in
 // appendPendingBody.)
-func (c *Client) failPendingBody(requestID string, gen uint64) {
+func (c *Client) failPendingBody(requestID string, want *pendingRequestBody, gen uint64) {
 	c.pendingBodiesMu.Lock()
 	pb, ok := c.pendingBodies[requestID]
-	if !ok || pb.gen != gen {
+	if !ok || pb != want || pb.gen != gen {
 		c.pendingBodiesMu.Unlock()
 		return
 	}
@@ -1662,6 +1693,13 @@ func (c *Client) closeAllExecSessions() {
 // entry up under the same lock, finds nothing, and returns without sending.
 // Stopping an already-fired timer is a no-op, so the two cannot double-fail
 // one request.
+//
+// The swap is not enough on its own once the controller reconnects, because
+// by then the table is not empty: the retry has registered a fresh entry
+// under the same RequestID, at the same gen 0 the drained one was armed at.
+// What keeps a callback parked since the old connection from deleting it is
+// that failPendingBody matches on the entry it was armed for, not on the
+// RequestID.
 func (c *Client) failAllPendingBodies() {
 	c.pendingBodiesMu.Lock()
 	dropped := c.pendingBodies

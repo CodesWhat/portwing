@@ -386,9 +386,9 @@ func TestReadPumpConcurrentBodyStreamAndPingDoNotBlock(t *testing.T) {
 // whose deadline has already elapsed, so a timeout callback can already be
 // queued (parked on pendingBodiesMu) when a chunk lands and re-arms the
 // timer. That callback must not fail an upload that was making progress.
-// Calling failPendingBody with the generation the first timer was armed with
-// (0) reproduces exactly that state deterministically, with no sleep and no
-// dependence on when the real timer fires.
+// Calling failPendingBody with the entry and the generation the first timer
+// was armed with (0) reproduces exactly that state deterministically, with no
+// sleep and no dependence on when the real timer fires.
 func TestStalePendingBodyTimeoutDoesNotAbortProgressingUpload(t *testing.T) {
 	t.Parallel()
 
@@ -417,9 +417,16 @@ func TestStalePendingBodyTimeoutDoesNotAbortProgressingUpload(t *testing.T) {
 	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{Timestamp: 7})
 	expectType(t, ctrl, protocol.TypePong)
 
-	// The already-fired gen-0 callback finally gets the lock. It lost the
-	// race to the chunk above, so it must drop its firing.
-	c.failPendingBody("racy", 0)
+	// The already-fired gen-0 callback finally gets the lock, still holding
+	// the entry it was armed for. It lost the race to the chunk above, so it
+	// must drop its firing.
+	c.pendingBodiesMu.Lock()
+	armed := c.pendingBodies["racy"]
+	c.pendingBodiesMu.Unlock()
+	if armed == nil {
+		t.Fatal("pending body was gone before the stale callback ran")
+	}
+	c.failPendingBody("racy", armed, 0)
 
 	c.pendingBodiesMu.Lock()
 	_, stillPending := c.pendingBodies["racy"]
@@ -1206,11 +1213,18 @@ func TestFailAllPendingBodiesIsIdempotent(t *testing.T) {
 		BodyStream: true,
 	}, c.currentOutboundTarget())
 
+	c.pendingBodiesMu.Lock()
+	armed := c.pendingBodies["raced"]
+	c.pendingBodiesMu.Unlock()
+	if armed == nil {
+		t.Fatal("pending body was not registered")
+	}
+
 	c.failAllPendingBodies()
 	c.failAllPendingBodies()
-	// The generation the entry's first timer was armed with. This is exactly
-	// what a timer that fires just after the drain would call.
-	c.failPendingBody("raced", 0)
+	// The entry and the generation its first timer was armed with. This is
+	// exactly what a timer that fires just after the drain would call.
+	c.failPendingBody("raced", armed, 0)
 
 	c.pendingBodiesMu.Lock()
 	remaining := len(c.pendingBodies)
@@ -1227,6 +1241,88 @@ func TestFailAllPendingBodiesIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestStalePendingBodyTimeoutDoesNotKillTheRetry is the drain's half of the
+// idle-timer race, and the half the generation counter cannot catch. A body is
+// armed on the first connection and its timer fires, so a callback exists but
+// is parked on pendingBodiesMu. The tunnel then drops: failAllPendingBodies
+// swaps the table out and Timer.Stop reports a timer that has already fired.
+// The controller reconnects and retries the same RequestID, which registers a
+// fresh entry at gen 0 — the same generation the drained one was armed at — so
+// a callback matching on RequestID and generation alone finds it, deletes a
+// live upload, and puts a spurious timeout on the new connection.
+//
+// Releasing the parked callback is modelled as the direct call it is: the
+// arguments are exactly what the fired timer closed over, and running them
+// after the drain and the re-registration is the order a callback delayed
+// across dial, hello, welcome and RECONNECT_DELAY produces. No sleep, and no
+// dependence on when a real timer fires.
+func TestStalePendingBodyTimeoutDoesNotKillTheRetry(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+
+	req := protocol.RequestMessage{
+		RequestID:  "retried-after-a-drop",
+		Method:     http.MethodPost,
+		Path:       "/build",
+		BodyStream: true,
+	}
+
+	pending := func() *pendingRequestBody {
+		c.pendingBodiesMu.Lock()
+		defer c.pendingBodiesMu.Unlock()
+		return c.pendingBodies[req.RequestID]
+	}
+	genOf := func(pb *pendingRequestBody) uint64 {
+		c.pendingBodiesMu.Lock()
+		defer c.pendingBodiesMu.Unlock()
+		return pb.gen
+	}
+
+	c.registerPendingBody(req, c.currentOutboundTarget())
+	stale := pending()
+	if stale == nil {
+		t.Fatal("pending body was not registered on the first connection")
+	}
+
+	// The tunnel drops, and the controller retries the same RequestID on the
+	// connection that replaces it.
+	c.failAllPendingBodies()
+	c.registerPendingBody(req, c.currentOutboundTarget())
+
+	retry := pending()
+	if retry == nil {
+		t.Fatal("the retry was not registered: the drain did not free the RequestID")
+	}
+	if retry == stale {
+		t.Fatal("the drain left the original entry in place, so this test proves nothing")
+	}
+	if g, want := genOf(retry), genOf(stale); g != want {
+		t.Fatalf("retry gen = %d, drained gen = %d: the collision under test needs them equal", g, want)
+	}
+
+	// The first connection's already-fired callback finally gets the lock.
+	c.failPendingBody(req.RequestID, stale, genOf(stale))
+
+	switch survivor := pending(); {
+	case survivor == nil:
+		t.Fatal("the retry's pending body was deleted by the previous connection's timeout callback")
+	case survivor != retry:
+		t.Fatal("the retry's pending body was replaced by the previous connection's timeout callback")
+	}
+
+	// And nothing was reported to the controller for a request that never
+	// timed out.
+	if err := ctrl.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	if _, raw, err := ctrl.ReadMessage(); err == nil {
+		t.Fatalf("frame arrived for the retry: %s (the stale callback timed it out)", raw)
+	}
+
+	c.failAllPendingBodies()
+}
+
 // TestConnectDropFreesStreamedRequestIDForTheRetry is the wiring half, and the
 // defect as the controller sees it. A bodyStream request is registered, the
 // tunnel drops before its stream_end arrives, and the controller reconnects
@@ -1239,7 +1335,17 @@ func TestConnectDropFreesStreamedRequestIDForTheRetry(t *testing.T) {
 
 	const requestID = "survives-a-drop"
 
+	// dropNow is closed exactly once, by the test at the point it wants the
+	// drop or by cleanup, whichever comes first. Cleanup is not belt and
+	// braces: an assertion that fails before the close below would otherwise
+	// leave this handler parked on the channel for the rest of the package
+	// run, holding the controller side of the socket open. The connection is
+	// hijacked by the WebSocket upgrade, so nothing else releases it —
+	// httptest stops tracking a hijacked conn and neither its shutdown nor
+	// the request context reaches the handler.
 	dropNow := make(chan struct{})
+	drop := sync.OnceFunc(func() { close(dropNow) })
+
 	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
 		readAndAckHello(t, ctrl)
 		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{})
@@ -1252,6 +1358,9 @@ func TestConnectDropFreesStreamedRequestIDForTheRetry(t *testing.T) {
 		<-dropNow
 		// Returning closes the controller side, which is the drop.
 	})
+	// Registered after newControllerServer's own srv.Close cleanup so it runs
+	// before it: t.Cleanup is LIFO.
+	t.Cleanup(drop)
 
 	cfg := &config.Config{
 		DrydockURL:        srv,
@@ -1278,7 +1387,7 @@ func TestConnectDropFreesStreamedRequestIDForTheRetry(t *testing.T) {
 		return ok
 	})
 
-	close(dropNow)
+	drop()
 	select {
 	case <-connectDone:
 	case <-time.After(10 * time.Second):
