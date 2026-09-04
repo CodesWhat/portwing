@@ -33,6 +33,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
 
+    outputs:
+      targets_expected: ${{ strategy.job-total }}
+
     # Shared with quality-fuzz-monthly.yml's corpus-touching job, keyed on
     # the same fuzzer name the cache key itself uses (runner.os isn't in
     # this group — it isn't a valid context in a concurrency expression, and
@@ -388,6 +391,7 @@ jobs:
         env:
           QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}
           QUALITY_HISTORY_EVENT: ${{ github.event_name }}
+          TARGETS_EXPECTED: ${{ needs.deep-fuzz.outputs.targets_expected }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -398,7 +402,22 @@ jobs:
             exit 0
           fi
 
-          targets_total="${#records[@]}"
+          records_downloaded="${#records[@]}"
+          # The matrix size, carried out of deep-fuzz as strategy.job-total. A
+          # leg that died before its upload step ran — cancelled while pending
+          # on the shared per-fuzzer corpus concurrency group, runner lost,
+          # checkout failed — contributes no record at all, so a count of
+          # downloaded records can never notice that it is missing. max(), so
+          # an absent or stale value can only ever fail safe.
+          targets_total="${records_downloaded}"
+          case "${TARGETS_EXPECTED:-}" in
+          '' | *[!0-9]*) ;;
+          *)
+            if [ "${TARGETS_EXPECTED}" -gt "${targets_total}" ]; then
+              targets_total="${TARGETS_EXPECTED}"
+            fi
+            ;;
+          esac
           profile_args=()
           packages_file="$(mktemp)"
           corpus_total_all=0
@@ -446,6 +465,10 @@ jobs:
           # union — its record never arrived, or it scored anything other
           # than "ok" — so a reader of the series can tell a lower union
           # number apart from a run that simply measured fewer targets.
+          # When TARGETS_EXPECTED is absent (every leg failed, so no job
+          # output was published), targets_total falls back to the downloaded
+          # record count and partial behaves as it did before this record
+          # arrived and this field existed.
           partial="false"
           if [ "${profiles_merged}" -lt "${targets_total}" ]; then
             partial="true"
@@ -457,6 +480,7 @@ jobs:
             --argjson packages "${packages}" \
             --argjson profiles_merged "${profiles_merged}" \
             --argjson targets_total "${targets_total}" \
+            --argjson records_downloaded "${records_downloaded}" \
             --argjson partial "${partial}" \
             --argjson corpus_total "${corpus_total_all}" \
             --argjson new_interesting_total "${new_interesting_total}" \
@@ -467,6 +491,7 @@ jobs:
               packages: $packages,
               profiles_merged: $profiles_merged,
               targets_total: $targets_total,
+              records_downloaded: $records_downloaded,
               partial: $partial,
               corpus_total: $corpus_total,
               new_interesting_total: $new_interesting_total

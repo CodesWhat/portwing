@@ -342,7 +342,7 @@ done
 nightly_workflow=".github/workflows/quality-fuzz-nightly.yml"
 
 step_line() {
-	grep -n "^      - name: $2\$" "$1" | head -n 1 | cut -d: -f1
+	grep -n "^      - name: $2\$" "$1" | head -n 1 | cut -d: -f1 || true
 }
 
 step_block() {
