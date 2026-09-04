@@ -8,11 +8,29 @@ set -euo pipefail
 #
 # Several cases plant a decoy: text that LOOKS like the real key somewhere
 # the contract must not be reading from (a block scalar body, an unrelated
-# job, a different indentation level). Those exist because the contract used
-# to match text anywhere in the job block instead of the specific key line at
-# its exact indentation, so a decoy satisfied it. Each decoy case must still
+# job, a different indentation level, a spelling GitHub Actions accepts but
+# this file's regexes didn't happen to spell out). Those exist because the
+# contract used to match text anywhere in the job block instead of the
+# specific key line at its exact indentation -- or only recognized one
+# spelling of a key -- so a decoy satisfied it. Each decoy case must still
 # fail, and it must fail with the message for the check the decoy was aimed
 # at, not some other check catching it by accident.
+#
+# A second round found the bypass class that survives all of the above: a
+# FUTURE JOB. A block-scalar decoy has to fake a real key's exact
+# indentation; a second job doesn't -- it's genuinely well-formed YAML that
+# a "look inside the starchart job" check never had a reason to visit. Once
+# a second job is banned outright (the jobs: block may declare exactly one
+# job, and it has to be starchart), most of those mutations legitimately
+# trip more than one check at once: the job-count check AND whatever the
+# second job's content also happens to violate (an extra permissions:
+# occurrence, a second uses: line, ...). That's real defense in depth, not a
+# bug, so assert_rejected also asserts how many FAIL lines the run produced
+# -- it defaults to 1, and every case that legitimately trips more than one
+# check passes its actual count explicitly, so a check silently going quiet
+# (dropping the total) or a check silently getting noisier (a check that
+# used to be isolated no longer is) both show up as a self-test failure
+# instead of a comment nobody re-reads.
 #
 # The contract cross-checks branch: against renovate.json's baseBranchPatterns,
 # so this fixture tree carries its own copy to stay hermetic -- no reading the
@@ -44,20 +62,29 @@ assert_passes() {
 	fi
 }
 
+# expected_count defaults to 1: most mutations break exactly one invariant
+# and should produce exactly one FAIL: line. A mutation that legitimately
+# breaks more than one passes its real count explicitly (see the header
+# comment above) -- fail() has a stable "FAIL: " prefix for exactly this,
+# so counting is a plain line count, not a guess.
 assert_rejected() {
 	local expected="$1"
 	local failure_message="$2"
+	local expected_count="${3:-1}"
 	local output
 	local status
+	local actual_count
 
 	set +e
 	output="$(run_contract)"
 	status=$?
 	set -e
 
-	if [ "${status}" -eq 0 ] || ! grep -Fq "${expected}" <<<"${output}"; then
+	actual_count="$(grep -c '^FAIL: ' <<<"${output}" || true)"
+
+	if [ "${status}" -eq 0 ] || ! grep -Fq "${expected}" <<<"${output}" || [ "${actual_count}" -ne "${expected_count}" ]; then
 		echo "FAIL: ${failure_message}" >&2
-		echo "--- actual output ---" >&2
+		echo "--- actual output (expected ${expected_count} FAIL: line(s), got ${actual_count}) ---" >&2
 		echo "${output}" >&2
 		exit 1
 	fi
@@ -85,6 +112,14 @@ insert_after_line() {
 reset_fixture
 assert_passes "the real starchart.yml must pass its own contract"
 
+# --- line endings ------------------------------------------------------------
+
+reset_fixture
+awk '{ printf "%s\r\n", $0 }' "${fixture}" >"${fixture}.crlf" && mv "${fixture}.crlf" "${fixture}"
+assert_rejected \
+	"workflow file must not contain CRLF line endings" \
+	"contract must reject a CRLF-terminated file, and for that specific reason"
+
 # --- top-level permissions --------------------------------------------------
 
 reset_fixture
@@ -111,19 +146,151 @@ assert_rejected \
 	"on.push: must declare only tags: and nothing else" \
 	"contract must reject an extra branches: key under push:"
 
+# A column-0 comment planted inside the on: block used to end the awk state
+# machine's scan early, so a schedule: key placed after it was silently
+# outside the region the key-set check ever looked at.
+reset_fixture
+insert_after_line "  workflow_dispatch:" \
+	'# a column-0 comment
+  schedule:
+    - cron: "0 3 * * *"'
+assert_rejected \
+	"on: must declare exactly push and workflow_dispatch and nothing else" \
+	"contract must reject a schedule: trigger hidden after a column-0 comment inside on:"
+
+# --- the tag pattern ---------------------------------------------------------
+
+reset_fixture
+sed -i.bak 's/^      - "v\*"$/      - "release-*"/' "${fixture}"
+assert_rejected \
+	'on.push.tags: must be exactly '"'"'      - "v*"'"'" \
+	"contract must reject a changed tags: entry"
+
+reset_fixture
+sed -i.bak '/^      - "v\*"$/d' "${fixture}"
+assert_rejected \
+	"on.push.tags: must contain exactly the one entry this file uses today (found 0)" \
+	"contract must reject an emptied tags: list"
+
+# --- exactly one job, named starchart ---------------------------------------
+#
+# A second job doesn't need to fake a key's exact indentation the way a
+# block-scalar decoy does -- it's genuinely well-formed YAML. Each of these
+# also happens to trip whichever file-wide guard its particular grant
+# spelling matches (a step-form uses:, write-all, or the inline {contents:
+# write} map), which is why the expected counts below are more than 1: this
+# is the job-count check and at least one other independent check both
+# correctly firing on the same edit, not double-counting the same problem.
+
+reset_fixture
+cat >>"${fixture}" <<'YAML'
+  extra:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+YAML
+assert_rejected \
+	"jobs: must declare exactly one job (found 2)" \
+	"contract must reject a second job whose step uses the '- uses:' form" \
+	2
+
+reset_fixture
+cat >>"${fixture}" <<'YAML'
+  extra:
+    permissions: write-all
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi
+YAML
+assert_rejected \
+	"jobs: must declare exactly one job (found 2)" \
+	"contract must reject a second job granting permissions: write-all" \
+	3
+
+reset_fixture
+cat >>"${fixture}" <<'YAML'
+  extra:
+    permissions: {contents: write}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi
+YAML
+assert_rejected \
+	"jobs: must declare exactly one job (found 2)" \
+	"contract must reject a second job granting permissions via an inline {contents: write} map" \
+	4
+
+# A 2-space-indented comment planted inside the (sole) job used to end the
+# awk state machine's scan early, so a secrets: key placed after it was
+# silently outside the region the secrets: check ever looked at, even
+# though the job itself is still just one job.
+reset_fixture
+insert_after_line '      accent: "#7230d2"' \
+	'  # a 2-space comment
+    secrets: inherit'
+assert_rejected \
+	"must not declare secrets:" \
+	"contract must reject secrets: inherit hidden after a 2-space comment inside the job"
+
+# --- file-wide bans on alternate permission grants, isolated -----------------
+#
+# Each of these plants its decoy inside the (sole) job's own name: block
+# scalar, with no second job and no "permissions:" prefix where that would
+# also trip the permissions: occurrence count -- so each fails on exactly
+# the one guard it's aimed at.
+
+reset_fixture
+insert_after_line "  starchart:" \
+	'    name: |
+      permissions: read'
+assert_rejected \
+	"the file may declare permissions: exactly twice" \
+	"contract must reject a decoy permissions: read line even without write-all or {contents"
+
+reset_fixture
+insert_after_line "  starchart:" \
+	'    name: |
+      not a real key but write-all appears here'
+assert_rejected \
+	"the file must not contain write-all anywhere" \
+	"contract must reject write-all appearing anywhere in the file, isolated from the other permissions guards"
+
+reset_fixture
+insert_after_line "  starchart:" \
+	'    name: |
+      freestanding {contents: write} text'
+assert_rejected \
+	"the file must not contain an inline {contents: ...} permissions map anywhere" \
+	"contract must reject {contents appearing anywhere in the file, isolated from the other permissions guards"
+
+# permissions: { actions: write } avoids the {contents substring (so that
+# guard stays quiet) but still opens a non-empty inline map, and it still has
+# a "permissions:" prefix, so the occurrence-count guard fires alongside it.
+reset_fixture
+insert_after_line "  starchart:" \
+	'    name: |
+      permissions: { actions: write }'
+assert_rejected \
+	"the file must not contain a non-empty inline permissions: {...} map anywhere" \
+	"contract must reject a non-{contents inline permissions map" \
+	2
+
 # --- contents: write scoped to exactly one job, structurally ---------------
 
 # Dropped entirely: the reusable workflow's commit-back step would fail on
-# every run with no permission to push. This must fail on the file-wide count
-# message specifically (the job-scoping message below is a different check).
+# every run with no permission to push. This trips the file-wide count AND
+# the job-structural placement check -- deleting the only grant line breaks
+# both invariants at once, which is real, not a bug.
 reset_fixture
 sed -i.bak '/^      contents: write$/d' "${fixture}"
 assert_rejected \
 	"exactly one line in the file may read '      contents: write' (found 0)" \
-	"contract must reject a starchart job missing contents: write, on its own message"
+	"contract must reject a starchart job missing contents: write, on its own message" \
+	2
 
-# Granted a second time by another job: this simulates a future job in the
-# same file quietly picking up write access it doesn't need.
+# Granted a second time by another job: now also banned outright by the
+# job-count check, plus the permissions: occurrence count (a third
+# permissions: block) and the file-wide contents: write count (now 2).
 reset_fixture
 cat >>"${fixture}" <<'YAML'
   extra:
@@ -134,13 +301,14 @@ cat >>"${fixture}" <<'YAML'
       - run: echo hi
 YAML
 assert_rejected \
-	"exactly one line in the file may read '      contents: write' (found 2)" \
-	"contract must reject a second job also granting contents: write"
+	"jobs: must declare exactly one job (found 2)" \
+	"contract must reject a second job also granting contents: write" \
+	3
 
-# Moved, not dropped: the starchart job's own grant is gone but the file-wide
-# count still reads 1, because an unrelated job now carries it. Only the
-# job-scoped structural check can catch this -- the file-wide count alone
-# would report the file as fine.
+# Moved, not dropped: the starchart job's own grant is gone but a second job
+# has it instead. The job-scoped structural check on the starchart job still
+# fires (its own permissions: block is empty), alongside the job-count and
+# permissions: occurrence-count checks that a second job trips on its own.
 reset_fixture
 sed -i.bak '/^      contents: write$/d' "${fixture}"
 cat >>"${fixture}" <<'YAML'
@@ -153,7 +321,8 @@ cat >>"${fixture}" <<'YAML'
 YAML
 assert_rejected \
 	"a grant recorded elsewhere in the file (a different job, or text inside a block scalar) does not satisfy this contract" \
-	"contract must reject contents: write moved to an unrelated job, with the job-scoping message"
+	"contract must reject contents: write moved to an unrelated job, with the job-scoping message" \
+	3
 
 # permissions: {} on the job, plus a decoy "contents: write" line sitting in
 # a block scalar at the exact indentation the real grant would use. The
@@ -170,7 +339,28 @@ assert_rejected \
 	"a grant recorded elsewhere in the file (a different job, or text inside a block scalar) does not satisfy this contract" \
 	"contract must reject a decoy contents: write hiding in a block scalar while the job's own grant is permissions: {}"
 
-# --- no unconditional escape hatch ------------------------------------------
+# --- the gap between the grant and whatever comes next ----------------------
+#
+# A blank line or a comment directly after "      contents: write" used to
+# reset the structural check's state machine without checking what's on the
+# other side of the gap -- exactly where a second, wider grant would hide.
+
+reset_fixture
+sed -i.bak '/^      contents: write$/a\
+\
+      actions: write' "${fixture}"
+assert_rejected \
+	"must not be blank or a comment" \
+	"contract must reject a blank line directly after the contents: write grant, even with a wider grant hiding behind it"
+
+reset_fixture
+sed -i.bak '/^      contents: write$/a\
+      # spacer' "${fixture}"
+assert_rejected \
+	"must not be blank or a comment" \
+	"contract must reject a comment directly after the contents: write grant"
+
+# --- no unconditional escape hatch, tolerant of alternate spellings --------
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    continue-on-error: true\n    permissions:/' "${fixture}"
@@ -191,13 +381,41 @@ assert_rejected \
 	"must not run unconditionally via if: always()" \
 	'contract must reject a starchart job gated on if: ${{ always() }}'
 
-# --- no secrets forwarded ----------------------------------------------------
+reset_fixture
+sed -i.bak 's/^    permissions:$/    "if": always()\n    permissions:/' "${fixture}"
+assert_rejected \
+	"must not run unconditionally via if: always()" \
+	'contract must reject a quoted "if": key gated on always()'
+
+reset_fixture
+sed -i.bak 's/^    permissions:$/    if : always()\n    permissions:/' "${fixture}"
+assert_rejected \
+	"must not run unconditionally via if: always()" \
+	"contract must reject if : (a space before the colon) gated on always()"
+
+reset_fixture
+sed -i.bak 's/^    permissions:$/    if: always( )\n    permissions:/' "${fixture}"
+assert_rejected \
+	"must not run unconditionally via if: always()" \
+	"contract must reject always( ) with a space inside the parens"
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    secrets: inherit\n    permissions:/' "${fixture}"
 assert_rejected \
 	"must not declare secrets:" \
 	"contract must reject secrets: inherit on the job"
+
+reset_fixture
+sed -i.bak 's/^    permissions:$/    "secrets": inherit\n    permissions:/' "${fixture}"
+assert_rejected \
+	"must not declare secrets:" \
+	'contract must reject a quoted "secrets": key'
+
+reset_fixture
+sed -i.bak 's/^    permissions:$/    secrets : inherit\n    permissions:/' "${fixture}"
+assert_rejected \
+	"must not declare secrets:" \
+	"contract must reject secrets : (a space before the colon)"
 
 # --- the reusable workflow pin ----------------------------------------------
 
