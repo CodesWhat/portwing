@@ -21,7 +21,7 @@
 # kept rather than re-summed.
 #
 # Usage: awk -f fuzz-coverprofile-union.awk profile1.out [profile2.out ...]
-# Output: one line, the merged percentage formatted to two decimal places.
+# Output: one line, "<pct> <covered-statements> <total-statements>"
 
 $1 == "mode:" {
 	next
@@ -63,5 +63,5 @@ END {
 	if (total > 0) {
 		pct = covered / total * 100
 	}
-	printf "%.2f\n", pct
+	printf "%.2f %d %d\n", pct, covered, total
 }

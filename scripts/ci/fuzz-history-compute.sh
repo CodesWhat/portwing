@@ -132,8 +132,11 @@ if [ -s "${packages_file}" ]; then
 fi
 
 union_coverage_pct="null"
+union_stmts_covered="null"
+union_stmts_total="null"
 if [ "${profiles_merged}" -gt 0 ]; then
-	union_coverage_pct="$(awk -f "${union_awk}" "${profile_args[@]}")"
+	union_line="$(awk -f "${union_awk}" "${profile_args[@]}")"
+	read -r union_coverage_pct union_stmts_covered union_stmts_total <<<"${union_line}" || true
 fi
 
 # True whenever a target's coverage could not be folded into the union — its
@@ -150,6 +153,8 @@ fi
 jq -cn \
 	--arg target "ALL" \
 	--argjson union_coverage_pct "${union_coverage_pct}" \
+	--argjson union_stmts_covered "${union_stmts_covered}" \
+	--argjson union_stmts_total "${union_stmts_total}" \
 	--argjson packages "${packages}" \
 	--argjson profiles_merged "${profiles_merged}" \
 	--argjson targets_total "${targets_total}" \
@@ -161,6 +166,8 @@ jq -cn \
 		scope: "union",
 		target: $target,
 		union_coverage_pct: $union_coverage_pct,
+		union_stmts_covered: $union_stmts_covered,
+		union_stmts_total: $union_stmts_total,
 		packages: $packages,
 		profiles_merged: $profiles_merged,
 		targets_total: $targets_total,

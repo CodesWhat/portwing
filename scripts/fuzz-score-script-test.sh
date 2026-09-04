@@ -65,12 +65,12 @@ pkg/file.go:3.1,4.1 3 1
 EOF
 
 solo="$(awk -f "${union_awk}" "${fixture}/prof1.out")"
-[ "${solo}" = "62.50" ] ||
-	fail "awk union of profile1 alone: expected 62.50, got '${solo}'"
+[ "${solo}" = "62.50 5 8" ] ||
+	fail "awk union of profile1 alone: expected '62.50 5 8', got '${solo}'"
 
 merged="$(awk -f "${union_awk}" "${fixture}/prof1.out" "${fixture}/prof2.out")"
-[ "${merged}" = "100.00" ] ||
-	fail "awk union of both profiles: expected 100.00 (both blocks covered by at least one profile), got '${merged}'"
+[ "${merged}" = "100.00 8 8" ] ||
+	fail "awk union of both profiles: expected '100.00 8 8' (both blocks covered by at least one profile), got '${merged}'"
 
 # Fixture 2 (max, not sum): one block, covered 3 times in profile A and once
 # in profile B. A sum-merge would carry 4 for the merged count; a max-merge
@@ -94,6 +94,17 @@ case "${merge_debug}" in
 *'pkg/file.go:5.1,6.1 5 4'*) fail "awk union summed the counts (found 4) instead of taking the max (3)" ;;
 *) ;;
 esac
+
+# Fixture 3 (zero coverage): one block, 21 statements, never covered. Proves
+# the covered/total pair reads 0/21 rather than empty or a stale value when
+# nothing in the profile is covered at all.
+cat >"${fixture}/prof-zero.out" <<'EOF'
+mode: set
+pkg/file.go:1.1,2.1 21 0
+EOF
+zero="$(awk -f "${union_awk}" "${fixture}/prof-zero.out")"
+[ "${zero}" = "0.00 0 21" ] ||
+	fail "awk union of a fully-uncovered profile: expected '0.00 0 21', got '${zero}'"
 
 # --- fuzz-score.sh: unreadable profile -> failed, null, exit 0 ----------
 #
@@ -141,23 +152,55 @@ log_missing="${fixture}/no-elapsed.log"
 echo "some unrelated go test output" >"${log_missing}"
 out="${fixture}/no-elapsed.json"
 bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "" "" "${log_missing}" "${out}"
-for k in new_interesting corpus_engine_total execs execs_per_sec; do
+for k in new_interesting corpus_engine_total execs execs_per_sec elapsed_s corpus_engine_delta; do
 	v="$(field "${out}" "${k}")"
 	[ "${v}" = "null" ] ||
 		fail "a log with no 'fuzz: elapsed:' line must yield ${k}=null, not '${v}' (proves null, not a false 0)"
 done
 
+# The trailing line is Go's own FINAL stats line, printed by `defer
+# c.logStats()` after the workers stop: its own rate is (count -
+# countLastLog)/interval = 0 while execs/new interesting/total stay
+# cumulative and correct. `tail -n 1` picks this line, so execs_per_sec has
+# to come from elapsed_s and execs, never from the log's own "(N/sec)".
 log_present="${fixture}/with-elapsed.log"
 cat >"${log_present}" <<'EOF'
 fuzz: elapsed: 30s, execs: 219217 (7307/sec), new interesting: 12 (total: 89)
 fuzz: elapsed: 5m0s, execs: 6173290 (20577/sec), new interesting: 4 (total: 118)
+fuzz: elapsed: 5m0s, execs: 6173290 (0/sec), new interesting: 4 (total: 118)
 EOF
+# A real generated/seed pair instead of empty strings, so corpus_total and
+# corpus_engine_delta (fix 2B) have real numbers to reconcile against the
+# engine's own total (118) rather than trivially 0.
+generated_with_elapsed="${fixture}/with-elapsed-generated"
+seed_with_elapsed="${fixture}/with-elapsed-seed"
+mkdir -p "${generated_with_elapsed}" "${seed_with_elapsed}"
+printf 'go test fuzz v1\nstring("engine-cached-1")\n' >"${generated_with_elapsed}/cached1"
+printf 'go test fuzz v1\nstring("engine-cached-2")\n' >"${generated_with_elapsed}/cached2"
+printf 'go test fuzz v1\nstring("seed-1")\n' >"${seed_with_elapsed}/seed1"
+
 out="${fixture}/with-elapsed.json"
-bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "" "" "${log_present}" "${out}"
+bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "${generated_with_elapsed}" "${seed_with_elapsed}" "${log_present}" "${out}"
 [ "$(field "${out}" new_interesting)" = "4" ] || fail "must parse new_interesting from the LAST fuzz: elapsed: line (4), got '$(field "${out}" new_interesting)'"
 [ "$(field "${out}" corpus_engine_total)" = "118" ] || fail "must parse corpus_engine_total (118), got '$(field "${out}" corpus_engine_total)'"
 [ "$(field "${out}" execs)" = "6173290" ] || fail "must parse execs (6173290), got '$(field "${out}" execs)'"
-[ "$(field "${out}" execs_per_sec)" = "20577" ] || fail "must parse execs_per_sec (20577), got '$(field "${out}" execs_per_sec)'"
+# execs_per_sec must come off the last line's elapsed (5m0s = 300s) and
+# execs, not off its own (0/sec) rate: 6173290/300 = 20577.63 -> int() 20577.
+[ "$(field "${out}" execs_per_sec)" = "20577" ] || fail "must derive execs_per_sec from elapsed_s and execs, not the log's own trailing (0/sec) (expected 20577), got '$(field "${out}" execs_per_sec)'"
+[ "$(field "${out}" elapsed_s)" = "300" ] || fail "must parse elapsed_s from the last 'elapsed: 5m0s' (300), got '$(field "${out}" elapsed_s)'"
+[ "$(field "${out}" corpus_total)" = "3" ] || fail "expected corpus_total=3 (1 seed + 2 engine-cached), got '$(field "${out}" corpus_total)'"
+[ "$(field "${out}" corpus_engine_delta)" = "115" ] || fail "expected corpus_engine_delta=115 (118 engine total - 3 corpus total), got '$(field "${out}" corpus_engine_delta)'"
+
+# Hour-form duration (1h1m0s = 3660s), proving the h/m/s conversion isn't
+# minute-only.
+log_hour="${fixture}/with-elapsed-hour.log"
+cat >"${log_hour}" <<'EOF'
+fuzz: elapsed: 1h1m0s, execs: 7320 (0/sec), new interesting: 0 (total: 5)
+EOF
+out="${fixture}/with-elapsed-hour.json"
+bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "" "" "${log_hour}" "${out}"
+[ "$(field "${out}" elapsed_s)" = "3660" ] || fail "hour-form duration: expected elapsed_s=3660 (1h1m0s), got '$(field "${out}" elapsed_s)'"
+[ "$(field "${out}" execs_per_sec)" = "2" ] || fail "hour-form duration: expected execs_per_sec=2 (7320/3660), got '$(field "${out}" execs_per_sec)'"
 
 # --- copy/cleanup pair: zero cached-* survive, seed dir stays clean -----
 #
@@ -215,6 +258,11 @@ if [ -f "${out}" ]; then
 	pct="$(field "${out}" corpus_coverage_pct)"
 	case "${pct}" in
 	'' | null) fail "expected a numeric corpus_coverage_pct for a real target, got '${pct}'" ;;
+	esac
+	stmts_total="$(field "${out}" corpus_coverage_stmts_total)"
+	case "${stmts_total}" in
+	'' | null) fail "expected a numeric corpus_coverage_stmts_total for a real target, got '${stmts_total}'" ;;
+	*) [ "${stmts_total}" -gt 0 ] 2>/dev/null || fail "expected corpus_coverage_stmts_total > 0, got '${stmts_total}'" ;;
 	esac
 else
 	fail "fuzz-score.sh did not write ${out}"

@@ -135,6 +135,8 @@ corpus_total=$((corpus_seed + corpus_cached))
 
 coverage_status="ok"
 corpus_coverage_pct="null"
+corpus_coverage_stmts="null"
+corpus_coverage_stmts_total="null"
 reason=""
 
 if [ -n "${tracked_cached_reason}" ]; then
@@ -157,8 +159,8 @@ else
 	# independently discovers.
 	if go test -run="^${target}\$" -covermode=set -coverprofile="${coverprofile}" "${pkg}" >fuzz-score-go-test.log 2>&1 &&
 		[ -s "${coverprofile}" ] && head -n 1 "${coverprofile}" 2>/dev/null | grep -Fxq "mode: set" &&
-		pct="$(awk -f "${union_awk}" "${coverprofile}" 2>/dev/null)" && [ -n "${pct}" ]; then
-		corpus_coverage_pct="${pct}"
+		union_line="$(awk -f "${union_awk}" "${coverprofile}" 2>/dev/null)" && [ -n "${union_line}" ]; then
+		read -r corpus_coverage_pct corpus_coverage_stmts corpus_coverage_stmts_total <<<"${union_line}" || true
 	else
 		coverage_status="failed"
 	fi
@@ -174,19 +176,73 @@ new_interesting="null"
 corpus_engine_total="null"
 execs="null"
 execs_per_sec="null"
+elapsed_s="null"
 
 if [ -n "${fuzzlog}" ] && [ -f "${fuzzlog}" ]; then
 	last_line="$(grep -F 'fuzz: elapsed:' "${fuzzlog}" 2>/dev/null | tail -n 1 || true)"
 	if [ -n "${last_line}" ]; then
 		v="$(printf '%s' "${last_line}" | grep -oE 'execs: [0-9]+' | grep -oE '[0-9]+' || true)"
 		[ -n "${v}" ] && execs="${v}"
-		v="$(printf '%s' "${last_line}" | grep -oE '\([0-9]+/sec\)' | grep -oE '[0-9]+' || true)"
-		[ -n "${v}" ] && execs_per_sec="${v}"
+		# Go's coordinator prints one FINAL fuzz: elapsed: line, after `defer
+		# c.logStats()` runs post-shutdown, whose own rate is (count -
+		# countLastLog)/interval = 0 while execs/new interesting/total stay
+		# cumulative and correct — so the rate in parens is not trustworthy on
+		# the last line and is derived from the elapsed duration instead.
+		dur="$(printf '%s' "${last_line}" | sed -n 's/.*elapsed: \([^,]*\),.*/\1/p')"
+		# Durations are whole seconds in one of Go's own formats: 0s, 45s,
+		# 5m0s, 1h2m3s. Anything else (empty, a sub-second "ms" duration, or a
+		# character outside 0-9hms) leaves elapsed_s at "null" rather than a
+		# guess.
+		case "${dur}" in
+		'' | *ms* | *[!0-9hms]*) ;;
+		*)
+			elapsed_s="$(printf '%s' "${dur}" | awk '
+				{
+					n = 0
+					total = 0
+					for (i = 1; i <= length($0); i++) {
+						c = substr($0, i, 1)
+						if (c ~ /[0-9]/) {
+							n = n * 10 + (c + 0)
+						} else if (c == "h") {
+							total += n * 3600
+							n = 0
+						} else if (c == "m") {
+							total += n * 60
+							n = 0
+						} else if (c == "s") {
+							total += n
+							n = 0
+						}
+					}
+					print total
+				}
+			')"
+			;;
+		esac
 		v="$(printf '%s' "${last_line}" | grep -oE 'new interesting: [0-9]+' | grep -oE '[0-9]+' || true)"
 		[ -n "${v}" ] && new_interesting="${v}"
 		v="$(printf '%s' "${last_line}" | grep -oE 'total: [0-9]+' | grep -oE '[0-9]+' || true)"
 		[ -n "${v}" ] && corpus_engine_total="${v}"
 	fi
+fi
+
+# execs_per_sec is derived here, from elapsed_s and the cumulative execs
+# above, rather than parsed off the log's own (N/sec) — see the FINAL-line
+# comment above. A zero-second elapsed line has no defined rate, so it is
+# left null rather than raising a divide-by-zero or reading as 0/sec.
+if [ "${elapsed_s}" != "null" ] && [ "${elapsed_s}" -gt 0 ] 2>/dev/null && [ "${execs}" != "null" ]; then
+	execs_per_sec="$(awk -v e="${execs}" -v s="${elapsed_s}" 'BEGIN { print int(e / s) }')"
+fi
+
+# The engine dedups by content hash, drops wrong-typed cache files, and
+# counts f.Add values (not files), so the delta is normally a per-target
+# constant equal to the f.Add count (2026-09-04: PHC 10, Envelope 30,
+# ImageRef 17, Labels 8); a jump means the generated corpus stopped being
+# seen, a negative value means the engine rejected cache files.
+corpus_engine_delta="null"
+if [ "${corpus_engine_total}" != "null" ]; then
+	corpus_engine_delta=$((corpus_engine_total - corpus_total))
 fi
 
 kind_arg="${FUZZ_SCORE_KIND:-}"
@@ -202,13 +258,17 @@ if command -v jq >/dev/null 2>&1; then
 		--arg coverage_status "${coverage_status}" \
 		--arg reason "${reason}" \
 		--argjson corpus_coverage_pct "${corpus_coverage_pct}" \
+		--argjson corpus_coverage_stmts "${corpus_coverage_stmts}" \
+		--argjson corpus_coverage_stmts_total "${corpus_coverage_stmts_total}" \
 		--argjson corpus_seed "${corpus_seed}" \
 		--argjson corpus_cached "${corpus_cached}" \
 		--argjson corpus_total "${corpus_total}" \
 		--argjson new_interesting "${new_interesting}" \
 		--argjson corpus_engine_total "${corpus_engine_total}" \
+		--argjson corpus_engine_delta "${corpus_engine_delta}" \
 		--argjson execs "${execs}" \
 		--argjson execs_per_sec "${execs_per_sec}" \
+		--argjson elapsed_s "${elapsed_s}" \
 		--arg restored_from "${restored_from_arg}" \
 		'{
 			scope: "target",
@@ -217,6 +277,8 @@ if command -v jq >/dev/null 2>&1; then
 			kind: (if $kind == "" then null else $kind end),
 			fuzztime: (if $fuzztime == "" then null else $fuzztime end),
 			corpus_coverage_pct: $corpus_coverage_pct,
+			corpus_coverage_stmts: $corpus_coverage_stmts,
+			corpus_coverage_stmts_total: $corpus_coverage_stmts_total,
 			coverage_status: $coverage_status,
 			reason: (if $reason == "" then null else $reason end),
 			corpus_seed: $corpus_seed,
@@ -224,8 +286,10 @@ if command -v jq >/dev/null 2>&1; then
 			corpus_total: $corpus_total,
 			new_interesting: $new_interesting,
 			corpus_engine_total: $corpus_engine_total,
+			corpus_engine_delta: $corpus_engine_delta,
 			execs: $execs,
 			execs_per_sec: $execs_per_sec,
+			elapsed_s: $elapsed_s,
 			restored_from: (if $restored_from == "" then null else $restored_from end)
 		}' >"${outfile}" || echo "::warning::fuzz-score: jq failed to write ${outfile}" >&2
 else

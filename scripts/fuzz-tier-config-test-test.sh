@@ -501,6 +501,56 @@ awk '
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "the verify-cleanup step with no reference to fuzz-score.sh's manifest must not satisfy the contract"
 
+# --- Resolve corpus paths: go-list cross-check (review follow-up) ----------
+#
+# A wrong path derivation looks identical to a right one to every other check
+# in this file: mkdir -p creates whatever was computed, actions/cache saves
+# and restores it without complaint, and the corpus persists silently against
+# a path go itself never reads from. Only the go-list cross-check itself can
+# catch that, so its absence has to fail the contract.
+
+seed_fixture
+# Strip the go-list cross-check out of the 'Resolve corpus paths' step,
+# leaving the plain derivation (mkdir -p and all) exactly as it read before
+# this contract existed.
+awk '
+	/^          listed="\$\(go list/ { skip = 1 }
+	skip && /^          fi$/ { skip = 0; next }
+	skip { next }
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "a 'Resolve corpus paths' step with no go-list cross-check must not satisfy the contract"
+
+seed_fixture
+# Same strip, on the monthly workflow: the cross-check is not nightly-only,
+# so dropping it from the monthly step must fail the contract too.
+awk '
+	/^          listed="\$\(go list/ { skip = 1 }
+	skip && /^          fi$/ { skip = 0; next }
+	skip { next }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a monthly 'Resolve corpus paths' step with no go-list cross-check must not satisfy the contract"
+
+seed_fixture
+# The previous fixture strips the cross-check from every "Resolve corpus
+# paths" occurrence at once, so it can't tell a resolver that only walks the
+# first (leg job) step from one that walks both. Strip it from ONLY the
+# second occurrence (the merge-corpus job's step), leaving the leg job's copy
+# untouched, so this fails only if the contract actually reaches the second
+# occurrence.
+awk '
+	/^      - name: Resolve corpus paths$/ { resolver++ }
+	resolver == 2 && /^          listed="\$\(go list/ { skip = 1 }
+	skip && /^          fi$/ { skip = 0; next }
+	skip { next }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "the merge-corpus resolver must retain its go-list cross-check"
+
 # --- Corpus writer concurrency (review follow-up) ---------------------------
 
 seed_fixture
