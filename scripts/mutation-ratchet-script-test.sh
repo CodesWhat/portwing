@@ -92,6 +92,12 @@ bash "${ratchet}" "${case2}/records" "${case2}/history.jsonl" "${case2}/out.json
 proposal_count="$(jq '.proposals | length' "${case2}/out.json")"
 [ "${proposal_count}" -gt 0 ] || fail "case2 fixture should have produced at least one proposal to test"
 
+# basis is min(pool), not the run's own measurement or the best history row.
+# efficacy pool = [85.00 (measured), 81.90, 83.00] (the two history rows);
+# min(pool) = 81.90.
+basis="$(jq -r '.proposals[] | select(.metric == "efficacy") | .basis' "${case2}/out.json")"
+[ "${basis}" = "81.90" ] || fail "case2 efficacy basis must equal min(pool) = 81.90, got ${basis}"
+
 bad="$(jq -r '
     .proposals[]
     | select(.proposed <= .current_floor)
@@ -200,6 +206,21 @@ efficacy_proposals="$(jq '[.proposals[] | select(.metric == "efficacy")] | lengt
 [ "${efficacy_proposals}" -eq 0 ] ||
 	fail "this run's own history row must not evict the oldest prior (70.00) from the 6-row window"
 
+# The same fixture's mutator_coverage side is an all-99 pool against a floor
+# of 91.00: basis 99.00, spread 0, buffer max(1.0, 0) = 1.00, proposed 98.00,
+# gain 7.00 -- clears the 2.00 minimum, so this metric does propose. Assert
+# on it directly: dropping the metric loop's mutator_coverage iteration
+# entirely (or its floor2/gain arithmetic) would silently make this pass by
+# never emitting anything for the metric, so check both that exactly one
+# proposal exists and that its value is the one the arithmetic above demands.
+mcover_proposals="$(jq -c '[.proposals[] | select(.metric == "mutator_coverage")]' "${case6}/out.json")"
+mcover_count="$(jq 'length' <<<"${mcover_proposals}")"
+[ "${mcover_count}" -eq 1 ] ||
+	fail "case6 must produce exactly one mutator_coverage proposal, got ${mcover_count}"
+mcover_proposed="$(jq -r '.[0].proposed' <<<"${mcover_proposals}")"
+[ "${mcover_proposed}" = "98.00" ] ||
+	fail "case6 mutator_coverage proposed must be 98.00 (basis 99.00 - buffer 1.00), got ${mcover_proposed}"
+
 # --- (7) samples counts distinct runs, not this run counted twice ----------
 case7="${fixture}/case7"
 mkdir -p "${case7}/records/dupe"
@@ -232,6 +253,41 @@ GITHUB_RUN_ID=CURRENT bash "${ratchet}" "${case8}/records" "${case8}/history.jso
 samples="$(jq -r '.proposals[] | select(.metric == "efficacy") | .samples' "${case8}/out.json")"
 [ "${samples}" = "3" ] ||
 	fail "history rows without a run_id must survive the current-run filter, got samples=${samples}"
+
+# --- (9) min(pool) as basis, not max(pool) -----------------------------------
+#
+# case3 above (pool [91.11, 92.00], floor 90.00) doesn't discriminate: both a
+# min-based and a max-based basis reject it, so a regression from min(pool)
+# to max(pool) would pass case3 silently. This fixture is chosen so the two
+# bases disagree on whether to propose at all.
+#
+# Pool = [97.00 (measured), 93.00 (one history row)], floor 90.00.
+#
+#   min-based (what the script does):
+#     basis  = min(97.00, 93.00)          = 93.00
+#     spread = max - min = 97.00 - 93.00  =  4.00
+#     buffer = max(1.0, 4.00)             =  4.00
+#     proposed = floor2(93.00 - 4.00)     = 89.00
+#     89.00 <= floor 90.00 -> guard rejects it -> no proposal.
+#
+#   max-based (what a regression would do, NOT asserted as correct):
+#     basis  = max(97.00, 93.00)          = 97.00
+#     buffer = max(1.0, 4.00)             =  4.00
+#     proposed = floor2(97.00 - 4.00)     = 93.00
+#     gain = 93.00 - 90.00 = 3.00 >= 2.00 and 93.00 > 90.00 -> would propose.
+#
+# The two bases disagree (no proposal vs. a proposal), so this fixture
+# catches a min-to-max regression that case3 cannot.
+case9="${fixture}/case9"
+mkdir -p "${case9}/records/spread"
+write_record "${case9}/records/spread" "spread" "./internal/spread" \
+	"gated" "success" 0 90.00 97.00 0 0
+write_history_row "spread" 93.00 0 >"${case9}/history.jsonl"
+
+bash "${ratchet}" "${case9}/records" "${case9}/history.jsonl" "${case9}/out.json"
+efficacy_proposals="$(jq '[.proposals[] | select(.metric == "efficacy")] | length' "${case9}/out.json")"
+[ "${efficacy_proposals}" -eq 0 ] ||
+	fail "pool [97.00, 93.00] against floor 90.00 must use min(pool) = 93.00 as basis (no proposal), not max(pool) = 97.00"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} mutation ratchet check(s) failed" >&2

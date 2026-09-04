@@ -195,16 +195,18 @@ while IFS= read -r name; do
 			basis_fmt="$(floor2 "${basis}")"
 			buffer_fmt="$(floor2 "${buffer}")"
 			floor_fmt="$(floor2 "${current_floor}")"
+			measured_fmt="$(floor2 "${measured}")"
 			jq -cn \
 				--arg name "${name}" --arg package "${package}" --arg metric "${metric}" \
 				--argjson current_floor "${floor_fmt}" --argjson basis "${basis_fmt}" \
+				--argjson measured "${measured_fmt}" \
 				--argjson buffer "${buffer_fmt}" --argjson proposed "${proposed}" \
 				--argjson gain "${gain}" --argjson samples "${samples}" \
 				--arg workflow_field "${workflow_field}" --arg floor_hint "${floor_fmt}" \
 				--arg test_map_key "${package}" \
 				'{
                     name: $name, package: $package, metric: $metric,
-                    current_floor: $current_floor, basis: $basis, buffer: $buffer,
+                    current_floor: $current_floor, basis: $basis, measured: $measured, buffer: $buffer,
                     proposed: $proposed, gain: $gain, samples: $samples,
                     edit: {
                         workflow_line_hint: ($workflow_field + ": " + $floor_hint),

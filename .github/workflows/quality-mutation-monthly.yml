@@ -528,11 +528,11 @@ jobs:
           {
             echo "### Mutation floor ratchet proposal"
             echo ""
-            echo "| package | metric | floor | measured | proposed | gain | samples |"
-            echo "|---|---|---|---|---|---|---|"
+            echo "| package | metric | floor | measured | basis | proposed | gain | samples |"
+            echo "|---|---|---|---|---|---|---|---|"
             jq -r '
               .proposals[]
-              | "| \(.name) | \(.metric) | \(.current_floor) | \(.basis) | \(.proposed) | \(.gain) | \(.samples) |"
+              | "| \(.name) | \(.metric) | \(.current_floor) | \(.measured) | \(.basis) | \(.proposed) | \(.gain) | \(.samples) |"
             ' mutation-ratchet-proposal.json
 
             lowest_pkg="$(jq -r '.survivors_by_package[0].name // empty' mutation-ratchet-proposal.json)"
@@ -545,7 +545,9 @@ jobs:
                 .survivors_by_package[]
                 | select(.name == $name)
                 | .survivors[:15][]
-                | "\(.file):\(.line):\(.column)  \(.mutator)"
+                | ((.file // "") | gsub("`"; "") | gsub("\n"; " ")) as $file
+                | ((.mutator // "") | gsub("`"; "") | gsub("\n"; " ")) as $mutator
+                | "\($file):\(.line):\(.column)  \($mutator)"
               ' mutation-ratchet-proposal.json
               echo '```'
             fi
