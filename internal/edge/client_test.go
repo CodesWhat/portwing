@@ -1033,18 +1033,19 @@ func TestStartHealthServerPortConflict(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// startHealthServer — a second start on the same Client must not
-// double-close healthServerDone (client.go:1699)
+// startHealthServer — a second start on the same Client must get its own
+// healthServerDone channel, closed by its own goroutine (client.go:1699)
 // ---------------------------------------------------------------------------
 
 // TestStartHealthServerTwiceDoesNotPanic calls startHealthServer twice on one
 // Client, shutting the health server down and joining its goroutine between
-// the two starts. Before healthServerDoneOnce, the second start reassigns
-// healthServerDone to a fresh channel while the first goroutine's `defer
-// close(c.healthServerDone)` reads that field dynamically at close time;
-// under the right interleaving both goroutines close the same channel and
-// the second close panics. The test just needs to run clean under -race
-// with no panic to prove the guard holds.
+// the two starts. Each start must create its own healthServerDone channel
+// and hand it to its own goroutine: if a shared field were instead guarded
+// by a client-lifetime sync.Once, the second start's goroutine would find
+// the guard already spent and never close its channel, hanging any caller
+// that waits on it. The test proves the second close actually happens by
+// waiting on the channel captured right after the second start, with a
+// timeout that fails the test instead of hanging forever.
 func TestStartHealthServerTwiceDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
@@ -1081,6 +1082,7 @@ func TestStartHealthServerTwiceDoesNotPanic(t *testing.T) {
 
 	// Start again on the same Client, reusing the now-free address.
 	c.startHealthServer()
+	secondDone := c.healthServerDone
 	t.Cleanup(func() {
 		if c.healthServer != nil {
 			_ = c.healthServer.Close()
@@ -1101,6 +1103,11 @@ func TestStartHealthServerTwiceDoesNotPanic(t *testing.T) {
 	defer cancel2()
 	if err := c.healthServer.Shutdown(shutdownCtx2); err != nil {
 		t.Fatalf("second shutdown: %v", err)
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second ListenAndServe goroutine did not finish in time")
 	}
 }
 
