@@ -626,11 +626,19 @@ const runReturnBackstop = 10 * time.Second
 // post-connect check, without scheduling a reconnect.
 //
 // Two things make that a proof rather than a hope. The controller pings the
-// agent and waits for the pong before the test cancels: readPump is the only
-// thing that answers a ping, so the pong means readPump is up, dispatching,
-// and back in conn.ReadMessage, which is the state the cancel has to be
-// observed from. And the controller, not a timer, closes the socket, because
-// readPump only checks ctx at the top of its loop — once it is inside
+// agent and waits for the pong before the test cancels. readPump is the only
+// thing that answers a ping, so the pong means readPump is running and
+// dispatching, and the cancel is therefore observed from a live pump instead
+// of from one that does not exist yet. It deliberately does not claim where
+// in its loop readPump is: the pong is handed to sendPump through a buffered
+// channel, so readPump may still be short of its next ctx check or its next
+// ReadMessage when the cancel lands. That costs nothing, because the
+// controller closes the socket after the cancel and either position unblocks
+// from it, one by finding ctx already cancelled, the other by the read
+// failing.
+//
+// The controller, not a timer, is what closes that socket, and it has to be.
+// readPump only checks ctx at the top of its loop, so once it is inside
 // ReadMessage the cancel is invisible to it and Run cannot return until the
 // socket closes or the 60s read deadline fires.
 //
@@ -648,28 +656,52 @@ func TestRunCtxCancelWithActiveConn(t *testing.T) {
 	// Closed by the test after it cancels, to release the controller handler
 	// and with it the socket.
 	ctrlHold := make(chan struct{})
+	// Carries the controller conn out to the test so cleanup can drop it. A
+	// failing test cancels ctx, but a readPump already inside ReadMessage
+	// cannot see that, so without closing the socket here the agent would
+	// outlive the test until the controller's read deadline expired.
+	ctrlConn := make(chan *websocket.Conn, 1)
+	// Carries the first controller-side failure out to the test, so a broken
+	// handler reports its cause instead of spending the backstop and blaming
+	// readPump for a write that never went out.
+	ctrlErr := make(chan error, 1)
 
 	// OnceFunc because a controller handler that returned early would let the
 	// agent reconnect and run this closure a second time, and a bare close
 	// would then panic inside net/http instead of failing the test.
 	pumpIsLive := sync.OnceFunc(func() { close(pumpLive) })
 
+	reportCtrl := func(err error) {
+		select {
+		case ctrlErr <- err:
+		default: // keep the first failure; later ones are consequences of it
+		}
+	}
+
 	const pingStamp = 4242
 
 	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+		select {
+		case ctrlConn <- ctrl:
+		default: // a second connection; the first one is the one cleanup drops
+		}
+
 		readAndAckHello(t, ctrl)
 		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{})
 
 		// Ping the agent. Only readPump answers a ping, so the pong below is
 		// the liveness proof the cancel depends on.
 		if err := ctrl.SetWriteDeadline(time.Now().Add(runReturnBackstop)); err != nil {
+			reportCtrl(fmt.Errorf("set controller write deadline: %w", err))
 			return
 		}
 		pingData, err := json.Marshal(protocol.PingMessage{Timestamp: pingStamp})
 		if err != nil {
+			reportCtrl(fmt.Errorf("marshal ping: %w", err))
 			return
 		}
 		if err := ctrl.WriteJSON(protocol.Envelope{Type: protocol.TypePing, Data: pingData}); err != nil {
+			reportCtrl(fmt.Errorf("write ping to agent: %w", err))
 			return
 		}
 
@@ -678,11 +710,13 @@ func TestRunCtxCancelWithActiveConn(t *testing.T) {
 		// fails the test instead of wedging srv.Close in cleanup; the test
 		// synchronises on pumpLive, never on this timer.
 		if err := ctrl.SetReadDeadline(time.Now().Add(runReturnBackstop)); err != nil {
+			reportCtrl(fmt.Errorf("set controller read deadline: %w", err))
 			return
 		}
 		for {
 			_, raw, err := ctrl.ReadMessage()
 			if err != nil {
+				reportCtrl(fmt.Errorf("read from agent while waiting for the pong: %w", err))
 				return
 			}
 			var env protocol.Envelope
@@ -703,9 +737,13 @@ func TestRunCtxCancelWithActiveConn(t *testing.T) {
 		<-ctrlHold
 	})
 	releaseCtrl := sync.OnceFunc(func() { close(ctrlHold) })
-	// Registered after newControllerServer, so cleanup LIFO runs it before
-	// srv.Close: an early t.Fatal must not leave the handler parked.
-	t.Cleanup(releaseCtrl)
+	dropCtrl := sync.OnceFunc(func() {
+		select {
+		case conn := <-ctrlConn:
+			_ = conn.Close()
+		default: // never connected, nothing to drop
+		}
+	})
 
 	addr := freeAddr(t)
 	cfg := &config.Config{
@@ -722,9 +760,15 @@ func TestRunCtxCancelWithActiveConn(t *testing.T) {
 	c := newWireClient(t, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	// A t.Fatal below must still stop Run, or it reconnects past the end of
-	// the test and leaks its goroutine and its health server with it.
-	t.Cleanup(cancel)
+	// Every exit path, not just the happy one. Cancel alone does not stop a
+	// readPump that is already inside ReadMessage, so this releases the
+	// handler and drops the socket too. Registered after newControllerServer,
+	// so cleanup LIFO runs it before srv.Close rather than deadlocking on it.
+	t.Cleanup(func() {
+		cancel()
+		releaseCtrl()
+		dropCtrl()
+	})
 
 	runDone := make(chan error, 1)
 	go func() { runDone <- c.Run(ctx) }()
@@ -732,6 +776,8 @@ func TestRunCtxCancelWithActiveConn(t *testing.T) {
 	// Wait until readPump has answered the controller's ping.
 	select {
 	case <-pumpLive:
+	case err := <-ctrlErr:
+		t.Fatalf("controller side failed before the agent answered the ping: %v", err)
 	case <-time.After(runReturnBackstop):
 		t.Fatal("readPump never answered the controller ping")
 	}
