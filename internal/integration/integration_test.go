@@ -636,8 +636,9 @@ func TestMCPUnderEd25519Auth(t *testing.T) {
 	if badResp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("MCP with bad signature: got %d, want 401\nbody: %s", badResp.StatusCode, badBody)
 	}
-	if reason := badResp.Header.Get(auth.HeaderReason); reason == "" {
-		t.Error("MCP with bad signature: X-Portwing-Reason header is empty, want a reason")
+	wantReason := auth.ReasonFor(auth.ErrBadSignature)
+	if reason := badResp.Header.Get(auth.HeaderReason); reason != wantReason {
+		t.Errorf("MCP with bad signature: X-Portwing-Reason = %q, want %q", reason, wantReason)
 	}
 	// The rejected request must never reach the MCP handler: the body must
 	// not be a JSON-RPC response carrying our request ID.
@@ -675,6 +676,15 @@ func TestMCPUnderEd25519Auth(t *testing.T) {
 	if string(initRPC["jsonrpc"]) != `"2.0"` {
 		t.Errorf("MCP initialize: jsonrpc = %s, want \"2.0\"", initRPC["jsonrpc"])
 	}
+	if string(initRPC["id"]) != "1" {
+		t.Errorf("MCP initialize: id = %s, want 1", initRPC["id"])
+	}
+	if _, ok := initRPC["result"]; !ok {
+		t.Errorf("MCP initialize: response has no result key, want one\nbody: %v", initRPC)
+	}
+	if raw, ok := initRPC["error"]; ok {
+		t.Errorf("MCP initialize: response has an error key, want none\nerror: %s", raw)
+	}
 
 	// tools/list request, same connection pattern as TestMCPInitializeAndToolsList.
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
@@ -697,17 +707,35 @@ func TestMCPUnderEd25519Auth(t *testing.T) {
 			listResp.StatusCode, listResp.Header.Get(auth.HeaderReason), body)
 	}
 
+	listRespBody, err := io.ReadAll(listResp.Body)
+	if err != nil {
+		t.Fatalf("reading MCP tools/list response: %v", err)
+	}
+
+	var listFields map[string]json.RawMessage
+	if err := json.Unmarshal(listRespBody, &listFields); err != nil {
+		t.Fatalf("decoding MCP tools/list response: %v", err)
+	}
+	if string(listFields["jsonrpc"]) != `"2.0"` {
+		t.Errorf("tools/list: jsonrpc = %s, want \"2.0\"", listFields["jsonrpc"])
+	}
+	if string(listFields["id"]) != "2" {
+		t.Errorf("tools/list: id = %s, want 2", listFields["id"])
+	}
+	if _, ok := listFields["result"]; !ok {
+		t.Errorf("tools/list: response has no result key, want one\nbody: %v", listFields)
+	}
+	if raw, ok := listFields["error"]; ok {
+		t.Errorf("tools/list: response has an error key, want none\nerror: %s", raw)
+	}
+
 	var listRPC struct {
-		JSONRPC string `json:"jsonrpc"`
-		Result  struct {
+		Result struct {
 			Tools []map[string]any `json:"tools"`
 		} `json:"result"`
 	}
-	if err := json.NewDecoder(listResp.Body).Decode(&listRPC); err != nil {
-		t.Fatalf("decoding MCP tools/list response: %v", err)
-	}
-	if listRPC.JSONRPC != "2.0" {
-		t.Errorf("tools/list: jsonrpc = %q, want \"2.0\"", listRPC.JSONRPC)
+	if err := json.Unmarshal(listRespBody, &listRPC); err != nil {
+		t.Fatalf("decoding MCP tools/list result: %v", err)
 	}
 	if len(listRPC.Result.Tools) == 0 {
 		t.Error("tools/list: expected at least one tool, got 0")
