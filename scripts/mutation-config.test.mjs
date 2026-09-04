@@ -195,6 +195,101 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   assert.match(source, /internal\/integration is integration-test-only/u);
   assertCanaryJob(source);
   assertAdvisoryJob(source, entries);
+  assertRatchetJob(source);
+}
+
+// Comment lines are not code, the same reasoning
+// scripts/quality-history-config-test.sh:52 applies to its own bash
+// equivalent: a "must not contain X" assertion that reads through comments
+// would fail the moment a comment mentions X in passing, such as this job's
+// own header explaining why it never runs git push.
+function stripComments(text) {
+  return text
+    .split("\n")
+    .filter((line) => !/^\s*#/u.test(line))
+    .join("\n");
+}
+
+// The `run: |` step bodies only, not the whole job block. Every job in this
+// file pins actions with a version comment (`# v7.0.1`) and every job runs on
+// `ubuntu-24.04`, both of which contain a decimal-looking substring that has
+// nothing to do with a ratchet parameter. Scoping to the executable bodies is
+// what makes "no floating-point literal" a check on the ratchet's own numbers
+// (min gain, buffer floor, seed buffers) rather than a check that breaks on
+// the runner image tag.
+function runStepBodies(jobText) {
+  const lines = jobText.split("\n");
+  const bodies = [];
+  let collecting = false;
+  let bodyLines = [];
+  let bodyIndent = null;
+  for (const line of lines) {
+    if (/^ {8}run: \|$/u.test(line)) {
+      if (collecting) bodies.push(bodyLines.join("\n"));
+      collecting = true;
+      bodyLines = [];
+      bodyIndent = null;
+      continue;
+    }
+    if (collecting) {
+      if (line.trim() === "") {
+        bodyLines.push(line);
+        continue;
+      }
+      const indentMatch = line.match(/^( +)/u);
+      const indent = indentMatch ? indentMatch[1].length : 0;
+      if (bodyIndent === null) bodyIndent = indent;
+      if (indent < bodyIndent) {
+        bodies.push(bodyLines.join("\n"));
+        collecting = false;
+        bodyLines = [];
+        bodyIndent = null;
+      } else {
+        bodyLines.push(line);
+      }
+    }
+  }
+  if (collecting) bodies.push(bodyLines.join("\n"));
+  return bodies.join("\n---\n");
+}
+
+// PW-5.5's split applies here too: the ratchet job reads this run's own
+// records and the quality-history series and proposes; it must never hold
+// write access and never execute Go, Gremlins or git's write path. Unlike
+// `history`, it also has no reason to hold `contents: write`, so its own
+// permissions block is asserted at exactly `contents: read` rather than just
+// "no write scope".
+function assertRatchetJob(source) {
+  const ratchet = jobBlock(source, "ratchet", "the mutation ratchet job is missing");
+
+  assert.match(
+    ratchet,
+    /^ {4}needs: \[gremlins, history\]$/mu,
+    "the ratchet job must need both gremlins and history",
+  );
+
+  const permissionsMatch = ratchet.match(/^ {4}permissions:\n((?: {6}.+\n)+)/mu);
+  assert.ok(permissionsMatch, "the ratchet job must declare its own permissions");
+  const permissionsLines = permissionsMatch[1].split("\n").filter((line) => line.length > 0);
+  assert.ok(
+    permissionsLines.length === 1 && permissionsLines[0] === "      contents: read",
+    "the ratchet job's permissions must be exactly contents: read",
+  );
+
+  const code = stripComments(ratchet);
+  for (const forbidden of ["actions/setup-go", "gremlins unleash", "git push", "git commit"]) {
+    assert.doesNotMatch(
+      code,
+      new RegExp(escapeForRegExp(forbidden), "u"),
+      `the ratchet job must not run '${forbidden}'; it only reads`,
+    );
+  }
+
+  assert.doesNotMatch(
+    runStepBodies(ratchet),
+    /\d+\.\d+/u,
+    "the ratchet job's run steps must not hardcode a floating-point literal; ratchet parameters live in scripts/ci/mutation-ratchet.sh",
+  );
 }
 
 // PW-6.8: the advisory job exists to measure the mutators the gating matrix
@@ -645,6 +740,50 @@ test("mutation contract rejects a repo-root Gremlins config", () => {
   assert.throws(
     () => assertNoRootGremlinsConfig((name) => name === ".gremlins.yaml"),
     /would change every gating floor's mutator set/u,
+  );
+});
+
+// PW-5.5's split, applied to the ratchet job: a proposal-only job that grows
+// a real dependency on Go, Gremlins or git's write path has stopped being
+// read-only in fact, whatever its `permissions:` block still claims.
+test("mutation contract rejects a missing ratchet job", () => {
+  assertMutationFailure(
+    workflow.replace("  ratchet:\n", "  ratchet-disabled:\n"),
+    "the mutation ratchet job is missing",
+  );
+});
+
+test("mutation contract rejects a ratchet job that stops needing history", () => {
+  assertMutationFailure(
+    workflow.replace("    needs: [gremlins, history]\n", "    needs: [gremlins]\n"),
+    "the ratchet job must need both gremlins and history",
+  );
+});
+
+test("mutation contract rejects a ratchet job with a write scope", () => {
+  const source = workflow.replace(
+    "  ratchet:\n    name: \"Quality: Mutation floor ratchet proposal\"\n    needs: [gremlins, history]\n    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: read\n",
+    "  ratchet:\n    name: \"Quality: Mutation floor ratchet proposal\"\n    needs: [gremlins, history]\n    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: write\n",
+  );
+  assertMutationFailure(source, "the ratchet job's permissions must be exactly contents: read");
+});
+
+test("mutation contract rejects a ratchet job that runs Gremlins itself", () => {
+  const source = workflow.replace(
+    "      - name: Propose floor ratchets\n        run: |\n          set -euo pipefail\n",
+    '      - name: Propose floor ratchets\n        run: |\n          set -euo pipefail\n          gremlins unleash --tags="" ./internal/edge\n',
+  );
+  assertMutationFailure(source, "the ratchet job must not run 'gremlins unleash'; it only reads");
+});
+
+test("mutation contract rejects a ratchet job that hardcodes a ratchet parameter", () => {
+  const source = workflow.replace(
+    "          set -euo pipefail\n          ./scripts/ci/mutation-ratchet.sh records quality-history/mutation.jsonl mutation-ratchet-proposal.json\n",
+    '          set -euo pipefail\n          min_gain="2.0"\n          ./scripts/ci/mutation-ratchet.sh records quality-history/mutation.jsonl mutation-ratchet-proposal.json\n',
+  );
+  assertMutationFailure(
+    source,
+    "the ratchet job's run steps must not hardcode a floating-point literal; ratchet parameters live in scripts/ci/mutation-ratchet.sh",
   );
 });
 
