@@ -556,13 +556,16 @@ function assertAdvisoryMatrix(advisory, entries) {
         );
       }
 
-      // A package the gating matrix gives a timeout coefficient needs the
-      // same one here: without it the advisory leg re-creates the all-TIMED
-      // OUT run that scored 0.00% and read as a real measurement.
+      // A package in advisoryTimeoutCoefficients needs the same coefficient
+      // in its advisory row: without it the advisory leg re-creates the
+      // all-TIMED OUT run that scored 0.00% and read as a real measurement.
+      // adapter-drydock is advisory-only here (the gated row has no
+      // coefficient), so this checks the advisory group's own row, not the
+      // gating matrix.
       const expectedCoefficient = advisoryTimeoutCoefficients.has(name) ? "40" : "";
       if (coefficient !== expectedCoefficient) {
         throw new Error(
-          `${name}'s advisory row must carry the same timeout coefficient the gating matrix sets`,
+          `${name}'s advisory row must carry the timeout coefficient the advisory group requires`,
         );
       }
     }
@@ -1059,7 +1062,7 @@ test("mutation contract rejects an advisory floor that drifts from the matrix", 
 test("mutation contract rejects an advisory row that drops its timeout coefficient", () => {
   assertMutationFailure(
     workflow.replace("./internal/protocol|protocol|100|40", "./internal/protocol|protocol|100"),
-    "protocol's advisory row must carry the same timeout coefficient the gating matrix sets",
+    "protocol's advisory row must carry the timeout coefficient the advisory group requires",
   );
 });
 
@@ -1069,7 +1072,7 @@ test("mutation contract rejects adapter-drydock's advisory row dropping its time
       "./internal/adapter/drydock|adapter-drydock|82.50|40",
       "./internal/adapter/drydock|adapter-drydock|82.50",
     ),
-    "adapter-drydock's advisory row must carry the same timeout coefficient the gating matrix sets",
+    "adapter-drydock's advisory row must carry the timeout coefficient the advisory group requires",
   );
 });
 
