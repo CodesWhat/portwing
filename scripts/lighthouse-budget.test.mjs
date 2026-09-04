@@ -9,7 +9,7 @@ import {
   isChromeConnectionError,
   launchChromeWithRetries,
   median,
-  resolveChromeRetries,
+  resolveChromeAttempts,
   verifyLighthouseRuns,
   withLighthouseResources,
 } from "./lighthouse-budget.mjs";
@@ -161,34 +161,34 @@ test("isChromeConnectionError is cycle-safe and does not hang on a circular caus
   assert.ok(!isChromeConnectionError(a));
 });
 
-test("resolveChromeRetries defaults to 3 and validates its env override", () => {
-  assert.equal(resolveChromeRetries({}), 3);
-  assert.equal(resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "" }), 3);
-  assert.equal(resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "5" }), 5);
-  assert.equal(resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "10" }), 10);
+test("resolveChromeAttempts defaults to 3 and validates its env override", () => {
+  assert.equal(resolveChromeAttempts({}), 3);
+  assert.equal(resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "" }), 3);
+  assert.equal(resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "5" }), 5);
+  assert.equal(resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "10" }), 10);
   assert.throws(
-    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "0" }),
-    /LIGHTHOUSE_CHROME_RETRIES/,
+    () => resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "0" }),
+    /LIGHTHOUSE_CHROME_ATTEMPTS/,
   );
   assert.throws(
-    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "11" }),
-    /LIGHTHOUSE_CHROME_RETRIES/,
+    () => resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "11" }),
+    /LIGHTHOUSE_CHROME_ATTEMPTS/,
   );
   assert.throws(
-    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "9".repeat(400) }),
-    /LIGHTHOUSE_CHROME_RETRIES/,
+    () => resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "9".repeat(400) }),
+    /LIGHTHOUSE_CHROME_ATTEMPTS/,
   );
   assert.throws(
-    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "-1" }),
-    /LIGHTHOUSE_CHROME_RETRIES/,
+    () => resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "-1" }),
+    /LIGHTHOUSE_CHROME_ATTEMPTS/,
   );
   assert.throws(
-    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "abc" }),
-    /LIGHTHOUSE_CHROME_RETRIES/,
+    () => resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "abc" }),
+    /LIGHTHOUSE_CHROME_ATTEMPTS/,
   );
   assert.throws(
-    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "1.5" }),
-    /LIGHTHOUSE_CHROME_RETRIES/,
+    () => resolveChromeAttempts({ LIGHTHOUSE_CHROME_ATTEMPTS: "1.5" }),
+    /LIGHTHOUSE_CHROME_ATTEMPTS/,
   );
 });
 

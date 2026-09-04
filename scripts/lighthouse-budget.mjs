@@ -129,8 +129,8 @@ export async function withLighthouseResources({ startServer, startChrome, run })
   }
 }
 
-const DEFAULT_CHROME_RETRIES = 3;
-const MAX_CHROME_RETRIES = 10;
+const DEFAULT_CHROME_ATTEMPTS = 3;
+const MAX_CHROME_ATTEMPTS = 10;
 
 // The Chrome debugging port can go away mid-run (Chrome crash, runner OOM),
 // which lighthouse and chrome-launcher surface as a plain connection error
@@ -158,25 +158,25 @@ export function isChromeConnectionError(error) {
   return false;
 }
 
-// LIGHTHOUSE_CHROME_RETRIES caps the total attempts (including the first) a
+// LIGHTHOUSE_CHROME_ATTEMPTS caps the total attempts (including the first) a
 // single Lighthouse run gets before this exits fail-closed. It must be an
-// integer between 1 and MAX_CHROME_RETRIES; anything else is a configuration
+// integer between 1 and MAX_CHROME_ATTEMPTS; anything else is a configuration
 // error, not a run failure, so it throws immediately rather than falling
 // back silently. A plain /^\d+$/ check isn't enough on its own: a long
 // digit string like "9".repeat(400) still matches the regex but parses to
 // Infinity, which would never let the retry loop terminate.
-export function resolveChromeRetries(env = process.env) {
-  const raw = env.LIGHTHOUSE_CHROME_RETRIES;
-  if (raw === undefined || raw === "") return DEFAULT_CHROME_RETRIES;
+export function resolveChromeAttempts(env = process.env) {
+  const raw = env.LIGHTHOUSE_CHROME_ATTEMPTS;
+  if (raw === undefined || raw === "") return DEFAULT_CHROME_ATTEMPTS;
   const parsed = Number(raw);
   if (
     !/^\d+$/.test(raw) ||
     !Number.isSafeInteger(parsed) ||
     parsed < 1 ||
-    parsed > MAX_CHROME_RETRIES
+    parsed > MAX_CHROME_ATTEMPTS
   ) {
     throw new Error(
-      `LIGHTHOUSE_CHROME_RETRIES must be an integer between 1 and ${MAX_CHROME_RETRIES}, got ${JSON.stringify(raw)}`,
+      `LIGHTHOUSE_CHROME_ATTEMPTS must be an integer between 1 and ${MAX_CHROME_ATTEMPTS}, got ${JSON.stringify(raw)}`,
     );
   }
   return parsed;
@@ -204,12 +204,12 @@ async function killChromeQuietly(chrome) {
 // so it is a no-op when nothing has launched yet (e.g. under test doubles).
 export async function launchChromeWithRetries({
   launchChrome,
-  maxAttempts = resolveChromeRetries(),
+  maxAttempts = resolveChromeAttempts(),
   log = (message) => process.stdout.write(message),
 }) {
   if (maxAttempts < 1) {
     throw new Error(
-      `LIGHTHOUSE_CHROME_RETRIES resolved to ${maxAttempts}; at least one attempt is required`,
+      `LIGHTHOUSE_CHROME_ATTEMPTS resolved to ${maxAttempts}; at least one attempt is required`,
     );
   }
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -244,12 +244,12 @@ export async function collectLighthouseRuns({
   startChrome,
   setChrome,
   runLighthouse,
-  maxAttempts = resolveChromeRetries(),
+  maxAttempts = resolveChromeAttempts(),
   log = (message) => process.stdout.write(message),
 }) {
   if (maxAttempts < 1) {
     throw new Error(
-      `LIGHTHOUSE_CHROME_RETRIES resolved to ${maxAttempts}; at least one attempt is required`,
+      `LIGHTHOUSE_CHROME_ATTEMPTS resolved to ${maxAttempts}; at least one attempt is required`,
     );
   }
   let current = chrome;
