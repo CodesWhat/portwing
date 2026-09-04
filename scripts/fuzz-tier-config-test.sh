@@ -267,9 +267,36 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	done
 
 	# Corpus persistence must not have cost the lane its least-privilege token.
-	perms_declarations="$(grep -Ec '^[[:space:]]*permissions:' "${workflow}" || true)"
+	# Checked against the corpus-touching job specifically (named "deep-fuzz"
+	# in the nightly workflow, "monthly-fuzz" in the monthly one — the first
+	# job under `jobs:` either way), not a whole-file count: quality-fuzz-
+	# nightly.yml's own `history` job legitimately carries a job-level
+	# `permissions: contents: write` of its own (Spec 2), the same way
+	# quality-mutation-monthly.yml's history job does, and that is a
+	# different job holding a different, deliberate escalation.
+	corpus_job_name="$(awk '
+		/^jobs:$/ { in_jobs = 1; next }
+		in_jobs && /^  [A-Za-z0-9_-]+:$/ {
+			name = $1
+			sub(/:$/, "", name)
+			print name
+			exit
+		}
+	' "${workflow}")"
+	corpus_job_block="$(awk -v job="  ${corpus_job_name}:" '
+		$0 == job { in_job = 1; next }
+		in_job && /^  [^[:space:]]/ { in_job = 0 }
+		in_job { print }
+	' "${workflow}")"
+	if grep -Eq '^[[:space:]]*permissions:' <<<"${corpus_job_block}"; then
+		fail "${workflow}: the '${corpus_job_name}' job must not declare permissions of its own"
+	fi
+
+	# Anchored at column 0: this counts the workflow-level declaration only,
+	# same as perms_block's own anchor just below.
+	perms_declarations="$(grep -Ec '^permissions:$' "${workflow}" || true)"
 	[ "${perms_declarations}" -eq 1 ] ||
-		fail "${workflow} must declare permissions exactly once (found ${perms_declarations})"
+		fail "${workflow} must declare workflow-level permissions exactly once (found ${perms_declarations})"
 	perms_block="$(awk '/^permissions:$/ { inside = 1; next } inside && /^[^[:space:]]/ { exit } inside && NF { print }' "${workflow}")"
 	[ "${perms_block}" = "  contents: read" ] ||
 		fail "${workflow} permissions must stay exactly 'contents: read'"
@@ -306,6 +333,91 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${upload_step_block}" ||
 		fail "${workflow} must upload the corpus artifact with actions/upload-artifact pinned to ${upload_artifact_sha} in the same step"
 done
+
+# --- Spec 2: corpus coverage score step (nightly only) ----------------------
+#
+# The score-then-cleanup pair, and the quality-history record they feed,
+# belong to the nightly lane only: it is the one that runs on a schedule and
+# has a `history` job. The monthly workflow is untouched by this spec.
+nightly_workflow=".github/workflows/quality-fuzz-nightly.yml"
+
+step_line() {
+	grep -n "^      - name: $2\$" "$1" | head -n 1 | cut -d: -f1 || true
+}
+
+step_block() {
+	awk -v want="      - name: $2" '
+		$0 == want { inside = 1; print; next }
+		inside && /^      - name:/ { exit }
+		inside { print }
+	' "$1"
+}
+
+save_corpus_line="$(step_line "${nightly_workflow}" "Save fuzz corpus")"
+upload_failure_line="$(step_line "${nightly_workflow}" "Upload fuzz corpus on failure or cancel")"
+score_step_line="$(step_line "${nightly_workflow}" "Score corpus coverage")"
+cleanup_step_line="$(step_line "${nightly_workflow}" "Verify cached corpus copies were cleaned up")"
+
+[ -n "${save_corpus_line}" ] ||
+	fail "${nightly_workflow} must have a 'Save fuzz corpus' step"
+[ -n "${upload_failure_line}" ] ||
+	fail "${nightly_workflow} must have an 'Upload fuzz corpus on failure or cancel' step"
+[ -n "${score_step_line}" ] ||
+	fail "${nightly_workflow} must have a 'Score corpus coverage' step"
+[ -n "${cleanup_step_line}" ] ||
+	fail "${nightly_workflow} must have a 'Verify cached corpus copies were cleaned up' step"
+
+# The crash-artifact upload has to run BEFORE the score step, not just
+# somewhere in the file: the score step is the one that copies cached-*
+# entries into the seed dir, and that copy step's own `testdata/fuzz/` tree is
+# exactly what the failure-upload step's path glob captures. Scoring first
+# would let a cached-* copy ride along into the crash artifact a human later
+# downloads and commits as a minimized repro.
+if [ -n "${upload_failure_line}" ] && [ -n "${score_step_line}" ]; then
+	[ "${upload_failure_line}" -lt "${score_step_line}" ] ||
+		fail "${nightly_workflow}: 'Upload fuzz corpus on failure or cancel' (line ${upload_failure_line}) must come before 'Score corpus coverage' (line ${score_step_line}) — a cached-* copy must never be able to enter the crash artifact"
+fi
+
+# Every one of the 10 matrix fuzzers is scored by construction: the score
+# step, like every other step in this job, is one step shared across the
+# whole matrix rather than duplicated per fuzzer — the per-fuzzer inventory
+# loop above already proves all 10 run through this job, so what remains to
+# prove is that the shared step itself exists, runs unconditionally, and
+# sits after the cache save it must never race.
+if [ -n "${save_corpus_line}" ] && [ -n "${score_step_line}" ]; then
+	[ "${score_step_line}" -gt "${save_corpus_line}" ] ||
+		fail "${nightly_workflow}: 'Score corpus coverage' (line ${score_step_line}) must come after 'Save fuzz corpus' (line ${save_corpus_line}) — a cached-* copy must never be able to enter the actions/cache entry that step just wrote"
+fi
+
+score_step_block="$(step_block "${nightly_workflow}" "Score corpus coverage")"
+if [ -n "${score_step_block}" ]; then
+	grep -Fxq "        if: always()" <<<"${score_step_block}" ||
+		fail "${nightly_workflow}: the 'Score corpus coverage' step must run if: always()"
+	grep -Eq 'bash[[:space:]]+scripts/ci/fuzz-score\.sh' <<<"${score_step_block}" ||
+		fail "${nightly_workflow}: the 'Score corpus coverage' step must invoke scripts/ci/fuzz-score.sh"
+fi
+
+cleanup_step_block="$(step_block "${nightly_workflow}" "Verify cached corpus copies were cleaned up")"
+if [ -n "${cleanup_step_block}" ]; then
+	grep -Fxq "        if: always()" <<<"${cleanup_step_block}" ||
+		fail "${nightly_workflow}: the 'Verify cached corpus copies were cleaned up' step must run if: always()"
+	# fuzz-score.sh already deletes exactly the cached-<basename> paths it
+	# copied, from its own manifest, on every exit path. A blanket
+	# `rm -f "${SEED}/cached-"*` here would also delete a cached-* file
+	# fuzz-score.sh deliberately left alone (a pre-existing untracked one,
+	# or every copy when a tracked cached-* file made it refuse to copy at
+	# all) — this step must only verify, never delete.
+	# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+	grep -Fq 'rm -f "${SEED}/cached-"*' <<<"${cleanup_step_block}" &&
+		fail "${nightly_workflow}: the 'Verify cached corpus copies were cleaned up' step must not rm -f \"\${SEED}/cached-\"*; it must only verify fuzz-score.sh's own cleanup"
+	grep -Fiq 'manifest' <<<"${cleanup_step_block}" ||
+		fail "${nightly_workflow}: the 'Verify cached corpus copies were cleaned up' step must reference fuzz-score.sh's manifest of copied paths"
+fi
+
+if [ -n "${score_step_line}" ] && [ -n "${cleanup_step_line}" ]; then
+	[ "${cleanup_step_line}" -gt "${score_step_line}" ] ||
+		fail "${nightly_workflow}: 'Verify cached corpus copies were cleaned up' must come after 'Score corpus coverage'"
+fi
 
 # Monthly/nightly cron overlap. Both lanes restore from and save to the same
 # corpus cache prefix, and restore-keys picks whichever entry is newest, so if

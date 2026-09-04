@@ -2,31 +2,34 @@
 #
 # Contract for the quality-history recording jobs (PW-5.5).
 #
-# The jobs this guards run once a week in one lane and once a month in
-# another, cannot fail their caller by design, and write to a branch nobody
-# checks out. Every property below is one that would otherwise be discovered
-# weeks later, or never:
+# The jobs this guards run once a week in one lane, once a month in another,
+# and nightly in a third, cannot fail their caller by design, and write to a
+# branch nobody checks out. Every property below is one that would otherwise
+# be discovered weeks later, or never:
 #
-#   * the recording job still exists, in both lanes, calling the shared script;
+#   * the recording job still exists, in all three lanes, calling the shared
+#     script;
 #   * it fires only on schedule/workflow_dispatch, so a branch's numbers never
 #     land in the trunk's series;
 #   * `contents: write` is the recording job's alone. It is the only write
-#     scope in either lane, and the measuring jobs run code — Gremlins
-#     literally executes mutated source, the soak job runs the agent for four
-#     hours — so a write-scoped credential in one of those is a real
-#     escalation and not a style point;
+#     scope in any lane, and the measuring jobs run code — Gremlins literally
+#     executes mutated source, the soak job runs the agent for four hours,
+#     the fuzz job runs `go test` against a corpus restored from cache — so a
+#     write-scoped credential in one of those is a real escalation and not a
+#     style point;
 #   * the recording job builds and runs nothing. A job that checks out, calls
 #     jq and pushes has no way to reach a credential through code it executed;
 #     the moment it grows a `setup-go` or a `go test`, that stops being true.
 #
-# Usage: quality-history-config-test.sh [soak.yml] [mutation.yml] [append.sh]
+# Usage: quality-history-config-test.sh [soak.yml] [mutation.yml] [fuzz.yml] [append.sh]
 
 set -euo pipefail
 export LC_ALL=C
 
 soak_workflow="${1:-.github/workflows/quality-soak-weekly.yml}"
 mutation_workflow="${2:-.github/workflows/quality-mutation-monthly.yml}"
-append_script="${3:-scripts/ci/quality-history-append.sh}"
+fuzz_workflow="${3:-.github/workflows/quality-fuzz-nightly.yml}"
+append_script="${4:-scripts/ci/quality-history-append.sh}"
 
 failures=0
 
@@ -35,7 +38,7 @@ fail() {
 	failures=$((failures + 1))
 }
 
-for path in "${soak_workflow}" "${mutation_workflow}" "${append_script}"; do
+for path in "${soak_workflow}" "${mutation_workflow}" "${fuzz_workflow}" "${append_script}"; do
 	if [ ! -f "${path}" ]; then
 		fail "file not found: ${path}"
 		exit 1
@@ -170,6 +173,7 @@ check_lane() {
 
 check_lane "${soak_workflow}" "soak" "soak" "soak"
 check_lane "${mutation_workflow}" "gremlins" "mutation" "mutation"
+check_lane "${fuzz_workflow}" "deep-fuzz" "fuzz-nightly" "fuzz"
 
 # The mutation matrix hands its numbers over as an artifact, so the record has
 # to actually be produced and uploaded or the history job downloads nothing and

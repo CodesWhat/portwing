@@ -182,7 +182,7 @@ seed_fixture
 # the retry budget visible at the call site instead of relying silently on
 # fuzz-run.sh's own default.
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-sed 's|FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE="\$GITHUB_OUTPUT" bash scripts/ci/fuzz-run.sh|FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" bash scripts/ci/fuzz-run.sh|' \
+sed 's|FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE="\$GITHUB_OUTPUT" FUZZ_LOG_FILE="fuzz-run-\${FUZZER}.log" bash scripts/ci/fuzz-run.sh|FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" FUZZ_LOG_FILE="fuzz-run-${FUZZER}.log" bash scripts/ci/fuzz-run.sh|' \
 	"${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "a caller dropping the FUZZ_RETRIES retry env must not satisfy the contract"
@@ -257,6 +257,77 @@ awk '
 ' "${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "an if: guard attached to a different step must not satisfy the contract"
+
+# --- Failure-upload before scoring (codex follow-up #3) ---------------------
+
+seed_fixture
+# Duplicate the 'Score corpus coverage' step immediately ahead of 'Upload
+# fuzz corpus on failure or cancel', leaving the original step untouched in
+# its rightful place further down. step_line() takes the FIRST match, so this
+# makes the contract see 'Score corpus coverage' as running before the
+# failure-upload step even though every other check (step exists, runs
+# if: always(), invokes fuzz-score.sh, comes after Save fuzz corpus) still
+# passes — only the ordering check between these two specific steps notices.
+score_block_file="${fixture}/score-block.txt"
+awk '
+	$0 == "      - name: Score corpus coverage" { inside = 1; print; next }
+	inside && /^      - name:/ { exit }
+	inside { print }
+' "${nightly}" >"${score_block_file}"
+# Read the captured block back with getline rather than passing it through
+# -v: awk -v does not accept an embedded newline in the assigned value on
+# every awk this repo has to run under.
+awk -v blockfile="${score_block_file}" '
+	$0 == "      - name: Upload fuzz corpus on failure or cancel" {
+		while ((getline line < blockfile) > 0) {
+			print line
+		}
+		close(blockfile)
+	}
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "'Score corpus coverage' running before 'Upload fuzz corpus on failure or cancel' must not satisfy the contract"
+
+# --- Verify-cleanup step must verify, not delete (CodeRabbit review follow-up) --
+#
+# fuzz-score.sh already cleans up exactly what it copied, from its own
+# manifest, on every exit path. The paired workflow step exists only to
+# catch a leftover the script's own cleanup missed, so it must never itself
+# delete a cached-* file — a blanket `rm -f "${SEED}/cached-"*` would also
+# remove a file the scorer deliberately left alone (a pre-existing untracked
+# one, or every copy when a tracked cached-* file made it refuse to copy at
+# all) — and it must reference the manifest fuzz-score.sh keeps, not
+# reinvent its own notion of what survived.
+
+seed_fixture
+# Reintroduce the blanket delete inside the verify step's run block. Every
+# other property of the step (name, if: always(), ordering) is untouched, so
+# only this check notices the regression back to deleting instead of
+# verifying.
+awk '
+	/^          leftover=""$/ {
+		print "          rm -f \"${SEED}/cached-\"*"
+		print
+		next
+	}
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "the verify-cleanup step deleting cached-* files with a blanket rm -f must not satisfy the contract"
+
+seed_fixture
+# Drop every mention of "manifest" from the verify step's run block, leaving
+# its behavior (and every other step) otherwise identical, so only the
+# manifest-reference check notices.
+awk '
+	/^      - name: Verify cached corpus copies were cleaned up$/ { inside = 1 }
+	inside && /^      - name:/ && !/Verify cached corpus copies were cleaned up$/ { inside = 0 }
+	inside && /manifest/ { next }
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "the verify-cleanup step with no reference to fuzz-score.sh's manifest must not satisfy the contract"
 
 # --- Corpus writer concurrency (review follow-up) ---------------------------
 
