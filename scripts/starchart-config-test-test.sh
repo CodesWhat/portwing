@@ -81,7 +81,8 @@ reset_fixture() {
 }
 
 run_contract() {
-	(cd "${test_root}" && bash scripts/starchart-config-test.sh .github/workflows/starchart.yml 2>&1)
+	local workflow_arg="${1:-.github/workflows/starchart.yml}"
+	(cd "${test_root}" && bash scripts/starchart-config-test.sh "${workflow_arg}" 2>&1)
 }
 
 assert_passes() {
@@ -102,16 +103,20 @@ assert_passes() {
 # (see the contract's own comments), so a single mutation still produces
 # exactly one FAIL: line; expected_count stays here, defaulting to 1, as a
 # tripwire against a future regression making one mutation trip two checks.
+# workflow_arg defaults to the fixture's own path and only needs overriding
+# for the one case that isn't a fixture mutation at all: a workflow argument
+# that doesn't resolve to a file.
 assert_rejected() {
 	local expected_message="$1"
 	local failure_message="$2"
 	local expected_count="${3:-1}"
+	local workflow_arg="${4:-.github/workflows/starchart.yml}"
 	local output
 	local status
 	local actual_count
 
 	set +e
-	output="$(run_contract)"
+	output="$(run_contract "${workflow_arg}")"
 	status=$?
 	set -e
 
@@ -149,6 +154,16 @@ insert_after_line() {
 # without a second, redundant copy-and-run.
 reset_fixture
 assert_passes "the real starchart.yml must pass its own contract"
+
+# A workflow argument that doesn't resolve to a file at all -- the
+# contract's very first check, before the CRLF check, the printable-ASCII
+# check, or any of the template machinery even loads. No mutation of the
+# fixture applies here; run_contract's own argument is what varies.
+assert_rejected \
+	"workflow not found: .github/workflows/does-not-exist.yml" \
+	"contract must reject a workflow argument that does not resolve to a file" \
+	1 \
+	.github/workflows/does-not-exist.yml
 
 # --- line endings ------------------------------------------------------------
 
@@ -318,11 +333,11 @@ assert_rejected \
 #
 # All three mutations below are caught by the same file-wide printable-ASCII
 # check as the NUL-byte case above, before extraction or the byte gate ever
-# run -- the pin-comment-specific ASCII check that also exists in the
-# contract (for the same reason the slot checks exist alongside the byte
-# gate: to explain a failure, not just to make one) never gets a turn here,
-# because nothing in this file's own template can carry one of these bytes
-# without the file-wide check seeing it first.
+# run. A pin-comment-specific ASCII check briefly existed alongside this one
+# but was dead code -- the file-wide check always ran first and always
+# caught the same bytes first, since nothing in this file's own template can
+# carry one of these bytes without the file-wide check seeing it -- and a
+# seventh round removed it rather than keep an unreachable branch around.
 
 # NEL (U+0085, 2 UTF-8 bytes) spliced into the pin's trailing comment: a YAML
 # parser reads this as a line break inside a scalar, so `secrets: inherit`
@@ -467,17 +482,28 @@ assert_rejected \
 # path the contract builds from this fixture's own nested layout, the same
 # one the real repo's default argument builds from its own root.
 #
-# The single `jq -e --arg b ... '.baseBranchPatterns == [$b]'` array-equality
-# check a sixth round put in place of the old extract-then-compare folds
-# malformed JSON, zero entries, and two entries into the exact same
-# fail-closed message as an outright value mismatch: all four are just
-# "the array isn't exactly [branch_value]" to a single boolean check. That
-# collapse already existed for the first three under the old two-step
-# version; the sixth round's version stops being able to tell them apart
-# from a wrong VALUE too, which is fine -- the fix is the same either way
-# (make renovate.json's baseBranchPatterns be [branch_value]) -- but it means
-# these four cases now share their message with the branch/renovate.json
-# mismatch case above, not just with each other.
+# The `jq -es --arg b ... 'length == 1 and (.[0] | type == "object") and
+# (.[0].baseBranchPatterns == [$b])'` array-equality check a sixth round put
+# in place of the old extract-then-compare folds malformed JSON, zero
+# entries, and two entries into the exact same fail-closed message as an
+# outright value mismatch: all four are just "the array isn't exactly
+# [branch_value]" to a single boolean check. That collapse already existed
+# for the first three under the old two-step version; the sixth round's
+# version stops being able to tell them apart from a wrong VALUE too, which
+# is fine -- the fix is the same either way (make renovate.json's
+# baseBranchPatterns be [branch_value]) -- but it means these four cases now
+# share their message with the branch/renovate.json mismatch case above, not
+# just with each other.
+#
+# A seventh round found the sixth round's `jq -e` (no slurp) took its exit
+# status from only the LAST value it printed: two JSON documents
+# concatenated in one file -- {"baseBranchPatterns":["wrong"]} followed by
+# {"baseBranchPatterns":["dev/v0.9"]} -- makes jq print false then true and
+# exit 0, so the cross-check passed on a file whose FIRST document was
+# wrong. `-s` slurps the whole input into a single array first, so there is
+# exactly one output value and nothing left for jq to pick a "last" one
+# from; `length == 1` on that array is what actually enforces "exactly one
+# JSON document," which `-e` alone was never checking.
 
 reset_fixture
 rm -f "${test_root}/renovate.json"
@@ -517,6 +543,20 @@ PY
 assert_rejected \
 	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject renovate.json with two baseBranchPatterns entries"
+cp renovate.json "${test_root}/renovate.json"
+
+# Two JSON documents concatenated in one file, the first wrong and the
+# second correct: the exact bypass a seventh round reproduced against the
+# pre-fix `jq -e` (no slurp), which took its exit status from the last of
+# the two printed values and let the wrong first document through unseen.
+reset_fixture
+{
+	echo '{"baseBranchPatterns":["wrong"]}'
+	echo '{"baseBranchPatterns":["dev/v0.9"]}'
+} >"${test_root}/renovate.json"
+assert_rejected \
+	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
+	"contract must reject a concatenated multi-document renovate.json, which a bare jq -e (no slurp) took its exit status from only the last document and let a wrong first document slip through unseen"
 cp renovate.json "${test_root}/renovate.json"
 
 echo "starchart contract self-tests passed."

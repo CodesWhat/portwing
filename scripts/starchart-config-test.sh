@@ -299,8 +299,6 @@ done
 if [ "${pin_extracted}" -eq 1 ]; then
 	if ! [[ ${pin} =~ ^[0-9a-f]{40}$ ]] || [ -z "$(printf '%s' "${pin_comment}" | tr -d '[:space:]')" ]; then
 		fail "the starchart-refresh.yml pin must be a full 40-hex commit SHA followed by a non-empty comment: ${pin_line}"
-	elif ! printf '%s' "${pin_comment}" | LC_ALL=C grep -Eq '^[ -~]+$'; then
-		fail "pin comment must be printable ASCII"
 	fi
 fi
 
@@ -316,7 +314,7 @@ if [ "${branch_extracted}" -eq 1 ]; then
 			renovate_file="$(dirname "${workflow}")/../../renovate.json"
 			if [ ! -f "${renovate_file}" ]; then
 				fail "expected ${renovate_file} to exist to cross-check the branch value"
-			elif ! jq -e --arg b "${branch_value}" '.baseBranchPatterns == [$b]' "${renovate_file}" >/dev/null 2>&1; then
+			elif ! jq -es --arg b "${branch_value}" 'length == 1 and (.[0] | type == "object") and (.[0].baseBranchPatterns == [$b])' "${renovate_file}" >/dev/null 2>&1; then
 				fail "branch: (${branch_value}) must exactly match ${renovate_file}'s baseBranchPatterns as a single-entry array; both roll together at a release cut"
 			fi
 		fi
