@@ -60,6 +60,12 @@ const advisoryGroupPackages = new Map([
   ],
 ]);
 const timeoutCoefficients = new Set(["pool", "protocol"]);
+// adapter-drydock needs the coefficient in its advisory row (run 33848880338:
+// 30 of 32 extra mutants TIMED OUT under the default coefficient) without
+// touching the gated matrix, whose floor for adapter-drydock hasn't been
+// remeasured under a coefficient yet. This set only widens the advisory-side
+// check below; timeoutCoefficients above stays the gating-matrix contract.
+const advisoryTimeoutCoefficients = new Set([...timeoutCoefficients, "adapter-drydock"]);
 const expectedFloors = new Map([
   ["./cmd/portwing", [100, 100]],
   ["./internal/server", [77.88, 94.12]],
@@ -553,7 +559,7 @@ function assertAdvisoryMatrix(advisory, entries) {
       // A package the gating matrix gives a timeout coefficient needs the
       // same one here: without it the advisory leg re-creates the all-TIMED
       // OUT run that scored 0.00% and read as a real measurement.
-      const expectedCoefficient = timeoutCoefficients.has(name) ? "40" : "";
+      const expectedCoefficient = advisoryTimeoutCoefficients.has(name) ? "40" : "";
       if (coefficient !== expectedCoefficient) {
         throw new Error(
           `${name}'s advisory row must carry the same timeout coefficient the gating matrix sets`,
@@ -1057,6 +1063,16 @@ test("mutation contract rejects an advisory row that drops its timeout coefficie
   );
 });
 
+test("mutation contract rejects adapter-drydock's advisory row dropping its timeout coefficient", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "./internal/adapter/drydock|adapter-drydock|82.50|40",
+      "./internal/adapter/drydock|adapter-drydock|82.50",
+    ),
+    "adapter-drydock's advisory row must carry the same timeout coefficient the gating matrix sets",
+  );
+});
+
 test("mutation contract rejects an advisory job that stops passing its timeout coefficient", () => {
   assertMutationFailure(
     workflow.replace(`              "${coefficientArgsExpansion}" \\\n`, ""),
@@ -1081,7 +1097,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
       '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
     )
     .replace(
-      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock's tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
       "",
     );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");

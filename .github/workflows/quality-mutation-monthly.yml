@@ -666,9 +666,15 @@ jobs:
             packages: |
               ./internal/generic|generic|85.00
           - group: misc-a
+            # adapter-drydock hit the same cliff as pool and protocol: run
+            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of
+            # them under the default timeout coefficient (coverage-gather
+            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.
+            # drydock's tests are slow relative to its coverage gather, so
+            # it gets the same |40 coefficient.
             packages: |
               ./internal/adapter|adapter|84.68
-              ./internal/adapter/drydock|adapter-drydock|82.50
+              ./internal/adapter/drydock|adapter-drydock|82.50|40
               ./internal/auth|auth|88.58
               ./internal/audit|audit|88.31
           - group: misc-b
