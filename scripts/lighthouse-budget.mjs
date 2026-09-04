@@ -112,7 +112,14 @@ export async function withLighthouseResources({ startServer, startChrome, run })
   let chrome;
   try {
     chrome = await startChrome();
-    return await run({ server, chrome });
+    return await run({
+      server,
+      chrome,
+      startChrome,
+      setChrome: (nextChrome) => {
+        chrome = nextChrome;
+      },
+    });
   } finally {
     try {
       if (chrome) await chrome.kill();
@@ -120,6 +127,106 @@ export async function withLighthouseResources({ startServer, startChrome, run })
       await new Promise((resolve) => server.close(resolve));
     }
   }
+}
+
+const DEFAULT_CHROME_RETRIES = 3;
+
+// The Chrome debugging port can go away mid-run (Chrome crash, runner OOM),
+// which lighthouse and chrome-launcher surface as a plain connection error
+// rather than anything naming Chrome. Budget failures (verifyLighthouseRuns,
+// missing metrics) must never match here, or a real regression would get
+// silently retried into a false pass.
+export function isChromeConnectionError(error) {
+  if (!error) return false;
+  const message = String(error?.message ?? error);
+  return (
+    error?.code === "ECONNREFUSED" ||
+    /ECONNREFUSED/.test(message) ||
+    /unable to connect to chrome/i.test(message) ||
+    /chrome (has crashed|failed to launch|connection)/i.test(message)
+  );
+}
+
+// LIGHTHOUSE_CHROME_RETRIES caps the total attempts (including the first) a
+// single Lighthouse run gets before this exits fail-closed. It is a
+// non-negative integer; anything else is a configuration error, not a run
+// failure, so it throws immediately rather than falling back silently.
+export function resolveChromeRetries(env = process.env) {
+  const raw = env.LIGHTHOUSE_CHROME_RETRIES;
+  if (raw === undefined || raw === "") return DEFAULT_CHROME_RETRIES;
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(
+      `LIGHTHOUSE_CHROME_RETRIES must be a non-negative integer, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return Number.parseInt(raw, 10);
+}
+
+async function killChromeQuietly(chrome) {
+  try {
+    await chrome?.kill();
+  } catch {
+    // The connection already dropped; the process is likely already gone.
+  }
+}
+
+// Core retry loop, kept free of real Chrome/lighthouse so it can be unit
+// tested with injected doubles. `chrome` is the already-launched instance to
+// start with; `startChrome` relaunches a fresh one when the current one
+// drops; `runLighthouse` performs a single audit and is the thing that
+// throws the injected ECONNREFUSED in tests.
+export async function collectLighthouseRuns({
+  config,
+  url,
+  outputDir,
+  chrome,
+  startChrome,
+  setChrome,
+  runLighthouse,
+  maxAttempts = resolveChromeRetries(),
+  log = (message) => process.stdout.write(message),
+}) {
+  if (maxAttempts < 1) {
+    throw new Error(
+      `LIGHTHOUSE_CHROME_RETRIES resolved to ${maxAttempts}; at least one attempt is required`,
+    );
+  }
+  let current = chrome;
+  const completedRuns = [];
+  for (let index = 0; index < config.numberOfRuns; index += 1) {
+    let lastChromeError;
+    let attemptResult;
+    let succeeded = false;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const result = await runLighthouse(url, { port: current.port });
+        if (!result) throw new Error(`Lighthouse returned no result for run ${index + 1}`);
+        fs.writeFileSync(path.join(outputDir, `run-${index + 1}.json`), JSON.stringify(result.lhr));
+        attemptResult = metrics(result.lhr);
+        succeeded = true;
+        break;
+      } catch (error) {
+        if (!isChromeConnectionError(error)) throw error;
+        lastChromeError = error;
+        await killChromeQuietly(current);
+        if (attempt === maxAttempts) break;
+        log(
+          `run ${index + 1}/${config.numberOfRuns} attempt ${attempt}/${maxAttempts}: ` +
+            `chrome connection lost (${error.message}), relaunching\n`,
+        );
+        current = await startChrome();
+        setChrome(current);
+      }
+    }
+    if (!succeeded) {
+      throw new Error(
+        `run ${index + 1}/${config.numberOfRuns} lost its Chrome connection ${maxAttempts} ` +
+          `time(s) in a row (${lastChromeError?.message}); giving up`,
+      );
+    }
+    completedRuns.push(attemptResult);
+  }
+  return completedRuns;
 }
 
 async function run(configPath) {
@@ -137,10 +244,12 @@ async function run(configPath) {
   const outputRoot = path.resolve(ROOT, config.outputRoot);
   if (!fs.existsSync(outputRoot))
     throw new Error(`${config.outputRoot} is missing; run npm run build first`);
+  const startChrome = () =>
+    launch({ chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"] });
   const runs = await withLighthouseResources({
     startServer: () => serveStatic(outputRoot, config.mountPath),
-    startChrome: () => launch({ chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"] }),
-    run: async ({ server, chrome }) => {
+    startChrome,
+    run: async ({ server, chrome, startChrome: relaunchChrome, setChrome }) => {
       const address = server.address();
       if (!address || typeof address === "string") {
         throw new Error("static server has no TCP port");
@@ -149,19 +258,21 @@ async function run(configPath) {
       fs.rmSync(outputDir, { recursive: true, force: true });
       fs.mkdirSync(outputDir, { recursive: true });
       const url = config.url.replace("{PORT}", String(address.port));
-      const completedRuns = [];
-      for (let index = 0; index < config.numberOfRuns; index += 1) {
-        const result = await lighthouse(url, {
-          port: chrome.port,
-          output: "json",
-          logLevel: "error",
-          onlyCategories: ["performance"],
-        });
-        if (!result) throw new Error(`Lighthouse returned no result for run ${index + 1}`);
-        fs.writeFileSync(path.join(outputDir, `run-${index + 1}.json`), JSON.stringify(result.lhr));
-        completedRuns.push(metrics(result.lhr));
-      }
-      return completedRuns;
+      return collectLighthouseRuns({
+        config,
+        url,
+        outputDir,
+        chrome,
+        startChrome: relaunchChrome,
+        setChrome,
+        runLighthouse: (runUrl, options) =>
+          lighthouse(runUrl, {
+            ...options,
+            output: "json",
+            logLevel: "error",
+            onlyCategories: ["performance"],
+          }),
+      });
     },
   });
   const verified = verifyLighthouseRuns(config, runs);

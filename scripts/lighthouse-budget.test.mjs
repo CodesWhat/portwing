@@ -1,7 +1,33 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
-import { median, verifyLighthouseRuns, withLighthouseResources } from "./lighthouse-budget.mjs";
+import {
+  collectLighthouseRuns,
+  isChromeConnectionError,
+  median,
+  resolveChromeRetries,
+  verifyLighthouseRuns,
+  withLighthouseResources,
+} from "./lighthouse-budget.mjs";
+
+function fixtureLhr({ performance, totalByteWeight, scriptTransferBytes }) {
+  return {
+    categories: { performance: { score: performance } },
+    audits: {
+      "total-byte-weight": { numericValue: totalByteWeight },
+      "resource-summary": {
+        details: { items: [{ resourceType: "script", transferSize: scriptTransferBytes }] },
+      },
+    },
+  };
+}
+
+function fakeChrome(port) {
+  return { port, kill: async () => {} };
+}
 
 test("median is stable for unsorted odd and even inputs", () => {
   assert.equal(median([5, 1, 3]), 3);
@@ -79,4 +105,172 @@ test("Lighthouse resource cleanup closes the server when Chrome cleanup fails", 
     /fixture Chrome cleanup failed/,
   );
   assert.equal(serverCloseCount, 1);
+});
+
+test("isChromeConnectionError matches Chrome/connection failures and not budget failures", () => {
+  const econnrefused = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:41695"), {
+    code: "ECONNREFUSED",
+  });
+  assert.ok(isChromeConnectionError(econnrefused));
+  assert.ok(isChromeConnectionError(new Error("Unable to connect to Chrome")));
+  assert.ok(isChromeConnectionError(new Error("Chrome has crashed")));
+  assert.ok(
+    !isChromeConnectionError(new Error("marketing performance budget exceeded: 0.5 < 0.66")),
+  );
+  assert.ok(!isChromeConnectionError(undefined));
+});
+
+test("resolveChromeRetries defaults to 3 and validates its env override", () => {
+  assert.equal(resolveChromeRetries({}), 3);
+  assert.equal(resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "" }), 3);
+  assert.equal(resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "5" }), 5);
+  assert.equal(resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "0" }), 0);
+  assert.throws(
+    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "-1" }),
+    /non-negative integer/,
+  );
+  assert.throws(
+    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "abc" }),
+    /non-negative integer/,
+  );
+  assert.throws(
+    () => resolveChromeRetries({ LIGHTHOUSE_CHROME_RETRIES: "1.5" }),
+    /non-negative integer/,
+  );
+});
+
+test("collectLighthouseRuns retries a run after Chrome drops the connection", async () => {
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-lighthouse-retry-"));
+  try {
+    const config = { site: "fixture", numberOfRuns: 1 };
+    const logs = [];
+    const killedPorts = [];
+    let lighthouseCalls = 0;
+    let startChromeCalls = 0;
+    const runs = await collectLighthouseRuns({
+      config,
+      url: "http://127.0.0.1:0/",
+      outputDir,
+      chrome: { port: 1, kill: async () => killedPorts.push(1) },
+      startChrome: async () => {
+        startChromeCalls += 1;
+        const port = startChromeCalls + 1;
+        return { port, kill: async () => killedPorts.push(port) };
+      },
+      setChrome: () => {},
+      runLighthouse: async () => {
+        lighthouseCalls += 1;
+        if (lighthouseCalls === 1) {
+          const error = new Error("connect ECONNREFUSED 127.0.0.1:41695");
+          error.code = "ECONNREFUSED";
+          throw error;
+        }
+        return {
+          lhr: fixtureLhr({ performance: 0.95, totalByteWeight: 900, scriptTransferBytes: 400 }),
+        };
+      },
+      maxAttempts: 3,
+      log: (message) => logs.push(message),
+    });
+    assert.deepEqual(runs, [{ performance: 0.95, totalByteWeight: 900, scriptTransferBytes: 400 }]);
+    assert.equal(lighthouseCalls, 2);
+    assert.equal(startChromeCalls, 1);
+    assert.deepEqual(killedPorts, [1]);
+    assert.equal(logs.length, 1);
+    assert.match(
+      logs[0],
+      /^run 1\/1 attempt 1\/3: chrome connection lost \(connect ECONNREFUSED 127\.0\.0\.1:41695\), relaunching\n$/,
+    );
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
+});
+
+test("collectLighthouseRuns exits fail-closed and names Chrome when every attempt drops the connection", async () => {
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-lighthouse-exhausted-"));
+  try {
+    const config = { site: "fixture", numberOfRuns: 5 };
+    const logs = [];
+    let lighthouseCalls = 0;
+    let startChromeCalls = 0;
+    await assert.rejects(
+      collectLighthouseRuns({
+        config,
+        url: "http://127.0.0.1:0/",
+        outputDir,
+        chrome: fakeChrome(1),
+        startChrome: async () => {
+          startChromeCalls += 1;
+          return fakeChrome(startChromeCalls + 1);
+        },
+        setChrome: () => {},
+        runLighthouse: async () => {
+          lighthouseCalls += 1;
+          const error = new Error("connect ECONNREFUSED 127.0.0.1:41695");
+          error.code = "ECONNREFUSED";
+          throw error;
+        },
+        maxAttempts: 3,
+        log: (message) => logs.push(message),
+      }),
+      /run 1\/5 lost its Chrome connection 3 time\(s\) in a row/,
+    );
+    assert.equal(lighthouseCalls, 3);
+    assert.equal(startChromeCalls, 2);
+    assert.equal(logs.length, 2);
+    assert.match(logs[0], /^run 1\/5 attempt 1\/3: chrome connection lost/);
+    assert.match(logs[1], /^run 1\/5 attempt 2\/3: chrome connection lost/);
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
+});
+
+test("collectLighthouseRuns does not retry a budget failure", async () => {
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-lighthouse-budget-"));
+  try {
+    const config = { site: "fixture", numberOfRuns: 1 };
+    let lighthouseCalls = 0;
+    await assert.rejects(
+      collectLighthouseRuns({
+        config,
+        url: "http://127.0.0.1:0/",
+        outputDir,
+        chrome: fakeChrome(1),
+        startChrome: async () => assert.fail("must not relaunch Chrome for a non-connection error"),
+        setChrome: () => {},
+        runLighthouse: async () => {
+          lighthouseCalls += 1;
+          throw new Error("Lighthouse runtime error: NO_FCP");
+        },
+        maxAttempts: 3,
+      }),
+      /Lighthouse runtime error: NO_FCP/,
+    );
+    assert.equal(lighthouseCalls, 1);
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
+});
+
+test("collectLighthouseRuns refuses to run with zero attempts configured", async () => {
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-lighthouse-zero-"));
+  try {
+    await assert.rejects(
+      collectLighthouseRuns({
+        config: { site: "fixture", numberOfRuns: 1 },
+        url: "http://127.0.0.1:0/",
+        outputDir,
+        chrome: fakeChrome(1),
+        startChrome: async () =>
+          assert.fail("must not launch Chrome with zero attempts configured"),
+        setChrome: () => {},
+        runLighthouse: async () =>
+          assert.fail("must not run Lighthouse with zero attempts configured"),
+        maxAttempts: 0,
+      }),
+      /at least one attempt/,
+    );
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
 });
