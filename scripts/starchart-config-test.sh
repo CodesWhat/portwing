@@ -62,6 +62,19 @@ set -euo pipefail
 # a cmp failure, it says that too, rather than reporting a clean diff that
 # isn't one.
 #
+# A sixth round found the same "bash reads a line, YAML doesn't" gap one
+# level down: `read` only ever splits on \n, but YAML also treats U+0085
+# (NEL), U+2028, and U+2029 as line breaks, so a NEL hidden inside the pin's
+# trailing comment reads as one line here while a YAML parser reads it as
+# two -- and the second one can carry a sibling key (`secrets: inherit`)
+# that no line this file inspects would ever see on its own. Every line is
+# now also asserted to be printable ASCII plus LF, an invariant the template
+# already held but that was never checked outright. The renovate.json
+# cross-check also moved off an untested environment-variable override and
+# onto the workflow path's own directory, and off a two-step
+# extract-then-compare onto a single exact jq array-equality check, so a
+# byte difference the string compare could have glossed over now just fails.
+
 # When the workflow file legitimately changes -- a pin roll, a release cut
 # rolling the branch -- the three placeholders absorb it and this contract
 # needs no edit. Anything else is a deliberate edit to both files in the same
@@ -95,6 +108,24 @@ fi
 crlf_count="$(tr -cd '\r' <"${workflow}" | wc -c | tr -d '[:space:]')"
 if [ "${crlf_count}" -ne 0 ]; then
 	fail "workflow file must not contain CRLF line endings (found ${crlf_count} carriage return byte(s)); the template comparison assumes bare LF"
+	exit 1
+fi
+
+# --- printable ASCII ----------------------------------------------------------
+#
+# YAML treats U+0085 (NEL), U+2028 (LINE SEPARATOR), and U+2029 (PARAGRAPH
+# SEPARATOR) as line breaks; bash's `read` only ever splits on \n. A NEL
+# hidden inside a comment -- the pin's trailing `# ...` in particular -- reads
+# as one line to every check in this file while a YAML parser reads it as
+# two, and the second one can carry a sibling key (`secrets: inherit`) that
+# never appears on any line this file inspects. The template itself is plain
+# ASCII, so only the three slots could ever carry anything else, but this
+# makes that invariant an explicit, file-wide check rather than something
+# merely implied by the template's own contents.
+
+non_ascii_count="$(LC_ALL=C tr -d '\n -~' <"${workflow}" | wc -c | tr -d '[:space:]')"
+if [ "${non_ascii_count}" -ne 0 ]; then
+	fail "workflow file must be printable ASCII plus LF (found ${non_ascii_count} byte(s) outside that range); YAML's own line breaks (NEL, U+2028, U+2029) are otherwise invisible to a comparison built on bash's line splitting"
 	exit 1
 fi
 
@@ -268,6 +299,8 @@ done
 if [ "${pin_extracted}" -eq 1 ]; then
 	if ! [[ ${pin} =~ ^[0-9a-f]{40}$ ]] || [ -z "$(printf '%s' "${pin_comment}" | tr -d '[:space:]')" ]; then
 		fail "the starchart-refresh.yml pin must be a full 40-hex commit SHA followed by a non-empty comment: ${pin_line}"
+	elif ! printf '%s' "${pin_comment}" | LC_ALL=C grep -Eq '^[ -~]+$'; then
+		fail "pin comment must be printable ASCII"
 	fi
 fi
 
@@ -277,16 +310,14 @@ if [ "${branch_extracted}" -eq 1 ]; then
 		fail "branch must not be main/master/HEAD/empty; the reusable workflow refuses these too, but this fails before a run is even needed: got '${branch_value}'"
 		;;
 	*)
-		if ! echo "${branch_value}" | grep -Eq '^dev/v[0-9]+\.[0-9]+$'; then
+		if ! printf '%s\n' "${branch_value}" | grep -Eq '^dev/v[0-9]+\.[0-9]+$'; then
 			fail "branch must match this repo's dev/vX.Y convention: got '${branch_value}'"
 		else
-			renovate_file="${STARCHART_RENOVATE_JSON:-renovate.json}"
+			renovate_file="$(dirname "${workflow}")/../../renovate.json"
 			if [ ! -f "${renovate_file}" ]; then
 				fail "expected ${renovate_file} to exist to cross-check the branch value"
-			elif ! renovate_branch="$(jq -r '.baseBranchPatterns | if length == 1 then .[0] else error("expected exactly one baseBranchPattern") end' "${renovate_file}" 2>/dev/null)"; then
-				fail "${renovate_file}'s baseBranchPatterns must contain exactly one entry"
-			elif [ "${branch_value}" != "${renovate_branch}" ]; then
-				fail "branch: (${branch_value}) must match ${renovate_file}'s baseBranchPatterns (${renovate_branch}); both roll together at a release cut"
+			elif ! jq -e --arg b "${branch_value}" '.baseBranchPatterns == [$b]' "${renovate_file}" >/dev/null 2>&1; then
+				fail "branch: (${branch_value}) must exactly match ${renovate_file}'s baseBranchPatterns as a single-entry array; both roll together at a release cut"
 			fi
 		fi
 		;;
@@ -316,7 +347,11 @@ while [ "${i}" -lt "${template_count}" ]; do
 	i=$((i + 1))
 done >"${rendered_file}"
 
-if ! cmp -s "${rendered_file}" "${workflow}"; then
+cmp -s "${rendered_file}" "${workflow}" && cmp_rc=0 || cmp_rc=$?
+
+if [ "${cmp_rc}" -ge 2 ]; then
+	fail "could not compare files (cmp exit ${cmp_rc})"
+elif [ "${cmp_rc}" -eq 1 ]; then
 	# Diagnostics only, run because the gate above already failed: walk the
 	# same two arrays the extraction step used and say where the two files
 	# first disagree as text. If that walk finds nothing -- every line reads

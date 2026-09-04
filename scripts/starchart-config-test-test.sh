@@ -29,6 +29,22 @@ set -euo pipefail
 # level cases a line comparison alone would have missed, and for
 # renovate.json being absent or unusable.
 #
+# A sixth round closed the gap the fifth round's own line-based comparison
+# still had one level down: `read` only splits on \n, but YAML also treats
+# U+0085 (NEL), U+2028, and U+2029 as line breaks, so a NEL or line/paragraph
+# separator hidden inside the pin's trailing comment used to read as one
+# line here while a YAML parser reads it as two. The contract now asserts
+# the whole file is printable ASCII plus LF as an explicit, file-wide check,
+# which happens to run early enough that it also now catches the NUL-byte
+# mutation below directly, by name, rather than by the byte-gate's generic
+# fallback. The renovate.json cross-check also moved off an untested
+# STARCHART_RENOVATE_JSON override and onto the workflow argument's own
+# directory, and onto a single exact jq array-equality check in place of a
+# two-step extract-then-compare, so the fixture tree below now mirrors the
+# real repo's layout (workflow nested under .github/workflows/, renovate.json
+# at the root next to it) instead of a flat directory the old override
+# happened to resolve against.
+#
 # assert_rejected now matches the FULL "FAIL: ..." line by exact string
 # equality, not a substring anywhere in the output. A substring match would
 # have let a message drift (an interpolated value silently going missing, a
@@ -55,17 +71,17 @@ set -euo pipefail
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/portwing-starchart.XXXXXX")"
 trap 'rm -rf "${test_root}"' EXIT
 
-mkdir -p "${test_root}/scripts"
+mkdir -p "${test_root}/scripts" "${test_root}/.github/workflows"
 cp scripts/starchart-config-test.sh "${test_root}/scripts/"
 cp renovate.json "${test_root}/renovate.json"
-fixture="${test_root}/workflow.yml"
+fixture="${test_root}/.github/workflows/starchart.yml"
 
 reset_fixture() {
 	cp .github/workflows/starchart.yml "${fixture}"
 }
 
 run_contract() {
-	(cd "${test_root}" && bash scripts/starchart-config-test.sh workflow.yml 2>&1)
+	(cd "${test_root}" && bash scripts/starchart-config-test.sh .github/workflows/starchart.yml 2>&1)
 }
 
 assert_passes() {
@@ -264,10 +280,11 @@ assert_rejected \
 
 # A NUL byte embedded in an otherwise-untouched line: bash's `read` drops it
 # silently, so the line-based extraction and diagnostics both see the same
-# text as the template. Only cmp, comparing raw bytes, catches it -- and
-# because nothing else about the file is wrong, the diagnostics loop finds no
-# textual difference and no count difference, so this is the fallback
-# message, not a "deviates at line N" one.
+# text as the template. A sixth round's file-wide printable-ASCII check now
+# catches this one directly, by name and byte count, before the byte gate
+# even runs -- a NUL byte is as much "outside space-tilde-plus-LF" as a NEL
+# is. Only a missing trailing newline (below) still has no byte for that
+# check to see and falls through to the byte gate's own fallback message.
 reset_fixture
 python3 - "${fixture}" <<'PY'
 import sys
@@ -277,13 +294,13 @@ data = data.replace(b"permissions: {}", b"permissions: {}\x00", 1)
 open(p, "wb").write(data)
 PY
 assert_rejected \
-	"starchart.yml deviates from the pinned shape: files differ after line 79, but every line read identically as text (a NUL byte or a missing trailing newline reads the same through a line-based comparison)" \
-	"contract must reject a NUL byte embedded in an otherwise-correct line, via the fallback message since no line's text actually differs"
+	"workflow file must be printable ASCII plus LF (found 1 byte(s) outside that range); YAML's own line breaks (NEL, U+2028, U+2029) are otherwise invisible to a comparison built on bash's line splitting" \
+	"contract must reject a NUL byte embedded in an otherwise-correct line, via the file-wide printable-ASCII check"
 
 # A missing final newline: every line's TEXT still matches, since a line's
-# text never includes the newline that ends it -- the same fallback message,
-# for the same underlying reason (a line-based comparison has nothing to
-# compare the missing byte against).
+# text never includes the newline that ends it, and there is no missing BYTE
+# for the printable-ASCII check to see either -- the byte gate's own
+# fallback message is still the only thing that catches this one.
 reset_fixture
 python3 - "${fixture}" <<'PY'
 import sys
@@ -294,7 +311,73 @@ open(p, "wb").write(data[:-1])
 PY
 assert_rejected \
 	"starchart.yml deviates from the pinned shape: files differ after line 79, but every line read identically as text (a NUL byte or a missing trailing newline reads the same through a line-based comparison)" \
-	"contract must reject a missing final newline, via the same fallback message as the NUL-byte case, for the same reason"
+	"contract must reject a missing final newline, via the byte gate's fallback message, since neither the printable-ASCII check nor the line walk can see a missing byte"
+
+# --- the class round 6 found: YAML line breaks a line-based comparison -----
+# --- cannot see, because bash's `read` only ever splits on \n -------------
+#
+# All three mutations below are caught by the same file-wide printable-ASCII
+# check as the NUL-byte case above, before extraction or the byte gate ever
+# run -- the pin-comment-specific ASCII check that also exists in the
+# contract (for the same reason the slot checks exist alongside the byte
+# gate: to explain a failure, not just to make one) never gets a turn here,
+# because nothing in this file's own template can carry one of these bytes
+# without the file-wide check seeing it first.
+
+# NEL (U+0085, 2 UTF-8 bytes) spliced into the pin's trailing comment: a YAML
+# parser reads this as a line break inside a scalar, so `secrets: inherit`
+# after it would parse as a sibling job key that no line this file inspects
+# would ever show as its own line.
+reset_fixture
+python3 - "${fixture}" <<'PY'
+import sys
+p = sys.argv[1]
+data = open(p, "rb").read()
+old = b"  # main, 2026-08-21\n"
+assert old in data
+nel = "\u0085".encode("utf-8")
+new = old.rstrip(b"\n") + nel + b"    secrets: inherit\n"
+data = data.replace(old, new, 1)
+open(p, "wb").write(data)
+PY
+assert_rejected \
+	"workflow file must be printable ASCII plus LF (found 2 byte(s) outside that range); YAML's own line breaks (NEL, U+2028, U+2029) are otherwise invisible to a comparison built on bash's line splitting" \
+	"contract must reject a NEL hidden inside the pin's trailing comment, the exact bypass a sixth round reproduced against the pre-fix contract"
+
+# U+2028 (LINE SEPARATOR, 3 UTF-8 bytes), placed outside any slot to prove
+# the check is file-wide rather than pin-comment-specific.
+reset_fixture
+python3 - "${fixture}" <<'PY'
+import sys
+p = sys.argv[1]
+data = open(p, "rb").read()
+old = b"permissions: {}\n"
+assert old in data
+ls = "\u2028".encode("utf-8")
+new = b"permissions: {}" + ls + b"\n"
+data = data.replace(old, new, 1)
+open(p, "wb").write(data)
+PY
+assert_rejected \
+	"workflow file must be printable ASCII plus LF (found 3 byte(s) outside that range); YAML's own line breaks (NEL, U+2028, U+2029) are otherwise invisible to a comparison built on bash's line splitting" \
+	"contract must reject U+2028 anywhere in the file, not just inside the pin comment"
+
+# A tab inside the pin's trailing comment: not a YAML line break, but still
+# outside printable ASCII, and "no tabs" is explicit in what the pin comment
+# is allowed to hold.
+reset_fixture
+python3 - "${fixture}" <<'PY'
+import sys
+p = sys.argv[1]
+data = open(p, "rb").read()
+old = b"  # main, 2026-08-21\n"
+assert old in data
+data = data.replace(old, b"  # main,\t2026-08-21\n", 1)
+open(p, "wb").write(data)
+PY
+assert_rejected \
+	"workflow file must be printable ASCII plus LF (found 1 byte(s) outside that range); YAML's own line breaks (NEL, U+2028, U+2029) are otherwise invisible to a comparison built on bash's line splitting" \
+	"contract must reject a tab inside the pin's trailing comment"
 
 # --- the three slots: pin and pin comment -----------------------------------
 
@@ -349,7 +432,7 @@ assert_rejected \
 reset_fixture
 sed -i.bak 's/^      branch: dev\/v0\.9$/      branch: dev\/v9.9/' "${fixture}"
 assert_rejected \
-	"branch: (dev/v9.9) must match renovate.json's baseBranchPatterns (dev/v0.9); both roll together at a release cut" \
+	"branch: (dev/v9.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject a branch: that is shaped like dev/vX.Y but disagrees with renovate.json"
 
 # Deleted outright: no longer a slot mutation. Extraction never finds a
@@ -376,20 +459,38 @@ assert_rejected \
 #
 # The branch cross-check only runs once branch_value has already cleared the
 # main/master/HEAD/empty and dev/vX.Y checks, so these mutations leave
-# branch: at its correct value and only touch renovate.json.
+# branch: at its correct value and only touch renovate.json. renovate_file
+# is now derived from the workflow argument's own directory rather than the
+# STARCHART_RENOVATE_JSON override this file used to rely on, which is why
+# the messages below name it as ".github/workflows/../../renovate.json"
+# rather than a bare "renovate.json" -- that's the literal, unnormalized
+# path the contract builds from this fixture's own nested layout, the same
+# one the real repo's default argument builds from its own root.
+#
+# The single `jq -e --arg b ... '.baseBranchPatterns == [$b]'` array-equality
+# check a sixth round put in place of the old extract-then-compare folds
+# malformed JSON, zero entries, and two entries into the exact same
+# fail-closed message as an outright value mismatch: all four are just
+# "the array isn't exactly [branch_value]" to a single boolean check. That
+# collapse already existed for the first three under the old two-step
+# version; the sixth round's version stops being able to tell them apart
+# from a wrong VALUE too, which is fine -- the fix is the same either way
+# (make renovate.json's baseBranchPatterns be [branch_value]) -- but it means
+# these four cases now share their message with the branch/renovate.json
+# mismatch case above, not just with each other.
 
 reset_fixture
 rm -f "${test_root}/renovate.json"
 assert_rejected \
-	"expected renovate.json to exist to cross-check the branch value" \
+	"expected .github/workflows/../../renovate.json to exist to cross-check the branch value" \
 	"contract must reject a missing renovate.json"
 cp renovate.json "${test_root}/renovate.json"
 
 reset_fixture
 echo '{not valid json' >"${test_root}/renovate.json"
 assert_rejected \
-	"renovate.json's baseBranchPatterns must contain exactly one entry" \
-	"contract must reject malformed JSON in renovate.json, via the same message jq's own parse failure produces as a length-check failure"
+	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
+	"contract must reject malformed JSON in renovate.json, via the same exact-array-equality failure as any other renovate.json mismatch"
 cp renovate.json "${test_root}/renovate.json"
 
 reset_fixture
@@ -401,7 +502,7 @@ d["baseBranchPatterns"] = []
 json.dump(d, open(p, "w"))
 PY
 assert_rejected \
-	"renovate.json's baseBranchPatterns must contain exactly one entry" \
+	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject renovate.json with zero baseBranchPatterns entries"
 cp renovate.json "${test_root}/renovate.json"
 
@@ -414,7 +515,7 @@ d["baseBranchPatterns"] = ["dev/v0.9", "dev/v1.0"]
 json.dump(d, open(p, "w"))
 PY
 assert_rejected \
-	"renovate.json's baseBranchPatterns must contain exactly one entry" \
+	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject renovate.json with two baseBranchPatterns entries"
 cp renovate.json "${test_root}/renovate.json"
 
