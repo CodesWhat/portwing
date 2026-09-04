@@ -741,6 +741,36 @@ function assertAdvisorySummaryJob(source) {
     "the advisory summary job must warn when a leg's efficacy is below its measured floor",
   );
 
+  // The `mutation-gate.sh` check above catches a re-measure-and-gate rewrite,
+  // but not a bare `exit`/`return 1`/`false` slipped in right after the
+  // warning: that would make this deliberately non-gating job fail the
+  // build without ever calling the gate script. Isolate the floor-compare
+  // while-loop itself and check nothing between its warning and its `done`
+  // can end the job.
+  const floorCompareMatch = summary.match(
+    /^ {10}while IFS='\|' read -r group floor; do\n([\s\S]*?)\n {10}done <<<"\$\{ADVISORY_GROUP_FLOORS\}"$/mu,
+  );
+  assert.ok(floorCompareMatch, "the advisory summary job must have a floor-compare while loop");
+  const floorCompareBody = floorCompareMatch[1];
+  const warningIndex = floorCompareBody.indexOf("::warning::");
+  assert.ok(warningIndex !== -1, "the floor-compare loop must contain the floor-miss warning");
+  const afterWarning = floorCompareBody.slice(warningIndex);
+  assert.doesNotMatch(
+    afterWarning,
+    /\bexit\b/u,
+    "the floor-compare loop must not exit after warning on a floor miss, or the advisory job stops being advisory",
+  );
+  assert.doesNotMatch(
+    afterWarning,
+    /\breturn 1\b/u,
+    "the floor-compare loop must not return 1 after warning on a floor miss, or the advisory job stops being advisory",
+  );
+  assert.doesNotMatch(
+    afterWarning,
+    /\bfalse\b/u,
+    "the floor-compare loop must not end on false after warning on a floor miss, or the advisory job stops being advisory",
+  );
+
   assert.match(
     summary,
     /^ {10}if \[ "\$\{#missing_groups\[@\]\}" -gt 0 \]; then$/mu,
@@ -1203,6 +1233,16 @@ test("mutation contract rejects an advisory summary job that gates on the leg-wi
       '          done <<<"${ADVISORY_GROUP_FLOORS}"\n\n          ./scripts/ci/mutation-gate.sh mutation-advisory-auth.json 79.17 97.96\n',
     ),
     "the advisory summary job must not call the gate, or it stops being advisory",
+  );
+});
+
+test("mutation contract rejects a hard exit after the advisory floor warning", () => {
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                exit 1\n',
+    ),
+    "the floor-compare loop must not exit after warning on a floor miss, or the advisory job stops being advisory",
   );
 });
 

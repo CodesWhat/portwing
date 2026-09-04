@@ -174,8 +174,15 @@ schedule | workflow_dispatch) ;;
 	;;
 esac
 
-if ! jq -e 'type == "object"' "${numbers_file}" >/dev/null 2>&1; then
-	warn "the numbers argument is not a JSON object"
+# `-e 'type == "object"'` only reflects the LAST top-level value jq reads:
+# a file holding two concatenated JSON objects passes this check (both are
+# objects) even though the record file is supposed to hold exactly one, and
+# the `--slurpfile ... $numbers_arr[0]` read below then silently drops the
+# second document instead of erroring. `-es` slurps every top-level value
+# into one array first, so this checks the document count and the shape of
+# the one document that's supposed to be there.
+if ! jq -es 'length == 1 and (.[0] | type == "object")' "${numbers_file}" >/dev/null 2>&1; then
+	warn "the numbers argument must be exactly one JSON object"
 	exit 1
 fi
 

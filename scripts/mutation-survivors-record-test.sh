@@ -176,14 +176,68 @@ jq -n '{name:"mu", package:"./internal/mu", survivors:"bad", uncovered:[]}' \
 
 # --- nu: gated, every mutant TIMED OUT (killed+lived at zero) ---------------
 mkdir -p "${records_dir}/nu"
-jq -n '{name:"nu", package:"./internal/nu", mode:"gated", outcome:"success", mutants_total:5, killed:0, lived:0}' \
+# Real Gremlins shape: MutantsTotal is killed+lived+notViable and excludes
+# TIMED OUT entirely, so an all-timed-out package reports mutants_total 0,
+# not >0. timed_out is the only place the real count lives (parsed by the
+# workflow from the text report and carried into this JSON).
+jq -n '{name:"nu", package:"./internal/nu", mode:"gated", outcome:"success", mutants_total:0, killed:0, lived:0, timed_out:5}' \
 	>"${records_dir}/nu/quality-history-record.json"
 jq -n '{name:"nu", package:"./internal/nu", survivors:[], uncovered:[]}' \
 	>"${records_dir}/nu/mutation-survivors.json"
 
 # --- xi: advisory, every mutant TIMED OUT ------------------------------------
-jq -n '{mutants_total:4, mutants_killed:0, mutants_lived:0, files: []}' \
-	>"${advisory_dir}/mutation-advisory-misc/mutation-advisory-xi.json"
+#
+# Real shape: four mutations, every one status "TIMED OUT" (not an empty
+# files array with a total headline number -- the advisory JSON carries the
+# full per-mutant status list, and that is where the real TIMED OUT count
+# has to come from).
+jq -n '{
+  mutants_total: 0, mutants_killed: 0, mutants_lived: 0,
+  files: [{
+    file_name: "x.go",
+    mutations: [
+      {type:"CONDITIONALS_BOUNDARY", status:"TIMED OUT", line:1, column:1},
+      {type:"CONDITIONALS_BOUNDARY", status:"TIMED OUT", line:2, column:1},
+      {type:"CONDITIONALS_BOUNDARY", status:"TIMED OUT", line:3, column:1},
+      {type:"CONDITIONALS_BOUNDARY", status:"TIMED OUT", line:4, column:1}
+    ]
+  }]
+}' >"${advisory_dir}/mutation-advisory-misc/mutation-advisory-xi.json"
+
+# --- sigma: gated, .survivors is an array of non-objects (not a string) -----
+#
+# shape_ok's earlier bug only checked the top-level value was an array, not
+# that its elements were objects, so [42] passed the check and then blew up
+# under `set -e` the moment the extraction tried to read .file/.mutator off
+# a bare number. This must demote to unparseable, the same as mu's
+# non-array shape, not abort the whole script.
+mkdir -p "${records_dir}/sigma"
+jq -n '{name:"sigma", package:"./internal/sigma", mode:"gated", outcome:"success"}' \
+	>"${records_dir}/sigma/quality-history-record.json"
+jq -n '{name:"sigma", package:"./internal/sigma", survivors:[42], uncovered:[]}' \
+	>"${records_dir}/sigma/mutation-survivors.json"
+
+# --- tau: advisory, .mutations is an array of non-objects (not a string) ----
+#
+# Same bug, advisory side: a files[].mutations entry of [42] must demote to
+# unparseable rather than crashing the extraction that reads .status/.line
+# off it.
+jq -n '{
+  mutants_total: 1, mutants_killed: 0, mutants_lived: 0,
+  files: [{file_name: "t.go", mutations: [42]}]
+}' >"${advisory_dir}/mutation-advisory-misc/mutation-advisory-tau.json"
+
+# --- upsilon: gated, .survivors is JSON false, not an array or absent -------
+#
+# `.survivors // []` folds `false` into the "no entries" case, which the
+# round-1 shape check did too, silently reporting a malformed record as a
+# clean zero-mutants measurement. `false` is a wrong shape, not an empty
+# list, and must demote to unparseable.
+mkdir -p "${records_dir}/upsilon"
+jq -n '{name:"upsilon", package:"./internal/upsilon", mode:"gated", outcome:"success"}' \
+	>"${records_dir}/upsilon/quality-history-record.json"
+jq -n '{name:"upsilon", package:"./internal/upsilon", survivors:false, uncovered:[]}' \
+	>"${records_dir}/upsilon/mutation-survivors.json"
 
 # --- pi: gated, a pinned anchor digest ---------------------------------------
 #
@@ -255,6 +309,9 @@ iota|./internal/iota
 mu|./internal/mu
 nu|./internal/nu
 xi|./internal/xi
+sigma|./internal/sigma
+tau|./internal/tau
+upsilon|./internal/upsilon
 pi|./internal/pi
 rho|./internal/rho
 EOF
@@ -375,19 +432,35 @@ mu="$(jq -c '.packages[] | select(.name == "mu" and .source == "gated")' <<<"${o
 # A malformed shape in one package must demote only that package's entry,
 # never abort the whole run: alpha (processed earlier) and rho (processed
 # later) both still measured proves the script kept going past mu.
-[ "$(jq -r '.packages | length' <<<"${output}")" = "30" ] ||
+[ "$(jq -r '.packages | length' <<<"${output}")" = "36" ] ||
 	fail "a malformed package must not drop other packages from the run (got $(jq -r '.packages | length' <<<"${output}") entries)"
 
 # --- nu/gated, xi/advisory: every mutant TIMED OUT ---------------------------
 
 nu="$(jq -c '.packages[] | select(.name == "nu" and .source == "gated")' <<<"${output}")"
 [ "$(jq -r '.state' <<<"${nu}")" = "unmeasured" ] ||
-	fail "killed+lived at zero with mutants_total>0 must read as unmeasured, not $(jq -r '.state' <<<"${nu}")"
+	fail "timed_out>0 with killed+lived at zero must read as unmeasured, not $(jq -r '.state' <<<"${nu}")"
 [ "$(jq -r '.counts' <<<"${nu}")" = "null" ] || fail "an unmeasured entry must have null counts"
 
 xi="$(jq -c '.packages[] | select(.name == "xi" and .source == "advisory")' <<<"${output}")"
 [ "$(jq -r '.state' <<<"${xi}")" = "unmeasured" ] ||
 	fail "an all-timed-out advisory report must read as unmeasured, not $(jq -r '.state' <<<"${xi}")"
+
+# --- sigma/gated, tau/advisory: an array of non-objects, e.g. [42] ----------
+
+sigma="$(jq -c '.packages[] | select(.name == "sigma" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${sigma}")" = "unparseable" ] ||
+	fail "a .survivors array of non-objects ([42]) must read as unparseable, not $(jq -r '.state' <<<"${sigma}")"
+
+tau="$(jq -c '.packages[] | select(.name == "tau" and .source == "advisory")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${tau}")" = "unparseable" ] ||
+	fail "a .mutations array of non-objects ([42]) must read as unparseable, not $(jq -r '.state' <<<"${tau}")"
+
+# --- upsilon/gated: .survivors is JSON false, not an array or absent --------
+
+upsilon="$(jq -c '.packages[] | select(.name == "upsilon" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${upsilon}")" = "unparseable" ] ||
+	fail "a .survivors of false must read as unparseable, not $(jq -r '.state' <<<"${upsilon}")"
 
 # --- pi/gated: a pinned anchor digest ----------------------------------------
 

@@ -440,10 +440,16 @@ branch_file4() {
 
 # `head -c | tr` rather than bash's `${var// /x}`: replacing 300,000
 # characters one at a time in a bash parameter expansion is quadratic and
-# takes minutes; this is one read and one translate.
-big_value="$(head -c 300000 /dev/zero | tr '\0' 'x')"
+# takes minutes; this is one read and one translate. The 300,000-byte pad
+# is written straight to a file and read into jq with `--rawfile`, never
+# passed as a `--arg` value: a single argv string is capped at 128 KiB on
+# Linux (MAX_ARG_STRLEN), so building this fixture via `--arg` would fail
+# to even construct the fixture on the platform this test exists to cover.
+pad_file="${test_root}/big-pad.txt"
+head -c 300000 /dev/zero | tr '\0' 'x' >"${pad_file}"
+big_value="$(cat "${pad_file}")"
 record_file="${test_root}/big-record.json"
-jq -cn --arg pad "${big_value}" '{pad: $pad, outcome:"success"}' >"${record_file}"
+jq -cn --rawfile pad "${pad_file}" '{pad: $pad, outcome:"success"}' >"${record_file}"
 [ "$(wc -c <"${record_file}")" -gt 131072 ] ||
 	fail "the big-record fixture must itself exceed 128 KiB to be a meaningful test"
 
@@ -481,6 +487,42 @@ output="$(
 )"
 grep -Fq "not both" <<<"${output}" ||
 	fail "passing both an inline argument and QUALITY_HISTORY_RECORD_FILE must be refused (output: ${output})"
+
+# --- QUALITY_HISTORY_RECORD_FILE: exactly one JSON document, no more, no less
+#
+# `jq -e 'type == "object"'` only reflects the LAST top-level value read, so
+# a file holding two concatenated objects passed the old check even though
+# `--slurpfile ... $numbers_arr[0]` would then silently drop the second
+# document. Both a two-document file and an empty file must be refused
+# loudly instead.
+
+two_docs_file="${test_root}/two-docs-record.json"
+printf '{"outcome":"success"}\n{"outcome":"success"}\n' >"${two_docs_file}"
+output="$(
+	env \
+		QUALITY_HISTORY_REMOTE="${bare4}" \
+		QUALITY_HISTORY_EVENT="schedule" \
+		QUALITY_HISTORY_RECORD_FILE="${two_docs_file}" \
+		bash "${append}" mutation-survivors 2>&1
+)" || true
+grep -Fq "exactly one JSON object" <<<"${output}" ||
+	fail "a record file holding two JSON documents must be refused, not silently truncated (output: ${output})"
+[ "$(grep -c . <<<"$(branch_file4 mutation-survivors.jsonl)" || true)" = "1" ] ||
+	fail "a rejected two-document record file must not append a second line"
+
+empty_docs_file="${test_root}/empty-record.json"
+: >"${empty_docs_file}"
+output="$(
+	env \
+		QUALITY_HISTORY_REMOTE="${bare4}" \
+		QUALITY_HISTORY_EVENT="schedule" \
+		QUALITY_HISTORY_RECORD_FILE="${empty_docs_file}" \
+		bash "${append}" mutation-survivors 2>&1
+)" || true
+grep -Fq "exactly one JSON object" <<<"${output}" ||
+	fail "an empty record file must be refused (output: ${output})"
+[ "$(grep -c . <<<"$(branch_file4 mutation-survivors.jsonl)" || true)" = "1" ] ||
+	fail "a rejected empty record file must not append a line"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} quality-history script check(s) failed" >&2

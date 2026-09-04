@@ -295,30 +295,54 @@ one_object() {
 	jq -e -s 'length == 1 and (.[0] | type == "object")' "$1" >/dev/null 2>&1
 }
 
-# True when the report's own headline counters say every mutant timed out
-# (or otherwise never reached a KILLED/LIVED verdict): mutants existed but
-# killed+lived is zero. Mirrors the guard the workflow's own advisory
-# headline table applies (quality-mutation-monthly.yml, "Record this
-# package" / advisory summary steps): Gremlins scores efficacy as
+# True when every mutant that got no KILLED/LIVED verdict did so because it
+# TIMED OUT, mirroring the guard mutation-gate.sh and the workflow's own
+# advisory headline table apply. Gremlins scores efficacy as
 # killed/(killed+lived), so an all-timed-out run reports 0.00% the same way
 # a genuinely all-LIVED run would, and the two must not be conflated as
-# "measured". The three fields are read from a workflow-generated (not
-# Gremlins-direct) file for the gated case and the raw report for the
-# advisory case, but both are still artifact-sourced, so they get the same
-# is_digits gate before arithmetic as everything else here.
-all_timed_out() {
-	local file="$1" total_field="$2" killed_field="$3" lived_field="$4"
-	local totals mutant_total killed_count lived_count
-	totals="$(jq -r --arg t "${total_field}" --arg k "${killed_field}" --arg l "${lived_field}" \
-		'[(.[$t] // 0), (.[$k] // 0), (.[$l] // 0)] | @tsv' "${file}" 2>/dev/null || true)"
-	IFS=$'\t' read -r mutant_total killed_count lived_count <<<"${totals}"
-	mutant_total="${mutant_total:-0}"
-	killed_count="${killed_count:-0}"
-	lived_count="${lived_count:-0}"
-	if ! is_digits "${mutant_total}" || ! is_digits "${killed_count}" || ! is_digits "${lived_count}"; then
+# "measured".
+#
+# Gremlins' own mutants_total is killed+lived+notViable (report.go:
+# `MutantsTotal: r.lived + r.killed + r.notViable`) and excludes TIMED OUT
+# and NOT COVERED entirely, so an all-timed-out package reports
+# mutants_total == 0, not >0: gating on "total > 0" can never fire for the
+# exact case it exists to catch. There is no mutants_timed_out field in
+# Gremlins' JSON output either. So the gated and advisory cases each read
+# the real TIMED OUT count from wherever it actually lives: the gated
+# leg's own quality-history-record.json carries `timed_out`, parsed by the
+# workflow from the text report's "Timed out: N" line for this reason; the
+# advisory leg has the full per-mutant status list right there, so its
+# count is the number of `.mutations[].status == "TIMED OUT"` entries,
+# read directly rather than through a proxy field.
+gated_all_timed_out() {
+	local file="$1"
+	local vals timed_out killed lived
+	vals="$(jq -r '[(.timed_out // 0), (.killed // 0), (.lived // 0)] | @tsv' "${file}" 2>/dev/null || true)"
+	IFS=$'\t' read -r timed_out killed lived <<<"${vals}"
+	timed_out="${timed_out:-0}"
+	killed="${killed:-0}"
+	lived="${lived:-0}"
+	if ! is_digits "${timed_out}" || ! is_digits "${killed}" || ! is_digits "${lived}"; then
 		return 1
 	fi
-	[ "${mutant_total}" -gt 0 ] && [ "$((killed_count + lived_count))" -eq 0 ]
+	[ "${timed_out}" -gt 0 ] && [ "$((killed + lived))" -eq 0 ]
+}
+
+advisory_all_timed_out() {
+	local file="$1"
+	local vals timed_out killed lived
+	vals="$(jq -r '
+        [ ([ (.files // [])[] | (.mutations // [])[] | select(.status == "TIMED OUT") ] | length),
+          (.mutants_killed // 0), (.mutants_lived // 0) ] | @tsv
+    ' "${file}" 2>/dev/null || true)"
+	IFS=$'\t' read -r timed_out killed lived <<<"${vals}"
+	timed_out="${timed_out:-0}"
+	killed="${killed:-0}"
+	lived="${lived:-0}"
+	if ! is_digits "${timed_out}" || ! is_digits "${killed}" || ! is_digits "${lived}"; then
+		return 1
+	fi
+	[ "${timed_out}" -gt 0 ] && [ "$((killed + lived))" -eq 0 ]
 }
 
 gated_entry() {
@@ -356,20 +380,26 @@ gated_entry() {
 			return
 		fi
 
-		# .survivors/.uncovered must actually be arrays before anything
-		# tries to iterate them: a malformed shape (e.g. a string) must
-		# demote this entry to "unparseable", not raise a jq type error
-		# that `set -e` would turn into a whole-script abort.
+		# .survivors/.uncovered must actually be arrays of objects before
+		# anything tries to index an element as {file,line,column,mutator}:
+		# a malformed shape (a string, or an array of non-objects like
+		# [42]) must demote this entry to "unparseable", not raise a jq
+		# type error that `set -e` would turn into a whole-script abort.
+		# `is_arr_ok` treats only null/absent as "no entries"; `false`, a
+		# string, or a number is a wrong shape, not an empty list, so
+		# `// []` (which folds false into [] too) is deliberately not
+		# used here.
 		local shape_ok
 		shape_ok="$(jq -r '
-            (((.survivors // []) | type) == "array") and (((.uncovered // []) | type) == "array")
+            def is_arr_ok: (. == null) or ((type == "array") and all(type == "object"));
+            (.survivors | is_arr_ok) and (.uncovered | is_arr_ok)
         ' "${survivors_file}" 2>/dev/null || echo false)"
 		if [ "${shape_ok}" != "true" ]; then
 			build_entry "${name}" "${package}" "gated" "unparseable" null '[]'
 			return
 		fi
 
-		if all_timed_out "${rec_file}" "mutants_total" "killed" "lived"; then
+		if gated_all_timed_out "${rec_file}"; then
 			build_entry "${name}" "${package}" "gated" "unmeasured" null '[]'
 			return
 		fi
@@ -432,30 +462,32 @@ advisory_entry() {
 			return
 		fi
 
-		# Same shape guard as the gated path, for .files/.mutations: a
-		# non-array here must demote to "unparseable" rather than
-		# silently degrading to "no mutants" behind the `?` operator,
+		# Same shape guard as the gated path, for .files/.mutations: an
+		# array element that isn't an object (e.g. [42]) must demote to
+		# "unparseable" rather than raising a jq type error under `set -e`
+		# when the extraction below tries to index it as {file_name,...},
+		# and a non-array, non-null value (e.g. false) must demote too
+		# rather than silently degrading to "no mutants" behind `// []`,
 		# which would misreport a malformed report as a clean
 		# zero-mutants measurement.
 		local shape_ok
 		shape_ok="$(jq -r '
-            ((.files // []) | type) == "array"
-            and ((.files // []) | all(type == "object"))
-            and ((.files // []) | all((.mutations // []) | type == "array"))
+            def is_arr_ok: (. == null) or ((type == "array") and all(type == "object"));
+            (.files | is_arr_ok) and ((.files // []) | all(.mutations | is_arr_ok))
         ' "${json_file}" 2>/dev/null || echo false)"
 		if [ "${shape_ok}" != "true" ]; then
 			build_entry "${name}" "${package}" "advisory" "unparseable" null '[]'
 			return
 		fi
 
-		if all_timed_out "${json_file}" "mutants_total" "mutants_killed" "mutants_lived"; then
+		if advisory_all_timed_out "${json_file}"; then
 			build_entry "${name}" "${package}" "advisory" "unmeasured" null '[]'
 			return
 		fi
 
 		local raw
 		raw="$(jq -c '
-            [ .files[] | .file_name as $f | (.mutations // [])[]
+            [ (.files // [])[] | .file_name as $f | (.mutations // [])[]
               | select(.status == "LIVED" or .status == "NOT COVERED")
               | {f: $f, m: .type, s: (if .status == "LIVED" then "L" else "U" end), l: .line, c: .column} ]
         ' "${json_file}" | jq -c "${MUTANT_OK_FILTER}")"
