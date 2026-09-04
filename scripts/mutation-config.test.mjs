@@ -365,7 +365,7 @@ function assertAdvisoryJob(source, entries) {
   // mutators. The invocation must expand both arrays literally.
   assert.match(
     advisory,
-    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}"\$\{default_mutator_flags\[@\]\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
+    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}"\$\{default_mutator_flags\[@\]\}" \\\n^ {14}"\$\{coefficient_args\[@\]\+"\$\{coefficient_args\[@\]\}"\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
     "the advisory job must expand advisory_flags and default_mutator_flags on the unleash invocation",
   );
 
@@ -472,15 +472,15 @@ function assertAdvisoryMatrix(advisory, entries) {
 
     const packages = packageLines.map((line) => {
       const parts = line.split("|");
-      if (parts.length !== 3) {
+      if (parts.length !== 3 && parts.length !== 4) {
         throw new Error(`advisory group ${groupName} has a malformed entry: ${line}`);
       }
-      const [packagePath, name, floor] = parts;
-      return { packagePath, name, floor };
+      const [packagePath, name, floor, coefficient = ""] = parts;
+      return { packagePath, name, floor, coefficient };
     });
     groupsFound.set(groupName, packages);
 
-    for (const { packagePath, name, floor } of packages) {
+    for (const { packagePath, name, floor, coefficient } of packages) {
       if (seenPackages.has(packagePath)) {
         throw new Error(
           `${packagePath} appears in both '${seenPackages.get(packagePath)}' and '${groupName}'`,
@@ -505,6 +505,16 @@ function assertAdvisoryMatrix(advisory, entries) {
       } else if (floor !== entry.efficacy) {
         throw new Error(
           `${entry.name}'s advisory row must carry the efficacy floor the matrix measured`,
+        );
+      }
+
+      // A package the gating matrix gives a timeout coefficient needs the
+      // same one here: without it the advisory leg re-creates the all-TIMED
+      // OUT run that scored 0.00% and read as a real measurement.
+      const expectedCoefficient = timeoutCoefficients.has(name) ? "40" : "";
+      if (coefficient !== expectedCoefficient) {
+        throw new Error(
+          `${name}'s advisory row must carry the same timeout coefficient the gating matrix sets`,
         );
       }
     }
@@ -667,6 +677,7 @@ const matrixMcover = "$" + "{{ matrix.mcover }}";
 const matrixZeroMutants = "$" + "{{ matrix.zero_mutants || false }}";
 const advisoryMutants = "$" + "{advisory_mutants}";
 const advisoryFlagsExpansion = "$" + "{advisory_flags[@]}";
+const coefficientArgsExpansion = "$" + '{coefficient_args[@]+"$' + '{coefficient_args[@]}"}';
 const expressionTrue = "$" + "{{ true }}";
 const matrixGroup = "$" + "{{ matrix.group }}";
 const githubRunId = "$" + "{{ github.run_id }}";
@@ -950,6 +961,20 @@ test("mutation contract rejects an advisory floor that drifts from the matrix", 
   );
 });
 
+test("mutation contract rejects an advisory row that drops its timeout coefficient", () => {
+  assertMutationFailure(
+    workflow.replace("./internal/protocol|protocol|100|40", "./internal/protocol|protocol|100"),
+    "protocol's advisory row must carry the same timeout coefficient the gating matrix sets",
+  );
+});
+
+test("mutation contract rejects an advisory job that stops passing its timeout coefficient", () => {
+  assertMutationFailure(
+    workflow.replace(`              "${coefficientArgsExpansion}" \\\n`, ""),
+    "the advisory job must expand advisory_flags and default_mutator_flags on the unleash invocation",
+  );
+});
+
 test("mutation contract rejects an advisory group missing fail-fast: false", () => {
   assertMutationFailure(
     workflow.replace(
@@ -967,7 +992,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
       '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
     )
     .replace(
-      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/auth|auth|79.17\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00\n              ./internal/protocol|protocol|100\n",
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/auth|auth|79.17\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
       "",
     );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");
@@ -983,8 +1008,8 @@ test("mutation contract rejects an advisory group that drops a package", () => {
 test("mutation contract rejects an advisory group that duplicates a package", () => {
   assertMutationFailure(
     workflow.replace(
-      "              ./internal/protocol|protocol|100\n",
-      "              ./internal/protocol|protocol|100\n              ./internal/server|server|77.88\n",
+      "              ./internal/protocol|protocol|100|40\n",
+      "              ./internal/protocol|protocol|100|40\n              ./internal/server|server|77.88\n",
     ),
     "./internal/server appears in both 'server' and 'misc-c'",
   );
