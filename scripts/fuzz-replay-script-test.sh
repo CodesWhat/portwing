@@ -140,6 +140,73 @@ grep -Fxq "reason=corpus-copy" "${out_d}" || fail "case D (corpus-copy): expecte
 no_cached_survive "${ro_seed_dir}" "case D"
 rm -f "${out_d}"
 
+# --- (E) a generated cached-* entry whose shape doesn't match the target's
+# signature -> kind=error reason=stale-cache, exit 2, and the stale entry is
+# gone from the generated dir afterward (PW review finding A: the old script
+# left it there for "Save fuzz corpus" to re-save under the next key).
+mkdir -p "${module}/generated-stale/FuzzEcho"
+cat >"${module}/generated-stale/FuzzEcho/badtype" <<'EOF'
+go test fuzz v1
+int(1)
+EOF
+
+out_e="$(mktemp)"
+status=0
+(cd "${module}" && FUZZ_OUTPUT_FILE="${out_e}" bash "${replay}" "./pkgtest" "FuzzEcho" "${module}/generated-stale/FuzzEcho" "${seed_dir}") || status=$?
+[ "${status}" -eq 2 ] || fail "case E (stale-cache): expected exit 2, got ${status}"
+grep -Fxq "kind=error" "${out_e}" || fail "case E (stale-cache): expected kind=error, got: $(cat "${out_e}")"
+grep -Fxq "reason=stale-cache" "${out_e}" || fail "case E (stale-cache): expected reason=stale-cache, got: $(cat "${out_e}")"
+stale_left="$(find "${module}/generated-stale/FuzzEcho" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')"
+[ "${stale_left}" -eq 0 ] || fail "case E (stale-cache): expected the stale generated dir to be emptied, ${stale_left} file(s) remain"
+no_cached_survive "${seed_dir}" "case E"
+rm -f "${out_e}"
+
+# --- (F) a committed seed with the wrong shape and an empty generated cache
+# -> kind=error reason=seed-decode, NOT stale-cache, exit 2 (PW review
+# finding B: Go prints the same decode error for a committed seed as for a
+# cached-* copy, and the old script misreported both as stale-cache, which
+# never self-heals a seed that needs a source fix).
+cat >"${seed_dir}/seed-badtype" <<'EOF'
+go test fuzz v1
+int(1)
+EOF
+
+out_f="$(mktemp)"
+status=0
+(cd "${module}" && FUZZ_OUTPUT_FILE="${out_f}" bash "${replay}" "./pkgtest" "FuzzEcho" "" "${seed_dir}") || status=$?
+[ "${status}" -eq 2 ] || fail "case F (seed-decode): expected exit 2, got ${status}"
+grep -Fxq "kind=error" "${out_f}" || fail "case F (seed-decode): expected kind=error, got: $(cat "${out_f}")"
+grep -Fxq "reason=seed-decode" "${out_f}" || fail "case F (seed-decode): expected reason=seed-decode, got: $(cat "${out_f}")"
+if grep -Fxq "reason=stale-cache" "${out_f}"; then
+	fail "case F (seed-decode): must not report reason=stale-cache for a committed seed"
+fi
+rm -f "${seed_dir}/seed-badtype" "${out_f}"
+
+# --- (G) a repro save failure: fuzz-replay-failure/<target> is blocked by a
+# plain file where the directory needs to go -> repro_saved=false and a
+# ::warning:: naming the path and error (PW review finding C: the old
+# script's `mkdir -p ... || true` / `cp ... || true` swallowed this
+# silently, so a cached-only regression could lose its reproducer with
+# nothing in the log to explain why).
+cat >"${seed_dir}/seed-boom2" <<'EOF'
+go test fuzz v1
+string("boom")
+EOF
+rm -rf "${module}/fuzz-replay-failure"
+: >"${module}/fuzz-replay-failure"
+
+out_g="$(mktemp)"
+err_g="$(mktemp)"
+status=0
+(cd "${module}" && GITHUB_ACTIONS=true FUZZ_OUTPUT_FILE="${out_g}" bash "${replay}" "./pkgtest" "FuzzEcho" "${module}/generated/FuzzEcho" "${seed_dir}") >/dev/null 2>"${err_g}" || status=$?
+[ "${status}" -eq 1 ] || fail "case G (repro-save): expected exit 1 (crash), got ${status}"
+grep -Fxq "kind=crash" "${out_g}" || fail "case G (repro-save): expected kind=crash, got: $(cat "${out_g}")"
+grep -Fxq "repro_saved=false" "${out_g}" || fail "case G (repro-save): expected repro_saved=false, got: $(cat "${out_g}")"
+grep -Fq '::warning::' "${err_g}" || fail "case G (repro-save): expected a ::warning:: line on stderr, got: $(cat "${err_g}")"
+no_cached_survive "${seed_dir}" "case G"
+rm -f "${seed_dir}/seed-boom2" "${out_g}" "${err_g}"
+rm -rf "${module}/fuzz-replay-failure"
+
 # --- no cached-* survives outside fuzz-replay-failure/, in any case --------
 #
 # fuzz-replay-failure/ is the one place a cached-<basename> copy is meant to

@@ -442,8 +442,29 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	' "${workflow}")"
 	[ -n "${upload_step_block}" ] ||
 		fail "${workflow} must have an 'Upload fuzz corpus on failure or cancel' step"
-	grep -Fxq "        if: failure() || cancelled()" <<<"${upload_step_block}" ||
-		fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
+	if [ "${workflow}" = ".github/workflows/quality-fuzz-nightly.yml" ]; then
+		# The nightly workflow also gates on kind/reason, not just
+		# failure()/cancelled(): a repro is only ever expected for a real
+		# crash or a stale-cache replay (scripts/ci/fuzz-replay.sh's own
+		# reason=stale-cache) — a build or corpus-copy error never produces
+		# new corpus content, so uploading for those would just be a
+		# guaranteed empty artifact. steps.replay only exists on this
+		# workflow's replay tier, so the monthly workflow below (no id:
+		# replay step) keeps the plain failure()/cancelled() guard instead.
+		grep -Fxq "        if: |" <<<"${upload_step_block}" ||
+			fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with a multi-line if: expression"
+		grep -Fxq "          (failure() || cancelled()) &&" <<<"${upload_step_block}" ||
+			fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with failure() || cancelled()"
+		grep -Fxq "          ((steps.fuzz.outputs.kind || steps.replay.outputs.kind) == 'crash' ||" <<<"${upload_step_block}" ||
+			fail "${workflow} must only upload the corpus artifact when kind is crash (steps.fuzz or steps.replay)"
+		grep -Fxq "           (steps.fuzz.outputs.reason || steps.replay.outputs.reason) == 'stale-cache')" <<<"${upload_step_block}" ||
+			fail "${workflow} must also upload the corpus artifact when reason is stale-cache (steps.fuzz or steps.replay)"
+		grep -Fxq "          if-no-files-found: warn" <<<"${upload_step_block}" ||
+			fail "${workflow} must set if-no-files-found: warn on the 'Upload fuzz corpus on failure or cancel' step now that it only runs when a repro was expected"
+	else
+		grep -Fxq "        if: failure() || cancelled()" <<<"${upload_step_block}" ||
+			fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
+	fi
 	grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${upload_step_block}" ||
 		fail "${workflow} must upload the corpus artifact with actions/upload-artifact pinned to ${upload_artifact_sha} in the same step"
 done

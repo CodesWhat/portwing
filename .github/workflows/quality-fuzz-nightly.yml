@@ -268,7 +268,18 @@ jobs:
           FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" bash scripts/ci/fuzz-replay.sh "${PKG}" "${FUZZER}" "${GENERATED}" "${SEED}"
 
       - name: Upload fuzz corpus on failure or cancel
-        if: failure() || cancelled()
+        # Gated on kind/reason, not just failure()/cancelled(): a repro is
+        # only ever expected for a real crash (kind=crash) or a stale-cache
+        # replay (reason=stale-cache, scripts/ci/fuzz-replay.sh's own repro
+        # copy) — a build or corpus-copy error never produces new corpus
+        # content, so running this step for those would just be a guaranteed
+        # empty upload. `if-no-files-found: warn` below only means something
+        # once the step is scoped to runs that were expected to produce
+        # files.
+        if: |
+          (failure() || cancelled()) &&
+          ((steps.fuzz.outputs.kind || steps.replay.outputs.kind) == 'crash' ||
+           (steps.fuzz.outputs.reason || steps.replay.outputs.reason) == 'stale-cache')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: fuzz-corpus-${{ matrix.fuzzer.name }}-${{ github.run_id }}
@@ -283,7 +294,12 @@ jobs:
             **/testdata/fuzz/${{ matrix.fuzzer.name }}/
             fuzz-replay-failure/${{ matrix.fuzzer.name }}/
           retention-days: 90
-          if-no-files-found: ignore
+          # warn, not ignore: this step now only runs when a repro was
+          # expected (see the if: above), so an empty result here means
+          # scripts/ci/fuzz-replay.sh's own repro-save step failed
+          # (repro_saved=false in the Summarize step below) and deserves a
+          # visible signal, not silence.
+          if-no-files-found: warn
 
       - name: Save fuzz corpus
         # always(), because the run that matters most for persistence is the
@@ -408,6 +424,9 @@ jobs:
           # if: conditions above — so exactly one contributes here.
           KIND: ${{ steps.fuzz.outputs.kind || steps.replay.outputs.kind }}
           REASON: ${{ steps.fuzz.outputs.reason || steps.replay.outputs.reason }}
+          # Only ever set by scripts/ci/fuzz-replay.sh's save_repro; empty
+          # for anything the "Fuzz" step (steps.fuzz) produced.
+          REPRO_SAVED: ${{ steps.fuzz.outputs.repro_saved || steps.replay.outputs.repro_saved }}
           RUN_ID: ${{ github.run_id }}
           MATCHED_KEY: ${{ steps.corpus-restore.outputs.cache-matched-key }}
           GENERATED: ${{ steps.corpus.outputs.generated }}
@@ -454,6 +473,13 @@ jobs:
               fi
               echo "Download artifact \`fuzz-corpus-${FUZZER}-${RUN_ID}\`, commit the"
               echo "minimized input to the seed corpus, fix the bug, and push."
+              if [ "${REPRO_SAVED}" = "false" ]; then
+                echo ""
+                echo "scripts/ci/fuzz-replay.sh could not save its own reproduction copy to"
+                echo "\`fuzz-replay-failure/${FUZZER}/\` (see this step's own log for the"
+                echo "\`::warning::\`) — the artifact above may be missing the cached-corpus input"
+                echo "alongside the committed one."
+              fi
             elif [ "${KIND}" = "error" ]; then
               echo ""
               case "${REASON}" in
@@ -463,10 +489,29 @@ jobs:
                 ;;
               stale-cache)
                 echo "A cached corpus entry no longer matches \`${FUZZER}\`'s current signature"
-                echo "(matched one of Go's own corpus-decode errors). Not a regression in the"
-                echo "committed seed corpus — the stale entry was saved to"
-                echo "\`fuzz-replay-failure/${FUZZER}/\` before cleanup; it self-heals once the next"
-                echo "\"Save fuzz corpus\" step below writes a fresh cache entry."
+                echo "(matched one of Go's own corpus-decode errors, on a \`cached-\` copy — not a"
+                echo "committed seed). Not a regression in the committed seed corpus — this run's"
+                echo "scripts/ci/fuzz-replay.sh already deleted the stale entries from the generated"
+                echo "(GOCACHE) corpus and saved a copy to \`fuzz-replay-failure/${FUZZER}/\` first;"
+                echo "\"Save fuzz corpus\" below then writes that emptied corpus under today's cache"
+                echo "key, so tomorrow's run starts clean instead of re-failing on the same entry."
+                if [ "${REPRO_SAVED}" = "false" ]; then
+                  echo ""
+                  echo "scripts/ci/fuzz-replay.sh could not save its own reproduction copy (see this"
+                  echo "step's own log for the \`::warning::\`) — the artifact above may be empty."
+                fi
+                ;;
+              seed-decode)
+                echo "A committed seed under \`testdata/fuzz/${FUZZER}/\` no longer matches its"
+                echo "current signature (matched one of Go's own corpus-decode errors, on a"
+                echo "git-tracked file — not a \`cached-\` copy). Clearing the GOCACHE corpus can't"
+                echo "fix this: the seed itself is wrong for the target's current \`f.Add\`/\`Fuzz\`"
+                echo "signature. Fix or remove the offending seed and push."
+                ;;
+              log-write)
+                echo "scripts/ci/fuzz-replay.sh could not write its own replay log (\`tee\` failed)"
+                echo "before it could classify this run's output. An infrastructure problem, not a"
+                echo "code or corpus regression — see this step's own log for detail."
                 ;;
               corpus-copy)
                 echo "Copying the cached (GOCACHE) corpus into \`testdata/fuzz/${FUZZER}/\` failed"

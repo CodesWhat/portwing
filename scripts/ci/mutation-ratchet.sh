@@ -224,6 +224,15 @@ while IFS= read -r name; do
 		# this discount exists for raise the pool minimum, so such rows are
 		# dropped from the pool entirely instead, and counted so the drop is
 		# visible on the proposal.
+		#
+		# Policy: an undiscountable row is dropped rather than admitted raw,
+		# because a raw value can only be higher than the discounted truth
+		# and could only ever push the minimum up, never down — dropping it
+		# is the conservative branch, and the proposal reports it in
+		# discarded_rows. As of this writing, quality-history:mutation.jsonl
+		# carries 64 rows and none has this shape — every row either carries
+		# the full killed/lived/timed_out/efficacy set or has timed_out == 0
+		# — so this branch has never actually fired against real history.
 		history_result="$(jq -c --arg name "${name}" --arg metric "${metric}" --arg run_id "${GITHUB_RUN_ID:-}" '
             [ .[]
               | select(.name == $name and .mode == "gated" and .outcome == "success")

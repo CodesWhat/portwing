@@ -56,12 +56,25 @@ set -euo pipefail
 #      output matches one of Go's own corpus-decode error strings —
 #      "cannot unmarshal", "mismatched types in corpus entry", "wrong
 #      number of values in corpus entry" (internal/fuzz/encoding.go,
-#      internal/fuzz/fuzz.go's CheckCorpus) — is a cached GOCACHE entry
-#      whose shape no longer matches this target's current f.Add/Fuzz
-#      signature, not a real regression: kind=error, reason=stale-cache.
-#      That entry is also saved again under the next cache key by "Save
-#      fuzz corpus" below, so left unclassified it would keep redding the
-#      nightly on every run until the cache entry ages out.
+#      internal/fuzz/fuzz.go's CheckCorpus) — means some corpus entry's
+#      shape no longer matches this target's current f.Add/Fuzz signature.
+#      Go's own error names the failing file's path in double quotes
+#      ("testdata/fuzz/<Target>/<name>": <reason>); this script parses
+#      that path out of the replay log to tell which kind of entry it was:
+#        - basename starts with "cached-" (this run's own copy of a
+#          GOCACHE entry): kind=error, reason=stale-cache. That entry
+#          would otherwise be saved again under the next cache key by
+#          "Save fuzz corpus" below, so this script also deletes the
+#          stale entries from the generated (GOCACHE) corpus dir before
+#          exiting — the save step then writes a fresh cache instead of
+#          repeating the same broken one every night.
+#        - any other basename (a git-tracked seed under testdata/fuzz/):
+#          kind=error, reason=seed-decode. A committed seed can't be
+#          healed by clearing GOCACHE; it needs a source fix, so this is
+#          reported distinctly rather than folded into stale-cache, where
+#          it would never self-heal and would keep failing forever.
+#      If both kinds of entry fail in the same run, seed-decode wins:
+#      clearing the cache can't fix it, so it needs to surface.
 #   3. Any other non-zero exit is the one thing a seed-replay can otherwise
 #      mean: a previously-passing committed (or cached) entry now fails.
 #      kind=crash, reason=seed-regression.
@@ -86,8 +99,10 @@ generated="${3:-}"
 seed="${4:?usage: fuzz-replay.sh <pkg> <target> <generated-dir> <seed-dir>}"
 
 annotate_prefix=""
+warn_prefix=""
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
 	annotate_prefix="::error::"
+	warn_prefix="::warning::"
 fi
 
 emit() {
@@ -218,6 +233,7 @@ tee_rc="${pipe_status[1]}"
 
 if [ "${tee_rc}" -ne 0 ]; then
 	emit "kind=error"
+	emit "reason=log-write"
 	emit "status=2"
 	echo "${annotate_prefix}${target}: tee to the replay log failed (exit ${tee_rc}); cannot classify this run's output." >&2
 	exit 2
@@ -232,28 +248,94 @@ fi
 # This run's cached-<basename> copies are about to be removed by the EXIT
 # trap; save them now so the failure-path corpus upload can still offer a
 # genuine regression's cached input for download after this process exits.
+# A failed mkdir/cp here previously failed silently (`|| true`), so a
+# cached-only regression could lose its reproducer with nothing in the log
+# to explain why the uploaded artifact came back empty. Every failure now
+# gets a `::warning::` naming the path and the error, and the caller learns
+# about it through the repro_saved output (true unless something failed).
 save_repro() {
-	if [ -s "${manifest}" ]; then
-		local repro_dir="fuzz-replay-failure/${target}"
-		mkdir -p "${repro_dir}" 2>/dev/null || true
-		local f
-		while IFS= read -r f; do
-			[ -n "${f}" ] && [ -f "${f}" ] && cp "${f}" "${repro_dir}/" 2>/dev/null || true
-		done <"${manifest}"
+	if [ ! -s "${manifest}" ]; then
+		emit "repro_saved=true"
+		return
+	fi
+	local repro_dir="fuzz-replay-failure/${target}"
+	local mkdir_err mkdir_rc
+	set +e
+	mkdir_err="$(mkdir -p "${repro_dir}" 2>&1)"
+	mkdir_rc=$?
+	set -e
+	if [ "${mkdir_rc}" -ne 0 ]; then
+		echo "${warn_prefix}${target}: failed to create reproduction directory ${repro_dir} (exit ${mkdir_rc}): ${mkdir_err}" >&2
+		emit "repro_saved=false"
+		return
+	fi
+	local f cp_err cp_rc saved_ok=1
+	while IFS= read -r f; do
+		[ -n "${f}" ] && [ -f "${f}" ] || continue
+		set +e
+		cp_err="$(cp "${f}" "${repro_dir}/" 2>&1)"
+		cp_rc=$?
+		set -e
+		if [ "${cp_rc}" -ne 0 ]; then
+			echo "${warn_prefix}${target}: failed to copy ${f} to ${repro_dir}/ (exit ${cp_rc}): ${cp_err}" >&2
+			saved_ok=0
+		fi
+	done <"${manifest}"
+	if [ "${saved_ok}" -eq 1 ]; then
+		emit "repro_saved=true"
+	else
+		emit "repro_saved=false"
 	fi
 }
 
 # Go's own corpus-decode errors (internal/fuzz/encoding.go's
 # unmarshalCorpusFile, internal/fuzz/fuzz.go's CheckCorpus) surface through
-# f.Fatal in the test output above when a cached GOCACHE entry's shape no
-# longer matches this target's current signature. That is a stale cache
-# entry, not a regression the committed corpus is responsible for.
-if grep -Fq -e 'cannot unmarshal' -e 'mismatched types in corpus entry' -e 'wrong number of values in corpus entry' "${replay_log}"; then
+# f.Fatal in the test output above when some corpus entry's shape no longer
+# matches this target's current signature. Go names the failing file in
+# double quotes ahead of the reason
+# ("testdata/fuzz/<Target>/<name>": <reason>); pull every such path out of
+# the log and split on whether its basename is one of this run's own
+# cached-<basename> copies (stale GOCACHE entry) or a git-tracked seed
+# (the committed corpus itself no longer matches the signature).
+decode_pattern='"[^"]+": (cannot unmarshal|mismatched types in corpus entry|wrong number of values in corpus entry)'
+if grep -Eq "${decode_pattern}" "${replay_log}"; then
 	save_repro
+	seed_decode_path=""
+	while IFS= read -r decode_line; do
+		decode_path="$(printf '%s\n' "${decode_line}" | sed -E 's/^.*"([^"]+)": (cannot unmarshal|mismatched types in corpus entry|wrong number of values in corpus entry).*$/\1/')"
+		decode_base="$(basename "${decode_path}")"
+		case "${decode_base}" in
+		cached-*) ;;
+		*)
+			seed_decode_path="${decode_path}"
+			;;
+		esac
+	done < <(grep -E "${decode_pattern}" "${replay_log}")
+
+	if [ -n "${seed_decode_path}" ]; then
+		emit "kind=error"
+		emit "reason=seed-decode"
+		emit "status=${rc}"
+		echo "${annotate_prefix}${target}: committed seed ${seed_decode_path} no longer matches this target's signature (exit ${rc}) — fix or remove the seed, this is not a stale cache." >&2
+		exit 2
+	fi
+
+	# Every failing entry was this run's own cached-<basename> copy: delete
+	# this target's generated (GOCACHE) corpus so "Save fuzz corpus" below
+	# writes a fresh cache instead of re-saving the same broken entries —
+	# left alone, the entry would keep coming back under the next cache key
+	# and redden the nightly indefinitely.
+	removed=0
+	if [ -n "${generated}" ] && [ -d "${generated}" ]; then
+		while IFS= read -r -d '' stale_f; do
+			rm -f "${stale_f}"
+			removed=$((removed + 1))
+		done < <(find "${generated}" -maxdepth 1 -type f -print0 2>/dev/null)
+	fi
 	emit "kind=error"
 	emit "reason=stale-cache"
 	emit "status=${rc}"
-	echo "${annotate_prefix}${target}: a cached corpus entry no longer matches this target's signature (exit ${rc}) — stale GOCACHE entry, not a regression." >&2
+	echo "${annotate_prefix}${target}: a cached corpus entry no longer matches this target's signature (exit ${rc}) — stale GOCACHE entry, not a regression. Removed ${removed} stale entrie(s) from ${generated}." >&2
 	exit 2
 fi
 
