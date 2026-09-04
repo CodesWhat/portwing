@@ -317,14 +317,7 @@ func TestParsePHCRejectsOverflowParams(t *testing.T) {
 func TestParsePHCAcceptsMemoryAtUint32Max(t *testing.T) {
 	t.Parallel()
 
-	phc, err := HashToken("sometoken")
-	if err != nil {
-		t.Fatalf("HashToken: %v", err)
-	}
-	good := strings.Replace(phc, "m=19456", "m=4294967295", 1)
-	if good == phc {
-		t.Fatal("replacement m=19456 not found in PHC")
-	}
+	const good = "$argon2id$v=19$m=4294967295,t=2,p=1$c29tZXNhbHQ$aGFzaA"
 
 	p, err := ParsePHC(good)
 	if err != nil {
@@ -341,14 +334,7 @@ func TestParsePHCAcceptsMemoryAtUint32Max(t *testing.T) {
 func TestParsePHCAcceptsTimeAtUint32Max(t *testing.T) {
 	t.Parallel()
 
-	phc, err := HashToken("sometoken")
-	if err != nil {
-		t.Fatalf("HashToken: %v", err)
-	}
-	good := strings.Replace(phc, "t=2", "t=4294967295", 1)
-	if good == phc {
-		t.Fatal("replacement t=2 not found in PHC")
-	}
+	const good = "$argon2id$v=19$m=19456,t=4294967295,p=1$c29tZXNhbHQ$aGFzaA"
 
 	p, err := ParsePHC(good)
 	if err != nil {
@@ -365,14 +351,7 @@ func TestParsePHCAcceptsTimeAtUint32Max(t *testing.T) {
 func TestParsePHCAcceptsParallelismAt255(t *testing.T) {
 	t.Parallel()
 
-	phc, err := HashToken("sometoken")
-	if err != nil {
-		t.Fatalf("HashToken: %v", err)
-	}
-	good := strings.Replace(phc, "p=1", "p=255", 1)
-	if good == phc {
-		t.Fatal("replacement p=1 not found in PHC")
-	}
+	const good = "$argon2id$v=19$m=19456,t=2,p=255$c29tZXNhbHQ$aGFzaA"
 
 	p, err := ParsePHC(good)
 	if err != nil {
@@ -389,14 +368,7 @@ func TestParsePHCAcceptsParallelismAt255(t *testing.T) {
 func TestParsePHCAcceptsTimeAtMinimumOne(t *testing.T) {
 	t.Parallel()
 
-	phc, err := HashToken("sometoken")
-	if err != nil {
-		t.Fatalf("HashToken: %v", err)
-	}
-	good := strings.Replace(phc, "t=2", "t=1", 1)
-	if good == phc {
-		t.Fatal("replacement t=2 not found in PHC")
-	}
+	const good = "$argon2id$v=19$m=19456,t=1,p=1$c29tZXNhbHQ$aGFzaA"
 
 	p, err := ParsePHC(good)
 	if err != nil {
