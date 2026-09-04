@@ -145,7 +145,14 @@ printf 'gremlins is hunting for mutants\nsignal: killed\n' \
 	>"${advisory_dir}/mutation-advisory-misc/mutation-advisory-omicron.txt"
 
 # --- delta: advisory, an absolute file_name --------------------------------
-jq -n '{files: [{file_name: "/etc/passwd", mutations: [{type:"INVERT_LOGICAL", status:"LIVED", line:1, column:1}]}]}' \
+#
+# mutants_killed/mutants_lived have to be real numbers here, same as every
+# other fixture meant to reach build_from_raw: since round 4's safe_count
+# fix, an absent count now reads as unparseable on its own (safe_count
+# treats a missing key the same as null -> "BAD"), which would make this
+# assertion pass for the wrong reason -- the count check, not the absolute-
+# path rejection this fixture exists to exercise.
+jq -n '{mutants_killed: 0, mutants_lived: 1, files: [{file_name: "/etc/passwd", mutations: [{type:"INVERT_LOGICAL", status:"LIVED", line:1, column:1}]}]}' \
 	>"${advisory_dir}/mutation-advisory-misc/mutation-advisory-delta.json"
 
 # theta gets neither a records-dir entry nor an advisory-dir entry: both its
