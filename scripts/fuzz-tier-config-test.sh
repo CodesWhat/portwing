@@ -555,6 +555,23 @@ step_block() {
 	' "$1"
 }
 
+# A wrong `go list` cross-check derivation would still look fine to every
+# other check in this file: `mkdir -p` creates whatever path was computed,
+# actions/cache saves and restores it without complaint, and the corpus
+# persists silently against a path `go` itself never reads from. This step
+# has to compare its own derived path against the toolchain's own answer and
+# fail loudly on a mismatch, or a drift like that costs another investigation
+# instead of a red step.
+corpus_step_block="$(step_block "${nightly_workflow}" "Resolve corpus paths")"
+if [ -n "${corpus_step_block}" ]; then
+	grep -Fq "go list -f '{{.ImportPath}}'" <<<"${corpus_step_block}" ||
+		fail "${nightly_workflow}: the 'Resolve corpus paths' step must cross-check its derived import path against go list -f '{{.ImportPath}}'"
+	grep -Fq 'corpus path derivation is wrong' <<<"${corpus_step_block}" ||
+		fail "${nightly_workflow}: the 'Resolve corpus paths' step must fail loudly with a 'corpus path derivation is wrong' error on a go list mismatch"
+else
+	fail "${nightly_workflow} must have a 'Resolve corpus paths' step"
+fi
+
 save_corpus_line="$(step_line "${nightly_workflow}" "Save fuzz corpus")"
 upload_failure_line="$(step_line "${nightly_workflow}" "Upload fuzz corpus on failure or cancel")"
 score_step_line="$(step_line "${nightly_workflow}" "Score corpus coverage")"

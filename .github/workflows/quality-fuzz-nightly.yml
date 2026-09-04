@@ -134,6 +134,19 @@ jobs:
           rel="${PKG#./}"
           rel="${rel%/}"
           module="$(awk '$1 == "module" { print $2; exit }' go.mod)"
+          # A wrong derivation here would still look fine: mkdir -p below
+          # creates whatever path was computed, actions/cache saves and
+          # restores it without complaint, and the corpus would silently
+          # persist against a path go itself never reads from — indefinitely,
+          # since nothing downstream ever notices. `go list` reports the
+          # toolchain's own import path for PKG, so a derivation that drifted
+          # from it (a module rename, a package moved between directories) is
+          # caught here instead of costing another investigation.
+          listed="$(go list -f '{{.ImportPath}}' "${PKG}" 2>/dev/null || true)"
+          if [ -n "${listed}" ] && [ "${listed}" != "${module}/${rel}" ]; then
+            echo "::error::corpus path derivation is wrong: go list says '${listed}', derived '${module}/${rel}'"
+            exit 1
+          fi
           generated="$(go env GOCACHE)/fuzz/${module}/${rel}/${FUZZER}"
           seed="${rel}/testdata/fuzz/${FUZZER}"
           # Both have to exist before the save step runs: actions/cache treats

@@ -156,6 +156,13 @@ union_on_branch="$(branch_file fuzz-nightly.jsonl | jq -c 'select(.scope == "uni
 	fail "the appended union row's corpus_total must be 30 (10 + 20 + 0), got $(jq -r '.corpus_total' <<<"${union_on_branch}")"
 [ "$(jq -r '.profiles_merged' <<<"${union_on_branch}")" = "3" ] ||
 	fail "all three legs scored ok with a coverprofile, so profiles_merged must be 3, got $(jq -r '.profiles_merged' <<<"${union_on_branch}")"
+# Each leg's coverprofile has one distinct, fully-covered block (5 stmts,
+# count 1) under a different file name, so the union carries all three: 15
+# covered of 15 total.
+[ "$(jq -r '.union_stmts_covered' <<<"${union_on_branch}")" = "15" ] ||
+	fail "the appended union row's union_stmts_covered must be 15 (3 legs x 5 covered stmts), got $(jq -r '.union_stmts_covered' <<<"${union_on_branch}")"
+[ "$(jq -r '.union_stmts_total' <<<"${union_on_branch}")" = "15" ] ||
+	fail "the appended union row's union_stmts_total must be 15 (3 legs x 5 stmts), got $(jq -r '.union_stmts_total' <<<"${union_on_branch}")"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} fuzz-history merge check(s) failed" >&2

@@ -501,6 +501,27 @@ awk '
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "the verify-cleanup step with no reference to fuzz-score.sh's manifest must not satisfy the contract"
 
+# --- Resolve corpus paths: go-list cross-check (review follow-up) ----------
+#
+# A wrong path derivation looks identical to a right one to every other check
+# in this file: mkdir -p creates whatever was computed, actions/cache saves
+# and restores it without complaint, and the corpus persists silently against
+# a path go itself never reads from. Only the go-list cross-check itself can
+# catch that, so its absence has to fail the contract.
+
+seed_fixture
+# Strip the go-list cross-check out of the 'Resolve corpus paths' step,
+# leaving the plain derivation (mkdir -p and all) exactly as it read before
+# this contract existed.
+awk '
+	/^          listed="\$\(go list/ { skip = 1 }
+	skip && /^          fi$/ { skip = 0; next }
+	skip { next }
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "a 'Resolve corpus paths' step with no go-list cross-check must not satisfy the contract"
+
 # --- Corpus writer concurrency (review follow-up) ---------------------------
 
 seed_fixture
