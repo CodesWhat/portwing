@@ -182,15 +182,21 @@ if grep -Fxq "reason=stale-cache" "${out_f}"; then
 fi
 rm -f "${seed_dir}/seed-badtype" "${out_f}"
 
-# --- (G) a repro save failure: fuzz-replay-failure/<target> is blocked by a
-# plain file where the directory needs to go -> repro_saved=false and a
-# ::warning:: naming the path and error (PW review finding C: the old
-# script's `mkdir -p ... || true` / `cp ... || true` swallowed this
-# silently, so a cached-only regression could lose its reproducer with
-# nothing in the log to explain why).
-cat >"${seed_dir}/seed-boom2" <<'EOF'
+# --- (G) a repro save failure during a stale-cache classification:
+# fuzz-replay-failure/<target> is blocked by a plain file where the
+# directory needs to go, and the generated corpus has an entry whose shape
+# no longer matches the target -> kind=error reason=stale-cache, exit 2,
+# repro_saved=false, a ::warning:: naming the path and error (PW review
+# finding C: the old script's `mkdir -p ... || true` / `cp ... || true`
+# swallowed a save failure silently, so a cached-only regression could lose
+# its reproducer with nothing in the log to explain why), AND (PW review
+# finding E/P2) the stale entry under the generated dir survives instead of
+# being deleted -- deleting it here would destroy the only remaining copy
+# of the entry the reproducer save just failed to preserve elsewhere.
+mkdir -p "${module}/generated-stale-g/FuzzEcho"
+cat >"${module}/generated-stale-g/FuzzEcho/badtype" <<'EOF'
 go test fuzz v1
-string("boom")
+int(1)
 EOF
 rm -rf "${module}/fuzz-replay-failure"
 : >"${module}/fuzz-replay-failure"
@@ -198,14 +204,59 @@ rm -rf "${module}/fuzz-replay-failure"
 out_g="$(mktemp)"
 err_g="$(mktemp)"
 status=0
-(cd "${module}" && GITHUB_ACTIONS=true FUZZ_OUTPUT_FILE="${out_g}" bash "${replay}" "./pkgtest" "FuzzEcho" "${module}/generated/FuzzEcho" "${seed_dir}") >/dev/null 2>"${err_g}" || status=$?
-[ "${status}" -eq 1 ] || fail "case G (repro-save): expected exit 1 (crash), got ${status}"
-grep -Fxq "kind=crash" "${out_g}" || fail "case G (repro-save): expected kind=crash, got: $(cat "${out_g}")"
+(cd "${module}" && GITHUB_ACTIONS=true FUZZ_OUTPUT_FILE="${out_g}" bash "${replay}" "./pkgtest" "FuzzEcho" "${module}/generated-stale-g/FuzzEcho" "${seed_dir}") >/dev/null 2>"${err_g}" || status=$?
+[ "${status}" -eq 2 ] || fail "case G (repro-save): expected exit 2 (stale-cache), got ${status}"
+grep -Fxq "kind=error" "${out_g}" || fail "case G (repro-save): expected kind=error, got: $(cat "${out_g}")"
+grep -Fxq "reason=stale-cache" "${out_g}" || fail "case G (repro-save): expected reason=stale-cache, got: $(cat "${out_g}")"
 grep -Fxq "repro_saved=false" "${out_g}" || fail "case G (repro-save): expected repro_saved=false, got: $(cat "${out_g}")"
 grep -Fq '::warning::' "${err_g}" || fail "case G (repro-save): expected a ::warning:: line on stderr, got: $(cat "${err_g}")"
+stale_left_g="$(find "${module}/generated-stale-g/FuzzEcho" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')"
+[ "${stale_left_g}" -eq 1 ] || fail "case G (repro-save): expected the stale generated entry to survive a failed repro save, found ${stale_left_g} file(s)"
 no_cached_survive "${seed_dir}" "case G"
-rm -f "${seed_dir}/seed-boom2" "${out_g}" "${err_g}"
+rm -f "${out_g}" "${err_g}"
 rm -rf "${module}/fuzz-replay-failure"
+
+# --- (H) a cached corpus entry that is an empty file -> kind=error
+# reason=stale-cache, exit 2 (PW review finding D/P1: Go's
+# testing/fuzz.go readCorpusData wraps unmarshalCorpusFile's error as
+# "unmarshal: %v" before ReadCorpus prepends the quoted path, so an empty
+# file reads "<path>": unmarshal: cannot unmarshal empty string -- the old
+# decode_pattern anchored "cannot unmarshal" directly against the quoted
+# path with no "unmarshal: " infix, so this case fell all the way through
+# to a false kind=crash reason=seed-regression instead of being recognized
+# as a stale cache entry).
+mkdir -p "${module}/generated-empty/FuzzEcho"
+: >"${module}/generated-empty/FuzzEcho/empty"
+
+out_h="$(mktemp)"
+status=0
+(cd "${module}" && FUZZ_OUTPUT_FILE="${out_h}" bash "${replay}" "./pkgtest" "FuzzEcho" "${module}/generated-empty/FuzzEcho" "${seed_dir}") || status=$?
+[ "${status}" -eq 2 ] || fail "case H (empty-cached): expected exit 2, got ${status}"
+grep -Fxq "kind=error" "${out_h}" || fail "case H (empty-cached): expected kind=error, got: $(cat "${out_h}")"
+grep -Fxq "reason=stale-cache" "${out_h}" || fail "case H (empty-cached): expected reason=stale-cache, got: $(cat "${out_h}")"
+if grep -Fxq "reason=seed-regression" "${out_h}"; then
+	fail "case H (empty-cached): must not misclassify a wrapped empty-corpus decode error as seed-regression"
+fi
+no_cached_survive "${seed_dir}" "case H"
+rm -f "${out_h}"
+
+# --- (I) a committed seed that is an empty file -> kind=error
+# reason=seed-decode, NOT stale-cache, exit 2 (same wrapped-message gap as
+# case H, but on a git-tracked seed rather than a cached-* copy -- must
+# still be told apart from stale-cache the way case F already checks for
+# the unwrapped decode message).
+: >"${seed_dir}/seed-empty"
+
+out_i="$(mktemp)"
+status=0
+(cd "${module}" && FUZZ_OUTPUT_FILE="${out_i}" bash "${replay}" "./pkgtest" "FuzzEcho" "" "${seed_dir}") || status=$?
+[ "${status}" -eq 2 ] || fail "case I (empty-seed): expected exit 2, got ${status}"
+grep -Fxq "kind=error" "${out_i}" || fail "case I (empty-seed): expected kind=error, got: $(cat "${out_i}")"
+grep -Fxq "reason=seed-decode" "${out_i}" || fail "case I (empty-seed): expected reason=seed-decode, got: $(cat "${out_i}")"
+if grep -Fxq "reason=stale-cache" "${out_i}"; then
+	fail "case I (empty-seed): must not report reason=stale-cache for a committed seed"
+fi
+rm -f "${seed_dir}/seed-empty" "${out_i}"
 
 # --- no cached-* survives outside fuzz-replay-failure/, in any case --------
 #

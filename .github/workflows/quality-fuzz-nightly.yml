@@ -490,15 +490,20 @@ jobs:
               stale-cache)
                 echo "A cached corpus entry no longer matches \`${FUZZER}\`'s current signature"
                 echo "(matched one of Go's own corpus-decode errors, on a \`cached-\` copy — not a"
-                echo "committed seed). Not a regression in the committed seed corpus — this run's"
-                echo "scripts/ci/fuzz-replay.sh already deleted the stale entries from the generated"
-                echo "(GOCACHE) corpus and saved a copy to \`fuzz-replay-failure/${FUZZER}/\` first;"
-                echo "\"Save fuzz corpus\" below then writes that emptied corpus under today's cache"
-                echo "key, so tomorrow's run starts clean instead of re-failing on the same entry."
+                echo "committed seed). Not a regression in the committed seed corpus."
                 if [ "${REPRO_SAVED}" = "false" ]; then
                   echo ""
                   echo "scripts/ci/fuzz-replay.sh could not save its own reproduction copy (see this"
-                  echo "step's own log for the \`::warning::\`) — the artifact above may be empty."
+                  echo "step's own log for the \`::warning::\`), so it left the stale entries in the"
+                  echo "generated (GOCACHE) corpus instead of deleting them — the cache was NOT"
+                  echo "cleaned this run, and \"Save fuzz corpus\" below will re-save the same stale"
+                  echo "entries under today's key. Investigate why the reproducer save failed and"
+                  echo "re-run so the cache can actually be cleaned."
+                else
+                  echo "scripts/ci/fuzz-replay.sh already deleted the stale entries from the generated"
+                  echo "(GOCACHE) corpus and saved a copy to \`fuzz-replay-failure/${FUZZER}/\` first;"
+                  echo "\"Save fuzz corpus\" below then writes that emptied corpus under today's cache"
+                  echo "key, so tomorrow's run starts clean instead of re-failing on the same entry."
                 fi
                 ;;
               seed-decode)

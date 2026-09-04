@@ -252,10 +252,15 @@ fi
 # cached-only regression could lose its reproducer with nothing in the log
 # to explain why the uploaded artifact came back empty. Every failure now
 # gets a `::warning::` naming the path and the error, and the caller learns
-# about it through the repro_saved output (true unless something failed).
+# about it through the repro_saved output (true unless something failed),
+# and through the repro_saved_ok variable a caller in this same process can
+# branch on (the stale-cache path below does, so a save failure keeps the
+# only surviving copy of a stale entry instead of deleting it).
+repro_saved_ok=1
 save_repro() {
 	if [ ! -s "${manifest}" ]; then
 		emit "repro_saved=true"
+		repro_saved_ok=1
 		return
 	fi
 	local repro_dir="fuzz-replay-failure/${target}"
@@ -267,6 +272,7 @@ save_repro() {
 	if [ "${mkdir_rc}" -ne 0 ]; then
 		echo "${warn_prefix}${target}: failed to create reproduction directory ${repro_dir} (exit ${mkdir_rc}): ${mkdir_err}" >&2
 		emit "repro_saved=false"
+		repro_saved_ok=0
 		return
 	fi
 	local f cp_err cp_rc saved_ok=1
@@ -286,6 +292,7 @@ save_repro() {
 	else
 		emit "repro_saved=false"
 	fi
+	repro_saved_ok="${saved_ok}"
 }
 
 # Go's own corpus-decode errors (internal/fuzz/encoding.go's
@@ -296,13 +303,19 @@ save_repro() {
 # ("testdata/fuzz/<Target>/<name>": <reason>); pull every such path out of
 # the log and split on whether its basename is one of this run's own
 # cached-<basename> copies (stale GOCACHE entry) or a git-tracked seed
-# (the committed corpus itself no longer matches the signature).
-decode_pattern='"[^"]+": (cannot unmarshal|mismatched types in corpus entry|wrong number of values in corpus entry)'
+# (the committed corpus itself no longer matches the signature). Go's own
+# testing/fuzz.go readCorpusData wraps unmarshalCorpusFile's error as
+# "unmarshal: %v" before ReadCorpus prepends the quoted path, so an empty or
+# otherwise unparseable corpus file reads
+# "<path>": unmarshal: cannot unmarshal empty string — the "unmarshal: " is
+# optional here only because the other two phrases (mismatched types /
+# wrong number of values) come from a different check that does not wrap.
+decode_pattern='"[^"]+": (unmarshal: )?(cannot unmarshal|mismatched types in corpus entry|wrong number of values in corpus entry)'
 if grep -Eq "${decode_pattern}" "${replay_log}"; then
 	save_repro
 	seed_decode_path=""
 	while IFS= read -r decode_line; do
-		decode_path="$(printf '%s\n' "${decode_line}" | sed -E 's/^.*"([^"]+)": (cannot unmarshal|mismatched types in corpus entry|wrong number of values in corpus entry).*$/\1/')"
+		decode_path="$(printf '%s\n' "${decode_line}" | sed -E 's/^.*"([^"]+)": (unmarshal: )?(cannot unmarshal|mismatched types in corpus entry|wrong number of values in corpus entry).*$/\1/')"
 		decode_base="$(basename "${decode_path}")"
 		case "${decode_base}" in
 		cached-*) ;;
@@ -324,18 +337,26 @@ if grep -Eq "${decode_pattern}" "${replay_log}"; then
 	# this target's generated (GOCACHE) corpus so "Save fuzz corpus" below
 	# writes a fresh cache instead of re-saving the same broken entries —
 	# left alone, the entry would keep coming back under the next cache key
-	# and redden the nightly indefinitely.
+	# and redden the nightly indefinitely. But only once save_repro actually
+	# preserved a copy: if it failed, this generated dir is the only place
+	# the stale entries still exist, and deleting them would throw away the
+	# one reproducer save_repro couldn't save — leave it for the next run to
+	# retry instead of silently discarding it.
 	removed=0
-	if [ -n "${generated}" ] && [ -d "${generated}" ]; then
-		while IFS= read -r -d '' stale_f; do
-			rm -f "${stale_f}"
-			removed=$((removed + 1))
-		done < <(find "${generated}" -maxdepth 1 -type f -print0 2>/dev/null)
+	if [ "${repro_saved_ok}" -eq 1 ]; then
+		if [ -n "${generated}" ] && [ -d "${generated}" ]; then
+			while IFS= read -r -d '' stale_f; do
+				rm -f "${stale_f}"
+				removed=$((removed + 1))
+			done < <(find "${generated}" -maxdepth 1 -type f -print0 2>/dev/null)
+		fi
+		echo "${annotate_prefix}${target}: a cached corpus entry no longer matches this target's signature (exit ${rc}) — stale GOCACHE entry, not a regression. Removed ${removed} stale entrie(s) from ${generated}." >&2
+	else
+		echo "${warn_prefix}${target}: kept ${generated} uncleaned — a cached corpus entry no longer matches this target's signature (exit ${rc}), but the reproducer could not be saved, so the stale cache was left in place rather than discarded with no surviving copy." >&2
 	fi
 	emit "kind=error"
 	emit "reason=stale-cache"
 	emit "status=${rc}"
-	echo "${annotate_prefix}${target}: a cached corpus entry no longer matches this target's signature (exit ${rc}) — stale GOCACHE entry, not a regression. Removed ${removed} stale entrie(s) from ${generated}." >&2
 	exit 2
 fi
 
