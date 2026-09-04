@@ -458,30 +458,61 @@ func TestGetContainerLogs_DockerError(t *testing.T) {
 	}
 }
 
-// TestGetContainerLogs_DockerError_NoCloseLogOnCleanClose verifies the
-// resp.Body.Close() error branch only logs when Close actually fails. A real
-// httptest response body closes cleanly, so no "closing docker response
-// body" debug line should appear. Not parallel: swaps the global slog
-// default logger for the test's duration (see TestCloseConn_Error for why
-// that's safe with the surrounding serial/parallel test ordering).
-func TestGetContainerLogs_DockerError_NoCloseLogOnCleanClose(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "no such container", http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	var buf bytes.Buffer
-	orig := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer slog.SetDefault(orig)
-
-	c := newTestClient(srv)
-	_, err := c.GetContainerLogs(context.Background(), "abc123", "", "", "", false, false)
-	if err == nil {
-		t.Fatal("expected error on 404, got nil")
+// TestDockerError_NoCloseLogOnCleanClose is the shared table-driven test for
+// GetContainerLogs and GetEvents: the resp.Body.Close() error branch must
+// only log when Close actually fails. A real httptest response body closes
+// cleanly, so no "closing docker response body" debug line should appear for
+// either code path. Not parallel (and subtests don't call t.Parallel()
+// either): swaps the global slog default logger for the test's duration (see
+// TestCloseConn_Error for why that's safe with the surrounding
+// serial/parallel test ordering).
+func TestDockerError_NoCloseLogOnCleanClose(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		errMessage string
+		call       func(c *Client) error
+	}{
+		{
+			name:       "GetContainerLogs",
+			status:     http.StatusNotFound,
+			errMessage: "no such container",
+			call: func(c *Client) error {
+				_, err := c.GetContainerLogs(context.Background(), "abc123", "", "", "", false, false)
+				return err
+			},
+		},
+		{
+			name:       "GetEvents",
+			status:     http.StatusForbidden,
+			errMessage: "forbidden",
+			call: func(c *Client) error {
+				_, err := c.GetEvents(context.Background())
+				return err
+			},
+		},
 	}
-	if strings.Contains(buf.String(), "closing docker response body") {
-		t.Fatalf("did not expect a body-close debug log on a clean close, got: %s", buf.String())
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, tt.errMessage, tt.status)
+			}))
+			defer srv.Close()
+
+			var buf bytes.Buffer
+			orig := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(orig)
+
+			c := newTestClient(srv)
+			if err := tt.call(c); err == nil {
+				t.Fatalf("expected error on %d, got nil", tt.status)
+			}
+			if strings.Contains(buf.String(), "closing docker response body") {
+				t.Fatalf("did not expect a body-close debug log on a clean close, got: %s", buf.String())
+			}
+		})
 	}
 }
 
@@ -722,31 +753,6 @@ func TestGetEvents_DockerError(t *testing.T) {
 	_, err := c.GetEvents(context.Background())
 	if err == nil {
 		t.Fatal("expected error on 403, got nil")
-	}
-}
-
-// TestGetEvents_DockerError_NoCloseLogOnCleanClose is GetEvents's counterpart
-// to TestGetContainerLogs_DockerError_NoCloseLogOnCleanClose above: the
-// resp.Body.Close() error branch must only log when Close fails. Not
-// parallel, same slog-swap reasoning.
-func TestGetEvents_DockerError_NoCloseLogOnCleanClose(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-	}))
-	defer srv.Close()
-
-	var buf bytes.Buffer
-	orig := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer slog.SetDefault(orig)
-
-	c := newTestClient(srv)
-	_, err := c.GetEvents(context.Background())
-	if err == nil {
-		t.Fatal("expected error on 403, got nil")
-	}
-	if strings.Contains(buf.String(), "closing docker response body") {
-		t.Fatalf("did not expect a body-close debug log on a clean close, got: %s", buf.String())
 	}
 }
 

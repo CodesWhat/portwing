@@ -492,6 +492,15 @@ func TestEventStream_run_LogsOnlyOnConnectionError(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer slog.SetDefault(orig)
 
+	// cleanReconnect closes on the second call to after: the backoff fired
+	// after the first (errored) connection, so a second call means run() has
+	// already finished readEvents for the second (clean) connection and
+	// observed err == nil. Only cancel once that's signaled, so the test
+	// doesn't race cancellation against readEvents still decoding the
+	// trailing EOF for the clean connection.
+	cleanReconnect := make(chan struct{})
+	var afterCalls atomic.Int32
+
 	c := newTestClient(srv)
 	es := &EventStream{
 		client:       c,
@@ -502,6 +511,9 @@ func TestEventStream_run_LogsOnlyOnConnectionError(t *testing.T) {
 		// real wait here only matters if the backoff itself is broken
 		// (covered separately by TestEventStream_run_BackoffCapped).
 		after: func(time.Duration) <-chan time.Time {
+			if afterCalls.Add(1) == 2 {
+				close(cleanReconnect)
+			}
 			ready := make(chan time.Time, 1)
 			ready <- time.Now()
 			return ready
@@ -526,9 +538,15 @@ func TestEventStream_run_LogsOnlyOnConnectionError(t *testing.T) {
 		if ev.Action != "start" {
 			t.Fatalf("Action = %q, want %q", ev.Action, "start")
 		}
-		cancel()
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for event after reconnect")
+	}
+
+	select {
+	case <-cleanReconnect:
+		cancel()
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for clean reconnect")
 	}
 	for range ch {
 	}
