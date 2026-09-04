@@ -139,6 +139,7 @@ fi
 # lives in the workflow comments, not here.
 cache_action_sha="55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
 upload_artifact_sha="043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+download_artifact_sha="3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 cache_key='          key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-${{ github.run_id }}-${{ github.run_attempt }}'
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
@@ -332,6 +333,111 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 		fail "${workflow} must guard the 'Upload fuzz corpus on failure or cancel' step with if: failure() || cancelled()"
 	grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${upload_step_block}" ||
 		fail "${workflow} must upload the corpus artifact with actions/upload-artifact pinned to ${upload_artifact_sha} in the same step"
+done
+
+# --- Monthly fuzz chunking (PW-7.34 part B) ----------------------------------
+#
+# Since ~2026-09-01, hosted ubuntu-24.04 runners kill any job that saturates
+# CPU for more than ~14-19 minutes with "The runner has received a shutdown
+# signal" (exit 143) — run 33514192612 (2026-09-01) died at 19m into what was
+# a single 60m-per-fuzzer job. quality-fuzz-monthly.yml now splits each
+# fuzzer's hour into 6 parallel 10-minute legs instead of one long job, with a
+# separate per-fuzzer job that merges the six legs' corpora and is the only
+# thing that saves the cache. Every property below is one a leg-count-and-
+# artifact-plumbing regression would otherwise silently reintroduce the
+# runner-shutdown failure mode this design exists to avoid.
+
+# A named job's own block, from its two-space key to the next one. Local to
+# this section: quality-history-config-test.sh has its own copy scoped to a
+# different set of workflows.
+job_block_by_name() {
+	awk -v job="  $2:" '
+        $0 == job { in_job = 1; next }
+        in_job && /^  [^[:space:]]/ { in_job = 0 }
+        in_job { print }
+    ' "$1"
+}
+
+monthly_workflow=".github/workflows/quality-fuzz-monthly.yml"
+monthly_leg_job="$(job_block_by_name "${monthly_workflow}" "monthly-fuzz")"
+monthly_merge_job="$(job_block_by_name "${monthly_workflow}" "merge-corpus")"
+
+[ -n "${monthly_leg_job}" ] ||
+	fail "${monthly_workflow} must have a top-level 'monthly-fuzz' job"
+[ -n "${monthly_merge_job}" ] ||
+	fail "${monthly_workflow} must have a top-level 'merge-corpus' job that merges the legs' corpora"
+
+# The per-leg fuzztime default must already be inside the 12-minute cap, not
+# just accepted by the budget step's runtime check — a default above the cap
+# would fail every scheduled run, not just a misconfigured manual dispatch.
+grep -Fq 'default: "10m"' "${monthly_workflow}" ||
+	fail "${monthly_workflow} must default the per-leg fuzztime input to 10m"
+
+# The budget step's own hard cap: a fuzztime above 12 minutes (720s) must be
+# refused, loudly, rather than silently clamped or accepted. Anchored to the
+# comparison and the exit itself, not just "720 appears somewhere in the
+# file", so a cap that stops being enforced at runtime is caught even if the
+# comment describing it survives.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fq 'if [ "${budget_s}" -gt 720 ]; then' "${monthly_workflow}" ||
+	fail "${monthly_workflow} budget step must refuse a per-leg fuzztime over 720s (12m)"
+budget_cap_block="$(awk '
+    /if \[ "\$\{budget_s\}" -gt 720 \]; then/ { inside = 1 }
+    inside { print }
+    inside && /^          fi$/ { exit }
+' "${monthly_workflow}")"
+grep -Fq 'exit 1' <<<"${budget_cap_block}" ||
+	fail "${monthly_workflow} budget step must exit non-zero when the per-leg fuzztime exceeds the 12m cap, not just warn"
+
+# The chunk dimension: exactly 6 legs per fuzzer, matching the 60 CPU-minute
+# budget split into 6×10-minute pieces.
+grep -Fxq "        chunk: [1, 2, 3, 4, 5, 6]" <<<"${monthly_leg_job}" ||
+	fail "${monthly_workflow} 'monthly-fuzz' job must matrix chunk: [1, 2, 3, 4, 5, 6]"
+
+# Every leg uploads its corpus chunk for merge-corpus to fold back together —
+# pinned to the same actions/upload-artifact SHA the crash-artifact upload
+# above already asserts, with 1-day retention (this artifact is read once by
+# merge-corpus in the same run and never again, unlike the 180-day crash
+# artifact).
+leg_chunk_upload="$(awk '
+    $0 == "      - name: Upload fuzz corpus chunk" { inside = 1; print; next }
+    inside && /^      - name:/ { exit }
+    inside { print }
+' <<<"${monthly_leg_job}")"
+[ -n "${leg_chunk_upload}" ] ||
+	fail "${monthly_workflow} 'monthly-fuzz' job must have an 'Upload fuzz corpus chunk' step"
+grep -Fq "uses: actions/upload-artifact@${upload_artifact_sha}" <<<"${leg_chunk_upload}" ||
+	fail "${monthly_workflow} 'Upload fuzz corpus chunk' step must use actions/upload-artifact pinned to ${upload_artifact_sha}"
+grep -Fxq "          retention-days: 1" <<<"${leg_chunk_upload}" ||
+	fail "${monthly_workflow} 'Upload fuzz corpus chunk' step must set retention-days: 1"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fq 'name: fuzz-corpus-chunk-${{ matrix.fuzzer.name }}-${{ matrix.chunk }}-${{ github.run_id }}' <<<"${leg_chunk_upload}" ||
+	fail "${monthly_workflow} chunk artifact name must be fuzz-corpus-chunk-<fuzzer>-<chunk>-<run_id>"
+
+# merge-corpus must download exactly those chunks and be the one job that
+# saves the cache — the leg job must NOT also save it, or six legs of the
+# same fuzzer would race the same cache key the corpus-writer concurrency
+# group exists to prevent.
+grep -Fq "uses: actions/download-artifact@${download_artifact_sha}" <<<"${monthly_merge_job}" ||
+	fail "${monthly_workflow} 'merge-corpus' job must download the chunk artifacts with actions/download-artifact pinned to ${download_artifact_sha}"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fq 'pattern: fuzz-corpus-chunk-${{ matrix.fuzzer.name }}-*-${{ github.run_id }}' <<<"${monthly_merge_job}" ||
+	fail "${monthly_workflow} 'merge-corpus' job must download fuzz-corpus-chunk-<fuzzer>-*-<run_id>"
+grep -Fq "uses: actions/cache/save@${cache_action_sha}" <<<"${monthly_merge_job}" ||
+	fail "${monthly_workflow} 'merge-corpus' job must be the one that saves the corpus cache"
+grep -Fq "uses: actions/cache/save@${cache_action_sha}" <<<"${monthly_leg_job}" &&
+	fail "${monthly_workflow} 'monthly-fuzz' leg job must not itself save the corpus cache; only 'merge-corpus' may, or six legs of one fuzzer would race the same cache key"
+
+# Neither the leg job nor the merge job may declare permissions of its own —
+# the same "the corpus-touching job must not carry a credential" property
+# quality-history-config-test.sh guards for the recording jobs, extended here
+# to both halves of the now-split monthly lane. Nothing in this workflow
+# should ever need more than the workflow-level contents: read.
+for job_name_check in "monthly-fuzz" "merge-corpus"; do
+	job_block_check="$(job_block_by_name "${monthly_workflow}" "${job_name_check}")"
+	if grep -Eq '^[[:space:]]*permissions:' <<<"${job_block_check}"; then
+		fail "${monthly_workflow}: the '${job_name_check}' job must not declare permissions of its own"
+	fi
 done
 
 # --- Spec 2: corpus coverage score step (nightly only) ----------------------

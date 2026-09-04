@@ -141,6 +141,85 @@ sed 's|^            ${{ steps.corpus.outputs.generated }}$|&\n            ${{ st
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "caching the git-tracked seed corpus must not satisfy the contract"
 
+# --- Monthly fuzz chunking (PW-7.34 part B) ---------------------------------
+
+seed_fixture
+sed 's|        chunk: \[1, 2, 3, 4, 5, 6\]|        chunk: [1, 2, 3, 4, 5]|' \
+	"${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a monthly chunk matrix with fewer than 6 legs must not satisfy the contract"
+
+seed_fixture
+sed 's|default: "10m"|default: "15m"|' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a per-leg fuzztime default other than 10m must not satisfy the contract"
+
+seed_fixture
+# Widen the cap itself from 12m (720s) to 2h (7200s) — the default fuzztime
+# is still 10m, so only the enforcement of the cap is broken, not the default.
+sed 's|-gt 720|-gt 7200|' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a per-leg fuzztime cap above 12 minutes must not satisfy the contract"
+
+seed_fixture
+# Drop the cap block's own `exit 1`, leaving the ::error annotation (and
+# every other line) untouched — a bare "does the cap comparison appear
+# somewhere" check would still pass this, only "does it actually exit
+# non-zero" notices.
+awk '
+	/if \[ "\$\{budget_s\}" -gt 720 \]; then/ { inside = 1 }
+	inside && /^            exit 1$/ { next }
+	inside && /^          fi$/ { inside = 0 }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a per-leg fuzztime cap that does not exit non-zero must not satisfy the contract"
+
+seed_fixture
+# Drop the leg job's chunk-artifact upload entirely — merge-corpus would then
+# have nothing to download for that leg. The step is the last one in the
+# job, so deletion has to stop at the next job boundary (2-space indent, not
+# just the next step), or it eats the rest of the file.
+awk '
+	$0 == "      - name: Upload fuzz corpus chunk" { skip = 1; next }
+	skip && (/^      - name:/ || /^  [^[:space:]]/) { skip = 0 }
+	skip { next }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a monthly leg that does not upload a corpus chunk artifact must not satisfy the contract"
+
+seed_fixture
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+sed 's|name: fuzz-corpus-chunk-${{ matrix.fuzzer.name }}-${{ matrix.chunk }}-${{ github.run_id }}|name: fuzz-corpus-chunk-${{ matrix.fuzzer.name }}-${{ github.run_id }}|' \
+	"${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a chunk artifact name missing the chunk index must not satisfy the contract"
+
+seed_fixture
+# A leg job that ALSO saves the corpus cache — the exact race the split into
+# monthly-fuzz (restore only) and merge-corpus (the one saver) exists to
+# prevent: six legs of the same fuzzer writing the same cache key.
+awk '
+	$0 == "      - name: Upload fuzz corpus chunk" {
+		print
+		print "        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0"
+		next
+	}
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a leg job that also saves the corpus cache must not satisfy the contract"
+
+seed_fixture
+# merge-corpus growing a permissions block of its own — the write-scope
+# discipline quality-history-config-test.sh guards for the recording jobs,
+# extended here to the job that now owns the cache save.
+sed 's|^    needs: monthly-fuzz$|    needs: monthly-fuzz\n    permissions:\n      contents: write|' \
+	"${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a merge-corpus job with permissions of its own must not satisfy the contract"
+
 # --- Crash classification lives in scripts/ci/fuzz-run.sh (PW-5.10) --------
 
 fuzz_run="${fixture}/scripts/ci/fuzz-run.sh"
