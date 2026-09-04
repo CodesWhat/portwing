@@ -143,7 +143,9 @@ jobs:
           # from it (a module rename, a package moved between directories) is
           # caught here instead of costing another investigation.
           listed="$(go list -f '{{.ImportPath}}' "${PKG}" 2>/dev/null || true)"
-          if [ -n "${listed}" ] && [ "${listed}" != "${module}/${rel}" ]; then
+          if [ -z "${listed}" ]; then
+            echo "::warning::corpus path cross-check skipped: go list produced no import path for '${PKG}'"
+          elif [ "${listed}" != "${module}/${rel}" ]; then
             echo "::error::corpus path derivation is wrong: go list says '${listed}', derived '${module}/${rel}'"
             exit 1
           fi

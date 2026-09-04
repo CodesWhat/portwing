@@ -228,7 +228,50 @@ for caller in lefthook.yml scripts/ci/go-fuzz.sh .github/workflows/quality-fuzz-
 		fail "${caller} must pass FUZZ_RETRIES=${want_retries} explicitly to ${fuzz_run_script}, anchored at the call itself"
 done
 
+step_block() {
+	awk -v want="      - name: $2" -v occurrence="${3:-1}" '
+		$0 == want {
+			seen++
+			if (seen == occurrence) { inside = 1; print; next }
+		}
+		inside && /^      - name:/ { exit }
+		inside { print }
+	' "$1"
+}
+
 for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
+	# A wrong `go list` cross-check derivation would still look fine to every
+	# other check in this file: `mkdir -p` creates whatever path was computed,
+	# actions/cache saves and restores it without complaint, and the corpus
+	# persists silently against a path `go` itself never reads from. This step
+	# has to compare its own derived path against the toolchain's own answer and
+	# fail loudly on a mismatch, or a drift like that costs another investigation
+	# instead of a red step.
+	#
+	# The monthly workflow carries TWO "Resolve corpus paths" steps (the
+	# fuzzing leg and the merge-corpus job that restores/merges/saves the
+	# same cache path independently), and both derive the identical path
+	# from the identical inputs, so both need the same guard or a drift in
+	# just the merge job's copy would persist the merged corpus under a
+	# path go itself never reads from, silently, forever. step_block's
+	# occurrence param walks every "Resolve corpus paths" step in the file
+	# rather than only the first.
+	corpus_step_count="$(grep -c '^      - name: Resolve corpus paths$' "${workflow}")"
+	if [ "${corpus_step_count}" -eq 0 ]; then
+		fail "${workflow} must have a 'Resolve corpus paths' step"
+	fi
+	occurrence=1
+	while [ "${occurrence}" -le "${corpus_step_count}" ]; do
+		corpus_step_block="$(step_block "${workflow}" "Resolve corpus paths" "${occurrence}")"
+		grep -Fq "go list -f '{{.ImportPath}}'" <<<"${corpus_step_block}" ||
+			fail "${workflow}: 'Resolve corpus paths' step #${occurrence} must cross-check its derived import path against go list -f '{{.ImportPath}}'"
+		grep -Fq 'corpus path derivation is wrong' <<<"${corpus_step_block}" ||
+			fail "${workflow}: 'Resolve corpus paths' step #${occurrence} must fail loudly with a 'corpus path derivation is wrong' error on a go list mismatch"
+		grep -Fq 'corpus path cross-check skipped' <<<"${corpus_step_block}" ||
+			fail "${workflow}: 'Resolve corpus paths' step #${occurrence} must warn 'corpus path cross-check skipped' when go list produces no import path"
+		occurrence=$((occurrence + 1))
+	done
+
 	grep -Fq "uses: actions/cache/restore@${cache_action_sha}" "${workflow}" ||
 		fail "${workflow} must restore the fuzz corpus from actions/cache pinned to ${cache_action_sha}"
 	grep -Fq "uses: actions/cache/save@${cache_action_sha}" "${workflow}" ||
@@ -546,31 +589,6 @@ nightly_workflow=".github/workflows/quality-fuzz-nightly.yml"
 step_line() {
 	grep -n "^      - name: $2\$" "$1" | head -n 1 | cut -d: -f1 || true
 }
-
-step_block() {
-	awk -v want="      - name: $2" '
-		$0 == want { inside = 1; print; next }
-		inside && /^      - name:/ { exit }
-		inside { print }
-	' "$1"
-}
-
-# A wrong `go list` cross-check derivation would still look fine to every
-# other check in this file: `mkdir -p` creates whatever path was computed,
-# actions/cache saves and restores it without complaint, and the corpus
-# persists silently against a path `go` itself never reads from. This step
-# has to compare its own derived path against the toolchain's own answer and
-# fail loudly on a mismatch, or a drift like that costs another investigation
-# instead of a red step.
-corpus_step_block="$(step_block "${nightly_workflow}" "Resolve corpus paths")"
-if [ -n "${corpus_step_block}" ]; then
-	grep -Fq "go list -f '{{.ImportPath}}'" <<<"${corpus_step_block}" ||
-		fail "${nightly_workflow}: the 'Resolve corpus paths' step must cross-check its derived import path against go list -f '{{.ImportPath}}'"
-	grep -Fq 'corpus path derivation is wrong' <<<"${corpus_step_block}" ||
-		fail "${nightly_workflow}: the 'Resolve corpus paths' step must fail loudly with a 'corpus path derivation is wrong' error on a go list mismatch"
-else
-	fail "${nightly_workflow} must have a 'Resolve corpus paths' step"
-fi
 
 save_corpus_line="$(step_line "${nightly_workflow}" "Save fuzz corpus")"
 upload_failure_line="$(step_line "${nightly_workflow}" "Upload fuzz corpus on failure or cancel")"

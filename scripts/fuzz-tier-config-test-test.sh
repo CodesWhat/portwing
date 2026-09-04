@@ -522,6 +522,18 @@ awk '
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "a 'Resolve corpus paths' step with no go-list cross-check must not satisfy the contract"
 
+seed_fixture
+# Same strip, on the monthly workflow: the cross-check is not nightly-only,
+# so dropping it from the monthly step must fail the contract too.
+awk '
+	/^          listed="\$\(go list/ { skip = 1 }
+	skip && /^          fi$/ { skip = 0; next }
+	skip { next }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a monthly 'Resolve corpus paths' step with no go-list cross-check must not satisfy the contract"
+
 # --- Corpus writer concurrency (review follow-up) ---------------------------
 
 seed_fixture

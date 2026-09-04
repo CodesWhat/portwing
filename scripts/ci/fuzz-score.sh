@@ -237,7 +237,7 @@ fi
 
 # The engine dedups by content hash, drops wrong-typed cache files, and
 # counts f.Add values (not files), so the delta is normally a per-target
-# constant equal to the f.Add count (2026-09-04: PHC 10, Envelope 24,
+# constant equal to the f.Add count (2026-09-04: PHC 10, Envelope 30,
 # ImageRef 17, Labels 8); a jump means the generated corpus stopped being
 # seen, a negative value means the engine rejected cache files.
 corpus_engine_delta="null"
