@@ -213,8 +213,19 @@ for caller in lefthook.yml scripts/ci/go-fuzz.sh .github/workflows/quality-fuzz-
 		fail "${caller} must not reimplement the '${crash_pattern_seed_regression}' classifier inline; it must call ${fuzz_run_script}"
 	grep -Eq 'bash[[:space:]]+.*fuzz-run\.sh' <<<"${caller_code}" ||
 		fail "${caller} must invoke ${fuzz_run_script} rather than its own retry/classify loop"
-	grep -Eq '^[[:space:]]*FUZZ_RETRIES=2([[:space:]]|\\$|"|$)' <<<"${caller_code}" ||
-		fail "${caller} must pass FUZZ_RETRIES=2 explicitly to ${fuzz_run_script}, anchored at the call itself"
+
+	# The monthly leg is the one exception to FUZZ_RETRIES=2: a retry re-runs
+	# the FULL -fuzztime on the "context deadline exceeded" boundary flake,
+	# so two retries there is two full fuzztimes in one job — 10m + 10m +
+	# ~2m setup = ~22m, past that job's own timeout-minutes and back inside
+	# the 14-19m runner-shutdown window the six-leg split exists to stay out
+	# of. Every other caller keeps the shared default of 2.
+	case "${caller}" in
+	.github/workflows/quality-fuzz-monthly.yml) want_retries=1 ;;
+	*) want_retries=2 ;;
+	esac
+	grep -Eq "^[[:space:]]*FUZZ_RETRIES=${want_retries}([[:space:]]|\\\\$|\"|$)" <<<"${caller_code}" ||
+		fail "${caller} must pass FUZZ_RETRIES=${want_retries} explicitly to ${fuzz_run_script}, anchored at the call itself"
 done
 
 for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/quality-fuzz-monthly.yml; do
@@ -225,9 +236,18 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 
 	# Restore and save have to name the same key. If they drift, every run
 	# writes an entry the next run cannot find and the lane is back to zero.
+	# The nightly's single job restores once and saves once (2 uses); the
+	# monthly split the restore across two jobs — the leg restores its own
+	# copy and merge-corpus restores again immediately before folding the
+	# legs in and saving (PW-7.34 part C's restore-before-save fix) — plus
+	# the one save, for 3.
+	case "${workflow}" in
+	.github/workflows/quality-fuzz-monthly.yml) want_key_uses=3 ;;
+	*) want_key_uses=2 ;;
+	esac
 	key_uses="$(grep -Fxc "${cache_key}" "${workflow}" || true)"
-	[ "${key_uses}" -eq 2 ] ||
-		fail "${workflow} must use one run-scoped corpus cache key on both restore and save (found ${key_uses})"
+	[ "${key_uses}" -eq "${want_key_uses}" ] ||
+		fail "${workflow} must use one run-scoped corpus cache key on restore and save (want ${want_key_uses}, found ${key_uses})"
 
 	# No workflow name in the prefix, on purpose: a cache entry is deleted
 	# after 7 days without an access, so the monthly lane can only ever hit a
@@ -238,8 +258,8 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 	corpus_path='            ${{ steps.corpus.outputs.generated }}'
 	path_uses="$(grep -Fxc "${corpus_path}" "${workflow}" || true)"
-	[ "${path_uses}" -eq 2 ] ||
-		fail "${workflow} must cache ${corpus_path# *} on both restore and save (found ${path_uses})"
+	[ "${path_uses}" -eq "${want_key_uses}" ] ||
+		fail "${workflow} must cache ${corpus_path# *} on restore and save (want ${want_key_uses}, found ${path_uses})"
 
 	# Regression guard: the git-tracked seed corpus must never be cached
 	# alongside the generated corpus. actions/cache restore extracts over the
@@ -257,8 +277,14 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	grep -Fq 'seed="${rel}/testdata/fuzz/${FUZZER}"' "${workflow}" ||
 		fail "${workflow} must resolve the seed corpus to <pkg>/testdata/fuzz/<Target>"
 
-	grep -Fxq "${cache_save_guard}" "${workflow}" ||
-		fail "${workflow} must save the corpus on failure too — a crasher is the finding worth keeping"
+	# The monthly's save guard has its own exact-text assertion in the
+	# chunking section below (it also requires the merge step to have
+	# succeeded, which the nightly's single-job shape has no equivalent
+	# step for), so this generic guard is scoped to the nightly only.
+	if [ "${workflow}" = ".github/workflows/quality-fuzz-nightly.yml" ]; then
+		grep -Fxq "${cache_save_guard}" "${workflow}" ||
+			fail "${workflow} must save the corpus on failure too — a crasher is the finding worth keeping"
+	fi
 
 	# harden-runner fails these transfers silently: actions/cache warns and the
 	# job stays green while persisting nothing.
@@ -389,10 +415,38 @@ budget_cap_block="$(awk '
 grep -Fq 'exit 1' <<<"${budget_cap_block}" ||
 	fail "${monthly_workflow} budget step must exit non-zero when the per-leg fuzztime exceeds the 12m cap, not just warn"
 
+# The budget step's else branch — a fuzztime that does not match any of the
+# ^[0-9]+[hms]$ arms above (1h30m, 0.5h, 12m0s, 10m30s, 0.2h, ...) — must
+# refuse too, not silently default to budget_s=600 and pass the fuzztime
+# through to `go test -fuzz` unchecked. go test -fuzz ignores -timeout
+# while fuzzing, so an unrecognized value sailing past the 12-minute cap
+# check was the bypass: any Go-valid duration the three arms above don't
+# match hit the old else, got budget_s=600 (which is <= 720 and so passes
+# the cap check below), and was still written to the fuzz step verbatim.
+grep -Fq 'budget_s=600' "${monthly_workflow}" &&
+	fail "${monthly_workflow} budget step must not silently default an unparsed fuzztime to budget_s=600 and pass it through; it must refuse with exit 1"
+budget_else_block="$(awk '
+    /^          else$/ { inside = 1 }
+    inside { print }
+    inside && /^          fi$/ { exit }
+' "${monthly_workflow}")"
+[ -n "${budget_else_block}" ] ||
+	fail "${monthly_workflow} budget step must have an else branch for an unparsed fuzztime"
+grep -Fq 'exit 1' <<<"${budget_else_block}" ||
+	fail "${monthly_workflow} budget step's else branch (an unparsed fuzztime) must exit 1, not silently fall back to a default"
+
 # The chunk dimension: exactly 6 legs per fuzzer, matching the 60 CPU-minute
 # budget split into 6×10-minute pieces.
 grep -Fxq "        chunk: [1, 2, 3, 4, 5, 6]" <<<"${monthly_leg_job}" ||
 	fail "${monthly_workflow} 'monthly-fuzz' job must matrix chunk: [1, 2, 3, 4, 5, 6]"
+
+# 15-minute job ceiling: one 12m fuzztime attempt (FUZZ_RETRIES=1, checked
+# above) plus ~2m of setup/checkout/cache overhead is ~14m, so 15m is a
+# backstop above the legitimate maximum, not a number this job is expected
+# to run into — and still comfortably under the ~14-19m runner-shutdown
+# window.
+grep -Fxq "    timeout-minutes: 15" <<<"${monthly_leg_job}" ||
+	fail "${monthly_workflow} 'monthly-fuzz' leg job must set timeout-minutes: 15"
 
 # Every leg uploads its corpus chunk for merge-corpus to fold back together —
 # pinned to the same actions/upload-artifact SHA the crash-artifact upload
@@ -439,6 +493,48 @@ for job_name_check in "monthly-fuzz" "merge-corpus"; do
 		fail "${monthly_workflow}: the '${job_name_check}' job must not declare permissions of its own"
 	fi
 done
+
+# merge-corpus must run on !cancelled(), not always(): always() would also
+# run it — and its Save fuzz corpus step — on a CANCELLED run, writing a
+# near-empty corpus under a fresh key that restore-keys would then hand to
+# every future run as the newest entry for this fuzzer.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fxq '    if: ${{ !cancelled() }}' <<<"${monthly_merge_job}" ||
+	fail "${monthly_workflow} 'merge-corpus' job must set if: \${{ !cancelled() }} exactly, not always()"
+
+# merge-corpus must restore the cache before it merges and saves — the
+# pre-chunking shape did restore -> fuzz -> save in one job, which made a
+# lost update against the nightly's own writer impossible; splitting the
+# fuzzing out to the six legs above moved the read to them (no concurrency
+# group) and left only the write here, so restoring again immediately
+# before the merge closes that gap.
+grep -Fq "uses: actions/cache/restore@${cache_action_sha}" <<<"${monthly_merge_job}" ||
+	fail "${monthly_workflow} 'merge-corpus' job must restore the fuzz corpus (actions/cache/restore pinned to ${cache_action_sha}) before merging and saving"
+
+# The save guard's exact text: !cancelled(), a non-empty generated path, and
+# the merge step's own success — a cache-restore failure, a jq failure, or
+# any other error inside Merge chunk corpus must not save whatever partial
+# `generated` dir it left behind.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+monthly_save_guard="        if: \${{ !cancelled() && steps.corpus.outputs.generated != '' && steps.merge.outcome == 'success' }}"
+grep -Fxq "${monthly_save_guard}" <<<"${monthly_merge_job}" ||
+	fail "${monthly_workflow} 'merge-corpus' job's Save fuzz corpus step must guard on !cancelled() && steps.corpus.outputs.generated != '' && steps.merge.outcome == 'success'"
+
+# The merge step must escalate kind to infra when fewer than all six legs
+# reported — otherwise a leg torn down by the runner (never running its own
+# always() upload) is indistinguishable from a leg that ran clean, and a red
+# run summarizes as kind=pass, which is what the notification lane keys on.
+monthly_merge_step="$(awk '
+    $0 == "      - name: Merge chunk corpus and aggregate leg stats" { inside = 1; print; next }
+    inside && /^      - name:/ { exit }
+    inside { print }
+' <<<"${monthly_merge_job}")"
+[ -n "${monthly_merge_step}" ] ||
+	fail "${monthly_workflow} must have a 'Merge chunk corpus and aggregate leg stats' step"
+grep -Fq 'expected_legs' <<<"${monthly_merge_step}" ||
+	fail "${monthly_workflow} 'Merge chunk corpus and aggregate leg stats' step must compute expected_legs"
+grep -Fq 'kind="infra"' <<<"${monthly_merge_step}" ||
+	fail "${monthly_workflow} 'Merge chunk corpus and aggregate leg stats' step must escalate kind=\"infra\" when fewer than expected_legs legs reported"
 
 # --- Spec 2: corpus coverage score step (nightly only) ----------------------
 #

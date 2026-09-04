@@ -21,8 +21,12 @@ run-name: >-
 # triage that failure mode after the fact, but the fix that stops it from
 # happening in the first place lives here: every fuzzer's hour is now six
 # PARALLEL 10-minute legs (`matrix.chunk: [1..6]`) instead of one 60-minute
-# leg, so no single `go test -fuzz` process ever runs long enough to be a
-# candidate for the shutdown signal. 12 minutes (720s) is the hard per-leg
+# leg. The property that matters is that no leg JOB occupies a runner with
+# a CPU-saturating workload for more than one fuzztime — which is why the
+# leg's Fuzz step runs with FUZZ_RETRIES=1 rather than the shared default
+# of 2: a retry re-runs the full -fuzztime on a boundary flake, and two
+# fuzztimes in one job is exactly the shutdown-signal candidate this
+# redesign exists to eliminate. 12 minutes (720s) is the hard per-leg
 # cap enforced below — 2 minutes of headroom under the ~14-minute low end of
 # the observed kill window — and the "Resolve fuzz budget" step refuses any
 # `fuzztime` input above it rather than silently clamping it, because a
@@ -81,12 +85,15 @@ jobs:
   monthly-fuzz:
     name: "Fuzz ${{ matrix.fuzzer.name }} chunk ${{ matrix.chunk }} (monthly)"
     runs-on: ubuntu-24.04
-    # 20-minute ceiling per leg: comfortably above the 12m fuzztime cap plus
-    # setup/checkout/cache overhead, and comfortably under the ~14-19 minute
-    # window where a CPU-saturating job risks the runner shutdown signal.
-    # This is the hard cap on THIS job; the fuzztime cap below is what keeps
-    # the CPU-saturating `go test` step itself well under it.
-    timeout-minutes: 20
+    # 15-minute ceiling per leg: one 12m fuzztime attempt (FUZZ_RETRIES=1,
+    # see the Fuzz step below — a retry would re-run the full fuzztime and
+    # blow this budget) plus ~2m of setup/checkout/cache overhead is ~14m,
+    # so 15m is a backstop above the legitimate maximum, not the number
+    # this job is expected to run into. Still comfortably under the ~14-19
+    # minute window where a CPU-saturating job risks the runner shutdown
+    # signal. This is the hard cap on THIS job; the fuzztime cap below is
+    # what keeps the CPU-saturating `go test` step itself well under it.
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false
@@ -219,8 +226,14 @@ jobs:
         run: |
           set -euo pipefail
           FUZZTIME="${INPUT_FUZZTIME:-10m}"
-          # Parse the trailing unit (h, m, or s) and convert to seconds, then add
-          # a 120-second cushion so the go test -timeout always outlasts -fuzztime.
+          # Parse the trailing unit (h, m, or s) and convert to seconds. The
+          # 120-second cushion added to test_timeout below only bounds the
+          # post-fuzz corpus-verification phase: go test -fuzz ignores
+          # -timeout while fuzzing itself is running (measured:
+          # -fuzztime=60s -timeout=8s ran the full 61s at 963% CPU and
+          # PASSED), so this cushion does not bound the CPU-saturating fuzz
+          # loop — the 12-minute per-leg cap below and the leg job's own
+          # timeout-minutes are what bound that.
           if [[ "${FUZZTIME}" =~ ^([0-9]+)h$ ]]; then
             budget_s=$(( BASH_REMATCH[1] * 3600 ))
           elif [[ "${FUZZTIME}" =~ ^([0-9]+)m$ ]]; then
@@ -228,7 +241,8 @@ jobs:
           elif [[ "${FUZZTIME}" =~ ^([0-9]+)s$ ]]; then
             budget_s=${BASH_REMATCH[1]}
           else
-            budget_s=600
+            echo "::error::fuzztime '${FUZZTIME}' is not a plain <integer><h|m|s> duration (e.g. 5m, 600s). go test -fuzz ignores -timeout during fuzzing, so an unrecognized value would be passed to -fuzztime unchecked and could run far past the 12-minute per-leg cap." >&2
+            exit 1
           fi
           # Hard cap: 12 minutes (720s). This workflow now runs the fuzzer's
           # hour as six PARALLEL legs instead of one long job specifically to
@@ -268,8 +282,20 @@ jobs:
           PKG: ${{ matrix.fuzzer.pkg }}
           FUZZTIME: ${{ steps.budget.outputs.fuzztime }}
           FUZZ_TIMEOUT: ${{ steps.budget.outputs.test_timeout }}
+          # FUZZ_PARALLEL=3 leaves the coordinator a core on a 4-core
+          # runner, matching scripts/ci/go-fuzz.sh: unset here, a leg runs
+          # one worker per core and starves the coordinator, which is what
+          # produces the "context deadline exceeded" boundary flake in the
+          # first place.
+          FUZZ_PARALLEL: 3
         run: |
-          FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" FUZZ_LOG_FILE="fuzz-run-${FUZZER}-${{ matrix.chunk }}.log" bash scripts/ci/fuzz-run.sh "${PKG}" "${FUZZER}" "${FUZZTIME}"
+          # FUZZ_RETRIES=1, not the shared default of 2: a retry re-runs the
+          # FULL -fuzztime on that flake, so two retries is two full legs —
+          # 10m + 10m + ~2m setup = ~22m, past this job's timeout-minutes and
+          # back inside the 14-19m runner-shutdown window this chunking exists
+          # to stay out of. One attempt plus setup is ~12m; see the
+          # timeout-minutes comment below for the arithmetic.
+          FUZZ_RETRIES=1 FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" FUZZ_LOG_FILE="fuzz-run-${FUZZER}-${{ matrix.chunk }}.log" bash scripts/ci/fuzz-run.sh "${PKG}" "${FUZZER}" "${FUZZTIME}"
 
       - name: Upload fuzz corpus on failure or cancel
         if: failure() || cancelled()
@@ -340,7 +366,17 @@ jobs:
   merge-corpus:
     name: "Merge fuzz corpus ${{ matrix.fuzzer.name }} (monthly)"
     needs: monthly-fuzz
-    if: always()
+    # !cancelled(), not always(): always() would also run this job — and its
+    # Save fuzz corpus step below — on a run that was CANCELLED, writing a
+    # near-empty corpus (download is continue-on-error, and legs_found only
+    # gates the merge step's own kind escalation below, not the save) under
+    # a fresh run_id/run_attempt key. restore-keys returns the newest
+    # matching entry, so the next scheduled run would restore that
+    # near-empty cache and months of corpus would be gone with a green job.
+    # !cancelled() still runs on a leg FAILURE (the case this job exists to
+    # salvage the other five legs' corpus for) but skips a cancelled run
+    # entirely.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -425,6 +461,27 @@ jobs:
             echo "seed=${seed}"
           } >> "$GITHUB_OUTPUT"
 
+      # Restore before merge, inside this job's quality-fuzz-corpus-<fuzzer>
+      # concurrency group, so restore -> merge -> save is one serialised
+      # read-modify-write against the nightly's own restore/fuzz/save for
+      # the same key. Before this job existed, one job did restore, fuzz,
+      # and save in sequence, so a lost update was impossible; splitting
+      # fuzzing out to the six leg jobs above moved the read to them (no
+      # concurrency group) and left only the write here, so a nightly run
+      # could restore, fuzz, and save entirely inside this job's window and
+      # have this job's save silently overwrite it with a union that never
+      # saw the nightly's contribution. Restoring here, under the same
+      # group the save below uses, closes that gap.
+      - name: Restore fuzz corpus
+        id: corpus-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ${{ steps.corpus.outputs.generated }}
+          key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-
+
       # continue-on-error, not a hard failure: a leg that never reached its
       # own upload step (killed before "Upload fuzz corpus chunk" ran) means
       # one fewer chunk to merge, not nothing to merge — the other five
@@ -501,6 +558,23 @@ jobs:
               fi
             done
           fi
+          expected_legs=6
+          if [ "${legs_found}" -lt "${expected_legs}" ]; then
+            echo "::warning::only ${legs_found} of ${expected_legs} legs reported a corpus chunk"
+          fi
+          # kind is seeded "pass" and only ratchets up from leg-status.json
+          # records that actually arrived: a leg torn down by the runner
+          # never runs its own always() upload and contributes nothing here,
+          # so a missing leg was previously indistinguishable from a leg
+          # that ran clean — a red job with a green-looking kind=pass
+          # summary, which is what the notification lane keys on. Escalate
+          # to infra whenever fewer than all six legs reported, unless some
+          # leg already reported something worse (a real crash or error
+          # outranks a missing leg).
+          if [ "${legs_found}" -lt "${expected_legs}" ] && [ "$(rank "${kind}")" -lt "$(rank infra)" ]; then
+            kind="infra"
+            reason="missing-legs"
+          fi
           {
             echo "execs=${total_execs}"
             echo "new_interesting=${total_new}"
@@ -508,16 +582,24 @@ jobs:
             echo "kind=${kind}"
             echo "reason=${reason}"
             echo "legs_found=${legs_found}"
+            echo "expected_legs=${expected_legs}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Save fuzz corpus
-        # always(), because the run that matters most for persistence is the
-        # one that failed: a crasher lives in the seed dir and has to come back
-        # on the next run, or the finding is thrown away exactly the way it is
-        # today. Guarded on the resolve step's output so a failure there cannot
-        # turn into a second red step over an empty `path`. On a full runner
-        # teardown of one of the six legs the other five still land here.
-        if: always() && steps.corpus.outputs.generated != ''
+        # !cancelled(), because the run that matters most for persistence is
+        # the one that failed: a crasher lives in the seed dir and has to
+        # come back on the next run, or the finding is thrown away exactly
+        # the way it is today. Guarded on the resolve step's output so a
+        # failure there cannot turn into a second red step over an empty
+        # `path`, and on the merge step's own success so a cache-restore
+        # failure, a jq failure, or any other error inside Merge chunk
+        # corpus cannot save whatever partial `generated` dir it left
+        # behind. On a full runner teardown of one of the six legs the
+        # other five still land here. The saved dir is a superset of what
+        # Restore fuzz corpus above just pulled down — restore, then fold
+        # in the downloaded chunks, then save — so this write can only add
+        # entries, never drop ones a concurrent nightly run already wrote.
+        if: ${{ !cancelled() && steps.corpus.outputs.generated != '' && steps.merge.outcome == 'success' }}
         # The key carries run_id/run_attempt because cache keys are immutable —
         # writing the same key twice is a no-op, so a fixed key would freeze the
         # corpus at whatever the first run stored. restore-keys (in the leg
@@ -538,6 +620,7 @@ jobs:
           GENERATED: ${{ steps.corpus.outputs.generated }}
           SEED: ${{ steps.corpus.outputs.seed }}
           LEGS_FOUND: ${{ steps.merge.outputs.legs_found }}
+          EXPECTED_LEGS: ${{ steps.merge.outputs.expected_legs }}
           EXECS: ${{ steps.merge.outputs.execs }}
           NEW_INTERESTING: ${{ steps.merge.outputs.new_interesting }}
           RESTORED_FROM: ${{ steps.merge.outputs.restored_from }}
@@ -552,7 +635,7 @@ jobs:
             echo "### ${FUZZER} (monthly deep)"
             echo ""
             echo "- Package:  \`${PKG}\`"
-            echo "- Chunks:   6 legs found, ${LEGS_FOUND} reported in"
+            echo "- Chunks:   ${LEGS_FOUND} of ${EXPECTED_LEGS} legs reported in"
             echo "- Budget:   fuzztime_per_chunk × 6 legs (see the leg jobs for the per-leg fuzztime used)"
             echo "- Execs:    ${EXECS} (summed across the 6 legs), new interesting: ${NEW_INTERESTING}"
             # These two counts are the acceptance signal for corpus
@@ -579,9 +662,15 @@ jobs:
             fi
             if [ "${KIND}" = "infra" ]; then
               echo ""
-              echo "At least one leg's \`go test\` was killed by SIGTERM (exit 143) rather than failing:"
-              echo "a lost runner, or that leg's own job hitting its own timeout. Either way this"
-              echo "is NOT a code regression and no fuzz finding is implied."
+              if [ "${REASON}" = "missing-legs" ]; then
+                echo "Only ${LEGS_FOUND} of ${EXPECTED_LEGS} legs reported a corpus chunk. A leg torn down by the"
+                echo "runner never runs its own always() upload, so it contributes nothing here — this is"
+                echo "reported as infra rather than pass so a red run can't summarize as kind=pass."
+              else
+                echo "At least one leg's \`go test\` was killed by SIGTERM (exit 143) rather than failing:"
+                echo "a lost runner, or that leg's own job hitting its own timeout. Either way this"
+                echo "is NOT a code regression and no fuzz finding is implied."
+              fi
               echo ""
               echo "This line is best-effort. A full runner teardown kills the leg's own status-file"
               echo "step too, so \`Quality: Deep Fuzz Infra Rerun\` is the reliable place the"

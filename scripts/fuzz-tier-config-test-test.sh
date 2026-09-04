@@ -220,6 +220,79 @@ sed 's|^    needs: monthly-fuzz$|    needs: monthly-fuzz\n    permissions:\n    
 mv "${monthly}.tmp" "${monthly}"
 expect_fail "a merge-corpus job with permissions of its own must not satisfy the contract"
 
+# --- Deep-reasoner findings on PR #296 (fuzztime validation bypass, retries,
+#     restore-before-save, missing-leg escalation) ---------------------------
+
+seed_fixture
+# Revert the budget step's else branch from "refuse an unparsed fuzztime"
+# back to the old silent default. Any Go-valid duration the three ^[0-9]+[hms]$
+# arms don't match (1h30m, 0.5h, 12m0s, ...) would hit this branch, get
+# budget_s=600 (which passes the -gt 720 cap check), and sail through to
+# -fuzztime unchecked — go test -fuzz ignores -timeout while fuzzing, so
+# nothing else bounds it.
+awk '
+	/^          else$/ { inside = 1; print; next }
+	inside && /^          fi$/ { print "            budget_s=600"; print; inside = 0; next }
+	inside { next }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a budget step else branch that silently defaults to budget_s=600 instead of exiting 1 must not satisfy the contract"
+
+seed_fixture
+# The monthly leg's FUZZ_RETRIES back to the shared default of 2 — a retry
+# re-runs the FULL -fuzztime on the boundary flake, so two retries is two
+# fuzztimes in one job (10m + 10m + ~2m setup = ~22m), past this job's own
+# timeout-minutes and back inside the runner-shutdown window the six-leg
+# split exists to stay out of.
+sed 's|FUZZ_RETRIES=1 FUZZ_OUTPUT_FILE=|FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE=|' \
+	"${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a monthly leg passing FUZZ_RETRIES=2 instead of 1 must not satisfy the contract"
+
+seed_fixture
+# merge-corpus back to if: always() — would also run the job (and its Save
+# fuzz corpus step) on a CANCELLED run, writing a near-empty corpus under a
+# fresh key that restore-keys would then hand to the next run as the newest
+# entry for this fuzzer.
+sed 's|^    if: \${{ !cancelled() }}$|    if: always()|' \
+	"${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+# shellcheck disable=SC2016 # Message text only, no expansion intended.
+expect_fail 'a merge-corpus job using if: always() instead of if: ${{ !cancelled() }} must not satisfy the contract'
+
+seed_fixture
+# Delete merge-corpus's own "Restore fuzz corpus" step. Before the split,
+# one job did restore -> fuzz -> save in sequence, so a lost update against
+# the nightly's own writer was impossible; without this restore, the merge
+# step's save can silently overwrite a nightly write that landed inside this
+# job's own window with a union that never saw it.
+awk '
+	$0 == "      - name: Restore fuzz corpus" { skip = 1; next }
+	skip && (/^      - name:/ || /^  [^[:space:]]/) { skip = 0 }
+	skip { next }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a merge-corpus job with no restore step before merging and saving must not satisfy the contract"
+
+seed_fixture
+# Delete the merge step's missing-leg escalation block (kind="infra" on
+# fewer than expected_legs legs reporting), leaving expected_legs=6 itself
+# and the warning in place. kind stays seeded "pass" and only ratchets up
+# from leg-status.json records that actually arrived — a leg torn down by
+# the runner never runs its own always() upload and contributes nothing, so
+# a red run (fewer than 6 legs reported) would summarize as kind=pass, the
+# exact case this block exists to catch.
+awk '
+	/^          if \[ "\$\{legs_found\}" -lt "\$\{expected_legs\}" \] && \[ "\$\(rank "\$\{kind\}"\)" -lt "\$\(rank infra\)" \]; then$/ { skip = 1; next }
+	skip && /^          fi$/ { skip = 0; next }
+	skip { next }
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
+mv "${monthly}.tmp" "${monthly}"
+expect_fail "a merge step with no missing-leg kind=infra escalation must not satisfy the contract"
+
 # --- Crash classification lives in scripts/ci/fuzz-run.sh (PW-5.10) --------
 
 fuzz_run="${fixture}/scripts/ci/fuzz-run.sh"
