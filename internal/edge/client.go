@@ -232,6 +232,12 @@ type Client struct {
 
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
+	// healthServerDone is closed by the ListenAndServe goroutine started in
+	// startHealthServer once it has returned and performed its post-Shutdown
+	// error check (and logged, if warranted). It gives callers — chiefly
+	// tests asserting on that log — a happens-before point instead of
+	// racing the goroutine with a poll loop.
+	healthServerDone chan struct{}
 }
 
 // pendingRequestBody accumulates the stream/stream_end frames that follow a
@@ -1688,7 +1694,9 @@ func (c *Client) startHealthServer() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	c.healthServerDone = make(chan struct{})
 	go func() {
+		defer close(c.healthServerDone)
 		if err := c.healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Warn("health server error", "error", err)
 		}

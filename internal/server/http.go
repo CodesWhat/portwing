@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -136,6 +137,12 @@ type Server struct {
 	auditor      *audit.Logger
 	httpServer   *http.Server
 	startTime    time.Time
+
+	// listenAddr holds the net.Addr ListenAndServe bound, set once the
+	// listener is up and before Serve/ServeTLS starts blocking. It lets
+	// callers — chiefly tests using an OS-assigned port ("0") — discover
+	// the real bound address instead of guessing or racing a separate bind.
+	listenAddr atomic.Value
 
 	// streamSem bounds concurrent streaming proxy responses; execSem bounds
 	// concurrent hijacked exec/attach sessions. Both are nil when unbounded.
@@ -877,10 +884,25 @@ func (s *Server) waitForActiveHandlers(ctx context.Context) error {
 func (s *Server) ListenAndServe() error {
 	go s.pollContainers(s.pollCtx)
 
-	if s.cfg.TLSCert != "" && s.cfg.TLSKey != "" {
-		return s.httpServer.ListenAndServeTLS(s.cfg.TLSCert, s.cfg.TLSKey)
+	ln, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		return err
 	}
-	return s.httpServer.ListenAndServe()
+	s.listenAddr.Store(ln.Addr())
+
+	if s.cfg.TLSCert != "" && s.cfg.TLSKey != "" {
+		return s.httpServer.ServeTLS(ln, s.cfg.TLSCert, s.cfg.TLSKey)
+	}
+	return s.httpServer.Serve(ln)
+}
+
+// Addr returns the address ListenAndServe bound, or nil if it hasn't bound
+// one yet. It exists so callers — tests, chiefly, using an OS-assigned port
+// ("0") — can discover the real listening address instead of guessing it or
+// racing a separate bind/close/rebind.
+func (s *Server) Addr() net.Addr {
+	addr, _ := s.listenAddr.Load().(net.Addr)
+	return addr
 }
 
 // Shutdown gracefully shuts down the HTTP server and stops background goroutines.

@@ -254,8 +254,8 @@ func TestListContainers_AllTrueSetsParam(t *testing.T) {
 		if r.URL.Path != "/v1.44/containers/json" {
 			t.Errorf("expected path /v1.44/containers/json, got %q", r.URL.Path)
 		}
-		if !strings.Contains(r.URL.RawQuery, "all=1") {
-			t.Errorf("expected all=1 query param, got %q", r.URL.RawQuery)
+		if got := r.URL.Query().Get("all"); got != "1" {
+			t.Errorf("expected all=1 query param, got %q (raw query %q)", got, r.URL.RawQuery)
 		}
 		json.NewEncoder(w).Encode([]ContainerJSON{}) //nolint:errcheck
 	}))

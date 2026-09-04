@@ -1148,19 +1148,18 @@ func TestHealthServerListenAndServeSwallowsGracefulShutdown(t *testing.T) {
 	if err := c.healthServer.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("graceful shutdown: %v", err)
 	}
-	// Shutdown does not establish a happens-before relationship with the
-	// err-check in the ListenAndServe goroutine, so poll the captured log
-	// for a bounded window instead of sleeping a fixed, easily-outrun
-	// duration. On correct code the warning is never written regardless of
-	// how long we wait, so this is not flaky; it only needs to be long
-	// enough for a genuinely mutated build to reliably surface the log line
-	// under CI scheduling slop before we conclude it's absent.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if strings.Contains(logBuf.String(), "health server error") {
-			break
-		}
-		time.Sleep(2 * time.Millisecond)
+	// Shutdown does not itself establish a happens-before relationship with
+	// the err-check in the ListenAndServe goroutine, so join that goroutine
+	// via healthServerDone (closed only after the check, and the log write
+	// when warranted, complete) instead of polling the log on a timer — a
+	// mutant that logs "health server error" could otherwise pass as clean
+	// simply because the goroutine hadn't run by the deadline yet. The
+	// timeout below fails the test rather than silently passing if the
+	// goroutine never finishes.
+	select {
+	case <-c.healthServerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ListenAndServe goroutine did not finish its post-shutdown error check in time")
 	}
 
 	if strings.Contains(logBuf.String(), "health server error") {
