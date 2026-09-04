@@ -289,6 +289,46 @@ awk -v blockfile="${score_block_file}" '
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "'Score corpus coverage' running before 'Upload fuzz corpus on failure or cancel' must not satisfy the contract"
 
+# --- Verify-cleanup step must verify, not delete (CodeRabbit review follow-up) --
+#
+# fuzz-score.sh already cleans up exactly what it copied, from its own
+# manifest, on every exit path. The paired workflow step exists only to
+# catch a leftover the script's own cleanup missed, so it must never itself
+# delete a cached-* file — a blanket `rm -f "${SEED}/cached-"*` would also
+# remove a file the scorer deliberately left alone (a pre-existing untracked
+# one, or every copy when a tracked cached-* file made it refuse to copy at
+# all) — and it must reference the manifest fuzz-score.sh keeps, not
+# reinvent its own notion of what survived.
+
+seed_fixture
+# Reintroduce the blanket delete inside the verify step's run block. Every
+# other property of the step (name, if: always(), ordering) is untouched, so
+# only this check notices the regression back to deleting instead of
+# verifying.
+awk '
+	/^          leftover=""$/ {
+		print "          rm -f \"${SEED}/cached-\"*"
+		print
+		next
+	}
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "the verify-cleanup step deleting cached-* files with a blanket rm -f must not satisfy the contract"
+
+seed_fixture
+# Drop every mention of "manifest" from the verify step's run block, leaving
+# its behavior (and every other step) otherwise identical, so only the
+# manifest-reference check notices.
+awk '
+	/^      - name: Verify cached corpus copies were cleaned up$/ { inside = 1 }
+	inside && /^      - name:/ && !/Verify cached corpus copies were cleaned up$/ { inside = 0 }
+	inside && /manifest/ { next }
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
+mv "${nightly}.tmp" "${nightly}"
+expect_fail "the verify-cleanup step with no reference to fuzz-score.sh's manifest must not satisfy the contract"
+
 # --- Corpus writer concurrency (review follow-up) ---------------------------
 
 seed_fixture

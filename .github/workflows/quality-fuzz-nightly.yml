@@ -256,27 +256,52 @@ jobs:
             "${PKG}" "${FUZZER}" "${GENERATED}" "${SEED}" \
             "fuzz-run-${FUZZER}.log" "fuzz-score-${FUZZER}.json"
 
-      # Paired with the step above: fuzz-score.sh cleans up its own
-      # cached-<basename> copies internally, but this is the loud,
-      # independent check that none survived it — the seed corpus is
+      # Paired with the step above: fuzz-score.sh already cleans up its own
+      # cached-<basename> copies internally, from a manifest of exactly the
+      # paths it copied — never a glob. This step is the loud, independent
+      # check that none survived that cleanup, not a second attempt at the
+      # cleanup itself. It must never delete anything: fuzz-score.sh
+      # deliberately leaves some cached-* files untouched (a pre-existing
+      # untracked one, or every copy when a tracked cached-* file made it
+      # refuse to copy at all), and a blanket `rm -f "${SEED}/cached-"*`
+      # here would delete those too, silently lowering the seed count
+      # instead of catching the bug this step exists to catch. There is no
+      # manifest file left on disk to read — fuzz-score.sh's own EXIT trap
+      # removes it along with the copies — so the check re-derives the same
+      # set of paths from ${GENERATED}'s file list using fuzz-score.sh's own
+      # `cached-$(basename "${src}")` naming convention, and fails loudly if
+      # any of them still exist under ${SEED}: the seed corpus is
       # git-tracked, and a leftover cached-* file there would show up as an
       # untracked file in every future `git status` and, worse, get
       # committed the next time someone runs `git add -A` on a crasher.
-      - name: Clean up cached corpus copies
+      - name: Verify cached corpus copies were cleaned up
         if: always()
         env:
+          GENERATED: ${{ steps.corpus.outputs.generated }}
           SEED: ${{ steps.corpus.outputs.seed }}
         run: |
           set -euo pipefail
           if [ -z "${SEED}" ]; then
-            echo "::error::SEED is empty; refusing to run rm -f against an unqualified path."
+            echo "::error::SEED is empty; refusing to verify an unqualified path."
             exit 1
           fi
-          rm -f "${SEED}/cached-"*
-          leftover="$(find "${SEED}" -maxdepth 1 -name 'cached-*' -type f 2>/dev/null || true)"
+          # fuzz-score.sh's own manifest of copied paths never reaches this
+          # step — its EXIT trap deletes both the copies and the manifest
+          # file itself before this step starts — so re-derive the same set
+          # from ${GENERATED}'s file list instead of reading it back.
+          leftover=""
+          if [ -n "${GENERATED}" ] && [ -d "${GENERATED}" ]; then
+            while IFS= read -r -d '' src; do
+              candidate="${SEED}/cached-$(basename "${src}")"
+              if [ -e "${candidate}" ]; then
+                leftover="${leftover}
+          ${candidate}"
+              fi
+            done < <(find "${GENERATED}" -maxdepth 1 -type f -print0 2>/dev/null)
+          fi
           if [ -n "${leftover}" ]; then
-            echo "::error::cached-* corpus copies survived cleanup in ${SEED}:"
-            echo "${leftover}"
+            echo "::error::cached-* corpus copies survived fuzz-score.sh's own cleanup in ${SEED}:"
+            printf '%s\n' "${leftover}"
             exit 1
           fi
 
