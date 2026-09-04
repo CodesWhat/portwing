@@ -772,8 +772,6 @@ func TestWritePumpPollRefreshErrorLogsAndSkipsNotify(t *testing.T) {
 	c.welcomePollInterval = 1 // fast poll tick
 	c.adapter = &errRefreshAdapter{fakeAdapter: fakeAdapter{pollInterval: 999}}
 
-	runSendPump(t, c)
-
 	logBuf := &syncBuffer{}
 	oldLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
@@ -812,8 +810,6 @@ func TestWritePumpPollOnContainerRefreshErrorLogs(t *testing.T) {
 	c.cfg.DDPollInterval = 999
 	c.welcomePollInterval = 1
 	c.adapter = &errOnRefreshAdapter{fakeAdapter: fakeAdapter{pollInterval: 999}}
-
-	runSendPump(t, c)
 
 	logBuf := &syncBuffer{}
 	oldLogger := slog.Default()

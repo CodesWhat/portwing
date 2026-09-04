@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +21,7 @@ import (
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/metrics"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -694,8 +697,6 @@ func TestWritePumpHeartbeatTick(t *testing.T) {
 	c.adapter = &fakeAdapter{pollInterval: 999}
 	c.cfg.DDPollInterval = 999 // large: poll must not fire during test
 
-	runSendPump(t, c)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	pumpDone := make(chan struct{})
 	go func() {
@@ -759,8 +760,6 @@ func TestWritePumpPollRefreshError(t *testing.T) {
 	c.welcomePollInterval = 1     // 1s poll tick fires within readTimeout (2s)
 	c.adapter = &errRefreshAdapter{fakeAdapter: fakeAdapter{pollInterval: 999}}
 
-	runSendPump(t, c)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	go c.writePump(ctx)
 	t.Cleanup(cancel)
@@ -815,8 +814,6 @@ func TestWritePumpPollOnContainerRefreshError(t *testing.T) {
 	c.welcomePollInterval = 1  // 1s poll tick fires within readTimeout (2s)
 	c.adapter = &errOnRefreshAdapter{fakeAdapter: fakeAdapter{pollInterval: 999}}
 
-	runSendPump(t, c)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	go c.writePump(ctx)
 	t.Cleanup(cancel)
@@ -854,8 +851,6 @@ func TestWritePumpWelcomePollIntervalOverride(t *testing.T) {
 	c.adapter = &fakeAdapter{pollInterval: -1} // <= 0 → falls back to DDPollInterval
 	c.welcomePollInterval = 999                // large override: poll must not fire during test
 
-	runSendPump(t, c)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
@@ -864,53 +859,279 @@ func TestWritePumpWelcomePollIntervalOverride(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// sendMetrics — collector error path (line 722-725)
+// sendMetrics — failed collection reaches the wire
 // ---------------------------------------------------------------------------
 
-// errCollector is a stand-in that satisfies the minimal surface sendMetrics
-// calls by making collector.Collect() fail. Since metrics.Collector is a
-// concrete type with no interface, we exercise sendMetrics indirectly by
-// giving the client a nil collector (which panics) or by setting
-// c.collector = nil. The recover in the goroutine is separate.
-//
-// Actually the easiest approach: sendMetrics() calls c.collector.Collect().
-// If collector is nil the call panics (uncovered). But we can't make
-// Collect() return an error without a fake. Looking at the actual function:
-//
-//   func (c *Client) sendMetrics() {
-//     m, err := c.collector.Collect()
-//     if err != nil {  <-- line 722-725: uncovered
-//
-// To cover this we need a collector that fails. metrics.NewCollector with a
-// bad path in non-skip mode won't help in unit tests. Instead, we arrange
-// SkipDFCollection=false and a non-existent root — Collect() tries to stat
-// the path and returns an error on most systems.
+// stubCollector is a hostCollector whose Collect returns whatever the test
+// scripts. It exists because the real collector cannot be made to fail on a
+// Linux host: Collect's only error is a missing /proc.
+type stubCollector struct {
+	snapshot *metrics.HostMetrics
+	err      error
+}
 
-// TestSendMetricsCollectorError covers the error branch in sendMetrics by
-// pointing the collector at a non-existent directory without SkipDFCollection,
-// which causes Collect() to fail.
-func TestSendMetricsCollectorError(t *testing.T) {
+func (s stubCollector) Collect() (*metrics.HostMetrics, error) { return s.snapshot, s.err }
+
+// TestSendMetricsReportsFailedCollection pins the contract for a collection
+// that fails: an explicit error frame carrying host-metrics-unavailable, never
+// silence and never the zero-filled snapshot Collect returns alongside its
+// error. Silence is what shipped, and it left a controller unable to tell an
+// unsupported host from an agent that had stopped talking.
+func TestSendMetricsReportsFailedCollection(t *testing.T) {
 	t.Parallel()
 
-	c, _ := newTestClient(t)
-	// Use a collector pointed at a non-existent path with disk collection
-	// enabled; Collect() should fail because df/statvfs can't stat the path.
-	// We import metrics.NewCollector via newWireClient and override.
-	wc := newWireClient(t, &config.Config{
-		SkipDFCollection: false, // enable disk stat
-	})
-	// Override the collector root to a path that definitely doesn't exist.
-	// We can't call an unexported method, but NewCollector takes the root path
-	// directly. Use the wc collector which was built with the default root;
-	// on CI the /var/lib/docker path may not exist, causing failures.
-	// Instead, just call sendMetrics with a collector that will fail.
-	// metrics package is internal; we can call NewCollector with a missing root.
-	c.collector = wc.collector
+	unsupported := fmt.Errorf("%w: /proc: no such file or directory", metrics.ErrHostMetricsUnsupported)
 
-	// sendMetrics is synchronous and returns nothing; just ensure no panic.
-	// The error branch logs at Debug and returns.
+	tests := []struct {
+		name      string
+		collector stubCollector
+		wantType  string
+		// wantMessage is the exact ErrorMessage.Message for a failure case.
+		wantMessage string
+		wantCPUCore int
+	}{
+		{
+			name:        "unsupported host still answers",
+			collector:   stubCollector{snapshot: &metrics.HostMetrics{CPUCores: 8}, err: unsupported},
+			wantType:    protocol.TypeError,
+			wantMessage: unsupported.Error(),
+		},
+		{
+			name:        "nil snapshot alongside the error",
+			collector:   stubCollector{snapshot: nil, err: unsupported},
+			wantType:    protocol.TypeError,
+			wantMessage: unsupported.Error(),
+		},
+		{
+			name:        "collection error that is not the sentinel",
+			collector:   stubCollector{snapshot: &metrics.HostMetrics{}, err: errors.New("collector wedged")},
+			wantType:    protocol.TypeError,
+			wantMessage: "collector wedged",
+		},
+		{
+			name:        "successful collection is unchanged",
+			collector:   stubCollector{snapshot: &metrics.HostMetrics{CPUCores: 4, MemoryTotal: 1 << 30}},
+			wantType:    protocol.TypeMetrics,
+			wantCPUCore: 4,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			c, ctrl := newTestClient(t)
+			c.collector = tc.collector
+
+			c.sendMetrics()
+
+			data := expectType(t, ctrl, tc.wantType)
+			if tc.wantType == protocol.TypeMetrics {
+				var msg protocol.MetricsMessage
+				decodeData(t, data, &msg)
+				if msg.CPUCores != tc.wantCPUCore {
+					t.Errorf("CPUCores = %d, want %d", msg.CPUCores, tc.wantCPUCore)
+				}
+				return
+			}
+
+			var em protocol.ErrorMessage
+			decodeData(t, data, &em)
+			if em.Code != metricsUnavailableCode {
+				t.Errorf("error Code = %q, want %q", em.Code, metricsUnavailableCode)
+			}
+			if em.Message != tc.wantMessage {
+				t.Errorf("error Message = %q, want %q", em.Message, tc.wantMessage)
+			}
+			if em.RequestID != "" {
+				t.Errorf("error RequestID = %q, want empty: the metrics tick answers no request", em.RequestID)
+			}
+		})
+	}
+}
+
+// TestSendMetricsFailureCarriesNoZeroedSnapshot is the half the frame type
+// alone does not prove: a failed collection must not also put the partially
+// populated snapshot on the wire, because a zero-filled metrics frame reads as
+// a real measurement of a completely idle host.
+func TestSendMetricsFailureCarriesNoZeroedSnapshot(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	c.collector = stubCollector{
+		snapshot: &metrics.HostMetrics{CPUCores: 8},
+		err:      metrics.ErrHostMetricsUnsupported,
+	}
+
 	c.sendMetrics()
-	// No assertion — just confirms the function doesn't panic on error.
+
+	// The error frame is the only frame. A metrics frame arriving either
+	// before or after it would be the zero-filled snapshot.
+	if env := expectEnvelope(t, ctrl); env.Type != protocol.TypeError {
+		t.Fatalf("first frame = %q (data=%s), want %q", env.Type, env.Data, protocol.TypeError)
+	}
+	if err := ctrl.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	if _, raw, err := ctrl.ReadMessage(); err == nil {
+		t.Fatalf("a second frame followed the error frame: %s", raw)
+	}
+}
+
+// levelRecordingHandler captures the level and message of every log record,
+// for the transition assertions below. Concurrency-safe because it is
+// installed as the process-wide default logger and other goroutines may still
+// be logging into it.
+type levelRecordingHandler struct {
+	mu      sync.Mutex
+	records []loggedRecord
+}
+
+type loggedRecord struct {
+	level   slog.Level
+	message string
+}
+
+func (h *levelRecordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *levelRecordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, loggedRecord{level: r.Level, message: r.Message})
+	return nil
+}
+
+func (h *levelRecordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *levelRecordingHandler) WithGroup(string) slog.Handler      { return h }
+
+// take returns the records whose message is one of want, and clears the
+// buffer. Filtering by message keeps an unrelated log line from another
+// goroutine out of the assertion.
+func (h *levelRecordingHandler) take(want ...string) []loggedRecord {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []loggedRecord
+	for _, r := range h.records {
+		for _, w := range want {
+			if r.message == w {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	h.records = nil
+	return out
+}
+
+// TestSendMetricsLogsCollectionTransitionsOnly pins the log-level policy for a
+// failure that persists. The error frame is per-tick, but the log is not: a
+// host with no procfs fails every heartbeat forever, so warning each time
+// would bury the tick that actually changed something. Only the transitions
+// are loud.
+//
+// The sequence is failure, failure, success, failure. The fourth call is the
+// first failure after a recovery, so it warns again — a second break after a
+// recovery is a real event an operator has to see, not a repeat.
+func TestSendMetricsLogsCollectionTransitionsOnly(t *testing.T) {
+	// Not t.Parallel(): swaps the process-wide default slog logger.
+
+	const (
+		failedMsg    = "metrics collection failed"
+		recoveredMsg = "metrics collection recovered"
+	)
+
+	handler := &levelRecordingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	failing := stubCollector{
+		snapshot: &metrics.HostMetrics{CPUCores: 8},
+		err:      fmt.Errorf("%w: /proc: no such file or directory", metrics.ErrHostMetricsUnsupported),
+	}
+	healthy := stubCollector{snapshot: &metrics.HostMetrics{CPUCores: 8, MemoryTotal: 1 << 30}}
+
+	steps := []struct {
+		name        string
+		collector   stubCollector
+		wantLevel   slog.Level
+		wantMessage string
+		wantFrame   string
+	}{
+		{
+			name:        "first failure warns",
+			collector:   failing,
+			wantLevel:   slog.LevelWarn,
+			wantMessage: failedMsg,
+			wantFrame:   protocol.TypeError,
+		},
+		{
+			name:        "repeat failure drops to debug",
+			collector:   failing,
+			wantLevel:   slog.LevelDebug,
+			wantMessage: failedMsg,
+			wantFrame:   protocol.TypeError,
+		},
+		{
+			name:        "recovery says so once at info",
+			collector:   healthy,
+			wantLevel:   slog.LevelInfo,
+			wantMessage: recoveredMsg,
+			wantFrame:   protocol.TypeMetrics,
+		},
+		{
+			name:        "failure after a recovery warns again",
+			collector:   failing,
+			wantLevel:   slog.LevelWarn,
+			wantMessage: failedMsg,
+			wantFrame:   protocol.TypeError,
+		},
+	}
+
+	c, ctrl := newTestClient(t)
+	byLevel := map[slog.Level]int{}
+
+	for _, tc := range steps {
+		t.Run(tc.name, func(t *testing.T) {
+			c.collector = tc.collector
+
+			c.sendMetrics()
+
+			// Reading the frame first is the ordering barrier: sendMetrics
+			// logs before it sends, so a frame in hand means the record is
+			// already in the handler.
+			if env := expectEnvelope(t, ctrl); env.Type != tc.wantFrame {
+				t.Fatalf("frame = %q (data=%s), want %q", env.Type, env.Data, tc.wantFrame)
+			}
+
+			got := handler.take(failedMsg, recoveredMsg)
+			if len(got) != 1 {
+				t.Fatalf("collection log records = %+v, want exactly one", got)
+			}
+			if got[0].level != tc.wantLevel {
+				t.Errorf("log level = %v, want %v", got[0].level, tc.wantLevel)
+			}
+			if got[0].message != tc.wantMessage {
+				t.Errorf("log message = %q, want %q", got[0].message, tc.wantMessage)
+			}
+			byLevel[got[0].level]++
+		})
+	}
+
+	// The aggregate over the whole sequence, which is what the policy is for.
+	wantByLevel := map[slog.Level]int{
+		slog.LevelWarn:  2, // the two transitions into failure
+		slog.LevelDebug: 1, // the repeat while already failed
+		slog.LevelInfo:  1, // the single recovery
+	}
+	for level, want := range wantByLevel {
+		if byLevel[level] != want {
+			t.Errorf("%v records = %d, want %d (levels seen: %v)", level, byLevel[level], want, byLevel)
+		}
+	}
+	if len(byLevel) != len(wantByLevel) {
+		t.Errorf("levels seen = %v, want exactly %v", byLevel, wantByLevel)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1242,8 +1463,6 @@ func TestWritePumpPollIntervalFallback(t *testing.T) {
 	c.cfg.HeartbeatInterval = 999
 	c.cfg.DDPollInterval = 999                 // prevent poll from firing
 	c.adapter = &fakeAdapter{pollInterval: -1} // <= 0 → use DDPollInterval
-
-	runSendPump(t, c)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -1600,7 +1819,7 @@ func TestSendMetricsWithFailingCollector(t *testing.T) {
 func TestSendPumpWriteJSONError(t *testing.T) {
 	t.Parallel()
 
-	c, _ := newTestClient(t)
+	c, _ := newHandshakeTestClient(t)
 	sendCh := make(chan protocol.Envelope, sendQueueSize)
 	c.connMu.Lock()
 	c.sendCh = sendCh

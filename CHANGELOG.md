@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failed host-metrics collection now goes on the wire instead of being
+  swallowed.** The edge agent logged the error at debug level and sent
+  nothing, so on a host with no procfs the tunnel emitted zero metrics frames
+  and nothing on the wire separated an unsupported host from a supported one
+  that had stopped reporting. Liveness was never the gap: the agent pings on
+  the same tick. The metrics tick now emits an `error` frame carrying
+  `host-metrics-unavailable` and the collection error, on the same cadence as
+  the `metrics` frame it stands in for. Whether that surfaces anywhere is the
+  controller's call, and no controller acts on it yet: Drydock drops any
+  `error` frame that carries no `requestId`, with no log and no state change,
+  which is also what makes the frame safe to send unnegotiated. What changed
+  is that the failing tick now carries a signal a controller can read instead
+  of nothing at all. It deliberately does not send the partially populated
+  snapshot collection returns alongside the error, because a zero-filled
+  metrics frame reads as a real measurement of an idle host — the same reason
+  the Prometheus endpoint omits the host series behind
+  `portwing_host_metrics_supported 0`. The log follows the transitions
+  rather than the ticks — the first failure warns, repeats while the host
+  stays broken drop to debug, and a recovery says so once at info — because
+  a permanent failure warning every 30 seconds buries the tick that changed.
+  Documented in SPEC section 8.
+- **A dropped tunnel no longer wedges a streamed request's `requestId` for 30
+  seconds.** Connection teardown closed the exec sessions but left every
+  `bodyStream: true` reassembly registered with its idle timer running, so a
+  controller that reconnected and retried the same `requestId` was answered
+  with a duplicate-`requestId` rejection until the 30-second idle timeout
+  expired. Teardown now drains those pending bodies and stops their timers
+  alongside the exec sessions, so the retry is accepted immediately.
+
 ## [v0.9.13] - 2026-09-03
 
 ### Fixed
@@ -46,6 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gitleaks:allow` marker instead, which travels with the line's content
   rather than its position; the release contract now rejects any
   `.gitleaksignore` line that isn't a commit-pinned history fingerprint.
+
+## [v0.9.12] - 2026-09-03
 
 ### Added
 
