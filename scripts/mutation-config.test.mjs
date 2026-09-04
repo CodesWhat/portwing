@@ -467,21 +467,30 @@ function assertAdvisoryMatrix(advisory, entries) {
 
     for (const { packagePath, name, floor } of packages) {
       if (seenPackages.has(packagePath)) {
-        throw new Error(`${packagePath} appears in both '${seenPackages.get(packagePath)}' and '${groupName}'`);
+        throw new Error(
+          `${packagePath} appears in both '${seenPackages.get(packagePath)}' and '${groupName}'`,
+        );
       }
       seenPackages.set(packagePath, groupName);
 
       const entry = entries.find((candidate) => candidate.package === packagePath);
-      assert.ok(entry, `${packagePath} is in advisory group '${groupName}' but not in the gating matrix`);
+      assert.ok(
+        entry,
+        `${packagePath} is in advisory group '${groupName}' but not in the gating matrix`,
+      );
       if (name !== entry.name) {
         throw new Error(`${packagePath}'s advisory row must use the gating matrix's name`);
       }
       if (entry.zero_mutants === "true") {
         if (floor !== "") {
-          throw new Error(`${entry.name} has no gating floor and its advisory row must leave one blank`);
+          throw new Error(
+            `${entry.name} has no gating floor and its advisory row must leave one blank`,
+          );
         }
       } else if (floor !== entry.efficacy) {
-        throw new Error(`${entry.name}'s advisory row must carry the efficacy floor the matrix measured`);
+        throw new Error(
+          `${entry.name}'s advisory row must carry the efficacy floor the matrix measured`,
+        );
       }
     }
   }
@@ -507,7 +516,9 @@ function assertAdvisoryMatrix(advisory, entries) {
       .map((entry) => entry.packagePath)
       .sort();
     if (JSON.stringify([...expectedPackages].sort()) !== JSON.stringify(actualPackages)) {
-      throw new Error(`advisory group '${groupName}' no longer matches its documented package list`);
+      throw new Error(
+        `advisory group '${groupName}' no longer matches its documented package list`,
+      );
     }
   }
 }
@@ -544,7 +555,12 @@ function assertAdvisorySummaryJob(source) {
   );
 
   const code = stripComments(summary);
-  for (const forbidden of ["actions/setup-go", "gremlins unleash", "gremlins install", "go install"]) {
+  for (const forbidden of [
+    "actions/setup-go",
+    "gremlins unleash",
+    "gremlins install",
+    "go install",
+  ]) {
     assert.doesNotMatch(
       code,
       new RegExp(escapeForRegExp(forbidden), "u"),
@@ -637,6 +653,8 @@ const matrixZeroMutants = "$" + "{{ matrix.zero_mutants || false }}";
 const advisoryMutants = "$" + "{advisory_mutants}";
 const advisoryFlagsExpansion = "$" + "{advisory_flags[@]}";
 const expressionTrue = "$" + "{{ true }}";
+const matrixGroup = "$" + "{{ matrix.group }}";
+const githubRunId = "$" + "{{ github.run_id }}";
 
 function assertMutationFailure(source, expectedMessage, expectedPackages) {
   assert.throws(
@@ -921,10 +939,15 @@ test("mutation contract rejects an advisory group missing fail-fast: false", () 
 });
 
 test("mutation contract rejects an advisory job that reverts to a single job", () => {
-  const source = workflow.replace(
-    '    name: "Quality: Gremlins advisory mutators (${{ matrix.group }})"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge-generic\n            packages: |\n              ./internal/edge|edge|74.73\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/audit|audit|88.31\n              ./internal/auth|auth|79.17\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/log|log|\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n              ./internal/pool|pool|50.00\n              ./internal/protocol|protocol|100\n\n    steps:',
-    '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n\n    steps:',
-  );
+  const source = workflow
+    .replace(
+      `    name: "Quality: Gremlins advisory mutators (${matrixGroup})"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n`,
+      '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
+    )
+    .replace(
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge-generic\n            packages: |\n              ./internal/edge|edge|74.73\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/audit|audit|88.31\n              ./internal/auth|auth|79.17\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/log|log|\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n              ./internal/pool|pool|50.00\n              ./internal/protocol|protocol|100\n",
+      "",
+    );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");
 });
 
@@ -990,8 +1013,8 @@ test("mutation contract rejects an advisory summary job that only runs on succes
 
 test("mutation contract rejects an advisory summary job with a write scope", () => {
   const source = workflow.replace(
-    "  mutation-advisory-summary:\n    name: \"Quality: Gremlins advisory mutators summary\"\n    needs: mutation-advisory\n    if: always()\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: read\n",
-    "  mutation-advisory-summary:\n    name: \"Quality: Gremlins advisory mutators summary\"\n    needs: mutation-advisory\n    if: always()\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: write\n",
+    '  mutation-advisory-summary:\n    name: "Quality: Gremlins advisory mutators summary"\n    needs: mutation-advisory\n    if: always()\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: read\n',
+    '  mutation-advisory-summary:\n    name: "Quality: Gremlins advisory mutators summary"\n    needs: mutation-advisory\n    if: always()\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: write\n',
   );
   assertMutationFailure(
     source,
@@ -1013,8 +1036,8 @@ test("mutation contract rejects an advisory summary job that runs Go tooling", (
 test("mutation contract rejects an advisory summary job that stops downloading every leg", () => {
   assertMutationFailure(
     workflow.replace(
-      "          pattern: mutation-advisory-*-${{ github.run_id }}\n",
-      "          pattern: mutation-advisory-server-${{ github.run_id }}\n",
+      `          pattern: mutation-advisory-*-${githubRunId}\n`,
+      `          pattern: mutation-advisory-server-${githubRunId}\n`,
     ),
     "the advisory summary job must download every leg's rows artifact",
   );
