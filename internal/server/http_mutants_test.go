@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -243,12 +244,18 @@ func TestShutdownWithNilHupDoneDoesNotPanic(t *testing.T) {
 type tickErrorCountingAdapter struct {
 	stubServerAdapter
 	initialDone        atomic.Bool
+	tickCount          atomic.Int32
+	ticked             chan struct{}
+	tickedOnce         sync.Once
 	onRefreshCallCount atomic.Int32
 }
 
 func (a *tickErrorCountingAdapter) RefreshContainers(_ context.Context) ([]adapter.Container, []adapter.Container, []adapter.Container, error) {
 	if a.initialDone.CompareAndSwap(false, true) {
 		return nil, nil, nil, nil // initial refresh succeeds
+	}
+	if a.tickCount.Add(1) >= 2 {
+		a.tickedOnce.Do(func() { close(a.ticked) })
 	}
 	return nil, nil, nil, context.DeadlineExceeded // every ticker refresh fails
 }
@@ -281,7 +288,7 @@ func TestPollContainersSkipsNotifyAfterTickRefreshError(t *testing.T) {
 	cfg := minimalConfig()
 	cfg.DDPollInterval = 1 // 1-second ticker
 
-	a := &tickErrorCountingAdapter{}
+	a := &tickErrorCountingAdapter{ticked: make(chan struct{})}
 	s := &Server{
 		dockerClient: client,
 		adapter:      a,
@@ -291,8 +298,7 @@ func TestPollContainersSkipsNotifyAfterTickRefreshError(t *testing.T) {
 	}
 	defer s.rateLimiter.Stop()
 
-	// Give the ticker time to fire a few times.
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	done := make(chan struct{})
@@ -300,6 +306,16 @@ func TestPollContainersSkipsNotifyAfterTickRefreshError(t *testing.T) {
 		defer close(done)
 		s.pollContainers(ctx)
 	}()
+
+	// Wait for two ticker refreshes rather than a wall-clock deadline: by the
+	// time the second one starts, a mutated build has already completed one
+	// full ticker iteration and called OnContainerRefresh.
+	select {
+	case <-a.ticked:
+	case <-time.After(20 * time.Second):
+		t.Fatal("ticker did not fire twice in time")
+	}
+	cancel()
 
 	select {
 	case <-done:
