@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { launch } from "chrome-launcher";
+import { killAll, launch } from "chrome-launcher";
 import lighthouse from "lighthouse";
 
 const SCRIPT_FILE = fileURLToPath(import.meta.url);
@@ -130,43 +130,104 @@ export async function withLighthouseResources({ startServer, startChrome, run })
 }
 
 const DEFAULT_CHROME_RETRIES = 3;
+const MAX_CHROME_RETRIES = 10;
 
 // The Chrome debugging port can go away mid-run (Chrome crash, runner OOM),
 // which lighthouse and chrome-launcher surface as a plain connection error
 // rather than anything naming Chrome. Budget failures (verifyLighthouseRuns,
 // missing metrics) must never match here, or a real regression would get
-// silently retried into a false pass.
+// silently retried into a false pass. puppeteer-core wraps the underlying
+// ECONNREFUSED in a TypeError and only exposes it on `error.cause`, so this
+// walks the cause chain (depth-capped to stay cycle-safe).
 export function isChromeConnectionError(error) {
   if (!error) return false;
-  const message = String(error?.message ?? error);
-  return (
-    error?.code === "ECONNREFUSED" ||
-    /ECONNREFUSED/.test(message) ||
-    /unable to connect to chrome/i.test(message) ||
-    /chrome (has crashed|failed to launch|connection)/i.test(message)
-  );
+  for (let current = error, depth = 0; current && depth < 5; current = current.cause, depth += 1) {
+    const message = String(current?.message ?? current);
+    if (
+      current?.code === "ECONNREFUSED" ||
+      current?.code === "ECONNRESET" ||
+      /ECONNREFUSED|ECONNRESET|socket hang up/.test(message) ||
+      /unable to connect to chrome/i.test(message) ||
+      /failed to fetch browser websocket url/i.test(message) ||
+      /chrome (has crashed|failed to launch|connection)/i.test(message) ||
+      /(target|session) closed/i.test(message)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // LIGHTHOUSE_CHROME_RETRIES caps the total attempts (including the first) a
-// single Lighthouse run gets before this exits fail-closed. It is a
-// non-negative integer; anything else is a configuration error, not a run
-// failure, so it throws immediately rather than falling back silently.
+// single Lighthouse run gets before this exits fail-closed. It must be an
+// integer between 1 and MAX_CHROME_RETRIES; anything else is a configuration
+// error, not a run failure, so it throws immediately rather than falling
+// back silently. A plain /^\d+$/ check isn't enough on its own: a long
+// digit string like "9".repeat(400) still matches the regex but parses to
+// Infinity, which would never let the retry loop terminate.
 export function resolveChromeRetries(env = process.env) {
   const raw = env.LIGHTHOUSE_CHROME_RETRIES;
   if (raw === undefined || raw === "") return DEFAULT_CHROME_RETRIES;
-  if (!/^\d+$/.test(raw)) {
+  const parsed = Number(raw);
+  if (
+    !/^\d+$/.test(raw) ||
+    !Number.isSafeInteger(parsed) ||
+    parsed < 1 ||
+    parsed > MAX_CHROME_RETRIES
+  ) {
     throw new Error(
-      `LIGHTHOUSE_CHROME_RETRIES must be a non-negative integer, got ${JSON.stringify(raw)}`,
+      `LIGHTHOUSE_CHROME_RETRIES must be an integer between 1 and ${MAX_CHROME_RETRIES}, got ${JSON.stringify(raw)}`,
     );
   }
-  return Number.parseInt(raw, 10);
+  return parsed;
 }
 
 async function killChromeQuietly(chrome) {
   try {
     await chrome?.kill();
-  } catch {
+  } catch (error) {
     // The connection already dropped; the process is likely already gone.
+    // Swallowed deliberately, but worth a trace: if kill() is failing for a
+    // reason other than "already gone," a leaked Chrome process is the
+    // symptom and this is the only place that would say why.
+    process.stderr.write(
+      `lighthouse-budget: chrome.kill() failed, ignoring (${error?.message ?? error})\n`,
+    );
+  }
+}
+
+// A launch() rejection from chrome-launcher/puppeteer-core still leaves the
+// spawned Chrome process registered internally (chrome-launcher adds it to
+// its instance registry before awaiting readiness), so a failed attempt
+// orphans a process unless something reaps it. killAll() does that reaping;
+// it only touches instances this process's chrome-launcher actually spawned,
+// so it is a no-op when nothing has launched yet (e.g. under test doubles).
+export async function launchChromeWithRetries({
+  launchChrome,
+  maxAttempts = resolveChromeRetries(),
+  log = (message) => process.stdout.write(message),
+}) {
+  if (maxAttempts < 1) {
+    throw new Error(
+      `LIGHTHOUSE_CHROME_RETRIES resolved to ${maxAttempts}; at least one attempt is required`,
+    );
+  }
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await launchChrome();
+    } catch (error) {
+      if (!isChromeConnectionError(error)) throw error;
+      killAll();
+      if (attempt === maxAttempts) {
+        throw new Error(
+          `chrome failed to launch ${maxAttempts} time(s) in a row (${error.message}); giving up`,
+          { cause: error },
+        );
+      }
+      log(
+        `chrome launch attempt ${attempt}/${maxAttempts} failed (${error.message}), relaunching\n`,
+      );
+    }
   }
 }
 
@@ -214,8 +275,17 @@ export async function collectLighthouseRuns({
           `run ${index + 1}/${config.numberOfRuns} attempt ${attempt}/${maxAttempts}: ` +
             `chrome connection lost (${error.message}), relaunching\n`,
         );
-        current = await startChrome();
-        setChrome(current);
+        try {
+          current = await startChrome();
+          setChrome(current);
+        } catch (relaunchError) {
+          killAll();
+          throw new Error(
+            `run ${index + 1}/${config.numberOfRuns} could not relaunch Chrome after attempt ` +
+              `${attempt}/${maxAttempts} (${relaunchError.message})`,
+            { cause: relaunchError },
+          );
+        }
       }
     }
     if (!succeeded) {
@@ -244,8 +314,18 @@ async function run(configPath) {
   const outputRoot = path.resolve(ROOT, config.outputRoot);
   if (!fs.existsSync(outputRoot))
     throw new Error(`${config.outputRoot} is missing; run npm run build first`);
-  const startChrome = () =>
-    launch({ chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"] });
+  const launchChrome = () =>
+    launch({
+      chromeFlags: ["--headless", "--no-sandbox", "--disable-gpu"],
+      connectionPollInterval: 500,
+      maxConnectionRetries: 20,
+    });
+  // Both the very first launch and every in-loop relaunch go through the
+  // same retrying launcher: chrome-launcher's own connection budget
+  // (maxConnectionRetries x connectionPollInterval, ~10s here) can still
+  // reject on a slow or crash-looping runner, and that rejection must be
+  // retried and accounted for exactly like a mid-run connection drop.
+  const startChrome = () => launchChromeWithRetries({ launchChrome });
   const runs = await withLighthouseResources({
     startServer: () => serveStatic(outputRoot, config.mountPath),
     startChrome,
