@@ -621,39 +621,82 @@ func TestRunReconnectsAfterNonFatalError(t *testing.T) {
 // 3s read deadline, and lost it under load.
 const runReturnBackstop = 10 * time.Second
 
-// TestRunCtxCancelWithActiveConn verifies that when Run's context is cancelled
-// while a connection is active, Run tears the connection down and returns
-// ctx.Err().
+// TestRunCtxCancelWithActiveConn proves that cancelling Run's context while a
+// connection is genuinely live makes Run return ctx.Err() from its
+// post-connect check, without scheduling a reconnect.
 //
-// The controller side owns the teardown here, and that is the whole point.
-// readPump only checks ctx at the top of its loop; once it is inside
-// conn.ReadMessage the cancel is invisible to it, and Run cannot return until
-// the socket closes or the 60s read deadline fires. So the connection has to
-// be closed from the controller, deliberately, after the cancel — not left to
-// whichever timer happens to expire first.
+// Two things make that a proof rather than a hope. The controller pings the
+// agent and waits for the pong before the test cancels: readPump is the only
+// thing that answers a ping, so the pong means readPump is up, dispatching,
+// and back in conn.ReadMessage, which is the state the cancel has to be
+// observed from. And the controller, not a timer, closes the socket, because
+// readPump only checks ctx at the top of its loop — once it is inside
+// ReadMessage the cancel is invisible to it and Run cannot return until the
+// socket closes or the 60s read deadline fires.
+//
+// The reconnect counter is what separates the two ways Run can return
+// ctx.Err() here, which asserting on the error alone cannot do. The
+// post-connect check returns before IncReconnect; the reconnect wait's
+// ctx.Done case returns after it. Asserting the counter is still zero pins
+// the branch under test.
 func TestRunCtxCancelWithActiveConn(t *testing.T) {
 	t.Parallel()
 
-	// Closed once the controller has seen the agent's first post-handshake
-	// frame, which is the point at which the connection is genuinely active:
-	// handshake done, pumps running, agent writing.
-	connected := make(chan struct{})
+	// Closed once the controller has had a ping answered, so readPump is
+	// provably running and dispatching rather than merely about to exist.
+	pumpLive := make(chan struct{})
 	// Closed by the test after it cancels, to release the controller handler
 	// and with it the socket.
 	ctrlHold := make(chan struct{})
 
+	// OnceFunc because a controller handler that returned early would let the
+	// agent reconnect and run this closure a second time, and a bare close
+	// would then panic inside net/http instead of failing the test.
+	pumpIsLive := sync.OnceFunc(func() { close(pumpLive) })
+
+	const pingStamp = 4242
+
 	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
 		readAndAckHello(t, ctrl)
 		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{})
-		// connect() sends metrics as soon as the pumps are up, so this read
-		// returns on a healthy agent. The deadline is only there so a broken
-		// agent fails the test instead of wedging srv.Close in cleanup; the
-		// test synchronises on connected, never on this timer.
-		_ = ctrl.SetReadDeadline(time.Now().Add(runReturnBackstop))
-		if _, _, err := ctrl.ReadMessage(); err != nil {
+
+		// Ping the agent. Only readPump answers a ping, so the pong below is
+		// the liveness proof the cancel depends on.
+		if err := ctrl.SetWriteDeadline(time.Now().Add(runReturnBackstop)); err != nil {
 			return
 		}
-		close(connected)
+		pingData, err := json.Marshal(protocol.PingMessage{Timestamp: pingStamp})
+		if err != nil {
+			return
+		}
+		if err := ctrl.WriteJSON(protocol.Envelope{Type: protocol.TypePing, Data: pingData}); err != nil {
+			return
+		}
+
+		// Read past the metrics frame connect sends before the pumps start,
+		// until the pong arrives. The deadline is only here so a broken agent
+		// fails the test instead of wedging srv.Close in cleanup; the test
+		// synchronises on pumpLive, never on this timer.
+		if err := ctrl.SetReadDeadline(time.Now().Add(runReturnBackstop)); err != nil {
+			return
+		}
+		for {
+			_, raw, err := ctrl.ReadMessage()
+			if err != nil {
+				return
+			}
+			var env protocol.Envelope
+			if err := json.Unmarshal(raw, &env); err != nil || env.Type != protocol.TypePong {
+				continue
+			}
+			var pong protocol.PongMessage
+			if err := json.Unmarshal(env.Data, &pong); err != nil || pong.Timestamp != pingStamp {
+				continue
+			}
+			break
+		}
+		pumpIsLive()
+
 		// Hold the socket open, reading nothing, until the test has cancelled.
 		// Returning closes the conn (newControllerServer defers it), which is
 		// what unblocks the agent's readPump.
@@ -679,20 +722,22 @@ func TestRunCtxCancelWithActiveConn(t *testing.T) {
 	c := newWireClient(t, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// A t.Fatal below must still stop Run, or it reconnects past the end of
+	// the test and leaks its goroutine and its health server with it.
+	t.Cleanup(cancel)
 
 	runDone := make(chan error, 1)
 	go func() { runDone <- c.Run(ctx) }()
 
-	// Wait for the agent to fully connect.
+	// Wait until readPump has answered the controller's ping.
 	select {
-	case <-connected:
+	case <-pumpLive:
 	case <-time.After(runReturnBackstop):
-		t.Fatal("agent never connected")
+		t.Fatal("readPump never answered the controller ping")
 	}
 
-	// Cancel first, then drop the socket. Cancel is synchronous, so ctx.Err()
-	// is already set when connect returns, which pins the branch under test:
-	// Run's post-connect ctx.Err() check, not the reconnect wait's ctx.Done.
+	// Cancel first, then drop the socket, so ctx.Err() is already set by the
+	// time connect returns.
 	cancel()
 	releaseCtrl()
 
@@ -703,6 +748,15 @@ func TestRunCtxCancelWithActiveConn(t *testing.T) {
 		}
 	case <-time.After(runReturnBackstop):
 		t.Fatal("Run did not return after context cancel")
+	}
+
+	// Zero reconnects means Run left through its post-connect ctx.Err() check.
+	// The reconnect wait reaches its own ctx.Done case only after incrementing
+	// this, so a count of 1 would mean the cancel was observed a branch later.
+	var rendered strings.Builder
+	c.metrics.WritePrometheus(&rendered, func(value string) string { return value })
+	if !strings.Contains(rendered.String(), "portwing_edge_reconnects_total 0\n") {
+		t.Errorf("Run scheduled a reconnect on a cancelled context, want the post-connect ctx exit:\n%s", rendered.String())
 	}
 }
 
