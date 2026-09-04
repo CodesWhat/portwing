@@ -681,11 +681,10 @@ func TestStreamedBodyBudgetCoversDispatchAndIsReleased(t *testing.T) {
 	maxStreamedRequestBodyBytes = 35
 	t.Cleanup(func() { maxStreamedRequestBodyBytes = orig })
 
-	c, ctrl := newTestClient(t)
-	// The queued send path, not newTestClient's direct-write one: three
+	// The queued send path newTestClient starts is load-bearing here: three
 	// parked handlers answer concurrently at the end, and gorilla panics on a
-	// concurrent write. This is also what production uses.
-	runSendPump(t, c)
+	// concurrent write.
+	c, ctrl := newTestClient(t)
 
 	gate := make(chan struct{})
 	var gateOnce sync.Once
@@ -834,11 +833,10 @@ func TestStreamedBodyRejectedWhenStreamSemFullReleasesItsReservation(t *testing.
 	maxStreamedRequestBodyBytes = 15
 	t.Cleanup(func() { maxStreamedRequestBodyBytes = orig })
 
-	c, ctrl := newTestClient(t)
-	// The queued send path, not newTestClient's direct-write one: the
+	// The queued send path newTestClient starts is load-bearing here: the
 	// rejection is written by the dispatch goroutine while readPump is free to
 	// write a pong, and gorilla panics on a concurrent write.
-	runSendPump(t, c)
+	c, ctrl := newTestClient(t)
 	fd := &fakeDocker{} // no canned response: a call here would mean the admission check didn't hold.
 	c.dockerClient = fd
 

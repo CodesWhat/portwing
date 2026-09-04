@@ -697,8 +697,6 @@ func TestWritePumpHeartbeatTick(t *testing.T) {
 	c.adapter = &fakeAdapter{pollInterval: 999}
 	c.cfg.DDPollInterval = 999 // large: poll must not fire during test
 
-	runSendPump(t, c)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	pumpDone := make(chan struct{})
 	go func() {
@@ -762,8 +760,6 @@ func TestWritePumpPollRefreshError(t *testing.T) {
 	c.welcomePollInterval = 1     // 1s poll tick fires within readTimeout (2s)
 	c.adapter = &errRefreshAdapter{fakeAdapter: fakeAdapter{pollInterval: 999}}
 
-	runSendPump(t, c)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	go c.writePump(ctx)
 	t.Cleanup(cancel)
@@ -818,8 +814,6 @@ func TestWritePumpPollOnContainerRefreshError(t *testing.T) {
 	c.welcomePollInterval = 1  // 1s poll tick fires within readTimeout (2s)
 	c.adapter = &errOnRefreshAdapter{fakeAdapter: fakeAdapter{pollInterval: 999}}
 
-	runSendPump(t, c)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	go c.writePump(ctx)
 	t.Cleanup(cancel)
@@ -856,8 +850,6 @@ func TestWritePumpWelcomePollIntervalOverride(t *testing.T) {
 	c.cfg.DDPollInterval = 1                   // positive fallback (required by time.NewTicker)
 	c.adapter = &fakeAdapter{pollInterval: -1} // <= 0 → falls back to DDPollInterval
 	c.welcomePollInterval = 999                // large override: poll must not fire during test
-
-	runSendPump(t, c)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -1393,8 +1385,6 @@ func TestWritePumpPollIntervalFallback(t *testing.T) {
 	c.cfg.DDPollInterval = 999                 // prevent poll from firing
 	c.adapter = &fakeAdapter{pollInterval: -1} // <= 0 → use DDPollInterval
 
-	runSendPump(t, c)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	c.writePump(ctx)
@@ -1750,7 +1740,7 @@ func TestSendMetricsWithFailingCollector(t *testing.T) {
 func TestSendPumpWriteJSONError(t *testing.T) {
 	t.Parallel()
 
-	c, _ := newTestClient(t)
+	c, _ := newHandshakeTestClient(t)
 	sendCh := make(chan protocol.Envelope, sendQueueSize)
 	c.connMu.Lock()
 	c.sendCh = sendCh
