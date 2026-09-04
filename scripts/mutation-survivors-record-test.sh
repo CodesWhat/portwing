@@ -239,6 +239,55 @@ jq -n '{name:"upsilon", package:"./internal/upsilon", mode:"gated", outcome:"suc
 jq -n '{name:"upsilon", package:"./internal/upsilon", survivors:false, uncovered:[]}' \
 	>"${records_dir}/upsilon/mutation-survivors.json"
 
+# --- phi: gated, .survivors is JSON null, not an array or absent ------------
+#
+# The workflow's own producer never writes .survivors as null -- it builds
+# the field with a jq array comprehension, [] at minimum for zero mutants --
+# so null is as wrong a shape as false or a string, not an "empty" one.
+# is_arr_ok must require an array outright, or a corrupted artifact with
+# survivors:null gets folded to zero survivors and recorded measured with
+# complete:true instead of unparseable.
+mkdir -p "${records_dir}/phi"
+jq -n '{name:"phi", package:"./internal/phi", mode:"gated", outcome:"success"}' \
+	>"${records_dir}/phi/quality-history-record.json"
+jq -n '{name:"phi", package:"./internal/phi", survivors:null, uncovered:[]}' \
+	>"${records_dir}/phi/mutation-survivors.json"
+
+# --- chi: gated, killed is the JSON string "08" ------------------------------
+#
+# is_digits accepts "08" (it's all digits), but bash `$(( killed + lived ))`
+# would try to parse "08" as an octal literal and abort the whole script
+# under set -e, since 8 and 9 aren't valid octal digits. `10#` forces base
+# 10 so "08" reads as 8, not as a syntax error. killed:"08" with lived:0
+# sums to a nonzero 8, so this package is NOT all-timed-out and must fall
+# through to an ordinary measured entry, proving the value was actually
+# read as 8 rather than merely avoiding a crash.
+mkdir -p "${src_root}/internal/chi"
+cat >"${src_root}/internal/chi/c.go" <<'EOF'
+package chi
+
+func C() int {
+    return 1
+}
+EOF
+mkdir -p "${records_dir}/chi"
+jq -n '{name:"chi", package:"./internal/chi", mode:"gated", outcome:"success", timed_out:5, killed:"08", lived:0}' \
+	>"${records_dir}/chi/quality-history-record.json"
+jq -n '{name:"chi", package:"./internal/chi", survivors:[{file:"c.go", line:3, column:1, mutator:"CONDITIONALS_BOUNDARY"}], uncovered:[]}' \
+	>"${records_dir}/chi/mutation-survivors.json"
+
+# --- psi: gated, timed_out is the non-numeric JSON string "x" ---------------
+#
+# is_digits rejects "x" outright: gated_all_timed_out must demote this to
+# unparseable (its 2-exit-status case), not fall through and read the
+# malformed record as an ordinary measurement the way returning a plain
+# false would.
+mkdir -p "${records_dir}/psi"
+jq -n '{name:"psi", package:"./internal/psi", mode:"gated", outcome:"success", timed_out:"x", killed:0, lived:0}' \
+	>"${records_dir}/psi/quality-history-record.json"
+jq -n '{name:"psi", package:"./internal/psi", survivors:[], uncovered:[]}' \
+	>"${records_dir}/psi/mutation-survivors.json"
+
 # --- pi: gated, a pinned anchor digest ---------------------------------------
 #
 # A fixed, fully-in-bounds 5-line window whose hash is computed independently
@@ -312,6 +361,9 @@ xi|./internal/xi
 sigma|./internal/sigma
 tau|./internal/tau
 upsilon|./internal/upsilon
+phi|./internal/phi
+chi|./internal/chi
+psi|./internal/psi
 pi|./internal/pi
 rho|./internal/rho
 EOF
@@ -432,7 +484,7 @@ mu="$(jq -c '.packages[] | select(.name == "mu" and .source == "gated")' <<<"${o
 # A malformed shape in one package must demote only that package's entry,
 # never abort the whole run: alpha (processed earlier) and rho (processed
 # later) both still measured proves the script kept going past mu.
-[ "$(jq -r '.packages | length' <<<"${output}")" = "36" ] ||
+[ "$(jq -r '.packages | length' <<<"${output}")" = "42" ] ||
 	fail "a malformed package must not drop other packages from the run (got $(jq -r '.packages | length' <<<"${output}") entries)"
 
 # --- nu/gated, xi/advisory: every mutant TIMED OUT ---------------------------
@@ -461,6 +513,24 @@ tau="$(jq -c '.packages[] | select(.name == "tau" and .source == "advisory")' <<
 upsilon="$(jq -c '.packages[] | select(.name == "upsilon" and .source == "gated")' <<<"${output}")"
 [ "$(jq -r '.state' <<<"${upsilon}")" = "unparseable" ] ||
 	fail "a .survivors of false must read as unparseable, not $(jq -r '.state' <<<"${upsilon}")"
+
+# --- phi/gated: .survivors is JSON null, not an array or absent -------------
+
+phi="$(jq -c '.packages[] | select(.name == "phi" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${phi}")" = "unparseable" ] ||
+	fail "a .survivors of null must read as unparseable, not $(jq -r '.state' <<<"${phi}")"
+
+# --- chi/gated: killed is the JSON string "08" -------------------------------
+
+chi="$(jq -c '.packages[] | select(.name == "chi" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${chi}")" = "measured" ] ||
+	fail "killed:\"08\" with lived:0 must sum to a nonzero 8 and read as measured, not $(jq -r '.state' <<<"${chi}")"
+
+# --- psi/gated: timed_out is the non-numeric JSON string "x" ----------------
+
+psi="$(jq -c '.packages[] | select(.name == "psi" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${psi}")" = "unparseable" ] ||
+	fail "a non-numeric timed_out must read as unparseable, not $(jq -r '.state' <<<"${psi}")"
 
 # --- pi/gated: a pinned anchor digest ----------------------------------------
 

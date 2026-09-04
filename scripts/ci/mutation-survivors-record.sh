@@ -314,18 +314,28 @@ one_object() {
 # advisory leg has the full per-mutant status list right there, so its
 # count is the number of `.mutations[].status == "TIMED OUT"` entries,
 # read directly rather than through a proxy field.
+#
+# Three-way exit status, not a boolean: 0 means "yes, all timed out", 1
+# means "no, this looks like a real measurement", and 2 means "the fields
+# this depends on are malformed" -- a caller that only checked for 0/nonzero
+# would read 2 the same as 1 and fall through to treating a corrupted
+# artifact as a trustworthy measurement. `10#` on every value forces base-10
+# arithmetic: a JSON string field such as `"killed": "08"` passes
+# `is_digits` (it is all digits) but `$((killed + lived))` alone would try
+# to parse "08" as octal and abort the whole script under `set -e`, since 8
+# and 9 are not valid octal digits.
 gated_all_timed_out() {
 	local file="$1"
 	local vals timed_out killed lived
 	vals="$(jq -r '[(.timed_out // 0), (.killed // 0), (.lived // 0)] | @tsv' "${file}" 2>/dev/null || true)"
 	IFS=$'\t' read -r timed_out killed lived <<<"${vals}"
-	timed_out="${timed_out:-0}"
-	killed="${killed:-0}"
-	lived="${lived:-0}"
 	if ! is_digits "${timed_out}" || ! is_digits "${killed}" || ! is_digits "${lived}"; then
-		return 1
+		return 2
 	fi
-	[ "${timed_out}" -gt 0 ] && [ "$((killed + lived))" -eq 0 ]
+	if [ "$((10#${timed_out}))" -gt 0 ] && [ "$((10#${killed} + 10#${lived}))" -eq 0 ]; then
+		return 0
+	fi
+	return 1
 }
 
 advisory_all_timed_out() {
@@ -336,13 +346,13 @@ advisory_all_timed_out() {
           (.mutants_killed // 0), (.mutants_lived // 0) ] | @tsv
     ' "${file}" 2>/dev/null || true)"
 	IFS=$'\t' read -r timed_out killed lived <<<"${vals}"
-	timed_out="${timed_out:-0}"
-	killed="${killed:-0}"
-	lived="${lived:-0}"
 	if ! is_digits "${timed_out}" || ! is_digits "${killed}" || ! is_digits "${lived}"; then
-		return 1
+		return 2
 	fi
-	[ "${timed_out}" -gt 0 ] && [ "$((killed + lived))" -eq 0 ]
+	if [ "$((10#${timed_out}))" -gt 0 ] && [ "$((10#${killed} + 10#${lived}))" -eq 0 ]; then
+		return 0
+	fi
+	return 1
 }
 
 gated_entry() {
@@ -385,13 +395,15 @@ gated_entry() {
 		# a malformed shape (a string, or an array of non-objects like
 		# [42]) must demote this entry to "unparseable", not raise a jq
 		# type error that `set -e` would turn into a whole-script abort.
-		# `is_arr_ok` treats only null/absent as "no entries"; `false`, a
-		# string, or a number is a wrong shape, not an empty list, so
-		# `// []` (which folds false into [] too) is deliberately not
-		# used here.
+		# No real producer ever writes `.survivors`/`.uncovered` as null:
+		# the workflow builds them with jq array comprehensions (`[]` at
+		# minimum for zero mutants), so `is_arr_ok` requires an array of
+		# objects outright. `null` and absent are wrong shapes here too,
+		# same as `false`, a string, or a number: `// []` (which would
+		# fold both into "no entries") is deliberately not used.
 		local shape_ok
 		shape_ok="$(jq -r '
-            def is_arr_ok: (. == null) or ((type == "array") and all(type == "object"));
+            def is_arr_ok: (type == "array") and all(type == "object");
             (.survivors | is_arr_ok) and (.uncovered | is_arr_ok)
         ' "${survivors_file}" 2>/dev/null || echo false)"
 		if [ "${shape_ok}" != "true" ]; then
@@ -399,10 +411,18 @@ gated_entry() {
 			return
 		fi
 
-		if gated_all_timed_out "${rec_file}"; then
+		local timed_out_rc=0
+		gated_all_timed_out "${rec_file}" || timed_out_rc=$?
+		case "${timed_out_rc}" in
+		0)
 			build_entry "${name}" "${package}" "gated" "unmeasured" null '[]'
 			return
-		fi
+			;;
+		2)
+			build_entry "${name}" "${package}" "gated" "unparseable" null '[]'
+			return
+			;;
+		esac
 
 		local raw
 		raw="$(jq -c '
@@ -465,25 +485,36 @@ advisory_entry() {
 		# Same shape guard as the gated path, for .files/.mutations: an
 		# array element that isn't an object (e.g. [42]) must demote to
 		# "unparseable" rather than raising a jq type error under `set -e`
-		# when the extraction below tries to index it as {file_name,...},
-		# and a non-array, non-null value (e.g. false) must demote too
-		# rather than silently degrading to "no mutants" behind `// []`,
-		# which would misreport a malformed report as a clean
-		# zero-mutants measurement.
+		# when the extraction below tries to index it as {file_name,...}.
+		# No real Gremlins report ever writes `.files` or a file's
+		# `.mutations` as null (the workflow's own zero-mutant leg is
+		# text-only, never a JSON report with a null array), so `null` and
+		# absent are wrong shapes too, same as `false` or a string: `// []`
+		# (which would fold either into "no entries", misreporting a
+		# malformed report as a clean zero-mutants measurement) is
+		# deliberately not used.
 		local shape_ok
 		shape_ok="$(jq -r '
-            def is_arr_ok: (. == null) or ((type == "array") and all(type == "object"));
-            (.files | is_arr_ok) and ((.files // []) | all(.mutations | is_arr_ok))
+            def is_arr_ok: (type == "array") and all(type == "object");
+            (.files | is_arr_ok) and (.files | all(.mutations | is_arr_ok))
         ' "${json_file}" 2>/dev/null || echo false)"
 		if [ "${shape_ok}" != "true" ]; then
 			build_entry "${name}" "${package}" "advisory" "unparseable" null '[]'
 			return
 		fi
 
-		if advisory_all_timed_out "${json_file}"; then
+		local timed_out_rc=0
+		advisory_all_timed_out "${json_file}" || timed_out_rc=$?
+		case "${timed_out_rc}" in
+		0)
 			build_entry "${name}" "${package}" "advisory" "unmeasured" null '[]'
 			return
-		fi
+			;;
+		2)
+			build_entry "${name}" "${package}" "advisory" "unparseable" null '[]'
+			return
+			;;
+		esac
 
 		local raw
 		raw="$(jq -c '

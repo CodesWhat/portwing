@@ -742,11 +742,12 @@ function assertAdvisorySummaryJob(source) {
   );
 
   // The `mutation-gate.sh` check above catches a re-measure-and-gate rewrite,
-  // but not a bare `exit`/`return 1`/`false` slipped in right after the
-  // warning: that would make this deliberately non-gating job fail the
-  // build without ever calling the gate script. Isolate the floor-compare
-  // while-loop itself and check nothing between its warning and its `done`
-  // can end the job.
+  // but a deny-list of `exit`/`return 1`/`false` still lets through anything
+  // else that could end the job under `set -e`: a stray `[ 1 -eq 0 ]`, a
+  // typo'd command, any statement at all. Isolate the floor-compare
+  // while-loop and require an allow-list instead: every line after the
+  // warning has to be blank or a bare `fi` closing the two nested ifs, and
+  // nothing else.
   const floorCompareMatch = summary.match(
     /^ {10}while IFS='\|' read -r group floor; do\n([\s\S]*?)\n {10}done <<<"\$\{ADVISORY_GROUP_FLOORS\}"$/mu,
   );
@@ -754,22 +755,15 @@ function assertAdvisorySummaryJob(source) {
   const floorCompareBody = floorCompareMatch[1];
   const warningIndex = floorCompareBody.indexOf("::warning::");
   assert.ok(warningIndex !== -1, "the floor-compare loop must contain the floor-miss warning");
-  const afterWarning = floorCompareBody.slice(warningIndex);
-  assert.doesNotMatch(
-    afterWarning,
-    /\bexit\b/u,
-    "the floor-compare loop must not exit after warning on a floor miss, or the advisory job stops being advisory",
-  );
-  assert.doesNotMatch(
-    afterWarning,
-    /\breturn 1\b/u,
-    "the floor-compare loop must not return 1 after warning on a floor miss, or the advisory job stops being advisory",
-  );
-  assert.doesNotMatch(
-    afterWarning,
-    /\bfalse\b/u,
-    "the floor-compare loop must not end on false after warning on a floor miss, or the advisory job stops being advisory",
-  );
+  const warningLineEnd = floorCompareBody.indexOf("\n", warningIndex);
+  const afterWarningLine = warningLineEnd === -1 ? "" : floorCompareBody.slice(warningLineEnd + 1);
+  for (const rawLine of afterWarningLine.split("\n")) {
+    const trimmedLine = rawLine.trim();
+    assert.ok(
+      trimmedLine === "" || trimmedLine === "fi",
+      `the floor-compare loop must do nothing but close its ifs after the floor-miss warning, or the advisory job stops being advisory (found: ${JSON.stringify(rawLine)})`,
+    );
+  }
 
   assert.match(
     summary,
@@ -1242,7 +1236,21 @@ test("mutation contract rejects a hard exit after the advisory floor warning", (
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                exit 1\n',
     ),
-    "the floor-compare loop must not exit after warning on a floor miss, or the advisory job stops being advisory",
+    'the floor-compare loop must do nothing but close its ifs after the floor-miss warning, or the advisory job stops being advisory (found: "                exit 1")',
+  );
+});
+
+test("mutation contract rejects a stray command after the advisory floor warning", () => {
+  // A deny-list of exit/return 1/false wouldn't catch this: `[ 1 -eq 0 ]` is
+  // none of those, but it's still a statement that shouldn't be there once
+  // the warning has fired -- the allow-list has to reject anything besides
+  // a blank line or a closing `fi`.
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                [ 1 -eq 0 ]\n',
+    ),
+    'the floor-compare loop must do nothing but close its ifs after the floor-miss warning, or the advisory job stops being advisory (found: "                [ 1 -eq 0 ]")',
   );
 });
 
