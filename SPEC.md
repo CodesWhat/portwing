@@ -565,6 +565,13 @@ looping forever. Everything else (timing/capacity conditions like
 This code set mirrors the drydock controller and is not itself a versioned wire
 contract, so an unrecognized code defaults to retry rather than a hard stop.
 
+Per-connection state does not survive the drop. Exec sessions are closed and
+`bodyStream: true` reassemblies still waiting for their `stream_end` are
+dropped, releasing their `requestId`s, because the frames that would have
+completed them died with the connection. A controller may therefore retry a
+streamed request under the same `requestId` immediately after reconnecting
+without drawing the duplicate-`requestId` rejection of §3.3.
+
 ### 13.2 Keepalive
 
 - Agent sends `ping` every `HEARTBEAT_INTERVAL` seconds

@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
+	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -1096,5 +1099,244 @@ func TestStreamedBodyInvalidBase64ChunkRejectsAndFreesTheRequestID(t *testing.T)
 	}
 	if string(calls[0].body) != retry {
 		t.Errorf("dispatched body = %q, want %q: the undecodable chunk leaked into the retry", calls[0].body, retry)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// failAllPendingBodies — connection teardown frees the RequestIDs
+// ---------------------------------------------------------------------------
+
+// TestFailAllPendingBodiesDrainsAndStopsTimers is the unit half of the
+// teardown drain: whatever was reassembling when the tunnel died is gone from
+// the table, its idle timer is stopped, and its RequestID is free again.
+//
+// Stopping the timers is asserted the only way it can be observed from
+// outside: with the idle timeout shrunk, a drained entry whose timer was left
+// running would fire and put a TypeError on the wire after the drain. Nothing
+// may arrive.
+func TestFailAllPendingBodiesDrainsAndStopsTimers(t *testing.T) {
+	// Not t.Parallel(): mutates the package-level requestBodyStreamIdleTimeout
+	// var, which every other BodyStream test reads.
+
+	origTimeout := requestBodyStreamIdleTimeout
+	requestBodyStreamIdleTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { requestBodyStreamIdleTimeout = origTimeout })
+
+	tests := []struct {
+		name       string
+		requestIDs []string
+	}{
+		{name: "no bodies in flight", requestIDs: nil},
+		{name: "one body in flight", requestIDs: []string{"solo"}},
+		{name: "several bodies in flight", requestIDs: []string{"a", "b", "c"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, ctrl := newTestClient(t)
+
+			for _, id := range tc.requestIDs {
+				c.registerPendingBody(protocol.RequestMessage{
+					RequestID:  id,
+					Method:     http.MethodPost,
+					Path:       "/build",
+					BodyStream: true,
+				}, c.currentOutboundTarget())
+			}
+
+			c.pendingBodiesMu.Lock()
+			registered := len(c.pendingBodies)
+			c.pendingBodiesMu.Unlock()
+			if registered != len(tc.requestIDs) {
+				t.Fatalf("pendingBodies before drain = %d, want %d", registered, len(tc.requestIDs))
+			}
+
+			c.failAllPendingBodies()
+
+			c.pendingBodiesMu.Lock()
+			remaining := len(c.pendingBodies)
+			c.pendingBodiesMu.Unlock()
+			if remaining != 0 {
+				t.Fatalf("pendingBodies after drain = %d, want 0: the dropped connection's bodies outlived it", remaining)
+			}
+
+			// Past the shrunk idle timeout. A timer left running would have
+			// fired by now and written a TypeError.
+			if err := ctrl.SetReadDeadline(time.Now().Add(4 * requestBodyStreamIdleTimeout)); err != nil {
+				t.Fatalf("set read deadline: %v", err)
+			}
+			if _, raw, err := ctrl.ReadMessage(); err == nil {
+				t.Fatalf("frame arrived after the drain: %s (a drained body's idle timer was left running)", raw)
+			}
+
+			// The IDs are free: re-registering every one of them is accepted
+			// rather than rejected as a duplicate.
+			for _, id := range tc.requestIDs {
+				c.registerPendingBody(protocol.RequestMessage{
+					RequestID:  id,
+					Method:     http.MethodPost,
+					Path:       "/build",
+					BodyStream: true,
+				}, c.currentOutboundTarget())
+			}
+			c.pendingBodiesMu.Lock()
+			reRegistered := len(c.pendingBodies)
+			c.pendingBodiesMu.Unlock()
+			if reRegistered != len(tc.requestIDs) {
+				t.Fatalf("pendingBodies after re-registration = %d, want %d: a drained RequestID was still wedged", reRegistered, len(tc.requestIDs))
+			}
+			c.failAllPendingBodies()
+		})
+	}
+}
+
+// TestFailAllPendingBodiesIsIdempotent covers the double-drain and the racing
+// idle timeout together: a second drain over an empty table, and a timeout
+// callback that fires after its entry was drained, must both be no-ops rather
+// than a second failure for the same request.
+func TestFailAllPendingBodiesIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+
+	c.registerPendingBody(protocol.RequestMessage{
+		RequestID:  "raced",
+		Method:     http.MethodPost,
+		Path:       "/build",
+		BodyStream: true,
+	}, c.currentOutboundTarget())
+
+	c.failAllPendingBodies()
+	c.failAllPendingBodies()
+	// The generation the entry's first timer was armed with. This is exactly
+	// what a timer that fires just after the drain would call.
+	c.failPendingBody("raced", 0)
+
+	c.pendingBodiesMu.Lock()
+	remaining := len(c.pendingBodies)
+	c.pendingBodiesMu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("pendingBodies = %d, want 0", remaining)
+	}
+
+	if err := ctrl.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	if _, raw, err := ctrl.ReadMessage(); err == nil {
+		t.Fatalf("frame arrived after a drained body was failed again: %s", raw)
+	}
+}
+
+// TestConnectDropFreesStreamedRequestIDForTheRetry is the wiring half, and the
+// defect as the controller sees it. A bodyStream request is registered, the
+// tunnel drops before its stream_end arrives, and the controller reconnects
+// and retries under the same RequestID. Without the drain on connect's
+// teardown path the retry draws a duplicate-requestId rejection for the whole
+// idle timeout; with it, the second connection reassembles and dispatches
+// normally.
+func TestConnectDropFreesStreamedRequestIDForTheRetry(t *testing.T) {
+	t.Parallel()
+
+	const requestID = "survives-a-drop"
+
+	dropNow := make(chan struct{})
+	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+		readAndAckHello(t, ctrl)
+		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{})
+		sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+			RequestID:  requestID,
+			Method:     http.MethodPost,
+			Path:       "/containers/create",
+			BodyStream: true,
+		})
+		<-dropNow
+		// Returning closes the controller side, which is the drop.
+	})
+
+	cfg := &config.Config{
+		DrydockURL:        srv,
+		HeartbeatInterval: 30,
+		WelcomeTimeout:    5,
+		DDPollInterval:    300,
+		SkipDFCollection:  true,
+	}
+	c := newWireClient(t, cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	connectDone := make(chan struct{})
+	go func() {
+		defer close(connectDone)
+		_, _ = c.connect(ctx)
+	}()
+
+	waitFor(t, "the streamed request body to register", func() bool {
+		c.pendingBodiesMu.Lock()
+		defer c.pendingBodiesMu.Unlock()
+		_, ok := c.pendingBodies[requestID]
+		return ok
+	})
+
+	close(dropNow)
+	select {
+	case <-connectDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("connect did not return after the controller dropped the connection")
+	}
+
+	c.pendingBodiesMu.Lock()
+	remaining := len(c.pendingBodies)
+	c.pendingBodiesMu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("pendingBodies after the drop = %d, want 0: the RequestID stays wedged until the idle timeout", remaining)
+	}
+
+	// The reconnect, modelled as a fresh read pump over a new conn: the same
+	// RequestID must complete rather than draw a duplicate rejection.
+	agent, ctrl := newWSPair(t)
+	c.connMu.Lock()
+	c.conn = agent
+	c.connMu.Unlock()
+	//nolint:bodyclose // consumed and closed by handleRequestTo, the code under test.
+	fd := &fakeDocker{doResp: mkResp(http.StatusCreated, "application/json", `{"ok":true}`)}
+	c.dockerClient = fd
+
+	runReadPump(t, c)
+
+	const retry = "retried build context"
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID:  requestID,
+		Method:     http.MethodPost,
+		Path:       "/containers/create",
+		BodyStream: true,
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{
+		RequestID: requestID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(retry)),
+	})
+	sendEnvelope(t, ctrl, protocol.TypeStreamEnd, protocol.StreamEndMessage{
+		RequestID: requestID,
+		Reason:    "complete",
+	})
+
+	env := expectEnvelope(t, ctrl)
+	if env.Type != protocol.TypeResponse {
+		t.Fatalf("frame after the retry = %q (data=%s), want %q: the dropped connection left the RequestID registered", env.Type, env.Data, protocol.TypeResponse)
+	}
+	var resp protocol.ResponseMessage
+	decodeData(t, env.Data, &resp)
+	if resp.RequestID != requestID {
+		t.Errorf("RequestID = %q, want %q", resp.RequestID, requestID)
+	}
+
+	fd.mu.Lock()
+	calls := append([]doCall(nil), fd.doCalls...)
+	fd.mu.Unlock()
+	if len(calls) != 1 {
+		t.Fatalf("Docker calls = %d, want 1", len(calls))
+	}
+	if string(calls[0].body) != retry {
+		t.Errorf("dispatched body = %q, want %q", calls[0].body, retry)
 	}
 }

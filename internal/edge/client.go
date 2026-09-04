@@ -551,6 +551,10 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	// their Docker exec conns) don't leak across reconnects; the next
 	// connection starts with a clean exec table.
 	c.closeAllExecSessions()
+	// Same for the streamed request bodies still reassembling: their
+	// stream_end died with the connection, so the next one starts with a
+	// clean pending table instead of rejecting the controller's retries.
+	c.failAllPendingBodies()
 
 	// Close connection.
 	c.connMu.Lock()
@@ -1610,6 +1614,46 @@ func (c *Client) closeAllExecSessions() {
 		}
 		return true
 	})
+}
+
+// failAllPendingBodies drops every streamed request body still reassembling
+// and releases its RequestID. It is closeAllExecSessions' sibling on the same
+// teardown path: both own per-connection state that the next connection must
+// not inherit.
+//
+// Without it a dropped tunnel leaves the entries registered with their idle
+// timers running, so the controller's retry of the same RequestID after
+// reconnect is answered with a duplicate-requestId rejection until
+// requestBodyStreamIdleTimeout expires — up to 30 seconds of a request that
+// can never succeed, on a connection that is otherwise healthy.
+//
+// Nothing goes on the wire. sendPump has already returned by the time teardown
+// runs, so its queue reports closed and every send would take the eviction
+// branch instead: a spurious "evicting controller connection" warning and a
+// second Close on the conn that connect is about to close anyway, per pending
+// body. closeAllExecSessions is silent for the same reason.
+//
+// Swapping the map out under the lock before touching any timer is what makes
+// this safe against a timeout callback racing it: failPendingBody looks the
+// entry up under the same lock, finds nothing, and returns without sending.
+// Stopping an already-fired timer is a no-op, so the two cannot double-fail
+// one request.
+func (c *Client) failAllPendingBodies() {
+	c.pendingBodiesMu.Lock()
+	dropped := c.pendingBodies
+	c.pendingBodies = nil
+	c.pendingBodiesMu.Unlock()
+
+	if len(dropped) == 0 {
+		return
+	}
+	for requestID, pb := range dropped {
+		pb.timer.Stop()
+		slog.Debug("dropping streamed request body: controller connection lost",
+			"request_id", applog.Sanitize(requestID))
+	}
+	slog.Warn("controller connection lost with streamed request bodies in flight",
+		"count", len(dropped))
 }
 
 // msEdge returns elapsed milliseconds since start as a float64.

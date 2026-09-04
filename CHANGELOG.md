@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a zero-filled metrics frame reads as a real measurement of an idle host —
   the same reason the Prometheus endpoint omits the host series behind
   `portwing_host_metrics_supported 0`. Documented in SPEC section 8.
+- **A dropped tunnel no longer wedges a streamed request's `requestId` for 30
+  seconds.** Connection teardown closed the exec sessions but left every
+  `bodyStream: true` reassembly registered with its idle timer running, so a
+  controller that reconnected and retried the same `requestId` was answered
+  with a duplicate-`requestId` rejection until the 30-second idle timeout
+  expired. Teardown now drains those pending bodies and stops their timers
+  alongside the exec sessions, so the retry is accepted immediately.
 
 ## [v0.9.13] - 2026-09-03
 
