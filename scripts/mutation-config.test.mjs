@@ -24,13 +24,41 @@ const advisoryFlags = [
   "--invert-loopctrl",
   "--remove-self-assignments",
 ];
-const advisoryPackages = [
-  "./internal/auth",
-  "./internal/edge",
-  "./internal/adapter",
-  "./internal/server",
-  "./internal/mcp",
+// The 5 mutators Gremlins enables by default. The gating matrix already
+// measures these, so the advisory job explicitly disables all 5 rather than
+// re-running them alongside the 6 above.
+const defaultMutatorFlags = [
+  "--arithmetic-base=false",
+  "--conditionals-boundary=false",
+  "--conditionals-negation=false",
+  "--increment-decrement=false",
+  "--invert-negatives=false",
 ];
+// The advisory job splits the gating matrix's packages across these groups so
+// each leg stays well under the runner's measured CPU-shutdown ceiling.
+// scripts/mutation-config.test.mjs is the only place this partition is
+// written down; the workflow's own matrix.include is checked against it.
+const advisoryGroupPackages = new Map([
+  ["server", ["./internal/server"]],
+  ["edge", ["./internal/edge"]],
+  ["generic", ["./internal/generic"]],
+  [
+    "misc-a",
+    ["./internal/adapter", "./internal/adapter/drydock", "./internal/auth", "./internal/audit"],
+  ],
+  ["misc-b", ["./internal/docker", "./internal/mcp", "./internal/metrics"]],
+  [
+    "misc-c",
+    [
+      "./cmd/portwing",
+      "./internal/banner",
+      "./internal/config",
+      "./internal/log",
+      "./internal/pool",
+      "./internal/protocol",
+    ],
+  ],
+]);
 const timeoutCoefficients = new Set(["pool", "protocol"]);
 const expectedFloors = new Map([
   ["./cmd/portwing", [100, 100]],
@@ -195,6 +223,7 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   assert.match(source, /internal\/integration is integration-test-only/u);
   assertCanaryJob(source);
   assertAdvisoryJob(source, entries);
+  assertAdvisorySummaryJob(source);
   assertRatchetJob(source);
 }
 
@@ -318,15 +347,26 @@ function assertAdvisoryJob(source, entries) {
       `${flag} would invalidate every floor measured without it`,
     );
   }
+  // The 5 default mutators are already measured by the gating matrix, so the
+  // advisory job must explicitly disable every one of them rather than
+  // re-running all 11: that duplication is what pushed a 4-group split over
+  // the runner's CPU ceiling.
+  for (const flag of defaultMutatorFlags) {
+    assert.match(
+      advisory,
+      new RegExp(`^ {12}${escapeForRegExp(flag)}$`, "mu"),
+      `the advisory job must disable ${flag}`,
+    );
+  }
 
   // Declaring advisory_flags is not the same as running with it: a version
   // that keeps the array but drops it from the unleash invocation would still
   // pass every check above while gremlins measured only the 5 default
-  // mutators. The invocation must expand the array literally.
+  // mutators. The invocation must expand both arrays literally.
   assert.match(
     advisory,
-    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
-    "the advisory job must expand advisory_flags on the unleash invocation",
+    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}"\$\{default_mutator_flags\[@\]\}" \\\n^ {14}"\$\{coefficient_args\[@\]\+"\$\{coefficient_args\[@\]\}"\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
+    "the advisory job must expand advisory_flags and default_mutator_flags on the unleash invocation",
   );
 
   // mutationRunStep is checked for step-level continue-on-error above, but
@@ -339,21 +379,6 @@ function assertAdvisoryJob(source, entries) {
     /continue-on-error:/u,
     "continue-on-error must not appear anywhere in the advisory job",
   );
-
-  // The advisory table prints each package against the floor the matrix
-  // measured, so the two have to be the same number.
-  for (const packagePath of advisoryPackages) {
-    const entry = entries.find((candidate) => candidate.package === packagePath);
-    assert.ok(entry, `${packagePath} is advisory but not in the gating matrix`);
-    assert.match(
-      advisory,
-      new RegExp(
-        `^ {12}"${escapeForRegExp(packagePath)}\\|${entry.name}\\|${entry.efficacy}"$`,
-        "mu",
-      ),
-      `${entry.name}'s advisory row must carry the efficacy floor the matrix measured`,
-    );
-  }
 
   // A flag Gremlins renamed would be swallowed by the per-package guard and
   // read as an unavailable package, and a run that discovers no advisory
@@ -369,7 +394,295 @@ function assertAdvisoryJob(source, entries) {
     /^ {10}if \[ "\$\{advisory_mutants\}" -eq 0 \]; then$/mu,
     "the advisory job must fail when the advisory mutators produce nothing",
   );
-  assert.match(advisory, /GITHUB_STEP_SUMMARY/u, "the advisory job must publish its table");
+
+  // Gremlins v0.6.0's report.Do() exits 0 without writing the JSON file when
+  // a package has zero mutants of the requested types (report.go:71-73,
+  // 243-249). internal/log is exactly that case among the six advisory
+  // mutators; without this branch a report-less success reads as
+  // "unavailable" forever instead of "measured zero", the same distinction
+  // the gating matrix's own zero_mutants convention draws for the same
+  // package.
+  assert.match(
+    advisory,
+    /^ {12}if \[ ! -f "\$\{report\}" \]; then$/mu,
+    "the advisory job must treat a report-less success as zero mutants, not unavailable",
+  );
+  const zeroMutantsHeadlineRow = `headline_rows+=("| \\\`${advisoryPackageVar}\\\` | 0 | 0 | 0 | 0 | n/a |")`;
+  const zeroMutantsMutatorRow = `mutator_rows+=("| \\\`${advisoryPackageVar}\\\` | 0 | 0 | 0 | 0 | 0 | 0 |")`;
+  assert.match(
+    advisory,
+    new RegExp(`^ {14}${escapeForRegExp(zeroMutantsHeadlineRow)}$`, "mu"),
+    "the advisory job's zero-mutants branch must record an explicit zero headline row",
+  );
+  assert.match(
+    advisory,
+    new RegExp(`^ {14}${escapeForRegExp(zeroMutantsMutatorRow)}$`, "mu"),
+    "the advisory job's zero-mutants branch must record an explicit zero mutator row",
+  );
+
+  // Gremlins computes efficacy as killed/(killed+lived); NOT COVERED plays no
+  // part in that ratio. A guard that also sums not_covered would let a
+  // package that is all NOT COVERED (or all TIMED OUT) fall through with
+  // killed+lived+not_covered > 0 and print Gremlins' 0.00 efficacy as a
+  // measured value, the same bug scripts/ci/mutation-gate.sh's own guard
+  // avoids by summing only killed and lived.
+  assert.match(
+    advisory,
+    new RegExp(`^ {12}${escapeForRegExp(advisoryUnmeasuredGuard)}$`, "mu"),
+    "the advisory job's unmeasured guard must sum only killed and lived, not not_covered",
+  );
+  assert.doesNotMatch(
+    advisory,
+    new RegExp(escapeForRegExp(killedPlusLivedPlusNotCovered), "u"),
+    "the advisory job's unmeasured guard must not include not_covered",
+  );
+
+  // The single-job form used to publish straight to GITHUB_STEP_SUMMARY.
+  // Splitting it into a matrix means each leg only has one group's worth of
+  // rows, so the combined table has to move to mutation-advisory-summary; a
+  // leg publishing its own partial table would be four incomplete summaries
+  // instead of one.
+  assert.doesNotMatch(
+    advisory,
+    /GITHUB_STEP_SUMMARY/u,
+    "each advisory leg must hand its rows to mutation-advisory-summary, not publish a partial table itself",
+  );
+  assert.match(
+    advisory,
+    /^ {10}printf '%s\\n' "\$\{headline_rows\[@\]\}" >mutation-advisory-headline\.txt$/mu,
+    "the advisory job must write its headline rows for the summary job to collect",
+  );
+  assert.match(
+    advisory,
+    /^ {10}printf '%s\\n' "\$\{mutator_rows\[@\]\}" >mutation-advisory-mutators\.txt$/mu,
+    "the advisory job must write its mutator rows for the summary job to collect",
+  );
+  assert.match(
+    advisory,
+    /^ {10}name: mutation-advisory-\$\{\{ matrix\.group \}\}-\$\{\{ github\.run_id \}\}$/mu,
+    "each advisory leg must upload its rows under a group-scoped artifact name",
+  );
+
+  assertAdvisoryMatrix(advisory, entries);
+}
+
+// The matrix that replaced the single job. Every package the gating matrix
+// above measures has to land in exactly one group here, with the same floor
+// (or the same blank floor, for a zero_mutants package), or the advisory
+// table silently stops covering a package the gating matrix still enforces.
+function assertAdvisoryMatrix(advisory, entries) {
+  const strategyStart = advisory.indexOf("    strategy:\n");
+  const stepsStart = advisory.indexOf("\n    steps:", strategyStart);
+  assert.notEqual(strategyStart, -1, "the advisory job must be a matrix of package groups");
+  assert.notEqual(stepsStart, -1, "the advisory job's matrix block has no steps boundary");
+  const strategy = advisory.slice(strategyStart, stepsStart);
+
+  assert.match(
+    strategy,
+    /^ {6}fail-fast: false$/mu,
+    "the advisory matrix must set fail-fast: false so one group's failure does not hide the rest",
+  );
+  assert.match(
+    strategy,
+    /^ {6}matrix:\n {8}include:$/mu,
+    "the advisory job must declare a matrix.include list of groups",
+  );
+
+  const groupBlocks = strategy.split(/\n {10}- group: /u).slice(1);
+  assert.ok(groupBlocks.length > 0, "the advisory matrix must declare at least one group");
+
+  const seenPackages = new Map();
+  const groupsFound = new Map();
+
+  for (const block of groupBlocks) {
+    const groupName = block.split("\n")[0];
+    const marker = "            packages: |\n";
+    const packagesStart = block.indexOf(marker);
+    assert.notEqual(packagesStart, -1, `advisory group ${groupName} must declare packages: |`);
+    const rest = block.slice(packagesStart + marker.length);
+
+    const packageLines = [];
+    for (const line of rest.split("\n")) {
+      if (line === "") break;
+      assert.ok(
+        line.startsWith("              "),
+        `advisory group ${groupName} has a malformed package line: ${line}`,
+      );
+      packageLines.push(line.slice("              ".length));
+    }
+    assert.ok(packageLines.length > 0, `advisory group ${groupName} lists no packages`);
+
+    const packages = packageLines.map((line) => {
+      const parts = line.split("|");
+      if (parts.length !== 3 && parts.length !== 4) {
+        throw new Error(`advisory group ${groupName} has a malformed entry: ${line}`);
+      }
+      const [packagePath, name, floor, coefficient = ""] = parts;
+      return { packagePath, name, floor, coefficient };
+    });
+    groupsFound.set(groupName, packages);
+
+    for (const { packagePath, name, floor, coefficient } of packages) {
+      if (seenPackages.has(packagePath)) {
+        throw new Error(
+          `${packagePath} appears in both '${seenPackages.get(packagePath)}' and '${groupName}'`,
+        );
+      }
+      seenPackages.set(packagePath, groupName);
+
+      const entry = entries.find((candidate) => candidate.package === packagePath);
+      assert.ok(
+        entry,
+        `${packagePath} is in advisory group '${groupName}' but not in the gating matrix`,
+      );
+      if (name !== entry.name) {
+        throw new Error(`${packagePath}'s advisory row must use the gating matrix's name`);
+      }
+      if (entry.zero_mutants === "true") {
+        if (floor !== "") {
+          throw new Error(
+            `${entry.name} has no gating floor and its advisory row must leave one blank`,
+          );
+        }
+      } else if (floor !== entry.efficacy) {
+        throw new Error(
+          `${entry.name}'s advisory row must carry the efficacy floor the matrix measured`,
+        );
+      }
+
+      // A package the gating matrix gives a timeout coefficient needs the
+      // same one here: without it the advisory leg re-creates the all-TIMED
+      // OUT run that scored 0.00% and read as a real measurement.
+      const expectedCoefficient = timeoutCoefficients.has(name) ? "40" : "";
+      if (coefficient !== expectedCoefficient) {
+        throw new Error(
+          `${name}'s advisory row must carry the same timeout coefficient the gating matrix sets`,
+        );
+      }
+    }
+  }
+
+  const gatedPackages = entries.map((entry) => entry.package).sort();
+  const advisoryPackagesFound = [...seenPackages.keys()].sort();
+  if (JSON.stringify(gatedPackages) !== JSON.stringify(advisoryPackagesFound)) {
+    throw new Error("every package in the gating matrix must appear in exactly one advisory group");
+  }
+
+  // The specific partition, not just full coverage: server, edge and generic
+  // each sized enough (~9, ~5, ~6 gated minutes) to run alone, and the rest
+  // spread across two more groups. A future rebalance is fine as long as it
+  // is deliberate; this catches a group silently losing or gaining a package.
+  const expectedGroupNames = [...advisoryGroupPackages.keys()].sort();
+  const actualGroupNames = [...groupsFound.keys()].sort();
+  if (JSON.stringify(expectedGroupNames) !== JSON.stringify(actualGroupNames)) {
+    throw new Error("the advisory matrix's groups no longer match the documented partition");
+  }
+  for (const [groupName, expectedPackages] of advisoryGroupPackages) {
+    const actualPackages = groupsFound
+      .get(groupName)
+      .map((entry) => entry.packagePath)
+      .sort();
+    if (JSON.stringify([...expectedPackages].sort()) !== JSON.stringify(actualPackages)) {
+      throw new Error(
+        `advisory group '${groupName}' no longer matches its documented package list`,
+      );
+    }
+  }
+}
+
+// The single job this used to be would silently swallow the runner's
+// shutdown signal by taking the whole advisory measurement down with it.
+// This job is deliberately separate, deliberately without setup-go or
+// Gremlins, and deliberately read-only: it only assembles rows the matrix
+// legs already computed.
+function assertAdvisorySummaryJob(source) {
+  const summary = jobBlock(
+    source,
+    "mutation-advisory-summary",
+    "the advisory summary job is missing",
+  );
+
+  assert.match(
+    summary,
+    /^ {4}needs: mutation-advisory$/mu,
+    "the advisory summary job must need mutation-advisory",
+  );
+  assert.match(
+    summary,
+    /^ {4}if: always\(\)$/mu,
+    "the advisory summary job must run even if a leg failed",
+  );
+
+  const permissionsMatch = summary.match(/^ {4}permissions:\n((?: {6}.+\n)+)/mu);
+  assert.ok(permissionsMatch, "the advisory summary job must declare its own permissions");
+  const permissionsLines = permissionsMatch[1].split("\n").filter((line) => line.length > 0);
+  assert.ok(
+    permissionsLines.length === 1 && permissionsLines[0] === "      contents: read",
+    "the advisory summary job's permissions must be exactly contents: read",
+  );
+
+  const code = stripComments(summary);
+  for (const forbidden of [
+    "actions/setup-go",
+    "gremlins unleash",
+    "gremlins install",
+    "go install",
+  ]) {
+    assert.doesNotMatch(
+      code,
+      new RegExp(escapeForRegExp(forbidden), "u"),
+      `the advisory summary job must not run '${forbidden}'; it only assembles rows the legs already computed`,
+    );
+  }
+
+  assert.match(
+    summary,
+    /^ {10}pattern: mutation-advisory-\*-\$\{\{ github\.run_id \}\}$/mu,
+    "the advisory summary job must download every leg's rows artifact",
+  );
+  assert.match(
+    summary,
+    /GITHUB_STEP_SUMMARY/u,
+    "the advisory summary job must publish the combined table",
+  );
+
+  // `cat rows/*/... || true` is silent about a group whose leg was killed
+  // before it could upload (PW-6.8's own comment on the matrix above
+  // documents the runner's CPU-shutdown signal doing exactly that), so the
+  // table would render as complete with one group's packages simply absent.
+  // This job's own env has to carry every group and package the advisory
+  // matrix declares, duplicated rather than read from the matrix's context
+  // because this job runs after it and has none, and it has to match
+  // advisoryGroupPackages above exactly or a renamed or dropped group here
+  // would go unnoticed by both this check and the summary it renders.
+  const envMatch = summary.match(/^ {10}ADVISORY_GROUP_PACKAGES: \|\n((?: {12}.+\n)+)/mu);
+  assert.ok(envMatch, "the advisory summary job must declare ADVISORY_GROUP_PACKAGES");
+  const declaredPairs = envMatch[1]
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice("            ".length));
+  const expectedPairs = [];
+  for (const [group, packages] of advisoryGroupPackages) {
+    for (const pkg of packages) {
+      expectedPairs.push(`${group}|${pkg}`);
+    }
+  }
+  if (JSON.stringify(declaredPairs) !== JSON.stringify(expectedPairs)) {
+    throw new Error(
+      "the advisory summary job's ADVISORY_GROUP_PACKAGES must match the advisory matrix's own groups and packages exactly",
+    );
+  }
+
+  assert.match(
+    summary,
+    /^ {10}if \[ "\$\{#missing_groups\[@\]\}" -gt 0 \]; then$/mu,
+    "the advisory summary job must fail when a group's leg never uploaded",
+  );
+  assert.match(
+    summary,
+    /^ {12}exit 1$/mu,
+    "the advisory summary job must exit non-zero when a group is missing",
+  );
 }
 
 // Gremlins reads .gremlins.yaml from the Go module root and the working
@@ -444,7 +757,19 @@ const matrixMcover = "$" + "{{ matrix.mcover }}";
 const matrixZeroMutants = "$" + "{{ matrix.zero_mutants || false }}";
 const advisoryMutants = "$" + "{advisory_mutants}";
 const advisoryFlagsExpansion = "$" + "{advisory_flags[@]}";
+const coefficientArgsExpansion = "$" + '{coefficient_args[@]+"$' + '{coefficient_args[@]}"}';
 const expressionTrue = "$" + "{{ true }}";
+const matrixGroup = "$" + "{{ matrix.group }}";
+const githubRunId = "$" + "{{ github.run_id }}";
+const advisoryReportVar = "$" + "{report}";
+const advisoryNameVar = "$" + "{name}";
+const advisoryPackageVar = "$" + "{package}";
+const missingGroupsCount = "$" + "{#missing_groups[@]}";
+const missingGroupsList = "$" + "{missing_groups[*]}";
+const advisoryMutantCountVar = "$" + "{mutant_count}";
+const killedPlusLived = "$" + "((killed + lived))";
+const killedPlusLivedPlusNotCovered = "$" + "((killed + lived + not_covered))";
+const advisoryUnmeasuredGuard = `if [ "${advisoryMutantCountVar}" -gt 0 ] && [ "${killedPlusLived}" -eq 0 ]; then`;
 
 function assertMutationFailure(source, expectedMessage, expectedPackages) {
   assert.throws(
@@ -681,6 +1006,13 @@ test("mutation contract rejects a dropped advisory mutator", () => {
   );
 });
 
+test("mutation contract rejects a default mutator left enabled in the advisory job", () => {
+  assertMutationFailure(
+    workflow.replace("            --arithmetic-base=false\n", ""),
+    "the advisory job must disable --arithmetic-base=false",
+  );
+});
+
 test("mutation contract rejects an advisory mutator in the gating run", () => {
   const source = workflow.replace(
     `          if [ "${matrixZeroMutants}" = "true" ]; then`,
@@ -699,7 +1031,7 @@ test("mutation contract rejects an advisory job that drops the flags expansion",
   );
   assertMutationFailure(
     source,
-    "the advisory job must expand advisory_flags on the unleash invocation",
+    "the advisory job must expand advisory_flags and default_mutator_flags on the unleash invocation",
   );
 });
 
@@ -713,8 +1045,62 @@ test("mutation contract rejects continue-on-error on the advisory step", () => {
 
 test("mutation contract rejects an advisory floor that drifts from the matrix", () => {
   assertMutationFailure(
-    workflow.replace('"./internal/auth|auth|79.17"', '"./internal/auth|auth|79.16"'),
+    workflow.replace("./internal/auth|auth|79.17", "./internal/auth|auth|79.16"),
     "auth's advisory row must carry the efficacy floor the matrix measured",
+  );
+});
+
+test("mutation contract rejects an advisory row that drops its timeout coefficient", () => {
+  assertMutationFailure(
+    workflow.replace("./internal/protocol|protocol|100|40", "./internal/protocol|protocol|100"),
+    "protocol's advisory row must carry the same timeout coefficient the gating matrix sets",
+  );
+});
+
+test("mutation contract rejects an advisory job that stops passing its timeout coefficient", () => {
+  assertMutationFailure(
+    workflow.replace(`              "${coefficientArgsExpansion}" \\\n`, ""),
+    "the advisory job must expand advisory_flags and default_mutator_flags on the unleash invocation",
+  );
+});
+
+test("mutation contract rejects an advisory group missing fail-fast: false", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server",
+      "    strategy:\n      matrix:\n        include:\n          - group: server",
+    ),
+    "the advisory matrix must set fail-fast: false so one group's failure does not hide the rest",
+  );
+});
+
+test("mutation contract rejects an advisory job that reverts to a single job", () => {
+  const source = workflow
+    .replace(
+      `    name: "Quality: Gremlins advisory mutators (${matrixGroup})"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n`,
+      '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
+    )
+    .replace(
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50\n              ./internal/auth|auth|79.17\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
+      "",
+    );
+  assertMutationFailure(source, "the advisory job must be a matrix of package groups");
+});
+
+test("mutation contract rejects an advisory group that drops a package", () => {
+  assertMutationFailure(
+    workflow.replace("              ./internal/log|log|\n", ""),
+    "every package in the gating matrix must appear in exactly one advisory group",
+  );
+});
+
+test("mutation contract rejects an advisory group that duplicates a package", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "              ./internal/protocol|protocol|100|40\n",
+      "              ./internal/protocol|protocol|100|40\n              ./internal/server|server|77.88\n",
+    ),
+    "./internal/server appears in both 'server' and 'misc-c'",
   );
 });
 
@@ -732,6 +1118,131 @@ test("mutation contract rejects an advisory job that can pass having measured no
       "          if false; then",
     ),
     "the advisory job must fail when the advisory mutators produce nothing",
+  );
+});
+
+test("mutation contract rejects an advisory job that reports a report-less success as unavailable", () => {
+  const zeroMutantsBlock =
+    '            if [ ! -f "' +
+    advisoryReportVar +
+    '" ]; then\n' +
+    '              echo "advisory: ' +
+    advisoryNameVar +
+    ' produced no mutants of any advisory type; recording zero-mutants"\n' +
+    '              headline_rows+=("| \\`' +
+    advisoryPackageVar +
+    '\\` | 0 | 0 | 0 | 0 | n/a |")\n' +
+    '              mutator_rows+=("| \\`' +
+    advisoryPackageVar +
+    '\\` | 0 | 0 | 0 | 0 | 0 | 0 |")\n' +
+    "              continue\n" +
+    "            fi\n\n";
+  assertMutationFailure(
+    workflow.replace(zeroMutantsBlock, ""),
+    "the advisory job must treat a report-less success as zero mutants, not unavailable",
+  );
+});
+
+test("mutation contract rejects an advisory job that folds not_covered into the unmeasured guard", () => {
+  const foldedGuard = `if [ "${advisoryMutantCountVar}" -gt 0 ] && [ "${killedPlusLivedPlusNotCovered}" -eq 0 ]; then`;
+  assertMutationFailure(
+    workflow.replace(advisoryUnmeasuredGuard, foldedGuard),
+    "the advisory job's unmeasured guard must sum only killed and lived, not not_covered",
+  );
+});
+
+// PW-6.8's split, applied a second time: the summary job that assembles the
+// matrix legs' rows must stay read-only and must never re-run what the legs
+// already ran, or the point of splitting the job is undone by the job that
+// puts it back together.
+test("mutation contract rejects a missing advisory summary job", () => {
+  assertMutationFailure(
+    workflow.replace("  mutation-advisory-summary:\n", "  mutation-advisory-summary-disabled:\n"),
+    "the advisory summary job is missing",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that stops needing the matrix", () => {
+  assertMutationFailure(
+    workflow.replace("    needs: mutation-advisory\n", "    needs: []\n"),
+    "the advisory summary job must need mutation-advisory",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that only runs on success", () => {
+  const source = workflow.replace(
+    "    needs: mutation-advisory\n    if: always()\n",
+    "    needs: mutation-advisory\n",
+  );
+  assertMutationFailure(source, "the advisory summary job must run even if a leg failed");
+});
+
+test("mutation contract rejects an advisory summary job with a write scope", () => {
+  const source = workflow.replace(
+    '  mutation-advisory-summary:\n    name: "Quality: Gremlins advisory mutators summary"\n    needs: mutation-advisory\n    if: always()\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: read\n',
+    '  mutation-advisory-summary:\n    name: "Quality: Gremlins advisory mutators summary"\n    needs: mutation-advisory\n    if: always()\n    runs-on: ubuntu-24.04\n    timeout-minutes: 15\n\n    permissions:\n      contents: write\n',
+  );
+  assertMutationFailure(
+    source,
+    "the advisory summary job's permissions must be exactly contents: read",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that runs Go tooling", () => {
+  const source = workflow.replace(
+    "      - name: Download the advisory rows",
+    "      - name: Setup Go\n        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0\n        with:\n          go-version-file: go.mod\n\n      - name: Download the advisory rows",
+  );
+  assertMutationFailure(
+    source,
+    "the advisory summary job must not run 'actions/setup-go'; it only assembles rows the legs already computed",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that stops downloading every leg", () => {
+  assertMutationFailure(
+    workflow.replace(
+      `          pattern: mutation-advisory-*-${githubRunId}\n`,
+      `          pattern: mutation-advisory-server-${githubRunId}\n`,
+    ),
+    "the advisory summary job must download every leg's rows artifact",
+  );
+});
+
+// `cat rows/*/... || true` reads a missing group's rows file the same way it
+// reads an empty one: silently. A leg killed before it could upload (the
+// runner's CPU-shutdown signal PW-6.8 documents on the matrix above) must
+// turn this job red, not leave the table quietly short one group.
+test("mutation contract rejects an advisory summary job that drops its group inventory", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "          ADVISORY_GROUP_PACKAGES: |\n",
+      "          ADVISORY_GROUP_PACKAGES_RENAMED: |\n",
+    ),
+    "the advisory summary job must declare ADVISORY_GROUP_PACKAGES",
+  );
+});
+
+test("mutation contract rejects an advisory summary job whose group inventory drifts from the matrix", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "            server|./internal/server\n",
+      "            server|./internal/serverx\n",
+    ),
+    "the advisory summary job's ADVISORY_GROUP_PACKAGES must match the advisory matrix's own groups and packages exactly",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that cannot notice a missing group", () => {
+  const missingGroupsBlock =
+    '          if [ "' +
+    missingGroupsCount +
+    '" -gt 0 ]; then\n            echo "::error::advisory legs produced no artifact for group(s): ' +
+    missingGroupsList +
+    '" >&2\n            exit 1\n          fi\n';
+  assertMutationFailure(
+    workflow.replace(missingGroupsBlock, ""),
+    "the advisory summary job must fail when a group's leg never uploaded",
   );
 });
 
