@@ -302,6 +302,53 @@ function runStepBodies(jobText) {
   return bodies.join("\n---\n");
 }
 
+// Locates a step by its exact `- name: ` line within a job's text and
+// returns its `run: |` block as an array of literal lines, indentation
+// included. Scoped to a named step (not "the first run: block", not "some
+// region matched by an anchor regex") so a rewrite anywhere in the step --
+// wrapped in a dead conditional, duplicated with the copy altered, or
+// followed by an extra statement still inside the same script -- lands
+// inside the returned lines and gets compared. A YAML clipped block scalar
+// (`|`, the default chomping) keeps exactly one trailing newline; the blank
+// line(s) between this step and whatever text follows in the source are
+// formatting, not part of the script, so trailing blank entries are trimmed.
+function stepRunLines(jobText, stepName, missingMessage) {
+  const stepStart = jobText.indexOf(`      - name: ${stepName}`);
+  assert.notEqual(stepStart, -1, missingMessage);
+  const nextStepStart = jobText.indexOf("\n      - name: ", stepStart + 1);
+  const stepText =
+    nextStepStart === -1 ? jobText.slice(stepStart) : jobText.slice(stepStart, nextStepStart);
+  const lines = stepText.split("\n");
+  let collecting = false;
+  let bodyLines = [];
+  let bodyIndent = null;
+  for (const line of lines) {
+    if (/^ {8}run: \|$/u.test(line)) {
+      collecting = true;
+      bodyLines = [];
+      bodyIndent = null;
+      continue;
+    }
+    if (collecting) {
+      if (line.trim() === "") {
+        bodyLines.push(line);
+        continue;
+      }
+      const indentMatch = line.match(/^( +)/u);
+      const indent = indentMatch ? indentMatch[1].length : 0;
+      if (bodyIndent === null) bodyIndent = indent;
+      if (indent < bodyIndent) {
+        collecting = false;
+      } else {
+        bodyLines.push(line);
+      }
+    }
+  }
+  while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1] === "") bodyLines.pop();
+  assert.ok(bodyLines.length > 0, `${missingMessage} (no run: block found)`);
+  return bodyLines;
+}
+
 // PW-5.5's split applies here too: the ratchet job reads this run's own
 // records and the quality-history series and proposes; it must never hold
 // write access and never execute Go, Gremlins or git's write path. Unlike
@@ -741,21 +788,68 @@ function assertAdvisorySummaryJob(source) {
     "the advisory summary job must warn when a leg's efficacy is below its measured floor",
   );
 
+  assert.match(
+    summary,
+    /^ {10}if \[ "\$\{#missing_groups\[@\]\}" -gt 0 \]; then$/mu,
+    "the advisory summary job must fail when a group's leg never uploaded",
+  );
+  assert.match(
+    summary,
+    /^ {12}exit 1$/mu,
+    "the advisory summary job must exit non-zero when a group is missing",
+  );
+
   // The `mutation-gate.sh` check above catches a re-measure-and-gate rewrite,
-  // but a deny-list of `exit`/`return 1`/`false`, or an allow-list applied
-  // only to the lines AFTER the warning, both miss a rewrite placed BEFORE
-  // it: a bare `exit 1` inserted immediately above the `echo "::warning::..."`
-  // makes an advisory floor miss a hard failure and neither check ever sees
-  // it, since it isn't after the warning and it isn't exit/return 1/false
-  // matched against the wrong slice. A line-continuation rewrite (`\` at the
-  // end of the warning line, the injected statement on the next physical
-  // line) has the same blind spot for a tail-only check anchored to the
-  // warning's own line. Pin the ENTIRE loop body to an exact, in-order
-  // allow-list of every line the workflow is supposed to contain: an
-  // insertion, deletion, or rewrite anywhere in the loop -- before the
-  // warning, after it, or spliced into its own line -- changes the line
-  // count or a line's exact text and fails.
-  const expectedFloorCompareLines = [
+  // but region checks anchored to a start/end pattern only prove a matching
+  // block exists SOMEWHERE, not that it is the only one or that it runs:
+  // wrapping the floor-compare loop in `if false; then ... fi` still matches
+  // the anchor and passes; a dead pinned copy followed by a live altered
+  // copy passes too, since regex match() returns the first hit; and an
+  // `exit 1` placed before the start anchor or after the end anchor, still
+  // inside the same `run:` script, sits entirely outside the checked region.
+  // Pinning the region tighter (a deny-list, or an allow-list restricted to
+  // "before" or "after" some anchor line) only moves the blind spot, it
+  // doesn't close it. Pin the step's ENTIRE `run:` script instead: a script
+  // this test owns byte-for-byte can't be wrapped, duplicated, or extended
+  // without changing its line count or some line's exact text.
+  const expectedSummaryStepLines = [
+    "          set -euo pipefail",
+    "",
+    "          # A leg killed before it could upload (the runner's CPU shutdown",
+    "          # signal, PW-6.8's own comment above) leaves no rows file for its",
+    "          # group, and `cat ... || true` below would read that silently: the",
+    "          # summary renders as complete with one group just missing. Every",
+    "          # expected group is checked here, and each package in a missing",
+    "          # group gets an explicit row instead of vanishing.",
+    "          declare -A group_present=()",
+    "          missing_groups=()",
+    "          missing_headline_rows=()",
+    "          missing_mutator_rows=()",
+    "",
+    "          while IFS='|' read -r group package; do",
+    '            [ -n "${group}" ] || continue',
+    '            if [ -z "${group_present[${group}]:-}" ]; then',
+    '              if compgen -G "rows/mutation-advisory-${group}-*/mutation-advisory-headline.txt" >/dev/null; then',
+    '                group_present[${group}]="yes"',
+    "              else",
+    '                group_present[${group}]="no"',
+    '                missing_groups+=("${group}")',
+    "              fi",
+    "            fi",
+    '            if [ "${group_present[${group}]}" = "no" ]; then',
+    '              missing_headline_rows+=("| \\`${package}\\` | missing (leg produced no artifact) | | | | |")',
+    '              missing_mutator_rows+=("| \\`${package}\\` | missing | missing | missing | missing | missing | missing |")',
+    "            fi",
+    '          done <<<"${ADVISORY_GROUP_PACKAGES}"',
+    "",
+    "          # PW-6.8: each present leg's headline rows already carry killed and",
+    "          # lived per package (this job never re-runs Gremlins); this sums",
+    "          # them per group and compares the sum's efficacy on the 6 extra",
+    "          # mutators against the floor measured in run 33901506579. A miss is",
+    "          # a ::warning::, never a failing exit: this job stays advisory the",
+    "          # same way the legs above do, and the missing-group check below is",
+    "          # the only thing in this job allowed to fail it.",
+    "          while IFS='|' read -r group floor; do",
     '            [ -n "${group}" ] || continue',
     '            [ "${group_present[${group}]:-no}" = "yes" ] || continue',
     "            killed_sum=0",
@@ -775,32 +869,70 @@ function assertAdvisorySummaryJob(source) {
     '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"',
     "              fi",
     "            fi",
+    '          done <<<"${ADVISORY_GROUP_FLOORS}"',
+    "",
+    "          {",
+    '            echo "### Mutation advisory: Gremlins\' default-disabled mutators"',
+    '            echo ""',
+    '            echo "Advisory. These numbers gate nothing. Each leg runs ONLY the 6"',
+    '            echo "mutator types Gremlins disables by default; the gating matrix above"',
+    '            echo "already measures the 5 it enables, so efficacy here is efficacy"',
+    '            echo "against those 6 extra mutators alone, not against the gating floor."',
+    '            echo ""',
+    '            echo "| Package | Extra mutants | Killed | Lived | Not covered | Efficacy on extra mutators |"',
+    '            echo "|---|---|---|---|---|---|"',
+    "            cat rows/*/mutation-advisory-headline.txt 2>/dev/null || true",
+    '            if [ "${#missing_headline_rows[@]}" -gt 0 ]; then',
+    "              printf '%s\\n' \"${missing_headline_rows[@]}\"",
+    "            fi",
+    '            echo ""',
+    '            echo "Mutants discovered per advisory mutator type:"',
+    '            echo ""',
+    '            echo "| Package | invert-logical | invert-bitwise | invert-bwassign | invert-assignments | invert-loopctrl | remove-self-assignments |"',
+    '            echo "|---|---|---|---|---|---|---|"',
+    "            cat rows/*/mutation-advisory-mutators.txt 2>/dev/null || true",
+    '            if [ "${#missing_mutator_rows[@]}" -gt 0 ]; then',
+    "              printf '%s\\n' \"${missing_mutator_rows[@]}\"",
+    "            fi",
+    '          } >>"$GITHUB_STEP_SUMMARY"',
+    "",
+    "          # A missing group is the same green-means-nothing failure PW-6.1",
+    "          # was about: this job runs nothing but the download and the render,",
+    "          # so failing it here is safe and is the only place left that can",
+    "          # notice a leg never uploaded.",
+    '          if [ "${#missing_groups[@]}" -gt 0 ]; then',
+    '            echo "::error::advisory legs produced no artifact for group(s): ${missing_groups[*]}" >&2',
+    "            exit 1",
+    "          fi",
   ];
-  const floorCompareMatch = summary.match(
-    /^ {10}while IFS='\|' read -r group floor; do\n([\s\S]*?)\n {10}done <<<"\$\{ADVISORY_GROUP_FLOORS\}"$/mu,
+  const summaryStepLines = stepRunLines(
+    summary,
+    "Combine and publish the advisory table",
+    "the advisory summary job must have a 'Combine and publish the advisory table' step",
   );
-  assert.ok(floorCompareMatch, "the advisory summary job must have a floor-compare while loop");
-  const floorCompareLines = floorCompareMatch[1].split("\n");
   assert.ok(
-    floorCompareLines.length === expectedFloorCompareLines.length,
-    `the floor-compare loop must have exactly ${expectedFloorCompareLines.length} lines, found ${floorCompareLines.length}`,
+    summaryStepLines.length === expectedSummaryStepLines.length,
+    `the advisory summary job's "Combine and publish the advisory table" step must have exactly ${expectedSummaryStepLines.length} lines, found ${summaryStepLines.length}`,
   );
-  for (const [i, actualLine] of floorCompareLines.entries()) {
+  for (const [i, actualLine] of summaryStepLines.entries()) {
     assert.ok(
-      actualLine === expectedFloorCompareLines[i],
-      `the floor-compare loop must do nothing but the expected statements, in order, or the advisory job stops being advisory; line ${i + 1} must be ${JSON.stringify(expectedFloorCompareLines[i])}, found ${JSON.stringify(actualLine)}`,
+      actualLine === expectedSummaryStepLines[i],
+      `the advisory summary job's "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line ${i + 1} must be ${JSON.stringify(expectedSummaryStepLines[i])}, found ${JSON.stringify(actualLine)}`,
     );
   }
 
-  assert.match(
-    summary,
-    /^ {10}if \[ "\$\{#missing_groups\[@\]\}" -gt 0 \]; then$/mu,
-    "the advisory summary job must fail when a group's leg never uploaded",
-  );
-  assert.match(
-    summary,
-    /^ {12}exit 1$/mu,
-    "the advisory summary job must exit non-zero when a group is missing",
+  // Defense in depth alongside the whole-step pin above: even if a rewrite
+  // somehow left this step's own line count and text alone, a second copy
+  // of the floor-compare loop spliced in anywhere else in the workflow
+  // would still get a vote no test here is watching for. The header is
+  // distinctive enough (no other loop in this file reads a bare
+  // "group|floor" pair) that "exactly once in the whole file" is a cheap,
+  // independent guard against that.
+  const floorLoopHeaderMatches =
+    source.match(/^ {10}while IFS='\|' read -r group floor; do$/gmu) ?? [];
+  assert.ok(
+    floorLoopHeaderMatches.length === 1,
+    `the floor-compare loop header must appear exactly once in the workflow, found ${floorLoopHeaderMatches.length}`,
   );
 }
 
@@ -1263,7 +1395,7 @@ test("mutation contract rejects a hard exit inserted after the advisory floor wa
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                exit 1\n',
     ),
-    "the floor-compare loop must have exactly 19 lines, found 20",
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
   );
 });
 
@@ -1275,7 +1407,7 @@ test("mutation contract rejects a stray command inserted after the advisory floo
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                [ 1 -eq 0 ]\n',
     ),
-    "the floor-compare loop must have exactly 19 lines, found 20",
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
   );
 });
 
@@ -1290,7 +1422,7 @@ test("mutation contract rejects a rewrite appended to the same line as the advis
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"; exit 1\n',
     ),
-    'the floor-compare loop must do nothing but the expected statements, in order, or the advisory job stops being advisory; line 17 must be "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"", found "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"; exit 1"',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 54 must be "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"", found "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"; exit 1"',
   );
 });
 
@@ -1304,7 +1436,7 @@ test("mutation contract rejects a hard exit inserted before the advisory floor w
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                exit 1\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
     ),
-    "the floor-compare loop must have exactly 19 lines, found 20",
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
   );
 });
 
@@ -1318,7 +1450,79 @@ test("mutation contract rejects a line-continuation rewrite of the advisory floo
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%" \\\n                ; exit 1\n',
     ),
-    "the floor-compare loop must have exactly 19 lines, found 20",
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
+  );
+});
+
+test("mutation contract rejects the floor-compare loop wrapped in a dead conditional", () => {
+  // A region check anchored to the loop's own start/end pattern still
+  // matches when the whole loop is wrapped in `if false; then ... fi`: the
+  // anchor text is untouched, only its reachability changed. Pinning the
+  // step's entire run: script catches the two inserted lines even though
+  // neither one touches the loop's own text.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          if false; then\n          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          fi',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 93',
+  );
+});
+
+test("mutation contract rejects a duplicated floor-compare loop whose second copy is altered", () => {
+  // A region check built on `String.match()` returns the FIRST match: a
+  // live, correct copy of the loop followed by a second, altered copy
+  // (here, the warning replaced with a no-op `true`) still matches the
+  // first, correct copy and passes, leaving the second copy free to run
+  // whatever it wants. The whole-step pin has no "first match wins" blind
+  // spot because it compares every line the step actually contains.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                true\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 112',
+  );
+});
+
+test("mutation contract rejects a hard exit spliced in right after the floor-compare loop", () => {
+  // Still inside the same run: script, still outside any region a
+  // start/end-anchored check would have captured: an `exit 1` dropped
+  // immediately after the loop's own closing `done` line sits entirely
+  // outside the old check's match, but not outside the step it runs in.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          exit 1',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
+  );
+});
+
+test("mutation contract rejects a same-length rewrite of the floor-compare loop's first body line", () => {
+  // A test that only checks the warning line (line 17 of the loop body) or
+  // otherwise compares a single index would never notice a rewrite
+  // elsewhere in the same, unchanged-length array. `-n` flipped to `-z`
+  // inverts the guard without changing the line's length.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          while IFS=\'|\' read -r group floor; do\n            [ -z "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 38 must be "            [ -n \\"${group}\\" ] || continue", found "            [ -z \\"${group}\\" ] || continue"',
+  );
+});
+
+test("mutation contract rejects a same-length rewrite of the floor-compare loop's last body line", () => {
+  // Same principle at the other end of the loop body: `fi` rewritten to
+  // `fu` is a one-character, same-length change to the very last line of
+  // the loop, as far from the warning line as this loop gets.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fu\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 56 must be "            fi", found "            fu"',
   );
 });
 

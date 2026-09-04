@@ -392,6 +392,24 @@ jq -n '{
   }]
 }' >"${advisory_dir}/mutation-advisory-misc/mutation-advisory-rho.json"
 
+# --- digamma: gated, a file_name MUTANT_OK_FILTER accepts but real_path_ok
+#     rejects ------------------------------------------------------------
+#
+# ".*/d.go" has no split("/") segment jq's string equality would ever call
+# "..", so the jq-side ok gate in MUTANT_OK_FILTER passes it clean. But
+# real_path_ok's own field split (`for seg in $1`, deliberately unquoted)
+# also puts ".*" through pathname expansion, and every directory always has
+# "." and ".." entries for that pattern to match -- so real_path_ok rejects
+# it independently of the jq gate that already ran. Without this fixture,
+# real_path_ok's own logic is only ever exercised by inputs the jq gate
+# already filtered out first, and a regression that neutered real_path_ok
+# entirely (e.g. always returning 0) would go unnoticed.
+mkdir -p "${records_dir}/digamma"
+jq -n '{name:"digamma", package:"./internal/digamma", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
+	>"${records_dir}/digamma/quality-history-record.json"
+jq -n '{name:"digamma", package:"./internal/digamma", survivors:[{file:".*/d.go", line:3, column:1, mutator:"CONDITIONALS_BOUNDARY"}], uncovered:[]}' \
+	>"${records_dir}/digamma/mutation-survivors.json"
+
 expected_list="${test_root}/packages.txt"
 cat >"${expected_list}" <<'EOF'
 alpha|./internal/alpha
@@ -418,6 +436,7 @@ lambda|./internal/lambda
 omega|./internal/omega
 pi|./internal/pi
 rho|./internal/rho
+digamma|./internal/digamma
 EOF
 
 output="$(bash "${record}" "${records_dir}" "${advisory_dir}" "${src_root}" "${expected_list}")"
@@ -536,7 +555,7 @@ mu="$(jq -c '.packages[] | select(.name == "mu" and .source == "gated")' <<<"${o
 # A malformed shape in one package must demote only that package's entry,
 # never abort the whole run: alpha (processed earlier) and rho (processed
 # later) both still measured proves the script kept going past mu.
-[ "$(jq -r '.packages | length' <<<"${output}")" = "48" ] ||
+[ "$(jq -r '.packages | length' <<<"${output}")" = "50" ] ||
 	fail "a malformed package must not drop other packages from the run (got $(jq -r '.packages | length' <<<"${output}") entries)"
 
 # --- nu/gated, xi/advisory: every mutant TIMED OUT ---------------------------
@@ -637,6 +656,12 @@ rho_gated_c5_a="$(jq -r '.mutants[] | select(.c == 5) | .a' <<<"${rho_gated}")"
 	fail "the cross-source fixture must actually collide on 'a' to be a meaningful test"
 [ "$(jq -r '.mutants[0].o' <<<"${rho_advisory}")" = "0" ] ||
 	fail "advisory ordinals must be numbered independently of a gated entry sharing the same (f,m,a)"
+
+# --- digamma/gated: real_path_ok rejects what MUTANT_OK_FILTER accepts ------
+
+digamma="$(jq -c '.packages[] | select(.name == "digamma" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${digamma}")" = "unparseable" ] ||
+	fail "a file_name whose only unsafe segment is a glob pattern (matching '.' and '..' unquoted) must still be unparseable, not $(jq -r '.state' <<<"${digamma}")"
 
 # --- the run as a whole ------------------------------------------------------
 

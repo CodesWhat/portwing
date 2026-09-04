@@ -103,6 +103,20 @@ is_digits() {
 # path segment (escaping the package directory). Field splitting on "/" is
 # deliberate here rather than a regex: POSIX ERE has no reliable word
 # boundary for a bare ".." segment without pulling in GNU-only extensions.
+#
+# Not provably redundant with MUTANT_OK_FILTER's identical-looking jq
+# predicate (leading "/", any split("/") segment equal to ".."), and this
+# is the reachable case that proves it: `for seg in $1` below is
+# deliberately unquoted for the field split, but that also puts every
+# resulting word through pathname expansion. A raw `f` field such as
+# ".*/x.go" has no segment jq's string-equality check would ever call
+# "..", so MUTANT_OK_FILTER's `ok` comes back true -- but bash's unquoted
+# expansion of the ".*" segment matches the "." and ".." entries every
+# directory always has, and one of those literal matches trips the ".."
+# comparison below. scripts/mutation-survivors-record-test.sh's "digamma"
+# fixture is exactly this input, gated-side, asserting build_from_raw
+# demotes it to unparseable through this function specifically, not
+# through the jq gate that runs before it.
 real_path_ok() {
 	case "$1" in
 	/*) return 1 ;;
