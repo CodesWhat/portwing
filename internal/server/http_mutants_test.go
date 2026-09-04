@@ -7,9 +7,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -328,5 +331,101 @@ func TestPollContainersSkipsNotifyAfterTickRefreshError(t *testing.T) {
 	// further calls should follow.
 	if got := a.onRefreshCallCount.Load(); got != 1 {
 		t.Fatalf("OnContainerRefresh called %d times (want exactly 1, from the initial refresh) after every ticker RefreshContainers failed", got)
+	}
+}
+
+// TestIsDockerResourceActionEmptyPathDoesNotPanic verifies an empty path is
+// rejected without indexing into it, killing the INVERT_LOGICAL mutant at
+// http.go:728:16 (the `path == "" || path[0] != '/'` `||` turned into `&&`).
+// Under the mutant, `path == ""` alone no longer short-circuits the OR chain,
+// so Go must evaluate `path[0] != '/'` too — indexing an empty string, which
+// panics.
+func TestIsDockerResourceActionEmptyPathDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	if got := isExecStartPath(""); got {
+		t.Fatalf("isExecStartPath(\"\") = %v, want false", got)
+	}
+}
+
+// TestIsDockerResourceActionMissingLeadingSlashRejected verifies a path that
+// fails the leading-slash check is rejected even when the trailing-slash
+// check alone would pass, killing the INVERT_LOGICAL mutant at http.go:728:34
+// (the second `||`, between `(path=="" || path[0]!='/')` and
+// `strings.HasSuffix(path, "/")`, turned into `&&`). Real code: the OR chain
+// short-circuits true on `path[0] != '/'` and returns false. The mutant's AND
+// requires HasSuffix(path, "/") to also be true; since it is not, the mutant
+// skips the early return and falls through to a resource/action match against
+// path[1:], incorrectly returning true.
+func TestIsDockerResourceActionMissingLeadingSlashRejected(t *testing.T) {
+	t.Parallel()
+
+	if got := isDockerResourceAction("Xexec/y/start", "exec", "start"); got {
+		t.Fatalf("isDockerResourceAction(%q, ...) = %v, want false (no leading slash)", "Xexec/y/start", got)
+	}
+}
+
+// TestListenAndServePlainHTTPWhenOnlyOneTLSFieldSet verifies ListenAndServe
+// takes the plain-HTTP path (not the TLS path) when only one of TLSCert/
+// TLSKey is set, killing the INVERT_LOGICAL mutant at http.go:880:25
+// (`s.cfg.TLSCert != "" && s.cfg.TLSKey != ""` turned into `||`).
+//
+// Pre-binding the port to force a fast failure does not discriminate here:
+// http.Server.ListenAndServeTLS calls net.Listen before ever touching the
+// cert file, so a bind failure looks identical on both the plain and TLS
+// paths. Instead this relies on the two paths' differing behavior once the
+// listen itself succeeds: the plain path blocks indefinitely serving
+// requests, while ListenAndServeTLS loads the (nonexistent) cert file before
+// serving and returns a fast, cert-related error. Real code (only TLSCert
+// set) must still be blocked, serving, after a short grace period; the
+// mutant returns almost immediately with an error naming "fake.crt".
+func TestListenAndServePlainHTTPWhenOnlyOneTLSFieldSet(t *testing.T) {
+	t.Parallel()
+
+	client, stop := newStubDockerClient(t)
+	defer stop()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	port := strings.TrimPrefix(ln.Addr().String(), "127.0.0.1:")
+	ln.Close()
+
+	cfg := minimalConfig()
+	cfg.Port = port
+	cfg.TLSCert = "fake.crt"
+	cfg.TLSKey = ""
+
+	s, err := NewServer(cfg, client, &stubServerAdapter{})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("ListenAndServe returned early (want the plain-HTTP path to keep serving): %v", err)
+	case <-time.After(300 * time.Millisecond):
+		// Still serving — consistent with the plain-HTTP path.
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Shutdown(ctx); err != nil {
+		t.Errorf("Shutdown: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("ListenAndServe returned an unexpected error after Shutdown: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ListenAndServe did not return after Shutdown")
 	}
 }

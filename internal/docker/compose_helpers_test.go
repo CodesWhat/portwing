@@ -641,6 +641,27 @@ func TestStatRootedEnvFile_NonNotExistStatErrorIsWrapped(t *testing.T) {
 	}
 }
 
+// ---- rootedPath ----
+
+// TestRootedPath_RejectsStacksDirItself covers the "rel == \".\"" branch of
+// the rejection check directly (both operands hitting the OR at once would
+// also satisfy an accidentally-AND'd condition, so stackDir="." and path="."
+// resolve to the stacks directory itself, where pathWithin(".", ".") is
+// true and only the rel == "." disjunct fires).
+func TestRootedPath_RejectsStacksDirItself(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir()}
+
+	rel, err := cm.rootedPath(".", ".")
+	if err == nil {
+		t.Fatalf("rootedPath: expected error for a path resolving to the stacks directory itself, got rel=%q", rel)
+	}
+	if !strings.Contains(err.Error(), "is not a file below stacks directory") {
+		t.Fatalf("rootedPath error = %v, want it to mention 'is not a file below stacks directory'", err)
+	}
+}
+
 // ---- mkdirRootedNoSymlinks ----
 
 func TestMkdirRootedNoSymlinks_ExistingDirComponentsAreSkipped(t *testing.T) {

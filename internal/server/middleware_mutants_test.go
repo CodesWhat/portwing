@@ -253,3 +253,44 @@ func TestAuthMiddlewareBodyCloseSuccessIsNotLogged(t *testing.T) {
 		t.Error(`unexpected "closing request body" warning when Body.Close() succeeds`)
 	}
 }
+
+// TestFinishAuthLockedResetsStreakAfterWindowExpires verifies finishAuthLocked
+// resets the failure streak (count=1, firstFail=now) rather than incrementing
+// it when the tracked entry's window has already expired, killing the
+// INVERT_LOGICAL mutant at middleware.go:283:26 (`a.firstFail.IsZero() ||
+// now.Sub(a.firstFail) > rl.window` turned into `&&`). firstFail is non-zero
+// here (already set), so the mutant's AND requires IsZero() to also be true;
+// since it is not, the mutant falls through to `a.count++` instead of
+// resetting.
+func TestFinishAuthLockedResetsStreakAfterWindowExpires(t *testing.T) {
+	t.Parallel()
+
+	rl := NewRateLimiter()
+	defer rl.Stop()
+
+	rl.attempts["some-ip"] = &ipAttempts{count: 5, firstFail: time.Now().Add(-2 * rl.window)}
+
+	rl.finishAuth("some-ip", false)
+
+	if got := rl.attempts["some-ip"].count; got != 1 {
+		t.Fatalf("count = %d, want 1 (streak should have reset after the window expired)", got)
+	}
+}
+
+// TestParseTrustedProxiesSkipsEmptyEntry verifies an empty entry is skipped,
+// not treated as loop-ending, killing the INVERT_LOOPCTRL mutant at
+// middleware.go:698:4 (`continue` -> `break`). Real code skips the empty
+// entry via `continue` and goes on to parse the following CIDR. The mutant's
+// `break` exits the loop entirely at the first (empty) entry, before ever
+// reaching the CIDR.
+func TestParseTrustedProxiesSkipsEmptyEntry(t *testing.T) {
+	t.Parallel()
+
+	nets, err := ParseTrustedProxies([]string{"", "10.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies: %v", err)
+	}
+	if len(nets) != 1 {
+		t.Fatalf("len(nets) = %d, want 1 (empty entry skipped, CIDR parsed)", len(nets))
+	}
+}
