@@ -505,8 +505,13 @@ jobs:
             scripts/ci/quality-history-append.sh mutation "${numbers}"
           done
 
-          if [ -s survivors.json ] && survivors="$(jq -ec 'select(type == "object")' survivors.json 2>/dev/null)"; then
-            QUALITY_HISTORY_RETAIN=12 scripts/ci/quality-history-append.sh mutation-survivors "${survivors}"
+          # Read via QUALITY_HISTORY_RECORD_FILE, not as an inline argument:
+          # a mutation-survivors record can reach the spec's 1 MiB ceiling,
+          # well past Linux's 128 KiB single-argument limit (MAX_ARG_STRLEN),
+          # so it is never captured into a shell variable or passed on argv.
+          if [ -s survivors.json ] && jq -e 'type == "object"' survivors.json >/dev/null 2>&1; then
+            QUALITY_HISTORY_RETAIN=12 QUALITY_HISTORY_RECORD_FILE=survivors.json \
+              scripts/ci/quality-history-append.sh mutation-survivors
           else
             echo "::warning::survivors.json is missing or not a JSON object; not appending mutation-survivors."
           fi

@@ -42,8 +42,16 @@ mutant() {
 fixture1="${test_root}/fixture1.jsonl"
 {
 	jq -cn --argjson mutants "[$(mutant f.go M1 L aaaaaaaaaaaa 0 10 1), $(mutant f.go M1 L bbbbbbbbbbbb 0 20 1)]" \
-		'{schema:1, packages:[{name:"server", package:"./internal/server", source:"advisory", state:"measured", counts:{lived:2,not_covered:0}, mutants:$mutants}]}'
-	jq -cn '{schema:1, packages:[{name:"server", package:"./internal/server", source:"advisory", state:"missing", counts:null, mutants:[]}]}'
+		--argjson w "[$(mutant w.go M3 L eeeeeeeeeeee 0 1 1)]" \
+		'{schema:1, packages:[
+            {name:"server", package:"./internal/server", source:"advisory", state:"measured", counts:{lived:2,not_covered:0}, mutants:$mutants},
+            {name:"worker", package:"./internal/worker", source:"gated", state:"measured", counts:{lived:1,not_covered:0}, mutants:$w}
+        ]}'
+	jq -cn --argjson w "[$(mutant w.go M3 L eeeeeeeeeeee 0 1 1)]" \
+		'{schema:1, packages:[
+            {name:"server", package:"./internal/server", source:"advisory", state:"missing", counts:null, mutants:[]},
+            {name:"worker", package:"./internal/worker", source:"gated", state:"measured", counts:{lived:1,not_covered:0}, mutants:$w}
+        ]}'
 } >"${fixture1}"
 
 output="$(MUTATION_SURVIVORS_RECORDS="${fixture1}" bash "${diff_script}")"
@@ -57,6 +65,30 @@ row="$(jq -c '.[] | select(.package == "server/advisory")' <<<"${output}")"
 	fail "an incomparable row must not carry a 'killed' key at all (row: ${row})"
 [ "$(jq -r '.was' <<<"${row}")" = "measured" ] && [ "$(jq -r '.now' <<<"${row}")" = "missing" ] ||
 	fail "an incomparable row must say what each side actually was (row: ${row})"
+
+# --- missing -> measured: the other direction of the same guard -------------
+#
+# A prior run's leg died first (recorded "missing"); this run measured it.
+# This must be incomparable too, folding the CURRENT run's ids into
+# "unknown" rather than reporting them all as "new".
+
+fixture1b="${test_root}/fixture1b.jsonl"
+{
+	jq -cn '{schema:1, packages:[{name:"server", package:"./internal/server", source:"advisory", state:"missing", counts:null, mutants:[]}]}'
+	jq -cn --argjson mutants "[$(mutant f.go M1 L aaaaaaaaaaaa 0 10 1), $(mutant f.go M1 L bbbbbbbbbbbb 0 20 1), $(mutant f.go M1 L cccccccccccc 0 30 1)]" \
+		'{schema:1, packages:[{name:"server", package:"./internal/server", source:"advisory", state:"measured", counts:{lived:3,not_covered:0}, mutants:$mutants}]}'
+} >"${fixture1b}"
+
+output="$(MUTATION_SURVIVORS_RECORDS="${fixture1b}" bash "${diff_script}")"
+row="$(jq -c '.[] | select(.package == "server/advisory")' <<<"${output}")"
+[ "$(jq -r '.comparable' <<<"${row}")" = "false" ] ||
+	fail "missing->measured must be incomparable too, not diffed as a set (row: ${row})"
+[ "$(jq -r '.was' <<<"${row}")" = "missing" ] && [ "$(jq -r '.now' <<<"${row}")" = "measured" ] ||
+	fail "an incomparable row must say what each side actually was, in either direction (row: ${row})"
+[ "$(jq -r '.unknown' <<<"${row}")" = "3" ] ||
+	fail "missing->measured must fold the current run's 3 mutants into 'unknown', not 'new' (row: ${row})"
+[ "$(jq 'has("new")' <<<"${row}")" = "false" ] ||
+	fail "an incomparable row must not carry a 'new' key at all (row: ${row})"
 
 # --- measured -> measured, one mutant dropped: exactly one kill -------------
 
@@ -84,18 +116,19 @@ row="$(jq -c '.[] | select(.package == "edge/gated")' <<<"${output}")"
 # --- a whole-file insertion above every mutant: zero kills, zero new --------
 #
 # Every mutant's line number shifts down by the same amount a real editor
-# insertion would produce, and the 5-line window re-identifies each one at
-# its new line (this is the documented open risk: a real code change here
-# would read the same way). What this asserts is narrower: an insertion
-# that does not touch any mutant's own window content must not manufacture
-# spurious kills or news out of thin air when the ids are literally
-# unchanged (same a, same o, same everything) because nothing shifted.
+# insertion would produce (the two sides deliberately use DIFFERENT `l`
+# values), and the 5-line window re-identifies each one at its new line
+# (this is the documented open risk: a real code change here would read the
+# same way). What this asserts is narrower: an insertion that does not
+# touch any mutant's own window content must not manufacture spurious kills
+# or news out of thin air when the identity (f, m, a, o) is unchanged,
+# regardless of where the line moved to.
 
 fixture3="${test_root}/fixture3.jsonl"
 {
 	jq -cn --argjson mutants "[$(mutant h.go M2 U cccccccccccc 0 30 1), $(mutant h.go M2 U dddddddddddd 1 31 4)]" \
 		'{schema:1, packages:[{name:"metrics", package:"./internal/metrics", source:"gated", state:"measured", counts:{lived:0,not_covered:2}, mutants:$mutants}]}'
-	jq -cn --argjson mutants "[$(mutant h.go M2 U cccccccccccc 0 30 1), $(mutant h.go M2 U dddddddddddd 1 31 4)]" \
+	jq -cn --argjson mutants "[$(mutant h.go M2 U cccccccccccc 0 35 1), $(mutant h.go M2 U dddddddddddd 1 36 4)]" \
 		'{schema:1, packages:[{name:"metrics", package:"./internal/metrics", source:"gated", state:"measured", counts:{lived:0,not_covered:2}, mutants:$mutants}]}'
 } >"${fixture3}"
 
@@ -106,6 +139,15 @@ row="$(jq -c '.[] | select(.package == "metrics/gated")' <<<"${output}")"
 [ "$(jq -r '.persisted' <<<"${row}")" = "2" ] || fail "an unchanged run must persist both mutants (row: ${row})"
 
 # --- filters -------------------------------------------------------------
+#
+# fixture1 carries two packages (server/advisory and worker/gated), so an
+# unfiltered diff has two rows and --package/--source actually have
+# something to filter out; against a single-package fixture these flags
+# would pass even if they were silently no-ops.
+
+output="$(MUTATION_SURVIVORS_RECORDS="${fixture1}" bash "${diff_script}")"
+[ "$(jq 'length' <<<"${output}")" = "2" ] ||
+	fail "the filter fixture must itself carry two rows unfiltered, got $(jq 'length' <<<"${output}")"
 
 output="$(MUTATION_SURVIVORS_RECORDS="${fixture1}" bash "${diff_script}" --package server)"
 [ "$(jq 'length' <<<"${output}")" = "1" ] || fail "--package must restrict the rows to that package"
@@ -114,6 +156,10 @@ output="$(MUTATION_SURVIVORS_RECORDS="${fixture1}" bash "${diff_script}" --packa
 output="$(MUTATION_SURVIVORS_RECORDS="${fixture1}" bash "${diff_script}" --package server --source gated)"
 [ "$(jq 'length' <<<"${output}")" = "0" ] ||
 	fail "--source gated must drop a package that only has an advisory row"
+
+output="$(MUTATION_SURVIVORS_RECORDS="${fixture1}" bash "${diff_script}" --source gated)"
+[ "$(jq 'length' <<<"${output}")" = "1" ] || fail "--source gated must keep only the gated row"
+[ "$(jq -r '.[0].package' <<<"${output}")" = "worker/gated" ] || fail "--source gated must keep worker/gated specifically"
 
 # --- refusals ----------------------------------------------------------------
 

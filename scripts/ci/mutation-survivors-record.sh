@@ -40,6 +40,20 @@
 # for the measurement behind this choice: bare file+type+line collides 66 of
 # 335 times on this repo's real churn, and the 5-line window plus ordinal
 # resolves all but 3 genuine code changes.
+#
+# Every {f,m,s,l,c} field below is sourced from a downloaded artifact: a
+# report the gremlins/mutation-advisory jobs produced by running mutated Go
+# source. That is treated as untrusted input throughout this script. `l` and
+# `c` never reach `$(( ))`, and no field reaches a path or a jq argument,
+# until it has passed validation: `f` is a relative path with no leading "/",
+# no ".." segment, and no control characters; `m` matches `^[A-Z_]+$`; `s` is
+# exactly "L" or "U"; `l` and `c` are non-negative JSON numbers (checked
+# twice: once in jq while the value is still JSON-typed, once more in bash
+# with a `case` glob immediately before the arithmetic in window_hash, so a
+# gap in either layer alone still can't reach `$(( ))`). Any mutant that
+# fails demotes the whole package/source entry to "unparseable" rather than
+# being dropped or aborting the run: a report that can't be trusted for one
+# field can't be trusted for the rest of it either.
 
 set -euo pipefail
 export LC_ALL=C
@@ -70,6 +84,15 @@ sha256_hex() {
 	fi
 }
 
+# A non-negative bash-integer literal: no sign, no decimal point, digits
+# only. The last gate before a value drives `$(( ))` arithmetic.
+is_digits() {
+	case "$1" in
+	'' | *[!0-9]*) return 1 ;;
+	esac
+	return 0
+}
+
 # Rejects a leading "/" (an absolute path escaping src-root) and any ".."
 # path segment (escaping the package directory). Field splitting on "/" is
 # deliberate here rather than a regex: POSIX ERE has no reliable word
@@ -90,24 +113,63 @@ real_path_ok() {
 	return 0
 }
 
+# Applied to a JSON array of raw {f,m,s,l,c} objects (still on stdin, still
+# JSON-typed): annotates each with a computed `ok` boolean and streams them
+# back out one per line. Shared between the gated and advisory extractions
+# so the field-validation rule behind finding 1 lives in exactly one place,
+# and runs before any field is ever pulled out of JSON into a bash string.
+MUTANT_OK_FILTER='
+    map(. + {ok: (
+        (.f? != null) and ((.f | type) == "string")
+        and ((.f | explode | any(. < 32 or . == 127)) | not)
+        and ((.f | startswith("/")) | not)
+        and ((.f | split("/") | any(. == "..")) | not)
+        and (.f != "")
+        and (.m? != null) and ((.m | type) == "string") and (.m | test("^[A-Z_]+$"))
+        and (.s == "L" or .s == "U")
+        and (.l? != null) and ((.l | type) == "number") and (.l == (.l | floor)) and (.l >= 1)
+        and (.c? != null) and ((.c | type) == "number") and (.c == (.c | floor)) and (.c >= 0)
+    )})
+    | .[]
+'
+
 # The 5-line window around $2 in file $1, whitespace-trimmed per line, each
 # followed by \x1f, hashed and truncated to 12 hex characters. A line before
 # 1 or past EOF (including a missing file entirely) contributes an empty
 # field rather than failing: the window is padding-tolerant by design so a
-# mutant near the top of a short file still gets an identity.
+# mutant near the top of a short file still gets an identity. One awk pass
+# per mutant collects the whole window (and stops reading past it) instead
+# of five separate `sed` scans, each restarting at line 1.
 window_hash() {
 	local file="$1" line="$2"
 	local start=$((line - 2))
 	local end=$((line + 2))
-	local n="${start}" content trimmed window=""
-	while [ "${n}" -le "${end}" ]; do
-		content=""
-		if [ "${n}" -ge 1 ] && [ -f "${file}" ]; then
-			content="$(sed -n "${n}p" "${file}" 2>/dev/null || true)"
+	local lead=0
+	if [ "${start}" -lt 1 ]; then
+		lead=$((1 - start))
+	fi
+
+	local -a existing=()
+	if [ -f "${file}" ]; then
+		local raw ln
+		raw="$(awk -v s="${start}" -v e="${end}" 'NR>=s && NR<=e {print} NR>e {exit}' "${file}" 2>/dev/null || true)"
+		if [ -n "${raw}" ]; then
+			while IFS= read -r ln || [ -n "${ln}" ]; do
+				existing+=("${ln}")
+			done <<<"${raw}"
 		fi
-		trimmed="$(printf '%s' "${content}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+	fi
+
+	local window="" i slot trimmed
+	for ((i = 0; i < 5; i++)); do
+		trimmed=""
+		if [ "${i}" -ge "${lead}" ]; then
+			slot=$((i - lead))
+			if [ "${slot}" -lt "${#existing[@]}" ]; then
+				trimmed="$(printf '%s' "${existing[${slot}]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+			fi
+		fi
 		window="${window}${trimmed}"$'\x1f'
-		n=$((n + 1))
 	done
 	printf '%s' "${window}" | sha256_hex | cut -c1-12
 }
@@ -121,13 +183,14 @@ build_entry() {
 		'{name: $name, package: $package, source: $source, state: $state, counts: $counts, mutants: $mutants}'
 }
 
-# Turns a stream of raw {f,m,s,l,c} objects (one per line on stdin) into a
-# finished "measured" entry: validates every real path, hashes every
-# window, assigns ordinals within (f, m, a), and rolls up the LIVED /
-# NOT COVERED counts. Any path that fails validation demotes the whole
-# entry to "unparseable" rather than dropping just that one mutant, since a
-# rejected path means the report cannot be trusted to describe this
-# package's real files at all.
+# Turns a stream of raw {f,m,s,l,c,ok} objects (one per line on stdin, `ok`
+# already computed by MUTANT_OK_FILTER) into a finished "measured" entry:
+# re-validates `l`/`c`/`m`/`s` in bash as a second gate, validates every real
+# path, hashes every window, assigns ordinals within (f, m, a), and rolls up
+# the LIVED / NOT COVERED counts. Any mutant that fails either validation
+# layer demotes the whole entry to "unparseable" rather than dropping just
+# that one mutant or aborting the run: a rejected field means the report
+# cannot be trusted to describe this package's real files at all.
 build_from_raw() {
 	local name="$1" package="$2" source="$3" raw="$4"
 	local pkg_rel="${package#./}"
@@ -135,14 +198,47 @@ build_from_raw() {
 	tmp="$(mktemp)"
 
 	local bad=0
-	local line f m s l c real a
+	local line ok f m s l c real a
 	while IFS= read -r line; do
 		[ -n "${line}" ] || continue
+
+		ok="$(jq -r '.ok' <<<"${line}" 2>/dev/null || echo false)"
+		if [ "${ok}" != "true" ]; then
+			bad=1
+			break
+		fi
+
 		f="$(jq -r '.f' <<<"${line}")"
 		m="$(jq -r '.m' <<<"${line}")"
 		s="$(jq -r '.s' <<<"${line}")"
 		l="$(jq -r '.l' <<<"${line}")"
 		c="$(jq -r '.c' <<<"${line}")"
+
+		# Defense in depth: `ok` above already confirmed these came from
+		# JSON numbers/safe strings, but `l` and `c` are about to drive
+		# shell arithmetic in window_hash, so they are re-checked here
+		# with a `case` glob rather than trusted on jq's say-so alone. A
+		# downloaded artifact that can influence a `$(( ))` expression is
+		# a command-injection primitive in the job that holds
+		# `contents: write`; this is the last gate before that
+		# expression runs.
+		if ! is_digits "${l}" || ! is_digits "${c}"; then
+			bad=1
+			break
+		fi
+		case "${m}" in
+		'' | *[!A-Z_]*)
+			bad=1
+			;;
+		esac
+		[ "${bad}" -eq 0 ] || break
+		case "${s}" in
+		L | U) ;;
+		*)
+			bad=1
+			;;
+		esac
+		[ "${bad}" -eq 0 ] || break
 
 		# Validated on the raw file_name, not the concatenated real path: a
 		# leading "/" in $f (Gremlins' own field) still passes an
@@ -199,6 +295,32 @@ one_object() {
 	jq -e -s 'length == 1 and (.[0] | type == "object")' "$1" >/dev/null 2>&1
 }
 
+# True when the report's own headline counters say every mutant timed out
+# (or otherwise never reached a KILLED/LIVED verdict): mutants existed but
+# killed+lived is zero. Mirrors the guard the workflow's own advisory
+# headline table applies (quality-mutation-monthly.yml, "Record this
+# package" / advisory summary steps): Gremlins scores efficacy as
+# killed/(killed+lived), so an all-timed-out run reports 0.00% the same way
+# a genuinely all-LIVED run would, and the two must not be conflated as
+# "measured". The three fields are read from a workflow-generated (not
+# Gremlins-direct) file for the gated case and the raw report for the
+# advisory case, but both are still artifact-sourced, so they get the same
+# is_digits gate before arithmetic as everything else here.
+all_timed_out() {
+	local file="$1" total_field="$2" killed_field="$3" lived_field="$4"
+	local totals mutant_total killed_count lived_count
+	totals="$(jq -r --arg t "${total_field}" --arg k "${killed_field}" --arg l "${lived_field}" \
+		'[(.[$t] // 0), (.[$k] // 0), (.[$l] // 0)] | @tsv' "${file}" 2>/dev/null || true)"
+	IFS=$'\t' read -r mutant_total killed_count lived_count <<<"${totals}"
+	mutant_total="${mutant_total:-0}"
+	killed_count="${killed_count:-0}"
+	lived_count="${lived_count:-0}"
+	if ! is_digits "${mutant_total}" || ! is_digits "${killed_count}" || ! is_digits "${lived_count}"; then
+		return 1
+	fi
+	[ "${mutant_total}" -gt 0 ] && [ "$((killed_count + lived_count))" -eq 0 ]
+}
+
 gated_entry() {
 	local name="$1" package="$2"
 	local d rf n rec_dir="" rec_file=""
@@ -233,12 +355,30 @@ gated_entry() {
 			build_entry "${name}" "${package}" "gated" "unparseable" null '[]'
 			return
 		fi
+
+		# .survivors/.uncovered must actually be arrays before anything
+		# tries to iterate them: a malformed shape (e.g. a string) must
+		# demote this entry to "unparseable", not raise a jq type error
+		# that `set -e` would turn into a whole-script abort.
+		local shape_ok
+		shape_ok="$(jq -r '
+            (((.survivors // []) | type) == "array") and (((.uncovered // []) | type) == "array")
+        ' "${survivors_file}" 2>/dev/null || echo false)"
+		if [ "${shape_ok}" != "true" ]; then
+			build_entry "${name}" "${package}" "gated" "unparseable" null '[]'
+			return
+		fi
+
+		if all_timed_out "${rec_file}" "mutants_total" "killed" "lived"; then
+			build_entry "${name}" "${package}" "gated" "unmeasured" null '[]'
+			return
+		fi
+
 		local raw
 		raw="$(jq -c '
             [ (.survivors // [])[] | {f: .file, m: .mutator, s: "L", l: .line, c: .column} ]
             + [ (.uncovered // [])[] | {f: .file, m: .mutator, s: "U", l: .line, c: .column} ]
-            | .[]
-        ' "${survivors_file}")"
+        ' "${survivors_file}" | jq -c "${MUTANT_OK_FILTER}")"
 		build_from_raw "${name}" "${package}" "gated" "${raw}"
 		;;
 	zero-mutants)
@@ -291,19 +431,51 @@ advisory_entry() {
 			build_entry "${name}" "${package}" "advisory" "unparseable" null '[]'
 			return
 		fi
+
+		# Same shape guard as the gated path, for .files/.mutations: a
+		# non-array here must demote to "unparseable" rather than
+		# silently degrading to "no mutants" behind the `?` operator,
+		# which would misreport a malformed report as a clean
+		# zero-mutants measurement.
+		local shape_ok
+		shape_ok="$(jq -r '
+            ((.files // []) | type) == "array"
+            and ((.files // []) | all(type == "object"))
+            and ((.files // []) | all((.mutations // []) | type == "array"))
+        ' "${json_file}" 2>/dev/null || echo false)"
+		if [ "${shape_ok}" != "true" ]; then
+			build_entry "${name}" "${package}" "advisory" "unparseable" null '[]'
+			return
+		fi
+
+		if all_timed_out "${json_file}" "mutants_total" "mutants_killed" "mutants_lived"; then
+			build_entry "${name}" "${package}" "advisory" "unmeasured" null '[]'
+			return
+		fi
+
 		local raw
 		raw="$(jq -c '
-            [ .files[]? | .file_name as $f | .mutations[]?
+            [ .files[] | .file_name as $f | (.mutations // [])[]
               | select(.status == "LIVED" or .status == "NOT COVERED")
               | {f: $f, m: .type, s: (if .status == "LIVED" then "L" else "U" end), l: .line, c: .column} ]
-            | .[]
-        ' "${json_file}")"
+        ' "${json_file}" | jq -c "${MUTANT_OK_FILTER}")"
 		build_from_raw "${name}" "${package}" "advisory" "${raw}"
 		return
 	fi
 
+	# The .txt is the tee'd Gremlins stdout for a leg that never produced
+	# JSON. A genuine zero-mutants run and a leg that died before Gremlins
+	# ran both leave only a .txt behind (or none at all), and they must not
+	# be conflated: the gating leg's own zero-mutants check greps
+	# mutation-report.txt for this exact phrase (workflow's "Assess the
+	# gate" step), so a died leg's .txt lacks it and is "missing", not a
+	# silent "zero-mutants".
 	if [ -n "${txt_file}" ]; then
-		build_entry "${name}" "${package}" "advisory" "zero-mutants" '{"lived":0,"not_covered":0}' '[]'
+		if grep -qF "No results to report" "${txt_file}" 2>/dev/null; then
+			build_entry "${name}" "${package}" "advisory" "zero-mutants" '{"lived":0,"not_covered":0}' '[]'
+		else
+			build_entry "${name}" "${package}" "advisory" "missing" null '[]'
+		fi
 		return
 	fi
 

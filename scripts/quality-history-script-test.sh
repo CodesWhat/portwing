@@ -327,6 +327,15 @@ grep -Fq "QUALITY_HISTORY_RETAIN must be at least 1" <<<"${output}" ||
 [ "$(grep -c . <<<"$(branch_file2 mutation-survivors.jsonl)" || true)" = "4" ] ||
 	fail "a refused RETAIN must not block the append, only the pruning"
 
+# RETAIN_BYTES=0 is refused the same way RETAIN=0 is: a warning, no byte
+# ceiling enforced, and the append (and any RETAIN pruning) still happens.
+output="$(run_append2 mutation-survivors '{"run_marker":6.5}' 165 \
+	QUALITY_HISTORY_RETAIN=3 QUALITY_HISTORY_RETAIN_BYTES=0)"
+grep -Fq "QUALITY_HISTORY_RETAIN_BYTES must be at least 1" <<<"${output}" ||
+	fail "RETAIN_BYTES=0 must be refused with a warning (output: ${output})"
+[ "$(grep -c . <<<"$(branch_file2 mutation-survivors.jsonl)" || true)" = "3" ] ||
+	fail "a refused RETAIN_BYTES must still let RETAIN prune normally"
+
 # Unset leaves the file unpruned: one more append grows it by exactly one.
 before_unset="$(grep -c . <<<"$(branch_file2 mutation-survivors.jsonl)" || true)"
 run_append2 mutation-survivors '{"run_marker":7}' 170 >/dev/null || true
@@ -414,6 +423,64 @@ retained2="$(branch_file3 mutation-survivors.jsonl)"
 	fail "an oversized newest record must still drop everything older"
 grep -Fq '"run_marker":99' <<<"${retained2}" ||
 	fail "an oversized newest record must still be kept, not dropped"
+
+# --- QUALITY_HISTORY_RECORD_FILE: a record too large for a single argv ------
+#
+# Linux caps a single argv/environ string (MAX_ARG_STRLEN) at 128 KiB; the
+# spec allows a mutation-survivors record up to 1 MiB. This fixture is well
+# past the 128 KiB line, so passing it as $2 the old way would fail before
+# the script even started, at the shell's own execve() of the child.
+
+bare4="${test_root}/qh-file.git"
+git init --quiet --bare "${bare4}"
+
+branch_file4() {
+	git -C "${bare4}" cat-file blob "quality-history:$1" 2>/dev/null || true
+}
+
+# `head -c | tr` rather than bash's `${var// /x}`: replacing 300,000
+# characters one at a time in a bash parameter expansion is quadratic and
+# takes minutes; this is one read and one translate.
+big_value="$(head -c 300000 /dev/zero | tr '\0' 'x')"
+record_file="${test_root}/big-record.json"
+jq -cn --arg pad "${big_value}" '{pad: $pad, outcome:"success"}' >"${record_file}"
+[ "$(wc -c <"${record_file}")" -gt 131072 ] ||
+	fail "the big-record fixture must itself exceed 128 KiB to be a meaningful test"
+
+output="$(
+	env \
+		QUALITY_HISTORY_REMOTE="${bare4}" \
+		QUALITY_HISTORY_EVENT="schedule" \
+		QUALITY_HISTORY_AUTHOR_NAME="test" \
+		QUALITY_HISTORY_AUTHOR_EMAIL="test@example.invalid" \
+		GITHUB_RUN_ID="400" \
+		GITHUB_RUN_ATTEMPT="1" \
+		GITHUB_RUN_NUMBER="400" \
+		GITHUB_WORKFLOW="Quality: Test" \
+		GITHUB_SHA="0000000000000000000000000000000000000000" \
+		GITHUB_REF_NAME="dev/v0.9" \
+		QUALITY_HISTORY_RECORD_FILE="${record_file}" \
+		bash "${append}" mutation-survivors 2>&1
+)"
+grep -Fq "recorded mutation-survivors" <<<"${output}" ||
+	fail "a record read via QUALITY_HISTORY_RECORD_FILE must still append (output: ${output})"
+big_recorded="$(branch_file4 mutation-survivors.jsonl)"
+[ "$(grep -c . <<<"${big_recorded}" || true)" = "1" ] ||
+	fail "a large record via QUALITY_HISTORY_RECORD_FILE must land as exactly one line"
+[ "$(jq -r '.pad' <<<"${big_recorded}")" = "${big_value}" ] ||
+	fail "a large record via QUALITY_HISTORY_RECORD_FILE must round-trip its content exactly"
+
+# Passing both the inline argument and the env var is refused, not silently
+# preferring one over the other.
+output="$(
+	env \
+		QUALITY_HISTORY_REMOTE="${bare4}" \
+		QUALITY_HISTORY_EVENT="schedule" \
+		QUALITY_HISTORY_RECORD_FILE="${record_file}" \
+		bash "${append}" mutation-survivors '{"x":1}' 2>&1
+)"
+grep -Fq "not both" <<<"${output}" ||
+	fail "passing both an inline argument and QUALITY_HISTORY_RECORD_FILE must be refused (output: ${output})"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} quality-history script check(s) failed" >&2

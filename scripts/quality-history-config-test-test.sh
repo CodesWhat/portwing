@@ -262,7 +262,7 @@ assert_rejected \
 
 reset_fixtures
 # shellcheck disable=SC2016 # A sed program over the append script's literal text.
-sed -i.bak 's/grep -Fxq "${record}"/grep -Fq "nothing-like-it"/' "${append}"
+sed -i.bak 's/grep -Fxqf "${record_tmp}"/grep -Fq "nothing-like-it"/' "${append}"
 assert_rejected \
 	"must not append a record the branch already carries" \
 	"contract must reject an appender that can write a duplicate row"

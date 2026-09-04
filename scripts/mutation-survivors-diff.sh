@@ -111,5 +111,7 @@ jq -s \
            then {killed: ($a[$k].ids - $b[$k].ids), new: ($b[$k].ids - $a[$k].ids),
                  persisted: (($a[$k].ids) - (($a[$k].ids) - ($b[$k].ids)) | length)}
            else {comparable: false, was: $a[$k].state, now: $b[$k].state,
-                 unknown: (($a[$k].ids // []) | length)} end))
+                 unknown: ((if $a[$k].state == "measured" then $a[$k].ids
+                            elif $b[$k].state == "measured" then $b[$k].ids
+                            else [] end) | length)} end))
     ' <<<"${records}"
