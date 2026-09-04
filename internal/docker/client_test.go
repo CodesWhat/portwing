@@ -251,6 +251,9 @@ func TestListContainers_AllTrueSetsParam(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1.44/containers/json" {
+			t.Errorf("expected path /v1.44/containers/json, got %q", r.URL.Path)
+		}
 		if !strings.Contains(r.URL.RawQuery, "all=1") {
 			t.Errorf("expected all=1 query param, got %q", r.URL.RawQuery)
 		}

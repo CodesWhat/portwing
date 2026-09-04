@@ -102,6 +102,12 @@ var maxStreamedRequestBodyBytes int64 = 1024 * 1024 * 1024 // 1 GB
 // the real 30s.
 var requestBodyStreamIdleTimeout = 30 * time.Second
 
+// reconnectWait is the timer the reconnect-retry loop waits on between
+// attempts. A var, not a direct time.After call, so tests can observe the
+// exact backoff delay sequence deterministically instead of inferring it
+// from how many reconnects fit in a wall-clock window.
+var reconnectWait = time.After
+
 type outboundQueueState struct {
 	mu     sync.Mutex
 	bytes  int64
@@ -326,7 +332,7 @@ func (c *Client) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(waitDuration):
+		case <-reconnectWait(waitDuration):
 		}
 
 		// Exponential backoff.

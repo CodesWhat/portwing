@@ -9,8 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +17,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/codeswhat/portwing/internal/config"
-	"github.com/codeswhat/portwing/internal/metrics"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -848,52 +845,52 @@ func TestWritePumpPollOnContainerRefreshErrorLogs(t *testing.T) {
 // Run — reconnect backoff actually grows (client.go:333, extra-mutator run)
 // ---------------------------------------------------------------------------
 
-// reconnectCountFromMetrics parses portwing_edge_reconnects_total out of the
-// registry's Prometheus exposition text.
-func reconnectCountFromMetrics(t *testing.T, registry *metrics.Registry) int64 {
-	t.Helper()
-
-	var output strings.Builder
-	registry.WritePrometheus(&output, func(value string) string { return value })
-	re := regexp.MustCompile(`portwing_edge_reconnects_total (\d+)`)
-	m := re.FindStringSubmatch(output.String())
-	if m == nil {
-		t.Fatalf("metrics missing portwing_edge_reconnects_total:\n%s", output.String())
-	}
-	n, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil {
-		t.Fatalf("parse reconnect count %q: %v", m[1], err)
-	}
-	return n
-}
-
 // TestRunExponentialBackoffBoundsReconnectCount covers `delay *= 2` (client.go
-// :333) by proving the reconnect wait actually grows across iterations
-// instead of collapsing to (near-)zero.
+// :333) by asserting the actual observed delay sequence doubles (within
+// jitter) and then holds at the configured cap, instead of inferring growth
+// from how many reconnects fit in a fixed wall-clock window.
 //
-// Against a server that always fails the handshake, correct exponential
-// backoff (1s, 2s, 4s, ... jittered 0.75-1.25x) fits only a handful of
-// reconnect attempts into a 4s window. INVERT_ASSIGNMENTS (`*=` -> `/=`)
-// makes the wait halve every iteration and converge on zero; REMOVE_SELF_
-// ASSIGNMENTS (`delay *= 2` -> `delay = 2`) collapses it to a constant 2ns
-// after the first cycle. Both turn the retry loop into a tight spin bounded
-// only by dial overhead, producing orders of magnitude more reconnects than
-// real backoff can in the same window.
+// It overrides the package-level reconnectWait seam so the retry loop never
+// really sleeps: each call records the delay it was asked to wait for and
+// returns an already-fired channel. That makes the assertion exact and fast
+// rather than a performance-dependent race against CI scheduling — under
+// INVERT_ASSIGNMENTS (`*=` -> `/=`) the recorded delays shrink instead of
+// growing, and under REMOVE_SELF_ASSIGNMENTS (`delay *= 2` -> `delay = 2`)
+// they collapse to a 2ns constant after the first cycle; both fail the
+// per-step bounds check deterministically.
 func TestRunExponentialBackoffBoundsReconnectCount(t *testing.T) {
-	t.Parallel()
+	// Deliberately NOT t.Parallel(): overrides the package-level reconnectWait var.
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(srv.Close)
 
+	const wantSamples = 6
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var delays []time.Duration
+	oldWait := reconnectWait
+	reconnectWait = func(d time.Duration) <-chan time.Time {
+		delays = append(delays, d)
+		if len(delays) >= wantSamples {
+			cancel()
+		}
+		ch := make(chan time.Time, 1)
+		ch <- time.Now()
+		return ch
+	}
+	t.Cleanup(func() { reconnectWait = oldWait })
+
 	addr := freeAddr(t)
 	cfg := &config.Config{
 		DrydockURL:        srv.URL,
 		HeartbeatInterval: 30,
 		WelcomeTimeout:    5,
-		ReconnectDelay:    1,  // 1s initial delay
-		MaxReconnectDelay: 30, // large enough that the cap never fires in this window
+		ReconnectDelay:    1, // 1s initial delay
+		MaxReconnectDelay: 4, // low cap so the recorded sequence exercises it too
 		DDPollInterval:    300,
 		BindAddress:       "127.0.0.1",
 		Port:              portFrom(addr),
@@ -901,17 +898,27 @@ func TestRunExponentialBackoffBoundsReconnectCount(t *testing.T) {
 	}
 	c := newWireClient(t, cfg)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-
 	_ = c.Run(ctx)
 
-	got := reconnectCountFromMetrics(t, c.metrics)
-	// Real growth (1s, 2s, 4s, ...) fits at most ~3-4 reconnect increments in
-	// a 4s window under either jitter extreme; a collapsed/shrinking delay
-	// spins hundreds of times in the same window.
-	if got < 2 || got > 10 {
-		t.Fatalf("reconnect count = %d, want in [2, 10] for a 4s window with exponential backoff (1s, 2s, 4s, ...)", got)
+	if len(delays) < wantSamples {
+		t.Fatalf("recorded %d reconnect delays, want at least %d", len(delays), wantSamples)
+	}
+
+	// jitteredDuration scales the nominal delay by [0.75, 1.25]x, so bound
+	// each observed wait against the nominal doubling-then-capped sequence
+	// with that same margin instead of asserting an exact value.
+	nominal := time.Duration(cfg.ReconnectDelay) * time.Second
+	maxDelay := time.Duration(cfg.MaxReconnectDelay) * time.Second
+	for i, d := range delays[:wantSamples] {
+		lo := time.Duration(float64(nominal) * 0.75)
+		hi := time.Duration(float64(nominal) * 1.25)
+		if d < lo || d > hi {
+			t.Fatalf("delay[%d] = %v, want in [%v, %v] for nominal %v", i, d, lo, hi, nominal)
+		}
+		nominal *= 2
+		if nominal > maxDelay {
+			nominal = maxDelay
+		}
 	}
 }
 
@@ -1119,6 +1126,11 @@ func TestHealthServerListenAndServeSwallowsGracefulShutdown(t *testing.T) {
 		},
 	}
 	c.startHealthServer()
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = c.healthServer.Shutdown(shutdownCtx)
+	})
 
 	healthURL := "http://" + c.healthServer.Addr + "/health"
 	waitFor(t, "health server ready", func() bool {
@@ -1136,11 +1148,20 @@ func TestHealthServerListenAndServeSwallowsGracefulShutdown(t *testing.T) {
 	if err := c.healthServer.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("graceful shutdown: %v", err)
 	}
-	// Shutdown blocks until the listener is closed and active connections have
-	// drained; the ListenAndServe goroutine observes the closed listener over
-	// the same OS-level event and its err-check runs within microseconds.
-	// This margin is generous, not load-bearing precision.
-	time.Sleep(20 * time.Millisecond)
+	// Shutdown does not establish a happens-before relationship with the
+	// err-check in the ListenAndServe goroutine, so poll the captured log
+	// for a bounded window instead of sleeping a fixed, easily-outrun
+	// duration. On correct code the warning is never written regardless of
+	// how long we wait, so this is not flaky; it only needs to be long
+	// enough for a genuinely mutated build to reliably surface the log line
+	// under CI scheduling slop before we conclude it's absent.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if strings.Contains(logBuf.String(), "health server error") {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 
 	if strings.Contains(logBuf.String(), "health server error") {
 		t.Errorf("log = %q, want no health-server-error warning on a graceful shutdown", logBuf.String())

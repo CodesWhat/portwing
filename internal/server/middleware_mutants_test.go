@@ -268,11 +268,19 @@ func TestFinishAuthLockedResetsStreakAfterWindowExpires(t *testing.T) {
 	rl := NewRateLimiter()
 	defer rl.Stop()
 
+	// Guard direct map access with rl.mu: NewRateLimiter starts a cleanup
+	// goroutine that owns the same map, so an unsynchronized read/write here
+	// races with it even though the window makes an actual overlap unlikely.
+	rl.mu.Lock()
 	rl.attempts["some-ip"] = &ipAttempts{count: 5, firstFail: time.Now().Add(-2 * rl.window)}
+	rl.mu.Unlock()
 
 	rl.finishAuth("some-ip", false)
 
-	if got := rl.attempts["some-ip"].count; got != 1 {
+	rl.mu.Lock()
+	got := rl.attempts["some-ip"].count
+	rl.mu.Unlock()
+	if got != 1 {
 		t.Fatalf("count = %d, want 1 (streak should have reset after the window expired)", got)
 	}
 }

@@ -9,10 +9,8 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -385,15 +383,12 @@ func TestListenAndServePlainHTTPWhenOnlyOneTLSFieldSet(t *testing.T) {
 	client, stop := newStubDockerClient(t)
 	defer stop()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("net.Listen: %v", err)
-	}
-	port := strings.TrimPrefix(ln.Addr().String(), "127.0.0.1:")
-	ln.Close()
-
+	// Let the OS assign a free port directly inside ListenAndServe instead of
+	// discovering one by binding, closing, and hoping nothing else claims it
+	// before the real server rebinds — that gap was a source of unmutated
+	// failures under parallel test load.
 	cfg := minimalConfig()
-	cfg.Port = port
+	cfg.Port = "0"
 	cfg.TLSCert = "fake.crt"
 	cfg.TLSKey = ""
 
@@ -401,16 +396,27 @@ func TestListenAndServePlainHTTPWhenOnlyOneTLSFieldSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.Shutdown(ctx)
+	})
 
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- s.ListenAndServe()
 	}()
 
+	// A generous deadline, not a tight one: too short a window and a merely
+	// slow-to-schedule goroutine can trick this into calling Shutdown before
+	// the server has even started listening, which masks the TLS mutant's
+	// fast cert-load error as the harmless ErrServerClosed Shutdown produces
+	// either way. The real, unmutated plain-HTTP path never returns here at
+	// all, so this only costs time, not reliability.
 	select {
 	case err := <-errCh:
 		t.Fatalf("ListenAndServe returned early (want the plain-HTTP path to keep serving): %v", err)
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		// Still serving — consistent with the plain-HTTP path.
 	}
 
