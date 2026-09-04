@@ -7,7 +7,10 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -328,5 +331,145 @@ func TestPollContainersSkipsNotifyAfterTickRefreshError(t *testing.T) {
 	// further calls should follow.
 	if got := a.onRefreshCallCount.Load(); got != 1 {
 		t.Fatalf("OnContainerRefresh called %d times (want exactly 1, from the initial refresh) after every ticker RefreshContainers failed", got)
+	}
+}
+
+// TestIsDockerResourceActionEmptyPathDoesNotPanic verifies an empty path is
+// rejected without indexing into it, killing the INVERT_LOGICAL mutant at
+// http.go:728:16 (the `path == "" || path[0] != '/'` `||` turned into `&&`).
+// Under the mutant, `path == ""` alone no longer short-circuits the OR chain,
+// so Go must evaluate `path[0] != '/'` too — indexing an empty string, which
+// panics.
+func TestIsDockerResourceActionEmptyPathDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	if got := isExecStartPath(""); got {
+		t.Fatalf("isExecStartPath(\"\") = %v, want false", got)
+	}
+}
+
+// TestIsDockerResourceActionMissingLeadingSlashRejected verifies a path that
+// fails the leading-slash check is rejected even when the trailing-slash
+// check alone would pass, killing the INVERT_LOGICAL mutant at http.go:728:34
+// (the second `||`, between `(path=="" || path[0]!='/')` and
+// `strings.HasSuffix(path, "/")`, turned into `&&`). Real code: the OR chain
+// short-circuits true on `path[0] != '/'` and returns false. The mutant's AND
+// requires HasSuffix(path, "/") to also be true; since it is not, the mutant
+// skips the early return and falls through to a resource/action match against
+// path[1:], incorrectly returning true.
+func TestIsDockerResourceActionMissingLeadingSlashRejected(t *testing.T) {
+	t.Parallel()
+
+	if got := isDockerResourceAction("Xexec/y/start", "exec", "start"); got {
+		t.Fatalf("isDockerResourceAction(%q, ...) = %v, want false (no leading slash)", "Xexec/y/start", got)
+	}
+}
+
+// TestListenAndServePlainHTTPWhenOnlyOneTLSFieldSet verifies ListenAndServe
+// takes the plain-HTTP path (not the TLS path) when only one of TLSCert/
+// TLSKey is set, killing the INVERT_LOGICAL mutant at http.go:880:25
+// (`s.cfg.TLSCert != "" && s.cfg.TLSKey != ""` turned into `||`).
+//
+// A wall-clock "still running after N seconds" branch doesn't discriminate
+// deterministically: it only fails the mutant when the timer wins the race
+// against however long the cert-load error takes to surface, which is a
+// scheduling bet, not a proof. This instead uses the Addr() seam ListenAndServe
+// now exposes (set the instant net.Listen succeeds, before the TLS branch, so
+// it doesn't itself discriminate between the two paths) to poll a real plain
+// HTTP GET against the bound port until it succeeds or a deadline fails the
+// test. The real, unmutated plain-HTTP path answers almost immediately. The
+// mutant takes the TLS branch instead: ServeTLS fails to load the nonexistent
+// "fake.crt" before it ever calls Accept, so the listener never answers and
+// every GET attempt times out, deterministically failing the probe deadline.
+func TestListenAndServePlainHTTPWhenOnlyOneTLSFieldSet(t *testing.T) {
+	client, stop := newStubDockerClient(t)
+	defer stop()
+
+	// Let the OS assign a free port directly inside ListenAndServe instead of
+	// discovering one by binding, closing, and hoping nothing else claims it
+	// before the real server rebinds — that gap was a source of unmutated
+	// failures under parallel test load.
+	cfg := minimalConfig()
+	cfg.Port = "0"
+	cfg.TLSCert = "fake.crt"
+	cfg.TLSKey = ""
+
+	s, err := NewServer(cfg, client, &stubServerAdapter{})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.Shutdown(ctx)
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.ListenAndServe()
+	}()
+
+	// Poll for the bound address rather than assuming it is ready by some
+	// fixed delay: net.Listen happens before the TLS/plain branch, so this
+	// step succeeds identically on both the real and mutant paths and only
+	// proves the listener came up.
+	addrDeadline := time.Now().Add(2 * time.Second)
+	var addr net.Addr
+	for time.Now().Before(addrDeadline) {
+		if addr = s.Addr(); addr != nil {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if addr == nil {
+		select {
+		case err := <-errCh:
+			t.Fatalf("ListenAndServe never bound a listener and returned: %v", err)
+		default:
+			t.Fatal("ListenAndServe never bound a listener")
+		}
+	}
+
+	// Now prove the plain-HTTP path is actually the one answering, not just
+	// that something is listening: poll a plain GET against the bound
+	// address until it succeeds within a deadline.
+	probeDeadline := time.Now().Add(3 * time.Second)
+	httpClient := &http.Client{Timeout: 300 * time.Millisecond}
+	url := "http://" + addr.String() + "/health"
+	var lastErr error
+	gotOK := false
+	for time.Now().Before(probeDeadline) {
+		resp, getErr := httpClient.Get(url)
+		if getErr != nil {
+			lastErr = getErr
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("unexpected status %d", resp.StatusCode)
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		gotOK = true
+		break
+	}
+	if !gotOK {
+		t.Fatalf("plain HTTP GET %s never succeeded (want the plain-HTTP path to be serving): %v", url, lastErr)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Shutdown(ctx); err != nil {
+		t.Errorf("Shutdown: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("ListenAndServe returned an unexpected error after Shutdown: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ListenAndServe did not return after Shutdown")
 	}
 }

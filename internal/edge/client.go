@@ -103,6 +103,12 @@ var maxStreamedRequestBodyBytes int64 = 1024 * 1024 * 1024 // 1 GB
 // the real 30s.
 var requestBodyStreamIdleTimeout = 30 * time.Second
 
+// reconnectWait is the timer the reconnect-retry loop waits on between
+// attempts. A var, not a direct time.After call, so tests can observe the
+// exact backoff delay sequence deterministically instead of inferring it
+// from how many reconnects fit in a wall-clock window.
+var reconnectWait = time.After
+
 type outboundQueueState struct {
 	mu     sync.Mutex
 	bytes  int64
@@ -248,6 +254,15 @@ type Client struct {
 
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
+	// healthServerDone is closed by the ListenAndServe goroutine started in
+	// startHealthServer once it has returned and performed its post-Shutdown
+	// error check (and logged, if warranted). It gives callers — chiefly
+	// tests asserting on that log — a happens-before point instead of
+	// racing the goroutine with a poll loop. Each startHealthServer call
+	// creates its own channel and hands it to its own goroutine, so a
+	// second start cannot double-close or leave an earlier channel
+	// unclosed.
+	healthServerDone chan struct{}
 }
 
 // pendingRequestBody accumulates the stream/stream_end frames that follow a
@@ -353,7 +368,7 @@ func (c *Client) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(waitDuration):
+		case <-reconnectWait(waitDuration):
 		}
 
 		// Exponential backoff.
@@ -1830,10 +1845,13 @@ func (c *Client) startHealthServer() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	done := make(chan struct{})
+	c.healthServerDone = done
 	go func() {
 		if err := c.healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Warn("health server error", "error", err)
 		}
+		close(done)
 	}()
 }
 

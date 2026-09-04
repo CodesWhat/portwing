@@ -247,6 +247,27 @@ func TestListContainers_AllFalseOmitsParam(t *testing.T) {
 	}
 }
 
+func TestListContainers_AllTrueSetsParam(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1.44/containers/json" {
+			t.Errorf("expected path /v1.44/containers/json, got %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("all"); got != "1" {
+			t.Errorf("expected all=1 query param, got %q (raw query %q)", got, r.URL.RawQuery)
+		}
+		json.NewEncoder(w).Encode([]ContainerJSON{}) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.ListContainers(context.Background(), true)
+	if err != nil {
+		t.Fatalf("ListContainers: %v", err)
+	}
+}
+
 func TestListContainers_DockerError(t *testing.T) {
 	t.Parallel()
 

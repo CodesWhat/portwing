@@ -1254,6 +1254,85 @@ func TestStartHealthServerPortConflict(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// startHealthServer — a second start on the same Client must get its own
+// healthServerDone channel, closed by its own goroutine (client.go:1699)
+// ---------------------------------------------------------------------------
+
+// TestStartHealthServerTwiceDoesNotPanic calls startHealthServer twice on one
+// Client, shutting the health server down and joining its goroutine between
+// the two starts. Each start must create its own healthServerDone channel
+// and hand it to its own goroutine: if a shared field were instead guarded
+// by a client-lifetime sync.Once, the second start's goroutine would find
+// the guard already spent and never close its channel, hanging any caller
+// that waits on it. The test proves the second close actually happens by
+// waiting on the channel captured right after the second start, with a
+// timeout that fails the test instead of hanging forever.
+func TestStartHealthServerTwiceDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	addr := freeAddr(t)
+	c := &Client{
+		cfg: &config.Config{
+			BindAddress: "127.0.0.1",
+			Port:        portFrom(addr),
+		},
+	}
+
+	c.startHealthServer()
+	healthURL := "http://" + c.healthServer.Addr + "/health"
+	waitFor(t, "first health server ready", func() bool {
+		//nolint:noctx,bodyclose
+		resp, err := http.Get(healthURL) //nolint:gosec
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return true
+	})
+
+	shutdownCtx1, cancel1 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel1()
+	if err := c.healthServer.Shutdown(shutdownCtx1); err != nil {
+		t.Fatalf("first shutdown: %v", err)
+	}
+	select {
+	case <-c.healthServerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first ListenAndServe goroutine did not finish in time")
+	}
+
+	// Start again on the same Client, reusing the now-free address.
+	c.startHealthServer()
+	secondDone := c.healthServerDone
+	t.Cleanup(func() {
+		if c.healthServer != nil {
+			_ = c.healthServer.Close()
+		}
+	})
+
+	waitFor(t, "second health server ready", func() bool {
+		//nolint:noctx,bodyclose
+		resp, err := http.Get(healthURL) //nolint:gosec
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return true
+	})
+
+	shutdownCtx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	if err := c.healthServer.Shutdown(shutdownCtx2); err != nil {
+		t.Fatalf("second shutdown: %v", err)
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second ListenAndServe goroutine did not finish in time")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // connect — welcome with matching compat level (no warning branch)
 // ---------------------------------------------------------------------------
 

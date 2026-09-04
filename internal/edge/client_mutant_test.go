@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -833,5 +834,331 @@ func TestWritePumpPollOnContainerRefreshErrorLogs(t *testing.T) {
 
 	if !strings.Contains(logBuf.String(), "container refresh notify failed") {
 		t.Errorf("log = %q, want the notify-failed warning", logBuf.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run — reconnect backoff actually grows (client.go:333, extra-mutator run)
+// ---------------------------------------------------------------------------
+
+// TestRunExponentialBackoffBoundsReconnectCount covers `delay *= 2` (client.go
+// :333) by asserting the actual observed delay sequence doubles (within
+// jitter) and then holds at the configured cap, instead of inferring growth
+// from how many reconnects fit in a fixed wall-clock window.
+//
+// It overrides the package-level reconnectWait seam so the retry loop never
+// really sleeps: each call records the delay it was asked to wait for and
+// returns an already-fired channel. That makes the assertion exact and fast
+// rather than a performance-dependent race against CI scheduling — under
+// INVERT_ASSIGNMENTS (`*=` -> `/=`) the recorded delays shrink instead of
+// growing, and under REMOVE_SELF_ASSIGNMENTS (`delay *= 2` -> `delay = 2`)
+// they collapse to a 2ns constant after the first cycle; both fail the
+// per-step bounds check deterministically.
+func TestRunExponentialBackoffBoundsReconnectCount(t *testing.T) {
+	// Deliberately NOT t.Parallel(): overrides the package-level reconnectWait var.
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	const wantSamples = 6
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var delays []time.Duration
+	oldWait := reconnectWait
+	reconnectWait = func(d time.Duration) <-chan time.Time {
+		delays = append(delays, d)
+		if len(delays) >= wantSamples {
+			cancel()
+		}
+		ch := make(chan time.Time, 1)
+		ch <- time.Now()
+		return ch
+	}
+	t.Cleanup(func() { reconnectWait = oldWait })
+
+	addr := freeAddr(t)
+	cfg := &config.Config{
+		DrydockURL:        srv.URL,
+		HeartbeatInterval: 30,
+		WelcomeTimeout:    5,
+		ReconnectDelay:    1, // 1s initial delay
+		MaxReconnectDelay: 4, // low cap so the recorded sequence exercises it too
+		DDPollInterval:    300,
+		BindAddress:       "127.0.0.1",
+		Port:              portFrom(addr),
+		SkipDFCollection:  true,
+	}
+	c := newWireClient(t, cfg)
+
+	_ = c.Run(ctx)
+
+	if len(delays) < wantSamples {
+		t.Fatalf("recorded %d reconnect delays, want at least %d", len(delays), wantSamples)
+	}
+
+	// jitteredDuration scales the nominal delay by [0.75, 1.25]x, so bound
+	// each observed wait against the nominal doubling-then-capped sequence
+	// with that same margin instead of asserting an exact value.
+	nominal := time.Duration(cfg.ReconnectDelay) * time.Second
+	maxDelay := time.Duration(cfg.MaxReconnectDelay) * time.Second
+	for i, d := range delays[:wantSamples] {
+		lo := time.Duration(float64(nominal) * 0.75)
+		hi := time.Duration(float64(nominal) * 1.25)
+		if d < lo || d > hi {
+			t.Fatalf("delay[%d] = %v, want in [%v, %v] for nominal %v", i, d, lo, hi, nominal)
+		}
+		nominal *= 2
+		if nominal > maxDelay {
+			nominal = maxDelay
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// outboundQueueState.enqueue — byte reservation rollback on frame-limit
+// rejection (client.go:1478, extra-mutator run)
+// ---------------------------------------------------------------------------
+
+// TestOutboundQueueStateEnqueueRollsBackReservationOnFrameLimit covers
+// `s.bytes -= size` in the outboundFrameLimitExceeded branch. It fills a
+// small channel to capacity (two accepted enqueues), then enqueues one more
+// envelope that must be rejected because the channel, not the byte budget,
+// is full.
+//
+// Correct code rolls the reservation back to exactly the two accepted
+// frames' bytes. INVERT_ASSIGNMENTS (`-=` -> `+=`) would double-reserve the
+// rejected frame's bytes on top of that; REMOVE_SELF_ASSIGNMENTS (`-=` ->
+// `=`) would throw away the prior reservation and set it to just the
+// rejected frame's size. All three land on different values.
+func TestOutboundQueueStateEnqueueRollsBackReservationOnFrameLimit(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan protocol.Envelope, 2)
+	state := &outboundQueueState{}
+	env := protocol.Envelope{Data: json.RawMessage(`"x"`)}
+	size := outboundEnvelopeBytes(env)
+
+	for i := 0; i < cap(ch); i++ {
+		if got := state.enqueue(ch, env); got != outboundEnqueued {
+			t.Fatalf("enqueue %d = %d, want outboundEnqueued", i, got)
+		}
+	}
+
+	if got := state.enqueue(ch, env); got != outboundFrameLimitExceeded {
+		t.Fatalf("enqueue on a full channel = %d, want outboundFrameLimitExceeded", got)
+	}
+
+	want := int64(cap(ch)) * size
+	if state.bytes != want {
+		t.Fatalf("state.bytes = %d, want %d: the rejected enqueue's reservation must roll back exactly", state.bytes, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// streamedBodyBytesLocked — sums every entry, not just the last
+// (client.go:986, extra-mutator run)
+// ---------------------------------------------------------------------------
+
+// TestStreamedBodyBytesLockedSumsAllEntries proves the pendingBodies loop
+// (client.go:986, `total += int64(pb.buf.Len())`) accumulates across
+// multiple entries. REMOVE_SELF_ASSIGNMENTS (`+=` -> `=`) would leave total
+// holding only the last-iterated entry's length, undercounting whenever more
+// than one streamed body is in flight.
+func TestStreamedBodyBytesLockedSumsAllEntries(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+
+	pbA := &pendingRequestBody{req: protocol.RequestMessage{RequestID: "a"}, timer: time.NewTimer(time.Hour)}
+	pbA.buf.WriteString("12345") // 5 bytes
+	pbB := &pendingRequestBody{req: protocol.RequestMessage{RequestID: "b"}, timer: time.NewTimer(time.Hour)}
+	pbB.buf.WriteString("1234567") // 7 bytes
+	t.Cleanup(func() {
+		pbA.timer.Stop()
+		pbB.timer.Stop()
+	})
+
+	c.pendingBodiesMu.Lock()
+	c.pendingBodies = map[string]*pendingRequestBody{"a": pbA, "b": pbB}
+	c.dispatchingBodies = map[uint64]int64{1: 3, 2: 11}
+	total := c.streamedBodyBytesLocked()
+	c.pendingBodiesMu.Unlock()
+
+	const want = 5 + 7 + 3 + 11
+	if total != want {
+		t.Fatalf("streamedBodyBytesLocked() = %d, want %d (sum across both maps, not just the last entry of each)", total, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// startHealthServer — readiness Ready field requires BOTH docker and
+// controller (client.go:1646, extra-mutator run)
+// ---------------------------------------------------------------------------
+
+// TestHealthServerReadyFieldRequiresBothDockerAndController covers
+// `Ready: dockerConnected && controllerConnected`. Existing tests only ever
+// exercise the (false,false) and (true,true) points, where AND and OR agree;
+// this pins a mixed point (docker up, controller down) where INVERT_LOGICAL
+// (`&&` -> `||`) diverges from the correct AND.
+func TestHealthServerReadyFieldRequiresBothDockerAndController(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		cfg: &config.Config{
+			BindAddress: "127.0.0.1",
+			Port:        "0",
+		},
+	}
+	//nolint:bodyclose // consumed and closed by dockerReady, the code under test.
+	c.dockerClient = &fakeDocker{doResp: mkResp(http.StatusOK, "", "")}
+	c.startHealthServer()
+	t.Cleanup(func() {
+		if c.healthServer != nil {
+			_ = c.healthServer.Close()
+		}
+	})
+
+	rec := httptest.NewRecorder()
+	c.healthServer.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+
+	var body protocol.HealthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode readiness: %v", err)
+	}
+	if body.Ready {
+		t.Fatalf("Ready = true, want false: docker is connected but the controller link is not")
+	}
+	if body.Docker != "connected" || body.Controller != "disconnected" {
+		t.Fatalf("readiness response = %+v, want docker connected / controller disconnected", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// dockerReady — nil response with nil error (client.go:1712, extra-mutator
+// run)
+// ---------------------------------------------------------------------------
+
+// TestDockerReadyNilResponseNilErrorIsNotReady covers `err != nil || response
+// == nil`. A dockerClient that hands back (nil, nil) is the one case where
+// INVERT_LOGICAL (`||` -> `&&`) diverges: the mutant no longer short-circuits
+// on the nil response and falls through toward dereferencing it.
+func TestDockerReadyNilResponseNilErrorIsNotReady(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	c.dockerClient = &fakeDocker{doResp: nil, doErr: nil}
+
+	if got := c.dockerReady(context.Background()); got != false {
+		t.Errorf("dockerReady() with nil response and nil error = %v, want false", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// allowedDockerRequestHeaders — a rejected entry must not stop the loop
+// (client.go:1304, extra-mutator run)
+// ---------------------------------------------------------------------------
+
+// TestAllowedDockerRequestHeadersSkipsOnlyTheBadEntry covers INVERT_LOOPCTRL
+// (`continue` -> `break`) on the CRLF/oversize guard. Unlike the readPump
+// switch-case continues (which are the last statement of an infinite `for`
+// body and so are unaffected by this mutation), this continue sits at the
+// top of a `for range` over a map with a case statement below it: a `break`
+// here would abort the entire loop instead of skipping just the bad entry,
+// dropping every header not yet visited.
+//
+// Go randomizes map iteration order, so a single run could get lucky (the
+// bad entry lands last, after every good one was already set). Looping many
+// times makes the bad entry land first often enough that a `break` is caught
+// with overwhelming probability while a passing run under real code is
+// guaranteed every time.
+func TestAllowedDockerRequestHeadersSkipsOnlyTheBadEntry(t *testing.T) {
+	t.Parallel()
+
+	for i := 0; i < 200; i++ {
+		headers := map[string]string{
+			"Accept":            "application/json",
+			"Content-Type":      "application/json",
+			"X-Registry-Auth":   "creds",
+			"X-Registry-Config": "config",
+			"X-Bad-Header":      "value\r\ninjected",
+		}
+		got := allowedDockerRequestHeaders(headers)
+		if got.Get("Accept") != "application/json" ||
+			got.Get("Content-Type") != "application/json" ||
+			got.Get("X-Registry-Auth") != "creds" ||
+			got.Get("X-Registry-Config") != "config" {
+			t.Fatalf("iteration %d: a good header was dropped because the bad one aborted the loop instead of being skipped: %+v", i, got)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// startHealthServer — a graceful shutdown must not log a health-server error
+// (client.go:1686, extra-mutator run)
+// ---------------------------------------------------------------------------
+
+// TestHealthServerListenAndServeSwallowsGracefulShutdown covers `err != nil
+// && err != http.ErrServerClosed`. ListenAndServe always returns a non-nil
+// error, so INVERT_LOGICAL (`&&` -> `||`) makes the left operand alone
+// satisfy the condition and logs a spurious "health server error" warning on
+// every graceful shutdown, not just a real listen failure.
+func TestHealthServerListenAndServeSwallowsGracefulShutdown(t *testing.T) {
+	// Deliberately NOT t.Parallel(): captures the process-global slog default.
+
+	logBuf := &syncBuffer{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
+	defer slog.SetDefault(oldLogger)
+
+	addr := freeAddr(t)
+	c := &Client{
+		cfg: &config.Config{
+			BindAddress: "127.0.0.1",
+			Port:        portFrom(addr),
+		},
+	}
+	c.startHealthServer()
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = c.healthServer.Shutdown(shutdownCtx)
+	})
+
+	healthURL := "http://" + c.healthServer.Addr + "/health"
+	waitFor(t, "health server ready", func() bool {
+		//nolint:noctx,bodyclose
+		resp, err := http.Get(healthURL) //nolint:gosec
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return true
+	})
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.healthServer.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("graceful shutdown: %v", err)
+	}
+	// Shutdown does not itself establish a happens-before relationship with
+	// the err-check in the ListenAndServe goroutine, so join that goroutine
+	// via healthServerDone (closed only after the check, and the log write
+	// when warranted, complete) instead of polling the log on a timer — a
+	// mutant that logs "health server error" could otherwise pass as clean
+	// simply because the goroutine hadn't run by the deadline yet. The
+	// timeout below fails the test rather than silently passing if the
+	// goroutine never finishes.
+	select {
+	case <-c.healthServerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ListenAndServe goroutine did not finish its post-shutdown error check in time")
+	}
+
+	if strings.Contains(logBuf.String(), "health server error") {
+		t.Errorf("log = %q, want no health-server-error warning on a graceful shutdown", logBuf.String())
 	}
 }

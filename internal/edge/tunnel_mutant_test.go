@@ -264,3 +264,68 @@ func TestRecoverSessionLogsRecoveredPanic(t *testing.T) {
 		t.Errorf("log = %q, want it to contain the execID", out)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// enqueueInput — byte reservation rollback on a full inbox (tunnel.go:280,
+// extra-mutator run)
+// ---------------------------------------------------------------------------
+
+// TestEnqueueInputRollsBackReservationOnQueueFull covers `s.queuedInputBytes
+// -= len(data)` in the inputQueueFull branch. It fills a small inbox to
+// capacity, then enqueues one more chunk that must be rejected because the
+// channel, not the byte budget, is full.
+//
+// Correct code rolls the reservation back to exactly the accepted chunks'
+// bytes. INVERT_ASSIGNMENTS (`-=` -> `+=`) would double-reserve the rejected
+// chunk's bytes on top of that; REMOVE_SELF_ASSIGNMENTS (`-=` -> `=`) would
+// discard the prior reservation and set it to just the rejected chunk's
+// size. All three land on different values.
+func TestEnqueueInputRollsBackReservationOnQueueFull(t *testing.T) {
+	t.Parallel()
+
+	s := &ExecSession{inbox: make(chan execItem, 2)}
+	data := []byte("abcde") // 5 bytes
+
+	for i := 0; i < cap(s.inbox); i++ {
+		if got := s.enqueueInput(data); got != inputEnqueued {
+			t.Fatalf("enqueueInput %d = %d, want inputEnqueued", i, got)
+		}
+	}
+
+	if got := s.enqueueInput(data); got != inputQueueFull {
+		t.Fatalf("enqueueInput on a full inbox = %d, want inputQueueFull", got)
+	}
+
+	s.mu.Lock()
+	got := s.queuedInputBytes
+	s.mu.Unlock()
+	want := len(data) * cap(s.inbox)
+	if got != want {
+		t.Fatalf("queuedInputBytes = %d, want %d: the rejected enqueue's reservation must roll back exactly", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// releaseInputBytes — subtracts across multiple calls (tunnel.go:290,
+// extra-mutator run)
+// ---------------------------------------------------------------------------
+
+// TestReleaseInputBytesSubtractsAcrossMultipleCalls covers
+// `s.queuedInputBytes -= n`. REMOVE_SELF_ASSIGNMENTS (`-=` -> `=`) would make
+// each call overwrite the budget with just its own n instead of subtracting
+// from the running total, so two releases in a row expose the bug that a
+// single release cannot.
+func TestReleaseInputBytesSubtractsAcrossMultipleCalls(t *testing.T) {
+	t.Parallel()
+
+	s := &ExecSession{queuedInputBytes: 30}
+	s.releaseInputBytes(10)
+	s.releaseInputBytes(7)
+
+	s.mu.Lock()
+	got := s.queuedInputBytes
+	s.mu.Unlock()
+	if got != 13 {
+		t.Fatalf("queuedInputBytes = %d, want 13 after releasing 10 then 7 from 30", got)
+	}
+}
