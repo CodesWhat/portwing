@@ -37,6 +37,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a duplicate-`requestId` rejection until the 30-second idle timeout
   expired. Teardown now drains those pending bodies and stops their timers
   alongside the exec sessions, so the retry is accepted immediately.
+- **SIGTERM now stops the edge agent promptly against a quiet controller.**
+  The read pump only looked for shutdown between messages, so once it was
+  parked inside a socket read a cancelled context was invisible to it until
+  the controller said something or the read deadline expired — and that
+  deadline floors at 60 seconds. A healthy controller with nothing to send is
+  exactly that case, so a container told to stop sat there well past the 10
+  seconds `docker stop` waits and the 30 Kubernetes waits before following up
+  with SIGKILL. Ordinary restarts and rolling deploys ended in a killed
+  process instead of a clean exit, with in-flight work dropped rather than
+  finished. Shutdown now closes the controller connection as soon as the
+  context is cancelled, which fails the blocked read at once and unwinds the
+  agent in milliseconds. The close is not mistaken for a dropped tunnel: the
+  agent still exits with the shutdown reason and schedules no reconnect on the
+  way out, and a real drop still reconnects as before.
 
 ## [v0.9.13] - 2026-09-03
 

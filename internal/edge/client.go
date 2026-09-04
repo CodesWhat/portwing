@@ -431,6 +431,31 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	c.conn = conn
 	c.connMu.Unlock()
 
+	// Cancelling ctx has to reach the socket, not only the loops that poll it.
+	// readPump checks ctx once per iteration, at the top; once it is inside
+	// conn.ReadMessage the cancel is invisible to it until the controller
+	// closes the socket or the steady-state read deadline expires — and that
+	// deadline floors at 60 seconds (readDeadline), which outlives both
+	// Docker's and Kubernetes' default SIGKILL grace. A healthy controller
+	// with nothing to say is exactly the case that hits it. Closing the conn
+	// is what makes the blocked read fail, so SIGTERM unwinds in milliseconds
+	// instead of up to a minute.
+	//
+	// The read error that close produces is not a reconnect signal: Run tests
+	// ctx.Err() before it looks at connect's error, so it returns ctx.Err()
+	// without reaching IncReconnect.
+	//
+	// The closure captures this conn, not c.conn, so even a callback that ran
+	// late could only close the generation it was registered for and never a
+	// replacement the reconnect loop has since installed. stopOnCancel is
+	// still deferred, because an AfterFunc that is never stopped stays
+	// registered on ctx for as long as the agent runs and the reconnect loop
+	// would add one per attempt. Nothing is logged here: the close is expected
+	// and gorilla's Close only forwards the net.Conn's error, which the
+	// teardown path below reports already.
+	stopOnCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopOnCancel()
+
 	// Send hello.
 	if err := c.sendHello(ctx); err != nil {
 		closeWebSocket(conn, "send hello failure")
