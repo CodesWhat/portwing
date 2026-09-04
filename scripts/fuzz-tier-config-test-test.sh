@@ -10,7 +10,7 @@ seed_fixture() {
 	rm -rf "${fixture:?}"/*
 	mkdir -p "${fixture}/scripts/ci" "${fixture}/.github/workflows" "${fixture}/.clusterfuzzlite"
 	cp scripts/fuzz-tier-config-test.sh "${fixture}/scripts/"
-	cp scripts/ci/go-fuzz.sh scripts/ci/fuzz-run.sh "${fixture}/scripts/ci/"
+	cp scripts/ci/go-fuzz.sh scripts/ci/fuzz-run.sh scripts/ci/fuzz-replay.sh "${fixture}/scripts/ci/"
 	cp lefthook.yml "${fixture}/"
 	cp .github/workflows/ci-verify.yml "${fixture}/.github/workflows/"
 	cp .github/workflows/quality-fuzz-nightly.yml "${fixture}/.github/workflows/"

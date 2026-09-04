@@ -29,6 +29,20 @@
 #             the newest slot in the 6-row window holds a duplicate of the
 #             current measurement and silently evicts the oldest real prior,
 #             raising basis and shrinking the buffer.
+#
+#             PW-7.36: a row (this run's own, or a prior one carrying the
+#             same killed/lived/timed_out counts) that timed out any mutants
+#             does not enter the efficacy pool as Gremlins' own reported
+#             value. It is recomputed as killed / (killed + lived +
+#             timed_out), i.e. every timed-out mutant is added to the
+#             sample and credited to neither side -- never counted as
+#             killed -- instead of being dropped from the ratio the way
+#             Gremlins' own killed/(killed+lived) drops it. That can only
+#             pull the pool value down or leave it unchanged, so a package
+#             that timed out mutants can never ratchet a floor higher than a
+#             clean run would have. mutator_coverage is not adjusted:
+#             Gremlins counts a timed-out mutant as covered (a test did run
+#             against it), so it costs nothing there.
 #   basis   = min(pool). Never the best run in the pool -- a ratchet built
 #             from the best run would relock the very slack PW-6.1 exists to
 #             catch.
@@ -47,8 +61,12 @@
 # least 2.00 and is strictly above it -- never a lower or equal value. A
 # package is skipped entirely (not proposed, not silently dropped) when its
 # own run this cycle was not a clean gated measurement: mode != "gated",
-# outcome != "success", it had any TIMED OUT mutant, or neither metric has a
-# readable pool.
+# outcome != "success", its timed-out mutants exceed 5% of the mutants it
+# attempted (reason "timed-out-over-tolerance", the counts that produced the
+# decision recorded alongside it), or neither metric has a readable pool.
+# Up to that 5% tolerance a timed-out mutant no longer skips the package on
+# its own -- see the pool comment above for how it is kept from raising a
+# floor instead.
 set -euo pipefail
 export LC_ALL=C
 
@@ -135,6 +153,8 @@ while IFS= read -r name; do
 	mode="$(jq -r '.mode' <<<"${record}")"
 	outcome="$(jq -r '.outcome' <<<"${record}")"
 	timed_out="$(jq -r '.timed_out // 0' <<<"${record}")"
+	killed="$(jq -r '.killed // empty' <<<"${record}")"
+	lived="$(jq -r '.lived // empty' <<<"${record}")"
 
 	if [ "${mode}" != "gated" ]; then
 		jq -cn --arg name "${name}" --arg reason "${mode}" '{name: $name, reason: $reason}' >>"${skipped_file}"
@@ -144,8 +164,23 @@ while IFS= read -r name; do
 		jq -cn --arg name "${name}" --arg reason "outcome-${outcome}" '{name: $name, reason: $reason}' >>"${skipped_file}"
 		continue
 	fi
-	if [ "$(to_hundredths "${timed_out}")" -gt 0 ]; then
-		jq -cn --arg name "${name}" '{name: $name, reason: "timed-out"}' >>"${skipped_file}"
+
+	# PW-7.36. mutants_total is Gremlins' own killed+lived+notViable count,
+	# which already excludes timed-out mutants (see the extraction comment in
+	# quality-mutation-monthly.yml), so adding timed_out back in gives the
+	# count of mutants actually attempted this run. Both sides of the
+	# tolerance check are plain non-negative integers -- mutants_total from
+	# Gremlins' JSON, timed_out parsed as digits from its text report -- so
+	# timed_out*100 <= mutants_attempted*5 is exactly timed_out/mutants <=
+	# 5% without ever forming the fraction, and with timed_out at 0 the
+	# check always passes. Above the tolerance the package is still skipped,
+	# same as before, but with the counts that produced the decision
+	# attached instead of a bare reason string.
+	mutants_total="$(jq -r '.mutants_total // 0' <<<"${record}")"
+	mutants_attempted=$((mutants_total + timed_out))
+	if [ "$((timed_out * 100))" -gt "$((mutants_attempted * 5))" ]; then
+		jq -cn --arg name "${name}" --argjson timed_out "${timed_out}" --argjson mutants "${mutants_attempted}" \
+			'{name: $name, reason: "timed-out-over-tolerance", timed_out: $timed_out, mutants: $mutants}' >>"${skipped_file}"
 		continue
 	fi
 
@@ -161,17 +196,38 @@ while IFS= read -r name; do
 		fi
 		pool_ok=1
 
+		# PW-7.36. A timed-out mutant is neither killed nor lived, so it is
+		# never counted as killed: every timed-out mutant is added to the
+		# denominator here and credited to neither side, which can only pull
+		# this value down from Gremlins' own killed/(killed+lived) or leave
+		# it unchanged (timed_out == 0), never raise it. Applies to this
+		# run's own contribution and to any history row that carries the
+		# same killed/lived/timed_out counts (quality-history-append.sh
+		# appends the full record, not just the headline numbers). Only
+		# efficacy is adjusted: Gremlins counts a timed-out mutant as
+		# covered, so mutator_coverage owes it nothing.
+		current_pool_value="${measured}"
+		if [ "${metric}" = "efficacy" ] && [ "${timed_out}" -gt 0 ] && [ -n "${killed}" ] && [ -n "${lived}" ]; then
+			current_pool_value="$(awk -v k="${killed}" -v l="${lived}" -v t="${timed_out}" \
+				'BEGIN { printf "%.10f", (100.0 * k) / (k + l + t) }')"
+		fi
+
 		history_values="$(jq -r --arg name "${name}" --arg metric "${metric}" --arg run_id "${GITHUB_RUN_ID:-}" '
             [ .[]
               | select(.name == $name and .mode == "gated" and .outcome == "success")
               | select($run_id == "" or ((.run_id // "") | tostring) != $run_id)
             ]
             | .[-6:][]
-            | .[$metric]
+            | (
+                if $metric == "efficacy" and ((.timed_out // 0) > 0) and (.killed != null) and (.lived != null)
+                then (100 * .killed) / (.killed + .lived + (.timed_out // 0))
+                else .[$metric]
+                end
+              )
             | select(. != null)
         ' <<<"${history_json}")"
 
-		pool="$(printf '%s\n%s\n' "${measured}" "${history_values}" | awk 'NF')"
+		pool="$(printf '%s\n%s\n' "${current_pool_value}" "${history_values}" | awk 'NF')"
 		samples="$(printf '%s\n' "${pool}" | awk 'NF' | wc -l | tr -d ' ')"
 
 		basis="$(printf '%s\n' "${pool}" | sort -g | head -n1)"
@@ -202,12 +258,14 @@ while IFS= read -r name; do
 				--argjson measured "${measured_fmt}" \
 				--argjson buffer "${buffer_fmt}" --argjson proposed "${proposed}" \
 				--argjson gain "${gain}" --argjson samples "${samples}" \
+				--argjson timed_out "${timed_out}" --argjson mutants "${mutants_attempted}" \
 				--arg workflow_field "${workflow_field}" --arg floor_hint "${floor_fmt}" \
 				--arg test_map_key "${package}" \
 				'{
                     name: $name, package: $package, metric: $metric,
                     current_floor: $current_floor, basis: $basis, measured: $measured, buffer: $buffer,
                     proposed: $proposed, gain: $gain, samples: $samples,
+                    timed_out: $timed_out, mutants: $mutants,
                     edit: {
                         workflow_line_hint: ($workflow_field + ": " + $floor_hint),
                         test_map_key: $test_map_key
