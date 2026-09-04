@@ -39,13 +39,15 @@ run-name: >-
 # way two workflows racing that key already do (see the corpus-touching job's
 # concurrency group below). Instead each leg uploads its own fuzz cache
 # directory as a short-lived (1-day) artifact, and the `merge-corpus` job —
-# one instance per fuzzer, after all six of that fuzzer's legs finish —
-# downloads the six, folds them into one directory, and is the only thing
-# that calls `actions/cache/save`. Go's fuzz corpus entries are named by the
-# content hash of the encoded value, so a file with the same name from two
-# different legs is always the same bytes: copying six overlapping
-# directories into one and letting duplicate names collide is exactly as
-# correct as copying one.
+# one instance per fuzzer, gated on the whole `monthly-fuzz` matrix via
+# `needs: monthly-fuzz` (which has no matrix granularity, so every
+# merge-corpus instance waits for all 60 legs across every fuzzer, not just
+# this one's own six) — downloads the six, folds them into one directory,
+# and is the only thing that calls `actions/cache/save`. Go's fuzz corpus
+# entries are named by the content hash of the encoded value, so a file with
+# the same name from two different legs is always the same bytes: copying
+# six overlapping directories into one and letting duplicate names collide
+# is exactly as correct as copying one.
 #
 # 1 hour per fuzzer × 10 fuzzers × matrix-parallel = ~10-12 minutes wall time
 # per leg, unchanged total CPU-minutes. Crashes upload with 180-day retention

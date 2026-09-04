@@ -124,8 +124,15 @@ mv "${nightly}.tmp" "${nightly}"
 expect_fail "a corpus save that skips failed runs must not satisfy the contract"
 
 seed_fixture
-sed 's|^    timeout-minutes: 75$|    timeout-minutes: 75\n    permissions:\n      actions: read|' \
-	"${nightly}" >"${nightly}.tmp"
+awk '
+	$0 == "    timeout-minutes: 75" {
+		print
+		print "    permissions:"
+		print "      actions: read"
+		next
+	}
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "a job-level permissions grant must not satisfy the contract"
 
@@ -136,8 +143,14 @@ expect_fail "dropping the on-failure corpus artifact upload must not satisfy the
 
 seed_fixture
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-sed 's|^            ${{ steps.corpus.outputs.generated }}$|&\n            ${{ steps.corpus.outputs.seed }}|' \
-	"${nightly}" >"${nightly}.tmp"
+awk '
+	$0 == "            ${{ steps.corpus.outputs.generated }}" {
+		print
+		print "            ${{ steps.corpus.outputs.seed }}"
+		next
+	}
+	{ print }
+' "${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "caching the git-tracked seed corpus must not satisfy the contract"
 
@@ -215,8 +228,15 @@ seed_fixture
 # merge-corpus growing a permissions block of its own — the write-scope
 # discipline quality-history-config-test.sh guards for the recording jobs,
 # extended here to the job that now owns the cache save.
-sed 's|^    needs: monthly-fuzz$|    needs: monthly-fuzz\n    permissions:\n      contents: write|' \
-	"${monthly}" >"${monthly}.tmp"
+awk '
+	$0 == "    needs: monthly-fuzz" {
+		print
+		print "    permissions:"
+		print "      contents: write"
+		next
+	}
+	{ print }
+' "${monthly}" >"${monthly}.tmp"
 mv "${monthly}.tmp" "${monthly}"
 expect_fail "a merge-corpus job with permissions of its own must not satisfy the contract"
 
