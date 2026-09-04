@@ -42,7 +42,12 @@
 #             that timed out mutants can never ratchet a floor higher than a
 #             clean run would have. mutator_coverage is not adjusted:
 #             Gremlins counts a timed-out mutant as covered (a test did run
-#             against it), so it costs nothing there.
+#             against it), so it costs nothing there. A history row that
+#             timed out mutants but is missing killed or lived cannot be
+#             recomputed at all, so it cannot be trusted to have been
+#             discounted -- it is dropped from the pool instead of falling
+#             back to its raw (undiscounted) efficacy, and the drop is
+#             counted in the proposal's discarded_rows.
 #   basis   = min(pool). Never the best run in the pool -- a ratchet built
 #             from the best run would relock the very slack PW-6.1 exists to
 #             catch.
@@ -212,20 +217,45 @@ while IFS= read -r name; do
 				'BEGIN { printf "%.10f", (100.0 * k) / (k + l + t) }')"
 		fi
 
-		history_values="$(jq -r --arg name "${name}" --arg metric "${metric}" --arg run_id "${GITHUB_RUN_ID:-}" '
+		# A history row that timed out mutants but is missing killed or
+		# lived cannot be recomputed as killed/(killed+lived+timed_out), so
+		# it cannot be discounted the way PW-7.36 requires. Falling back to
+		# its raw (undiscounted) efficacy would let exactly the kind of row
+		# this discount exists for raise the pool minimum, so such rows are
+		# dropped from the pool entirely instead, and counted so the drop is
+		# visible on the proposal.
+		history_result="$(jq -c --arg name "${name}" --arg metric "${metric}" --arg run_id "${GITHUB_RUN_ID:-}" '
             [ .[]
               | select(.name == $name and .mode == "gated" and .outcome == "success")
               | select($run_id == "" or ((.run_id // "") | tostring) != $run_id)
             ]
-            | .[-6:][]
-            | (
-                if $metric == "efficacy" and ((.timed_out // 0) > 0) and (.killed != null) and (.lived != null)
-                then (100 * .killed) / (.killed + .lived + (.timed_out // 0))
-                else .[$metric]
-                end
-              )
-            | select(. != null)
+            | .[-6:]
+            | {
+                values: [ .[]
+                  | select(
+                      $metric != "efficacy"
+                      or ((.timed_out // 0) == 0)
+                      or (.killed != null and .lived != null)
+                    )
+                  | (
+                      if $metric == "efficacy" and ((.timed_out // 0) > 0)
+                      then (100 * .killed) / (.killed + .lived + (.timed_out // 0))
+                      else .[$metric]
+                      end
+                    )
+                  | select(. != null)
+                ],
+                discarded: [ .[]
+                  | select(
+                      $metric == "efficacy"
+                      and ((.timed_out // 0) > 0)
+                      and (.killed == null or .lived == null)
+                    )
+                ] | length
+              }
         ' <<<"${history_json}")"
+		history_values="$(jq -r '.values[]' <<<"${history_result}")"
+		discarded_rows="$(jq -r '.discarded' <<<"${history_result}")"
 
 		pool="$(printf '%s\n%s\n' "${current_pool_value}" "${history_values}" | awk 'NF')"
 		samples="$(printf '%s\n' "${pool}" | awk 'NF' | wc -l | tr -d ' ')"
@@ -259,13 +289,14 @@ while IFS= read -r name; do
 				--argjson buffer "${buffer_fmt}" --argjson proposed "${proposed}" \
 				--argjson gain "${gain}" --argjson samples "${samples}" \
 				--argjson timed_out "${timed_out}" --argjson mutants "${mutants_attempted}" \
+				--argjson discarded_rows "${discarded_rows}" \
 				--arg workflow_field "${workflow_field}" --arg floor_hint "${floor_fmt}" \
 				--arg test_map_key "${package}" \
 				'{
                     name: $name, package: $package, metric: $metric,
                     current_floor: $current_floor, basis: $basis, measured: $measured, buffer: $buffer,
                     proposed: $proposed, gain: $gain, samples: $samples,
-                    timed_out: $timed_out, mutants: $mutants,
+                    timed_out: $timed_out, mutants: $mutants, discarded_rows: $discarded_rows,
                     edit: {
                         workflow_line_hint: ($workflow_field + ": " + $floor_hint),
                         test_map_key: $test_map_key

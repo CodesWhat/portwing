@@ -55,14 +55,18 @@ write_record() {
         }' >"${dir}/quality-history-record.json"
 }
 
-# Write one history.jsonl row for a package. run_id defaults to omitted, so
-# existing call sites (rows with no run_id) are unaffected.
+# Write one history.jsonl row for a package. run_id defaults to omitted, and
+# timed_out/killed/lived default to 0/null/null (no timed-out mutants), so
+# existing call sites are unaffected.
 write_history_row() {
 	local name="$1" efficacy="$2" mcover="$3" run_id="${4:-}"
+	local timed_out="${5:-0}" killed="${6:-null}" lived="${7:-null}"
 	jq -cn \
 		--arg name "${name}" --argjson efficacy "${efficacy}" --argjson mcover "${mcover}" \
 		--arg run_id "${run_id}" \
-		'{name: $name, mode: "gated", outcome: "success", efficacy: $efficacy, mutator_coverage: $mcover}
+		--argjson timed_out "${timed_out}" --argjson killed "${killed}" --argjson lived "${lived}" \
+		'{name: $name, mode: "gated", outcome: "success", efficacy: $efficacy, mutator_coverage: $mcover,
+		  timed_out: $timed_out, killed: $killed, lived: $lived}
 		 + (if $run_id == "" then {} else {run_id: $run_id} end)'
 }
 
@@ -403,6 +407,46 @@ proposed_without_discount="$(awk 'BEGIN { printf "%.2f", int(((94.74 - 1.00) * 1
 awk -v with="${proposed}" -v without="${proposed_without_discount}" 'BEGIN { exit !(with <= without) }' ||
 	fail "timedadjust proposed (${proposed}) must never exceed what it would be without the discount (${proposed_without_discount})"
 [ "${proposed}" = "89.00" ] || fail "timedadjust proposed must be 89.00 (basis 90.00 - buffer 1.00), got ${proposed}"
+
+# --- (14) an undiscountable timed-out history row is dropped, not raw -------
+#
+# A history row that timed out mutants but carries no killed/lived cannot be
+# recomputed as killed/(killed+lived+timed_out), so it cannot be discounted
+# the way PW-7.36 requires. Falling back to its raw (undiscounted) efficacy
+# would let it enter the pool anyway; the fix drops it from the pool
+# entirely instead, so its presence in history.jsonl must change nothing:
+# the proposal from a history file holding only that row must be identical
+# to the proposal from an empty history file, and the row must be counted
+# in discarded_rows.
+case14a="${fixture}/case14a"
+mkdir -p "${case14a}/records/discarded"
+write_record "${case14a}/records/discarded" "discarded" "./internal/discarded" \
+	"gated" "success" 0 70.00 90.00 0 0
+write_history_row "discarded" 55.00 60.00 "" 5 >"${case14a}/history.jsonl"
+
+case14b="${fixture}/case14b"
+mkdir -p "${case14b}/records/discarded"
+write_record "${case14b}/records/discarded" "discarded" "./internal/discarded" \
+	"gated" "success" 0 70.00 90.00 0 0
+: >"${case14b}/history.jsonl"
+
+bash "${ratchet}" "${case14a}/records" "${case14a}/history.jsonl" "${case14a}/out.json"
+bash "${ratchet}" "${case14b}/records" "${case14b}/history.jsonl" "${case14b}/out.json"
+
+discarded_rows="$(jq -r '.proposals[] | select(.metric == "efficacy") | .discarded_rows' "${case14a}/out.json")"
+[ "${discarded_rows}" = "1" ] || fail "case14a must count the undiscountable row in discarded_rows, got ${discarded_rows}"
+
+basis_with="$(jq -r '.proposals[] | select(.metric == "efficacy") | .basis' "${case14a}/out.json")"
+proposed_with="$(jq -r '.proposals[] | select(.metric == "efficacy") | .proposed' "${case14a}/out.json")"
+basis_without="$(jq -r '.proposals[] | select(.metric == "efficacy") | .basis' "${case14b}/out.json")"
+proposed_without="$(jq -r '.proposals[] | select(.metric == "efficacy") | .proposed' "${case14b}/out.json")"
+
+[ "${basis_with}" = "90.00" ] || fail "case14a basis must ignore the discarded row and equal the measured 90.00, got ${basis_with}"
+[ "${proposed_with}" = "89.00" ] || fail "case14a proposed must be 89.00 (basis 90.00 - buffer 1.00), got ${proposed_with}"
+[ "${basis_with}" = "${basis_without}" ] ||
+	fail "the discarded row must not change basis: with=${basis_with} without=${basis_without}"
+[ "${proposed_with}" = "${proposed_without}" ] ||
+	fail "the discarded row must not raise (or change) the proposal: with=${proposed_with} without=${proposed_without}"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} mutation ratchet check(s) failed" >&2

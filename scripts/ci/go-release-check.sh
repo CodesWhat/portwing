@@ -22,6 +22,7 @@ bash scripts/fuzz-tier-config-test-test.sh
 bash scripts/fuzz-tier-config-test.sh
 bash scripts/fuzz-run-script-test.sh
 bash scripts/fuzz-score-script-test.sh
+bash scripts/fuzz-replay-script-test.sh
 bash scripts/fuzz-history-merge-script-test.sh
 bash scripts/cflite-config-test-test.sh
 bash scripts/cflite-config-test.sh

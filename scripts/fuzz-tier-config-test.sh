@@ -684,7 +684,7 @@ if [ ! -f scripts/ci/fuzz-replay.sh ]; then
 fi
 if [ "${failures}" -eq "${fail_count_before_replay_script_check}" ]; then
 	replay_script_code="$(strip_comments scripts/ci/fuzz-replay.sh)"
-	# The replay script must classify a regression as kind=crash,
+	# The replay script must classify a genuine regression as kind=crash,
 	# reason=seed-regression — the same reason value the -fuzz path's own
 	# seed-corpus-regression case uses (scripts/ci/fuzz-run.sh above) — so
 	# the Summarize step's existing "a previously-fixed crash has regressed"
@@ -695,6 +695,20 @@ if [ "${failures}" -eq "${fail_count_before_replay_script_check}" ]; then
 		fail "scripts/ci/fuzz-replay.sh must emit reason=seed-regression on a seed-replay regression"
 	grep -Fq 'kind=replay' <<<"${replay_script_code}" ||
 		fail "scripts/ci/fuzz-replay.sh must emit kind=replay on a clean pass, not kind=pass — that value stays reserved for a run that spent -fuzz minutes"
+
+	# Three more exit paths, each kind=error rather than kind=crash, since
+	# none of them is a finding the committed corpus is responsible for: a
+	# package that no longer builds, a cached GOCACHE entry whose shape no
+	# longer matches the target's current signature, and a failure copying
+	# that cache into testdata in the first place. Collapsing any of these
+	# into reason=seed-regression would send someone hunting a corpus
+	# regression that isn't there.
+	grep -Fq 'reason=build' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit reason=build when the package fails to compile, distinct from a corpus regression"
+	grep -Fq 'reason=stale-cache' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit reason=stale-cache when a cached corpus entry no longer matches the target's signature"
+	grep -Fq 'reason=corpus-copy' <<<"${replay_script_code}" ||
+		fail "scripts/ci/fuzz-replay.sh must emit reason=corpus-copy when copying the generated corpus into testdata fails, rather than swallowing the error into a green kind=replay"
 fi
 
 # --- Spec 2: corpus coverage score step (nightly only) ----------------------

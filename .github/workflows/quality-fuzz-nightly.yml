@@ -272,7 +272,16 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: fuzz-corpus-${{ matrix.fuzzer.name }}-${{ github.run_id }}
-          path: "**/testdata/fuzz/${{ matrix.fuzzer.name }}/"
+          # testdata/fuzz/<Target>/ is the committed seed corpus (any crasher
+          # a -fuzz run wrote lands here). fuzz-replay-failure/<Target>/ is
+          # scripts/ci/fuzz-replay.sh's own reproduction copy of this run's
+          # cached-<basename> corpus, saved there before its EXIT trap
+          # removes cached-* from testdata/fuzz/ — without this second path,
+          # a replay-tier regression triggered only by the GOCACHE corpus
+          # (never committed) would leave nothing downloadable behind.
+          path: |
+            **/testdata/fuzz/${{ matrix.fuzzer.name }}/
+            fuzz-replay-failure/${{ matrix.fuzzer.name }}/
           retention-days: 90
           if-no-files-found: ignore
 
@@ -433,7 +442,9 @@ jobs:
               if [ "${REASON}" = "seed-regression" ]; then
                 if [ -z "${FUZZTIME}" ]; then
                   echo "The committed seed corpus (replayed via \`go test -run\`, not \`-fuzz\`) is failing:"
-                  echo "a previously-fixed crash has regressed."
+                  echo "a previously-fixed crash has regressed. scripts/ci/fuzz-replay.sh also saved"
+                  echo "its cached-corpus copies to \`fuzz-replay-failure/${FUZZER}/\` before cleanup,"
+                  echo "in case the regression is only in a cached (not yet committed) input."
                 else
                   echo "The committed seed corpus is failing (matched \`failure while testing seed corpus entry\`):"
                   echo "a previously-fixed crash has regressed."
@@ -443,6 +454,30 @@ jobs:
               fi
               echo "Download artifact \`fuzz-corpus-${FUZZER}-${RUN_ID}\`, commit the"
               echo "minimized input to the seed corpus, fix the bug, and push."
+            elif [ "${KIND}" = "error" ]; then
+              echo ""
+              case "${REASON}" in
+              build)
+                echo "\`${PKG}\` failed to compile (scripts/ci/fuzz-replay.sh's pre-replay build check)."
+                echo "Not a corpus regression — fix the package and push."
+                ;;
+              stale-cache)
+                echo "A cached corpus entry no longer matches \`${FUZZER}\`'s current signature"
+                echo "(matched one of Go's own corpus-decode errors). Not a regression in the"
+                echo "committed seed corpus — the stale entry was saved to"
+                echo "\`fuzz-replay-failure/${FUZZER}/\` before cleanup; it self-heals once the next"
+                echo "\"Save fuzz corpus\" step below writes a fresh cache entry."
+                ;;
+              corpus-copy)
+                echo "Copying the cached (GOCACHE) corpus into \`testdata/fuzz/${FUZZER}/\` failed"
+                echo "before the replay could even run — an infrastructure problem, not a code"
+                echo "or corpus regression. See this step's own log for the underlying error."
+                ;;
+              *)
+                echo "scripts/ci/fuzz-replay.sh reported kind=error (reason: \`${REASON:-none}\`)."
+                echo "See this step's own log for detail."
+                ;;
+              esac
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
