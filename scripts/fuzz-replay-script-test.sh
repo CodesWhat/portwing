@@ -258,6 +258,73 @@ if grep -Fxq "reason=stale-cache" "${out_i}"; then
 fi
 rm -f "${seed_dir}/seed-empty" "${out_i}"
 
+# --- (J) a generated cached-* entry whose corpus header is an unknown
+# encoding version ("go test fuzz v9") -> kind=error reason=stale-cache,
+# exit 2 (Codex review: internal/fuzz/fuzz.go's readCorpusData wraps EVERY
+# unmarshalCorpusFile error the same way, not just "cannot unmarshal ...";
+# an unknown version is one of the wrapped messages the old decode_pattern
+# let fall all the way through to a false kind=crash reason=seed-regression
+# -- confirmed against git show e9cdc02:scripts/ci/fuzz-replay.sh).
+mkdir -p "${module}/generated-v9/FuzzEcho"
+cat >"${module}/generated-v9/FuzzEcho/futureversion" <<'EOF'
+go test fuzz v9
+string("x")
+EOF
+
+out_j="$(mktemp)"
+status=0
+(cd "${module}" && FUZZ_OUTPUT_FILE="${out_j}" bash "${replay}" "./pkgtest" "FuzzEcho" "${module}/generated-v9/FuzzEcho" "${seed_dir}") || status=$?
+[ "${status}" -eq 2 ] || fail "case J (unknown-version-cached): expected exit 2, got ${status}"
+grep -Fxq "kind=error" "${out_j}" || fail "case J (unknown-version-cached): expected kind=error, got: $(cat "${out_j}")"
+grep -Fxq "reason=stale-cache" "${out_j}" || fail "case J (unknown-version-cached): expected reason=stale-cache, got: $(cat "${out_j}")"
+if grep -Fxq "reason=seed-regression" "${out_j}"; then
+	fail "case J (unknown-version-cached): must not misclassify a wrapped unknown-version decode error as seed-regression"
+fi
+no_cached_survive "${seed_dir}" "case J"
+rm -f "${out_j}"
+
+# --- (K) a committed seed whose corpus header is an unknown encoding
+# version ("go test fuzz v9") -> kind=error reason=seed-decode, NOT
+# stale-cache, exit 2 (same wrapped-message gap as case J, but on a
+# git-tracked seed -- confirmed against e9cdc02, which also misreports this
+# as reason=seed-regression).
+cat >"${seed_dir}/seed-v9" <<'EOF'
+go test fuzz v9
+string("x")
+EOF
+
+out_k="$(mktemp)"
+status=0
+(cd "${module}" && FUZZ_OUTPUT_FILE="${out_k}" bash "${replay}" "./pkgtest" "FuzzEcho" "" "${seed_dir}") || status=$?
+[ "${status}" -eq 2 ] || fail "case K (unknown-version-seed): expected exit 2, got ${status}"
+grep -Fxq "kind=error" "${out_k}" || fail "case K (unknown-version-seed): expected kind=error, got: $(cat "${out_k}")"
+grep -Fxq "reason=seed-decode" "${out_k}" || fail "case K (unknown-version-seed): expected reason=seed-decode, got: $(cat "${out_k}")"
+if grep -Fxq "reason=stale-cache" "${out_k}"; then
+	fail "case K (unknown-version-seed): must not report reason=stale-cache for a committed seed"
+fi
+rm -f "${seed_dir}/seed-v9" "${out_k}"
+
+# --- (L) a generated cached-* entry whose filename contains a literal
+# double quote -> kind=error reason=stale-cache, exit 2 (Codex review: Go's
+# %q formatting of the failing path escapes an embedded quote as \", and
+# the old path capture backtracked past that escaped quote -- reading
+# "cached-bad\"name" as basename "name" and misclassifying this run's own
+# cached copy as a committed seed, reason=seed-decode, on e9cdc02).
+mkdir -p "${module}/generated-quote/FuzzEcho"
+: >"${module}/generated-quote/FuzzEcho/bad\"name"
+
+out_l="$(mktemp)"
+status=0
+(cd "${module}" && FUZZ_OUTPUT_FILE="${out_l}" bash "${replay}" "./pkgtest" "FuzzEcho" "${module}/generated-quote/FuzzEcho" "${seed_dir}") || status=$?
+[ "${status}" -eq 2 ] || fail "case L (quoted-cached-filename): expected exit 2, got ${status}"
+grep -Fxq "kind=error" "${out_l}" || fail "case L (quoted-cached-filename): expected kind=error, got: $(cat "${out_l}")"
+grep -Fxq "reason=stale-cache" "${out_l}" || fail "case L (quoted-cached-filename): expected reason=stale-cache, got: $(cat "${out_l}")"
+if grep -Fxq "reason=seed-decode" "${out_l}"; then
+	fail "case L (quoted-cached-filename): must not misclassify its own cached copy as a committed seed"
+fi
+no_cached_survive "${seed_dir}" "case L"
+rm -f "${out_l}"
+
 # --- no cached-* survives outside fuzz-replay-failure/, in any case --------
 #
 # fuzz-replay-failure/ is the one place a cached-<basename> copy is meant to

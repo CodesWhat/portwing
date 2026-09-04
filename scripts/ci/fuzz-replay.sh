@@ -303,19 +303,34 @@ save_repro() {
 # ("testdata/fuzz/<Target>/<name>": <reason>); pull every such path out of
 # the log and split on whether its basename is one of this run's own
 # cached-<basename> copies (stale GOCACHE entry) or a git-tracked seed
-# (the committed corpus itself no longer matches the signature). Go's own
-# testing/fuzz.go readCorpusData wraps unmarshalCorpusFile's error as
-# "unmarshal: %v" before ReadCorpus prepends the quoted path, so an empty or
-# otherwise unparseable corpus file reads
-# "<path>": unmarshal: cannot unmarshal empty string — the "unmarshal: " is
-# optional here only because the other two phrases (mismatched types /
-# wrong number of values) come from a different check that does not wrap.
-decode_pattern='"[^"]+": (unmarshal: )?(cannot unmarshal|mismatched types in corpus entry|wrong number of values in corpus entry)'
+# (the committed corpus itself no longer matches the signature).
+# internal/fuzz/fuzz.go's readCorpusData wraps EVERY unmarshalCorpusFile
+# error the same way, as "unmarshal: %v", whatever the underlying message
+# is ("cannot unmarshal empty string", "unknown encoding version: ...",
+# "must include version and at least one value", "malformed line ...", and
+# more) -- matching only on "cannot unmarshal" let the rest of that set fall
+# through to seed-regression. ReadCorpus then prepends the failing file's
+# path in double quotes ahead of the reason using %q, which can itself
+# render a literal quote inside the filename as \" -- so the path capture
+# below has to anchor on the first unescaped quote and treat \" (and \\) as
+# part of the path, not the end of it. The "unmarshal: " prefix is present
+# for every unmarshalCorpusFile failure and absent for the other two
+# phrases (mismatched types / wrong number of values), which come back
+# unwrapped from CheckCorpus but still carry the quoted-path prefix from
+# ReadCorpus.
+decode_pattern='": (unmarshal: |mismatched types in corpus entry|wrong number of values in corpus entry)'
 if grep -Eq "${decode_pattern}" "${replay_log}"; then
 	save_repro
 	seed_decode_path=""
 	while IFS= read -r decode_line; do
-		decode_path="$(printf '%s\n' "${decode_line}" | sed -E 's/^.*"([^"]+)": (unmarshal: )?(cannot unmarshal|mismatched types in corpus entry|wrong number of values in corpus entry).*$/\1/')"
+		decode_path="$(printf '%s\n' "${decode_line}" | sed -E 's/^[^"]*"((\\.|[^"\\])*)": (unmarshal: .*|mismatched types in corpus entry|wrong number of values in corpus entry).*$/\1/')"
+		# Undo Go's %q escaping of the two characters it can introduce into
+		# a corpus path: a literal backslash and a literal double quote.
+		# The backslash pass runs through a placeholder first so a
+		# decoded \" doesn't get mistaken for a second escape target.
+		decode_path="${decode_path//\\\\/$'\x01'}"
+		decode_path="${decode_path//\\\"/\"}"
+		decode_path="${decode_path//$'\x01'/\\}"
 		decode_base="$(basename "${decode_path}")"
 		case "${decode_base}" in
 		cached-*) ;;
