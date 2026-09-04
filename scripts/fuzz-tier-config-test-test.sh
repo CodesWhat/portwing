@@ -182,7 +182,7 @@ seed_fixture
 # the retry budget visible at the call site instead of relying silently on
 # fuzz-run.sh's own default.
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-sed 's|FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE="\$GITHUB_OUTPUT" bash scripts/ci/fuzz-run.sh|FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" bash scripts/ci/fuzz-run.sh|' \
+sed 's|FUZZ_RETRIES=2 FUZZ_OUTPUT_FILE="\$GITHUB_OUTPUT" FUZZ_LOG_FILE="fuzz-run-\${FUZZER}.log" bash scripts/ci/fuzz-run.sh|FUZZ_OUTPUT_FILE="$GITHUB_OUTPUT" FUZZ_LOG_FILE="fuzz-run-${FUZZER}.log" bash scripts/ci/fuzz-run.sh|' \
 	"${nightly}" >"${nightly}.tmp"
 mv "${nightly}.tmp" "${nightly}"
 expect_fail "a caller dropping the FUZZ_RETRIES retry env must not satisfy the contract"
