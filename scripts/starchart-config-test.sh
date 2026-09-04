@@ -60,6 +60,25 @@ set -euo pipefail
 # an extra key immediately after the grant, not a blank line or a comment
 # sitting between the grant and whatever comes next, which is exactly where
 # a second, wider grant would try to hide.
+#
+# A third round found the shape of bypass a negative regex can never fully
+# close: a spelling nobody wrote a pattern for yet. Single-quoted keys
+# ('secrets': inherit) passed because every tolerant regex above only ever
+# grew a double-quote alternative. with: had no key allowlist at all, so an
+# extra with: input (output-path:, say) could redirect what the reusable
+# workflow writes without this file ever looking at with:'s key set, only at
+# branch:'s value. A job-level concurrency: block was never checked at all,
+# and one naming the same group the reusable workflow uses, with
+# cancel-in-progress: true, can cancel the write path out from under it. And
+# a YAML alias (if: *unconditional, pointing at an anchor defined anywhere
+# else in the file, & unconditional: always()) never puts the literal text
+# "always()" on the if: line at all, so a regex that scans the if: line's
+# own text can't see it. Rather than add a fourth tolerant spelling to every
+# regex above, the job and with: blocks are now allowlisted outright --
+# permissions, uses, with on the job; branch, accent under with: -- and
+# quoting a key or using a YAML anchor, alias, or merge key anywhere in the
+# file is banned outright too. An allowlist doesn't need to recognize a new
+# spelling to reject it; anything not on the list fails by construction.
 
 workflow="${1:-.github/workflows/starchart.yml}"
 
@@ -202,6 +221,116 @@ job_block() {
 }
 
 starchart_job="$(job_block "${workflow}" "starchart")"
+
+# --- allowlist the job's own keys -------------------------------------------
+#
+# A negative regex has to name the thing it's rejecting; an allowlist
+# doesn't. Rather than keep discovering GitHub Actions job-level keys one at
+# a time (concurrency: with the callee's group and cancel-in-progress: true
+# can cancel the write path out from under it; env:, needs:, strategy:,
+# timeout-minutes: are all real keys nobody has reason to add here), this
+# asserts the complete set: the starchart job may declare permissions:,
+# uses:, and with:, and nothing else. Extraction is deliberately strict --
+# exactly 4 spaces of indent, then an unquoted identifier, then a colon --
+# so an indented list item or a block-scalar body line is never mistaken for
+# a key (a quoted key is caught by its own ban below instead, since this
+# pattern wouldn't recognize it as a key at all).
+
+job_keys="$(grep -oE '^ {4}[A-Za-z0-9_-]+:' <<<"${starchart_job}" | sed -E 's/^ {4}//; s/:$//' | sort -u)"
+while IFS= read -r job_key; do
+	[ -n "${job_key}" ] || continue
+	case "${job_key}" in
+	permissions | uses | with) : ;;
+	*)
+		fail "starchart job may only declare permissions, uses and with (found: ${job_key})"
+		;;
+	esac
+done <<<"${job_keys}"
+
+# --- allowlist with:'s keys, and pin accent's value -------------------------
+#
+# Same reasoning, scoped one level deeper: with: may pass branch: and
+# accent:, and nothing else. Without this, an extra with: input (say
+# output-path:, if the reusable workflow ever grows one) can redirect what
+# gets written without this file's branch: check ever noticing, since that
+# check only ever looked at branch:'s value, not at with:'s key set. accent:
+# additionally gets its value pinned outright, the same way the tag pattern
+# and the reusable-workflow pin do: this file has exactly one accent colour
+# today, and a caller that changes it is a decision this contract should
+# see, not let float in unreviewed.
+
+with_block="$(
+	awk '
+        $0 == "    with:" { in_with = 1; next }
+        in_with && /^    [^[:space:]]/ && $0 !~ /^[[:space:]]*#/ { in_with = 0 }
+        in_with { print }
+    ' <<<"${starchart_job}"
+)"
+
+with_keys="$(grep -oE '^ {6}[A-Za-z0-9_-]+:' <<<"${with_block}" | sed -E 's/^ {6}//; s/:$//' | sort -u)"
+while IFS= read -r with_key; do
+	[ -n "${with_key}" ] || continue
+	case "${with_key}" in
+	branch | accent) : ;;
+	*)
+		fail "with: may only pass branch and accent (found: ${with_key})"
+		;;
+	esac
+done <<<"${with_keys}"
+
+accent_lines="$(grep -E '^      accent: ' <<<"${with_block}" || true)"
+accent_count=0
+if [ -n "${accent_lines}" ]; then
+	accent_count="$(wc -l <<<"${accent_lines}" | tr -d '[:space:]')"
+fi
+if [ "${accent_count}" -ne 1 ]; then
+	fail "expected exactly one 'accent:' line at 6-space indent in the starchart job's with: block (found ${accent_count})"
+elif [ "${accent_lines}" != '      accent: "#7230d2"' ]; then
+	fail "with.accent: must be exactly '\"#7230d2\"', this repo's own accent colour: got '$(sed -E 's/^      accent: //' <<<"${accent_lines}")'"
+fi
+
+# --- no quoted keys, anywhere -------------------------------------------------
+#
+# Every tolerant if:/secrets: regex above grew a double-quote alternative
+# because a decoy used a double-quoted key; a single-quoted 'secrets':
+# inherit or 'if': always() would have sailed past every one of them, and
+# would keep sailing past whatever the next tolerant spelling turns out to
+# be. This bans quoting a key at all, anywhere in the file: the first
+# non-whitespace character on a line must never be a quote mark. Nothing in
+# this file legitimately needs a quoted key -- accent:'s VALUE is quoted,
+# but that quote is never the first character on its line.
+
+quoted_key_lines="$(grep -nE "^[[:space:]]*['\"]" "${workflow}" || true)"
+if [ -n "${quoted_key_lines}" ]; then
+	while IFS= read -r hit; do
+		[ -n "${hit}" ] || continue
+		fail "keys must be unquoted (line ${hit%%:*})"
+	done <<<"${quoted_key_lines}"
+fi
+
+# --- no YAML anchors, aliases, or merge keys, anywhere -----------------------
+#
+# An alias never puts the text it resolves to on its own line, so a regex
+# that reads the if: line's own text (always(), in any spelling) can't see
+# past `if: *unconditional` pointing at an anchor -- &unconditional -- defined
+# anywhere else in the file, however far away, with the value always()
+# resolves the alias to. No check anchored on a single line's content can
+# close that; only banning the anchor/alias/merge-key mechanism itself can.
+# None of the three forms GitHub Actions' YAML parser accepts are used
+# anywhere in this file today, so all three are banned outright: an anchor
+# or alias on a mapping value (key: &name ... or key: *name), one on a
+# sequence item (- &name ... or - *name), and the merge key (<<: *name) that
+# splices an anchored mapping's keys into the one using it -- which would
+# let a single anchored mapping inject keys past the allowlists above
+# without either allowlist ever seeing them arrive on their own line.
+
+anchor_lines="$(grep -nE ':[[:space:]]*[&*]|^[[:space:]]*-[[:space:]]*[&*]|^[[:space:]]*<<' "${workflow}" || true)"
+if [ -n "${anchor_lines}" ]; then
+	while IFS= read -r hit; do
+		[ -n "${hit}" ] || continue
+		fail "YAML anchors, aliases and merge keys are not allowed (line ${hit%%:*})"
+	done <<<"${anchor_lines}"
+fi
 
 # --- file-wide bans on alternate ways to grant more than intended ----------
 #
@@ -373,15 +502,8 @@ fi
 # repo actually promotes from. renovate.json's baseBranchPatterns names that
 # same dev branch for an entirely different reason (where Renovate opens
 # PRs); the two roll together at a release cut, so drift between them is
-# exactly the failure this last check exists to catch.
-
-with_block="$(
-	awk '
-        $0 == "    with:" { in_with = 1; next }
-        in_with && /^    [^[:space:]]/ && $0 !~ /^[[:space:]]*#/ { in_with = 0 }
-        in_with { print }
-    ' <<<"${starchart_job}"
-)"
+# exactly the failure this last check exists to catch. with_block was
+# already extracted above, alongside with:'s key allowlist.
 
 branch_lines="$(grep -E '^      branch: ' <<<"${with_block}" || true)"
 branch_count=0

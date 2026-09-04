@@ -32,6 +32,21 @@ set -euo pipefail
 # used to be isolated no longer is) both show up as a self-test failure
 # instead of a comment nobody re-reads.
 #
+# A third round added the job and with: key allowlists, the quoted-key ban,
+# and the anchor/alias/merge-key ban. Those checks fire ALONGSIDE most of the
+# job-scoped decoys and tolerant-spelling mutations above, not instead of
+# them: a `name: |` decoy plants a real "name" key at the job's own 4-space
+# indent, which the allowlist has never seen before and rejects on its own
+# terms, in addition to whatever check the decoy was originally aimed at. So
+# this round's work was mostly re-deriving expected_count for mutations that
+# already existed, not just adding new ones -- every count below was
+# re-verified against the actual contract script, not assumed to carry over.
+# A few mutations below exist specifically because a double-quote-tolerant
+# regex doesn't recognize a single-quoted key at all: those trip ONLY the new
+# quoted-key ban, with a message that names the general shape (an unquoted
+# key), not the specific key -- which is the point of an allowlist over a
+# blocklist: it doesn't need to recognize a new spelling to reject it.
+#
 # The contract cross-checks branch: against renovate.json's baseBranchPatterns,
 # so this fixture tree carries its own copy to stay hermetic -- no reading the
 # real repo's renovate.json from a temp directory that isn't it.
@@ -181,6 +196,9 @@ assert_rejected \
 # write} map), which is why the expected counts below are more than 1: this
 # is the job-count check and at least one other independent check both
 # correctly firing on the same edit, not double-counting the same problem.
+# None of these trip the round-3 job-key allowlist: that allowlist only ever
+# reads the starchart job's own keys, and a second job named "extra" or
+# "unrelated" sits outside it entirely.
 
 reset_fixture
 cat >>"${fixture}" <<'YAML'
@@ -223,21 +241,27 @@ assert_rejected \
 # A 2-space-indented comment planted inside the (sole) job used to end the
 # awk state machine's scan early, so a secrets: key placed after it was
 # silently outside the region the secrets: check ever looked at, even
-# though the job itself is still just one job.
+# though the job itself is still just one job. That same secrets: line also
+# now sits at the job's own 4-space indent, so the round-3 job-key allowlist
+# rejects it too -- the awk-scoping fix and the allowlist catch it on two
+# independent grounds.
 reset_fixture
 insert_after_line '      accent: "#7230d2"' \
 	'  # a 2-space comment
     secrets: inherit'
 assert_rejected \
 	"must not declare secrets:" \
-	"contract must reject secrets: inherit hidden after a 2-space comment inside the job"
+	"contract must reject secrets: inherit hidden after a 2-space comment inside the job" \
+	2
 
 # --- file-wide bans on alternate permission grants, isolated -----------------
 #
 # Each of these plants its decoy inside the (sole) job's own name: block
 # scalar, with no second job and no "permissions:" prefix where that would
-# also trip the permissions: occurrence count -- so each fails on exactly
-# the one guard it's aimed at.
+# also trip the permissions: occurrence count. Round 3 added a job-key
+# allowlist, and "name" is not on it -- planting the decoy behind a `name: |`
+# key means every one of these now also trips the allowlist ("found: name"),
+# alongside whichever file-wide guard the decoy's own text was aimed at.
 
 reset_fixture
 insert_after_line "  starchart:" \
@@ -245,7 +269,8 @@ insert_after_line "  starchart:" \
       permissions: read'
 assert_rejected \
 	"the file may declare permissions: exactly twice" \
-	"contract must reject a decoy permissions: read line even without write-all or {contents"
+	"contract must reject a decoy permissions: read line even without write-all or {contents" \
+	2
 
 reset_fixture
 insert_after_line "  starchart:" \
@@ -253,7 +278,8 @@ insert_after_line "  starchart:" \
       not a real key but write-all appears here'
 assert_rejected \
 	"the file must not contain write-all anywhere" \
-	"contract must reject write-all appearing anywhere in the file, isolated from the other permissions guards"
+	"contract must reject write-all appearing anywhere in the file, isolated from the other permissions guards" \
+	2
 
 reset_fixture
 insert_after_line "  starchart:" \
@@ -261,11 +287,13 @@ insert_after_line "  starchart:" \
       freestanding {contents: write} text'
 assert_rejected \
 	"the file must not contain an inline {contents: ...} permissions map anywhere" \
-	"contract must reject {contents appearing anywhere in the file, isolated from the other permissions guards"
+	"contract must reject {contents appearing anywhere in the file, isolated from the other permissions guards" \
+	2
 
 # permissions: { actions: write } avoids the {contents substring (so that
 # guard stays quiet) but still opens a non-empty inline map, and it still has
-# a "permissions:" prefix, so the occurrence-count guard fires alongside it.
+# a "permissions:" prefix, so the occurrence-count guard fires alongside it,
+# on top of the job-key allowlist firing on the enclosing name: | decoy.
 reset_fixture
 insert_after_line "  starchart:" \
 	'    name: |
@@ -273,7 +301,7 @@ insert_after_line "  starchart:" \
 assert_rejected \
 	"the file must not contain a non-empty inline permissions: {...} map anywhere" \
 	"contract must reject a non-{contents inline permissions map" \
-	2
+	3
 
 # --- contents: write scoped to exactly one job, structurally ---------------
 
@@ -329,6 +357,7 @@ assert_rejected \
 # file-wide count reads 1 (the decoy), so only the job-scoped structural
 # check -- which reads the line immediately after the starchart job's own
 # `    permissions:` key -- can catch that the job itself grants nothing.
+# The decoy sits behind a `name: |` key, so the job-key allowlist also fires.
 reset_fixture
 sed -i.bak '/^      contents: write$/d' "${fixture}"
 sed -i.bak 's/^    permissions:$/    permissions: {}/' "${fixture}"
@@ -337,7 +366,8 @@ insert_after_line "  starchart:" \
       contents: write'
 assert_rejected \
 	"a grant recorded elsewhere in the file (a different job, or text inside a block scalar) does not satisfy this contract" \
-	"contract must reject a decoy contents: write hiding in a block scalar while the job's own grant is permissions: {}"
+	"contract must reject a decoy contents: write hiding in a block scalar while the job's own grant is permissions: {}" \
+	2
 
 # --- the gap between the grant and whatever comes next ----------------------
 #
@@ -361,31 +391,48 @@ assert_rejected \
 	"contract must reject a comment directly after the contents: write grant"
 
 # --- no unconditional escape hatch, tolerant of alternate spellings --------
+#
+# Round 3 added a job-key allowlist that reads the same 4-space-indented job
+# keys these mutations plant. Any variant where the key sits at an exact
+# 4-space indent with no space before its colon (continue-on-error:, if:,
+# secrets:) now also trips the allowlist ("found: <key>"), alongside the
+# tolerant-spelling check it originally existed to test -- both correctly
+# firing on the same edit. A variant with a space before the colon (if :,
+# secrets :) isn't recognized as a key by the allowlist's strict pattern at
+# all, so those stay isolated at count 1. A double-quoted key isn't
+# recognized as a key by the allowlist either (a quote isn't a valid key
+# character), but round 3's quoted-key ban recognizes it as a quoted line
+# and fires instead -- so those move from isolated to a 2-count pair as well,
+# just via the ban rather than the allowlist.
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    continue-on-error: true\n    permissions:/' "${fixture}"
 assert_rejected \
 	"must not carry continue-on-error" \
-	"contract must reject a starchart job with continue-on-error"
+	"contract must reject a starchart job with continue-on-error" \
+	2
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    if: always()\n    permissions:/' "${fixture}"
 assert_rejected \
 	"must not run unconditionally via if: always()" \
-	"contract must reject a starchart job gated on if: always()"
+	"contract must reject a starchart job gated on if: always()" \
+	2
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    if: ${{ always() }}\n    permissions:/' "${fixture}"
 # shellcheck disable=SC2016 # Literal failure-message text, not a variable expansion.
 assert_rejected \
 	"must not run unconditionally via if: always()" \
-	'contract must reject a starchart job gated on if: ${{ always() }}'
+	'contract must reject a starchart job gated on if: ${{ always() }}' \
+	2
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    "if": always()\n    permissions:/' "${fixture}"
 assert_rejected \
 	"must not run unconditionally via if: always()" \
-	'contract must reject a quoted "if": key gated on always()'
+	'contract must reject a double-quoted "if": key gated on always()' \
+	2
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    if : always()\n    permissions:/' "${fixture}"
@@ -397,25 +444,142 @@ reset_fixture
 sed -i.bak 's/^    permissions:$/    if: always( )\n    permissions:/' "${fixture}"
 assert_rejected \
 	"must not run unconditionally via if: always()" \
-	"contract must reject always( ) with a space inside the parens"
+	"contract must reject always( ) with a space inside the parens" \
+	2
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    secrets: inherit\n    permissions:/' "${fixture}"
 assert_rejected \
 	"must not declare secrets:" \
-	"contract must reject secrets: inherit on the job"
+	"contract must reject secrets: inherit on the job" \
+	2
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    "secrets": inherit\n    permissions:/' "${fixture}"
 assert_rejected \
 	"must not declare secrets:" \
-	'contract must reject a quoted "secrets": key'
+	'contract must reject a double-quoted "secrets": key' \
+	2
 
 reset_fixture
 sed -i.bak 's/^    permissions:$/    secrets : inherit\n    permissions:/' "${fixture}"
 assert_rejected \
 	"must not declare secrets:" \
 	"contract must reject secrets : (a space before the colon)"
+
+# --- job key allowlist --------------------------------------------------------
+#
+# concurrency: naming the reusable workflow's own group, with
+# cancel-in-progress: true, could cancel the write path out from under it --
+# a check that never had a reason to read job-level keys other than
+# permissions:, uses:, secrets:, if:, and continue-on-error: would never have
+# caught it. The allowlist rejects any key on the job that isn't one of the
+# three it's actually meant to declare.
+
+reset_fixture
+insert_after_line "  starchart:" \
+	'    concurrency:
+      group: starchart
+      cancel-in-progress: true'
+assert_rejected \
+	"starchart job may only declare permissions, uses and with (found: concurrency)" \
+	"contract must reject a concurrency: block on the starchart job"
+
+# --- with: key allowlist, and the accent value pin --------------------------
+#
+# An extra with: input (output-path:, max-pages:, ...) could redirect what
+# the reusable workflow writes, or change how much it reads, without the
+# branch: value check ever noticing -- that check only ever read branch:'s
+# own value, not with:'s full key set. accent:'s value is pinned the same
+# way the tag pattern and the reusable-workflow pin are: this file has one
+# accent colour today, and a caller that changes it is a decision this
+# contract should see.
+
+reset_fixture
+insert_after_line '      accent: "#7230d2"' '      output-path: docs/star-history.svg'
+assert_rejected \
+	"with: may only pass branch and accent (found: output-path)" \
+	"contract must reject an extra output-path: input under with:"
+
+reset_fixture
+insert_after_line '      accent: "#7230d2"' '      max-pages: 5'
+assert_rejected \
+	"with: may only pass branch and accent (found: max-pages)" \
+	"contract must reject an extra max-pages: input under with:"
+
+reset_fixture
+sed -i.bak 's/^      accent: "#7230d2"$/      accent: "#000000"/' "${fixture}"
+assert_rejected \
+	'with.accent: must be exactly '"'"'"#7230d2"'"'" \
+	"contract must reject a changed accent: value"
+
+# --- no quoted keys, anywhere -------------------------------------------------
+#
+# Every tolerant if:/secrets: regex above grew a double-quote alternative
+# because a decoy used a double-quoted key; a single-quoted 'secrets':
+# inherit or 'if': always() sails straight past all of them, since none of
+# those regexes' "?...?" alternatives spell single quotes. The quoted-key ban
+# doesn't need to: it fires on ANY quote as the first non-whitespace
+# character on a line, so these mutations trip only the ban, with its
+# general "keys must be unquoted" message, not the specific if:/secrets:
+# message the equivalent double-quoted mutations above produce.
+
+reset_fixture
+sed -i.bak "s/^    permissions:\$/    'secrets': inherit\n    permissions:/" "${fixture}"
+assert_rejected \
+	"keys must be unquoted" \
+	"contract must reject a single-quoted 'secrets': key, which no tolerant regex recognizes"
+
+reset_fixture
+sed -i.bak "s/^    permissions:\$/    'if': always()\n    permissions:/" "${fixture}"
+assert_rejected \
+	"keys must be unquoted" \
+	"contract must reject a single-quoted 'if': key gated on always(), which no tolerant regex recognizes"
+
+# A quoted "branch": key isn't recognized by with:'s key allowlist either (a
+# quote isn't a valid key character in that extraction), so the with: block
+# now reads as having no branch: line at all -- both the quoted-key ban and
+# the "expected exactly one branch:" check fire on this single edit.
+reset_fixture
+sed -i.bak 's/^      branch: dev\/v0\.9$/      "branch": dev\/v0.9/' "${fixture}"
+assert_rejected \
+	"keys must be unquoted" \
+	'contract must reject a double-quoted "branch": key under with:, which the key allowlist can no longer even see as branch:' \
+	2
+
+# --- no YAML anchors, aliases, or merge keys, anywhere -----------------------
+#
+# An alias never puts the text it resolves to on its own line, so no regex
+# that reads if:'s own line text (always(), in any spelling) can see past
+# `if: *unconditional` pointing at an anchor defined anywhere else in the
+# file. The anchor here is planted on a new run-name: key, deliberately far
+# from the if: line that aliases it. That if: also sits at the job's own
+# 4-space indent, so the job-key allowlist fires on it too ("found: if"),
+# alongside the anchor ban firing twice -- once for the anchor's own
+# definition, once for the alias that resolves it.
+
+reset_fixture
+insert_after_line "name: Star Chart" 'run-name: &unconditional always()'
+insert_after_line "  starchart:" '    if: *unconditional'
+assert_rejected \
+	"YAML anchors, aliases and merge keys are not allowed" \
+	"contract must reject if: *unconditional aliasing an always() anchor defined on run-name:" \
+	3
+
+# A merge key (<<: *base) splices an anchored mapping's keys into the job
+# using it, which would let one anchored mapping inject keys past the job-key
+# allowlist without the allowlist ever seeing them arrive on their own line.
+# The merge key itself is banned outright, alongside the anchor definition it
+# points at.
+reset_fixture
+insert_after_line "name: Star Chart" \
+	'base: &base
+  runs-on: ubuntu-24.04'
+insert_after_line "  starchart:" '    <<: *base'
+assert_rejected \
+	"YAML anchors, aliases and merge keys are not allowed" \
+	"contract must reject a merge key (<<: *base) splicing an anchored mapping into the job" \
+	2
 
 # --- the reusable workflow pin ----------------------------------------------
 
@@ -458,8 +622,9 @@ assert_rejected \
 
 # A decoy uses:...@main line hiding in a block scalar alongside the real,
 # correctly-pinned uses: line. The job-scoped check alone would pass (the
-# real line is untouched and correctly anchored); only the file-wide count
-# catches the second uses: line the decoy adds.
+# real line is untouched and correctly anchored); the file-wide count catches
+# the second uses: line the decoy adds, and the decoy sits behind a
+# `name: |` key, so the job-key allowlist fires too.
 reset_fixture
 insert_after_line "  starchart:" \
 	'    name: |
@@ -467,7 +632,8 @@ insert_after_line "  starchart:" \
         uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@main  # decoy'
 assert_rejected \
 	"no other 'uses:' lines are allowed anywhere in the file, but found 2 total" \
-	"contract must reject a decoy uses: line hiding in a block scalar"
+	"contract must reject a decoy uses: line hiding in a block scalar" \
+	2
 
 # --- the target branch -------------------------------------------------------
 
@@ -499,11 +665,15 @@ assert_rejected \
 # multi-line accent: block scalar, while the real branch: is set to the
 # forbidden value "main". The contract must still catch the real problem
 # instead of reading the decoy (or getting confused into reporting neither).
+# Turning accent: into a block scalar also breaks the round-3 accent-value
+# pin, since the block-scalar marker itself is not the pinned value -- so
+# this now legitimately trips two independent checks.
 reset_fixture
 sed -i.bak 's/^      branch: dev\/v0\.9$/      branch: main/' "${fixture}"
 sed -i.bak 's/^      accent: "#7230d2"$/      accent: |\n        branch: dev\/v0.9/' "${fixture}"
 assert_rejected \
 	"branch must not be main/master/HEAD/empty" \
-	"contract must reject branch: main even with a decoy branch: line inside accent's block scalar"
+	"contract must reject branch: main even with a decoy branch: line inside accent's block scalar" \
+	2
 
 echo "starchart contract self-tests passed."
