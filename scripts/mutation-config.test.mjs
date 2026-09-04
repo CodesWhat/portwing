@@ -59,6 +59,19 @@ const advisoryGroupPackages = new Map([
     ],
   ],
 ]);
+// PW-6.8: the leg-wide efficacy floor for each advisory group's 6 extra
+// mutators, measured in run 33901506579 (2026-09-04) and set to
+// floor(measured) - 2pp of slack. See the matrix.include `floor:` field and
+// the ADVISORY_GROUP_FLOORS env block above for the per-leg comments; this
+// map is the single source both are checked against.
+const advisoryGroupFloors = new Map([
+  ["server", 93],
+  ["edge", 80],
+  ["generic", 81],
+  ["misc-a", 92],
+  ["misc-b", 92],
+  ["misc-c", 90],
+]);
 const timeoutCoefficients = new Set(["pool", "protocol"]);
 // adapter-drydock needs the coefficient in its advisory row (run 33848880338:
 // 30 of 32 extra mutants TIMED OUT under the default coefficient) without
@@ -505,6 +518,19 @@ function assertAdvisoryMatrix(advisory, entries) {
     const marker = "            packages: |\n";
     const packagesStart = block.indexOf(marker);
     assert.notEqual(packagesStart, -1, `advisory group ${groupName} must declare packages: |`);
+
+    // PW-6.8: the leg-wide floor for this group's 6 extra mutators, measured
+    // in run 33901506579. It lives in the preamble between the group name
+    // and its packages: | marker, alongside whatever comments explain it.
+    const preamble = block.slice(0, packagesStart);
+    const floorMatch = preamble.match(/^ {12}floor: (\d+)$/mu);
+    assert.ok(floorMatch, `${groupName} is missing its advisory floor`);
+    const expectedGroupFloor = advisoryGroupFloors.get(groupName);
+    assert.ok(expectedGroupFloor !== undefined, `unexpected advisory group ${groupName}`);
+    if (Number(floorMatch[1]) !== expectedGroupFloor) {
+      throw new Error(`${groupName} advisory floor is weakened`);
+    }
+
     const rest = block.slice(packagesStart + marker.length);
 
     const packageLines = [];
@@ -681,6 +707,38 @@ function assertAdvisorySummaryJob(source) {
       "the advisory summary job's ADVISORY_GROUP_PACKAGES must match the advisory matrix's own groups and packages exactly",
     );
   }
+
+  // PW-6.8: ADVISORY_GROUP_FLOORS mirrors the matrix.include `floor:` field
+  // the same way ADVISORY_GROUP_PACKAGES mirrors its packages, and for the
+  // same reason: this job runs after the matrix and has no context left to
+  // read it from.
+  const floorsEnvMatch = summary.match(/^ {10}ADVISORY_GROUP_FLOORS: \|\n((?: {12}.+\n)+)/mu);
+  assert.ok(floorsEnvMatch, "the advisory summary job must declare ADVISORY_GROUP_FLOORS");
+  const declaredFloorPairs = floorsEnvMatch[1]
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice("            ".length));
+  const expectedFloorPairs = [...advisoryGroupFloors].map(([group, floor]) => `${group}|${floor}`);
+  if (JSON.stringify(declaredFloorPairs) !== JSON.stringify(expectedFloorPairs)) {
+    throw new Error(
+      "the advisory summary job's ADVISORY_GROUP_FLOORS must match the advisory matrix's own floors exactly",
+    );
+  }
+
+  // The sums this job compares against ADVISORY_GROUP_FLOORS come from rows
+  // the legs already wrote; this job must never re-measure, and a miss must
+  // warn rather than fail (the mutation-gate.sh pattern is for the gating
+  // job, not this one).
+  assert.doesNotMatch(
+    summary,
+    /mutation-gate\.sh/u,
+    "the advisory summary job must not call the gate, or it stops being advisory",
+  );
+  assert.match(
+    summary,
+    /::warning::advisory group \$\{group\} measured \$\{efficacy\}% efficacy on the 6 extra mutators, below its floor of \$\{floor\}%/u,
+    "the advisory summary job must warn when a leg's efficacy is below its measured floor",
+  );
 
   assert.match(
     summary,
@@ -1059,6 +1117,64 @@ test("mutation contract rejects an advisory floor that drifts from the matrix", 
   );
 });
 
+// PW-6.8: the leg-wide floor on the 6 extra mutators, distinct from the
+// per-package gating floor checked above. Missing and weakened get their own
+// tests because the two failures read differently to whoever is debugging a
+// broken contract.
+test("mutation contract rejects an advisory group missing its leg-wide floor", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "          - group: server\n            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run\n            # 33901506579 (2026-09-04): killed 68, lived 3 across\n            # ./internal/server. Floor is floor(measured) - 2pp of slack.\n            floor: 93\n",
+      "          - group: server\n",
+    ),
+    "server is missing its advisory floor",
+  );
+});
+
+test("mutation contract rejects a weakened leg-wide advisory floor", () => {
+  assertMutationFailure(
+    workflow.replace("            floor: 93\n", "            floor: 0\n"),
+    "server advisory floor is weakened",
+  );
+});
+
+test("mutation contract rejects an ADVISORY_GROUP_FLOORS that drifts from the matrix", () => {
+  assertMutationFailure(
+    workflow.replace("            server|93\n", "            server|94\n"),
+    "the advisory summary job's ADVISORY_GROUP_FLOORS must match the advisory matrix's own floors exactly",
+  );
+});
+
+test("mutation contract rejects a missing ADVISORY_GROUP_FLOORS declaration", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "          ADVISORY_GROUP_FLOORS: |\n",
+      "          ADVISORY_GROUP_FLOORS_RENAMED: |\n",
+    ),
+    "the advisory summary job must declare ADVISORY_GROUP_FLOORS",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that never warns on a floor miss", () => {
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      "",
+    ),
+    "the advisory summary job must warn when a leg's efficacy is below its measured floor",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that gates on the leg-wide floor", () => {
+  assertMutationFailure(
+    workflow.replace(
+      '          done <<<"${ADVISORY_GROUP_FLOORS}"\n',
+      '          done <<<"${ADVISORY_GROUP_FLOORS}"\n\n          ./scripts/ci/mutation-gate.sh mutation-advisory-auth.json 79.17 97.96\n',
+    ),
+    "the advisory summary job must not call the gate, or it stops being advisory",
+  );
+});
+
 test("mutation contract rejects an advisory row that drops its timeout coefficient", () => {
   assertMutationFailure(
     workflow.replace("./internal/protocol|protocol|100|40", "./internal/protocol|protocol|100"),
@@ -1100,7 +1216,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
       '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
     )
     .replace(
-      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock's tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
+      '\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run\n            # 33901506579 (2026-09-04): killed 68, lived 3 across\n            # ./internal/server. Floor is floor(measured) - 2pp of slack.\n            floor: 93\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            # Measured 82.56% in run 33901506579 (2026-09-04): killed 71,\n            # lived 15 across ./internal/edge.\n            floor: 80\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            # Measured 83.33% in run 33901506579 (2026-09-04): killed 5,\n            # lived 1 across ./internal/generic.\n            floor: 81\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock\'s tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            #\n            # Measured 94.02% in run 33901506579 (2026-09-04): killed 110,\n            # lived 7 summed across adapter, adapter-drydock, auth and audit.\n            floor: 92\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            # Measured 94.52% in run 33901506579 (2026-09-04): killed 138,\n            # lived 8 summed across docker, mcp and metrics.\n            floor: 92\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            # Measured 92.86% in run 33901506579 (2026-09-04): killed 39,\n            # lived 3 summed across portwing, banner, config, log, pool and\n            # protocol.\n            floor: 90\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n',
       "",
     );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");
