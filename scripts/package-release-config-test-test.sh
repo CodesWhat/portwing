@@ -316,6 +316,8 @@ location
 EOF
 
 prefix_version="${release_version}0"
+readme_prefix_backup="${fixture}/README.md.prefix-version-backup"
+cp "${fixture}/README.md" "${readme_prefix_backup}"
 
 awk -v from="VERSION=${release_version}" -v to="VERSION=${prefix_version}" '
 	!changed && index($0, from) {
@@ -342,6 +344,7 @@ if ! grep -Fq "${expected_diagnostic}" <<<"${validator_output}"; then
 	echo "${validator_output}" >&2
 	exit 1
 fi
+mv "${readme_prefix_backup}" "${fixture}/README.md"
 
 expect_stale_release_example_failure() {
 	local file="$1"
@@ -370,5 +373,24 @@ expect_release_contract_failure \
 	"FAIL: .gitleaksignore entries must be commit-pinned" \
 	"the package release contract must reject a line-pinned .gitleaksignore working-tree fingerprint"
 mv "${gitleaksignore_backup}" "${fixture}/.gitleaksignore"
+
+# The CHANGELOG-vs-tag guard only sees tags the checkout actually has, so
+# exercising it needs a real commit and a real tag in the fixture repo. It
+# guards against portwing#283: a prep PR renamed the v0.9.12 heading to
+# v0.9.13 instead of inserting a fresh section, leaving the already-tagged
+# v0.9.12 release with no matching heading.
+git -C "${fixture}" -c user.email=test@example.com -c user.name=test commit -q -m 'fixture commit'
+git -C "${fixture}" tag v0.0.1
+expect_release_contract_failure \
+	"FAIL: CHANGELOG.md has no '## [vX.Y.Z] - YYYY-MM-DD' heading for tag(s): v0.0.1" \
+	"the package release contract must reject a git tag with no matching CHANGELOG.md heading"
+git -C "${fixture}" tag -d v0.0.1 >/dev/null
+
+git -C "${fixture}" tag "v${release_version}"
+if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
+	echo "FAIL: a git tag matching an existing CHANGELOG.md heading must not fail the release contract" >&2
+	exit 1
+fi
+git -C "${fixture}" tag -d "v${release_version}" >/dev/null
 
 echo "Package release contract self-tests passed."
