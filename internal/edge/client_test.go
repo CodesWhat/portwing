@@ -614,22 +614,55 @@ func TestRunReconnectsAfterNonFatalError(t *testing.T) {
 // Run — ctx cancel while holding a live connection (lines 154-167)
 // ---------------------------------------------------------------------------
 
+// runReturnBackstop bounds the waits in TestRunCtxCancelWithActiveConn. Every
+// step there is synchronised on a channel, so this only decides how long a
+// genuine hang takes to report — it is not what makes the test pass. Generous
+// on purpose: the old 3s value was in a dead heat with the controller's own
+// 3s read deadline, and lost it under load.
+const runReturnBackstop = 10 * time.Second
+
 // TestRunCtxCancelWithActiveConn verifies that when Run's context is cancelled
-// while a connection is active, it sends a close frame and returns ctx.Err().
+// while a connection is active, Run tears the connection down and returns
+// ctx.Err().
+//
+// The controller side owns the teardown here, and that is the whole point.
+// readPump only checks ctx at the top of its loop; once it is inside
+// conn.ReadMessage the cancel is invisible to it, and Run cannot return until
+// the socket closes or the 60s read deadline fires. So the connection has to
+// be closed from the controller, deliberately, after the cancel — not left to
+// whichever timer happens to expire first.
 func TestRunCtxCancelWithActiveConn(t *testing.T) {
 	t.Parallel()
 
-	// Channel the test receives once the agent has connected.
+	// Closed once the controller has seen the agent's first post-handshake
+	// frame, which is the point at which the connection is genuinely active:
+	// handshake done, pumps running, agent writing.
 	connected := make(chan struct{})
+	// Closed by the test after it cancels, to release the controller handler
+	// and with it the socket.
+	ctrlHold := make(chan struct{})
 
 	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
 		readAndAckHello(t, ctrl)
 		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{})
+		// connect() sends metrics as soon as the pumps are up, so this read
+		// returns on a healthy agent. The deadline is only there so a broken
+		// agent fails the test instead of wedging srv.Close in cleanup; the
+		// test synchronises on connected, never on this timer.
+		_ = ctrl.SetReadDeadline(time.Now().Add(runReturnBackstop))
+		if _, _, err := ctrl.ReadMessage(); err != nil {
+			return
+		}
 		close(connected)
-		// Drain until the agent closes the connection.
-		_ = ctrl.SetReadDeadline(time.Now().Add(3 * time.Second))
-		_, _, _ = ctrl.ReadMessage()
+		// Hold the socket open, reading nothing, until the test has cancelled.
+		// Returning closes the conn (newControllerServer defers it), which is
+		// what unblocks the agent's readPump.
+		<-ctrlHold
 	})
+	releaseCtrl := sync.OnceFunc(func() { close(ctrlHold) })
+	// Registered after newControllerServer, so cleanup LIFO runs it before
+	// srv.Close: an early t.Fatal must not leave the handler parked.
+	t.Cleanup(releaseCtrl)
 
 	addr := freeAddr(t)
 	cfg := &config.Config{
@@ -653,19 +686,22 @@ func TestRunCtxCancelWithActiveConn(t *testing.T) {
 	// Wait for the agent to fully connect.
 	select {
 	case <-connected:
-	case <-time.After(3 * time.Second):
+	case <-time.After(runReturnBackstop):
 		t.Fatal("agent never connected")
 	}
 
-	// Cancel — should trigger the ctx-cancel-with-conn branch.
+	// Cancel first, then drop the socket. Cancel is synchronous, so ctx.Err()
+	// is already set when connect returns, which pins the branch under test:
+	// Run's post-connect ctx.Err() check, not the reconnect wait's ctx.Done.
 	cancel()
+	releaseCtrl()
 
 	select {
 	case err := <-runDone:
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("Run returned %v, want context.Canceled", err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(runReturnBackstop):
 		t.Fatal("Run did not return after context cancel")
 	}
 }
