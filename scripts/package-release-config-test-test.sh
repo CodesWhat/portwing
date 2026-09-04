@@ -65,13 +65,28 @@ expect_release_contract_failure() {
 	fi
 }
 
-# Both CI callers (ci-verify.yml, release-cut.yml) always check out with
-# fetch-depth: 0, so a real run never sees an empty tag list. Exercise that
-# shape before the fixture is tagged at all, so the guard's zero-tags branch
-# is proven to fail loudly instead of passing vacuously.
+# A full checkout with no release tags can only be a broken clone, so the
+# guard must fail loudly there instead of passing vacuously. Exercise that
+# shape before the fixture is tagged at all.
 expect_release_contract_failure \
-	"FAIL: no release tags found (shallow checkout?)" \
-	"the package release contract must reject a checkout with no release tags at all"
+	"FAIL: no release tags found in a full checkout" \
+	"the package release contract must reject a full checkout with no release tags at all"
+
+# A depth-1 clone carries no tags either, and the org's reusable GoReleaser
+# gate runs the script from one. That shape must pass with a visible SKIP
+# line, not fail every PR and not pass silently.
+shallow="$(mktemp -d)"
+git clone -q --depth 1 "file://${fixture}" "${shallow}/repo" 2>/dev/null
+set +e
+shallow_output="$(cd "${shallow}/repo" && bash scripts/package-release-config-test.sh 2>&1)"
+shallow_status=$?
+set -e
+rm -rf "${shallow}"
+if [ "${shallow_status}" -ne 0 ] || ! grep -Fq "SKIP: shallow checkout carries no release tags" <<<"${shallow_output}"; then
+	echo "FAIL: a shallow checkout must skip the tag-heading check with a SKIP line and pass" >&2
+	echo "${shallow_output}" >&2
+	exit 1
+fi
 
 git -C "${fixture}" tag "v${release_version}"
 

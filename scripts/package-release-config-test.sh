@@ -264,13 +264,13 @@ fi
 # place. Check every locally known "vX.Y.Z" tag instead: each one names a
 # release that already happened, so CHANGELOG.md must still carry that
 # heading. This only sees tags the checkout actually has, which is why it
-# runs locally on pre-push as well as in CI. Both CI callers of this script
-# (ci-verify.yml's Release Contract job and release-cut.yml) check out with
-# fetch-depth: 0 so the tags come along; the first CI run of this guard
-# failed because Release Contract was still a shallow clone. An empty tag
-# list therefore means
-# a shallow checkout slipped in, not that nothing has ever shipped, so it is
-# now a hard failure below rather than a silently vacuous pass. Releases
+# runs locally on pre-push as well as in CI. The Release Contract job in
+# ci-verify.yml and release-cut.yml check out with fetch-depth: 0 so the tags
+# come along, but the org's reusable GoReleaser gate runs this script from a
+# depth-1 clone that carries no tags at all. A shallow checkout therefore
+# says so and skips this one check, loudly, instead of passing vacuously or
+# failing every PR; a full checkout with no release tags is a hard failure,
+# because that shape can only be a broken clone. Releases
 # through v0.6.0 headed the section without a "v" prefix ("## [0.6.0]");
 # accept either form so this doesn't flag that older, still-correct
 # convention. The match is anchored to the start of the line and requires a
@@ -279,8 +279,10 @@ fi
 # a real heading.
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	release_tags="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
-	if [ -z "${release_tags}" ]; then
-		echo "FAIL: no release tags found (shallow checkout?)" >&2
+	if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ] && [ -z "${release_tags}" ]; then
+		echo "SKIP: shallow checkout carries no release tags, so the tag-heading check did not run here; it runs in Release Contract, release-cut, and pre-push" >&2
+	elif [ -z "${release_tags}" ]; then
+		echo "FAIL: no release tags found in a full checkout" >&2
 		failures=$((failures + 1))
 	else
 		missing_tag_headings=""
