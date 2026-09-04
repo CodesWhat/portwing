@@ -138,6 +138,18 @@ type dockerAPI interface {
 	ResizeExec(ctx context.Context, execID string, cols, rows int) error
 }
 
+// hostCollector is the *metrics.Collector subset sendMetrics depends on,
+// defined on the consumer side like dockerAPI above. *metrics.Collector
+// satisfies it structurally.
+//
+// The seam is what makes the failed-collection branch testable at all:
+// Collect's only error is a missing /proc, which cannot be arranged on the
+// Linux hosts that run CI, and the field's concrete type meant the branch had
+// no unit coverage anywhere.
+type hostCollector interface {
+	Collect() (*metrics.HostMetrics, error)
+}
+
 // edgeMessageSender wraps the edge Client to implement adapter.MessageSender.
 type edgeMessageSender struct {
 	client *Client
@@ -163,7 +175,7 @@ type Client struct {
 	dockerClient dockerAPI
 	adapter      adapter.EdgeAdapter
 	compose      *docker.ComposeManager
-	collector    *metrics.Collector
+	collector    hostCollector
 	metrics      *metrics.Registry
 	auditor      *audit.Logger
 	startTime    time.Time
@@ -1369,11 +1381,36 @@ func (c *Client) writePump(ctx context.Context) {
 	}
 }
 
-// sendMetrics collects and sends host metrics.
+// metricsUnavailableCode is the error frame's `code` when host metrics could
+// not be collected — the wire's marker for "this agent is alive and cannot
+// report these numbers", as distinct from an agent that has gone quiet.
+const metricsUnavailableCode = "host-metrics-unavailable"
+
+// sendMetrics collects and sends host metrics, and reports a failed collection
+// instead of swallowing it.
+//
+// Collect hands back a partially populated snapshot alongside its error, and
+// forwarding that is exactly what ErrHostMetricsUnsupported exists to prevent:
+// a zero-filled metrics frame is indistinguishable from a real reading of a
+// completely idle host. The other two surfaces both answer a failed collection
+// with an explicit marker rather than zeros — Prometheus omits the host series
+// behind `portwing_host_metrics_supported 0`, and the MCP host_metrics tool
+// returns an error naming the missing procfs — so this one answers with the
+// wire's own error frame (SPEC 3.3, 8), carrying metricsUnavailableCode.
+// Staying silent, which is what it used to do, left the controller unable to
+// tell an unsupported host from a dead agent.
+//
+// The frame keeps the metrics cadence: one per heartbeat, same as the metrics
+// frame it stands in for, so the signal is periodic rather than one-shot.
 func (c *Client) sendMetrics() {
 	m, err := c.collector.Collect()
 	if err != nil {
-		slog.Debug("metrics collection failed", "error", err)
+		slog.Warn("metrics collection failed", "error", err)
+		// Best-effort, like the metrics send below.
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message: err.Error(),
+			Code:    metricsUnavailableCode,
+		})
 		return
 	}
 	// Best-effort metrics send; connection loss surfaces on the read pump.
@@ -1668,7 +1705,12 @@ func (c *Client) startHealthServer() {
 		fmt.Fprintf(&b, "# HELP portwing_uptime_seconds Seconds since the agent started.\n")
 		fmt.Fprintf(&b, "# TYPE portwing_uptime_seconds gauge\n")
 		fmt.Fprintf(&b, "portwing_uptime_seconds %g\n", time.Since(c.startTime).Seconds())
-		metrics.WriteHostPrometheus(&b, c.collector)
+		// The host series need the real collector's concrete type, which
+		// production always holds. A test-injected fake leaves them out, the
+		// same absence a nil collector produced before.
+		if hostCol, ok := c.collector.(*metrics.Collector); ok {
+			metrics.WriteHostPrometheus(&b, hostCol)
+		}
 		if dockerMetrics, ok := c.dockerClient.(metrics.DockerMetricsClient); ok {
 			metrics.WriteContainerPrometheus(r.Context(), &b, dockerMetrics, metrics.EscapeLabelValue)
 		}

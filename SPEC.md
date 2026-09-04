@@ -357,6 +357,8 @@ In addition to host/container metrics, the Prometheus endpoints (`/_portwing/met
 
 Its relationship to `ErrHostMetricsUnsupported`/`portwing_host_metrics_supported` (which cover the `/proc`-derived fields) is one-directional, not independent: a broken data root leaves the `/proc` fields intact, but a missing `/proc` short-circuits collection before `statfs` runs, so no disk figure is reported on a host without procfs even though `statfs` would have worked there.
 
+**Failed collection.** When collection fails outright — `ErrHostMetricsUnsupported`, i.e. a host with no procfs — the tick emits an `error` frame with `code` `host-metrics-unavailable` and the collection error as its `message`, on the same 30-second cadence as the `metrics` frame it replaces, and with no `requestId` because the tick answers no request. It does **not** emit a `metrics` frame: collection returns a partially populated snapshot alongside the error, and a zero-filled `metrics` frame is indistinguishable from a real reading of a completely idle host. This is the wire's counterpart to `portwing_host_metrics_supported 0` on the Prometheus endpoints and to the MCP `host_metrics` tool's error, and it is what lets a controller tell an unsupported host from an agent that has gone silent. A controller that does not recognise the code should log it and treat the agent as connected but not reporting host metrics.
+
 | Metric | Source | Platform |
 |--------|--------|----------|
 | CPU usage | `/proc/stat` (delta-based) | Linux |

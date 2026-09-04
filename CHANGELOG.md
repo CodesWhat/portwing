@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failed host-metrics collection now reaches the controller instead of
+  being swallowed.** The edge agent logged the error at debug level and sent
+  nothing, so on a host with no procfs the tunnel emitted zero metrics frames
+  and the controller could not tell "unsupported" from "agent silent" from
+  "agent dead". The metrics tick now emits an `error` frame carrying
+  `host-metrics-unavailable` and the collection error, on the same cadence as
+  the `metrics` frame it stands in for. It deliberately does not send the
+  partially populated snapshot collection returns alongside the error, because
+  a zero-filled metrics frame reads as a real measurement of an idle host —
+  the same reason the Prometheus endpoint omits the host series behind
+  `portwing_host_metrics_supported 0`. Documented in SPEC section 8.
+
 ## [v0.9.13] - 2026-09-03
 
 ### Fixed
