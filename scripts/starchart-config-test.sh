@@ -18,67 +18,42 @@ set -euo pipefail
 # hitting the network at test time, neither of which this repo's config-test
 # pattern does anywhere else.
 #
-# What IS this repo's contract is everything the caller controls about that
-# delegation: the pin is frozen to an exact commit (so the behaviour above
-# can't drift out from under this file without a deliberate SHA bump), the
-# write permission is granted to exactly the one job that uses it, nothing
-# here escapes with continue-on-error or an if: always() (in any spelling)
-# that would run the write path past a failure, no secrets are forwarded into
-# a workflow that needs none, the trigger set is exactly what this file uses
-# today, and the branch handed to `with: branch:` clears the same main/master
-# rejection the reusable workflow enforces at runtime, matches this repo's own
-# dev/vX convention, and agrees with renovate.json's own idea of which branch
-# is "the" dev branch.
+# Three rounds of review grew this file from "match a few key lines" to a
+# thicket of exact-indent regexes, awk state machines, and allowlists,
+# closing one bypass at a time: a decoy in a block scalar, a second job, a
+# spelling a tolerant regex didn't happen to cover, a quoted key, a YAML
+# anchor. A fourth round found two more: YAML's explicit-key syntax
+# (`? "if"` / newline / `: always()`) is invisible to a check that only ever
+# read a key's own `key:` line, and a space before a colon
+# (`concurrency :`) was invisible to an allowlist extraction anchored on
+# `key:` with no space. Each fix closed its own bypass and reopened the
+# question of what the next one would be, because every one of those checks
+# describes the SHAPE of a violation instead of the shape of compliance --
+# and YAML has more ways to spell a given structure than any finite set of
+# regexes is going to enumerate.
 #
-# Every assertion below reads a specific key line at its exact YAML
-# indentation (anchored with a fixed run of literal spaces), not "this text
-# appears somewhere in the job". A block scalar (`name: |`, `accent: |`, ...)
-# can contain any text at all, including a line that looks byte-for-byte like
-# a real key -- but a genuine block-scalar body is indented deeper than the
-# key that introduces it, so an exact-indent anchor does not match it. Where a
-# decoy could still land at the exact indent of a real key (nothing stops
-# that from being technically well-formed, if oddly-shaped, YAML), the checks
-# below also count matches file-wide so a duplicate -- real key plus decoy --
-# fails on "found more than one" rather than silently picking whichever line
-# grep happened to see first.
+# So this file no longer asks "does anything look wrong". It asks "is this
+# byte-for-byte the one file this repo has reviewed", via a golden template:
+# the exact expected contents of starchart.yml, embedded below, compared to
+# the real file line by line. Three placeholders -- @PIN@, @PIN_COMMENT@, and
+# @BRANCH@ -- are the only positions allowed to vary, and each is validated
+# against the same rules the old checks used (a 40-hex SHA with a non-empty
+# comment; a branch that isn't main/master/HEAD/empty, matches this repo's
+# dev/vX.Y convention, and agrees with renovate.json's baseBranchPatterns).
+# Every other line, including blank lines, comments, and indentation, must
+# match exactly. There is no longer a spelling for continue-on-error, a
+# second job, an inline permissions map, an explicit-key if:, or a spaced
+# concurrency: to hide behind, because there's no code path left that reads
+# "does this look like key X" -- everything that isn't a placeholder is
+# compared as inert text.
 #
-# A second round of review found the class of bypass that survives all of
-# that: a FUTURE job. A block-scalar decoy has to fake a key's exact
-# indentation to fool the checks above; a second real job doesn't -- it's
-# genuinely well-formed YAML, so a check that only ever looked at "the
-# starchart job" never saw it at all. Rather than chase every spelling GitHub
-# Actions accepts for a permissions grant (write-all, the inline {contents:
-# write} flow-mapping form, a second `uses:` written as a step's `- uses:`),
-# this file now asserts there is exactly one job, named starchart, and backs
-# that with file-wide bans on the alternate grant spellings so a decoy hiding
-# in the one job that IS allowed doesn't just relocate the same trick. The
-# same review also found two smaller gaps: the awk state machines that scope
-# a block by indentation treated ANY line starting in the right column as the
-# block's end, including a comment, so a comment placed just right could
-# hide real content past it from a scoped check without technically breaking
-# the block it lives in; and the structural permissions check only rejected
-# an extra key immediately after the grant, not a blank line or a comment
-# sitting between the grant and whatever comes next, which is exactly where
-# a second, wider grant would try to hide.
-#
-# A third round found the shape of bypass a negative regex can never fully
-# close: a spelling nobody wrote a pattern for yet. Single-quoted keys
-# ('secrets': inherit) passed because every tolerant regex above only ever
-# grew a double-quote alternative. with: had no key allowlist at all, so an
-# extra with: input (output-path:, say) could redirect what the reusable
-# workflow writes without this file ever looking at with:'s key set, only at
-# branch:'s value. A job-level concurrency: block was never checked at all,
-# and one naming the same group the reusable workflow uses, with
-# cancel-in-progress: true, can cancel the write path out from under it. And
-# a YAML alias (if: *unconditional, pointing at an anchor defined anywhere
-# else in the file, & unconditional: always()) never puts the literal text
-# "always()" on the if: line at all, so a regex that scans the if: line's
-# own text can't see it. Rather than add a fourth tolerant spelling to every
-# regex above, the job and with: blocks are now allowlisted outright --
-# permissions, uses, with on the job; branch, accent under with: -- and
-# quoting a key or using a YAML anchor, alias, or merge key anywhere in the
-# file is banned outright too. An allowlist doesn't need to recognize a new
-# spelling to reject it; anything not on the list fails by construction.
+# When the workflow file legitimately changes -- a pin roll, a release cut
+# rolling the branch -- the three placeholders absorb it and this contract
+# needs no edit. Anything else is a deliberate edit to both files in the same
+# PR: change the workflow, then change the template below to match, in the
+# same diff a reviewer sees. That review IS the check; the golden template
+# just means a change that was never reviewed can't slip past by construction
+# instead of by yet another regex someone has to think to write.
 
 workflow="${1:-.github/workflows/starchart.yml}"
 
@@ -96,433 +71,194 @@ fi
 
 # --- line endings ------------------------------------------------------------
 #
-# Every check below anchors on a fixed run of literal spaces at the start or
-# end of a line. A trailing \r turns every one of those anchors into a silent
-# non-match instead of a failure with a message that says what's wrong, so
-# this is checked first and exits immediately rather than let the rest of the
-# file run against content none of its patterns were written for.
+# The template comparison below is a byte-for-byte line match. A trailing \r
+# turns every line into a silent non-match instead of a failure with a
+# message that says what's wrong, so this is checked first and exits
+# immediately rather than let the template comparison report the whole file
+# as one giant deviation.
 
 crlf_count="$(tr -cd '\r' <"${workflow}" | wc -c | tr -d '[:space:]')"
 if [ "${crlf_count}" -ne 0 ]; then
-	fail "workflow file must not contain CRLF line endings (found ${crlf_count} carriage return byte(s)); every indent-anchored check in this contract assumes bare LF"
+	fail "workflow file must not contain CRLF line endings (found ${crlf_count} carriage return byte(s)); the template comparison assumes bare LF"
 	exit 1
 fi
 
-# --- top-level permissions -------------------------------------------------
+# --- the golden template ------------------------------------------------------
+
+template_file="$(mktemp "${TMPDIR:-/tmp}/starchart-template.XXXXXX")"
+trap 'rm -f "${template_file}"' EXIT
+
+cat >"${template_file}" <<'__STARCHART_TEMPLATE_EOF__'
+name: Star Chart
+
+# Regenerates the docs/assets/star-history.svg pair from GitHub's own stargazer
+# timestamps and commits it back. The chart is a committed artifact rather
+# than a live third-party embed on purpose: a stale SVG is visible and a
+# missing one is a visibly broken image, where a live route renders a
+# plausible card at HTTP 200 forever. It also keeps visitor IPs off a third
+# party, which is what the cookieless posture requires.
 #
-# Nothing here needs anything by default; the one job that does declares it
-# for itself below.
-
-grep -Eq '^permissions:[[:space:]]*\{\}[[:space:]]*$' "${workflow}" ||
-	fail "workflow-level permissions must be exactly permissions: {}"
-
-# --- triggers ----------------------------------------------------------------
+# It refreshes at a release, not on a cron. A committed artifact refreshed on a
+# schedule mutates underneath a tag, which is what "main is the released
+# version" forbids for exactly this file. Tying it to releases means the chart
+# only ever moves when something ships.
 #
-# The header comment explains why this fires on the v* tag push instead of
-# release: or a dispatch, and workflow_dispatch exists for a manual re-run.
-# Any OTHER trigger key -- schedule: in particular -- would let the write path
-# run unattended on a cadence the "main is the released version" invariant
-# does not allow for a committed artifact. Parse by indentation rather than
-# grep for individual key names, so a decoy key hidden inside a block scalar
-# under on: can't pass by accident: keys immediately under `on:` sit at
-# 2-space indent, keys immediately under `push:` sit at 4-space indent.
+# The trigger is the v* tag push, and picking it took two wrong answers first.
+# They failed for DIFFERENT reasons, which is worth keeping apart: only one of
+# them can be fixed by granting something.
 #
-# Every block-scoping awk below excludes comment lines from ending the
-# region ($0 !~ /^[[:space:]]*#/ on the termination rule), not just from
-# being read as a key. A comment sitting at the exact column that would
-# otherwise close the block is still just a comment in real YAML -- the keys
-# after it are still inside the block -- so a scoping rule that let it act as
-# a terminator would silently stop reading before content a decoy relied on
-# going unread.
-
-on_block="$(
-	awk '
-        /^on:/ { in_on = 1; next }
-        in_on && /^[^[:space:]]/ && $0 !~ /^[[:space:]]*#/ { in_on = 0 }
-        in_on { print }
-    ' "${workflow}"
-)"
-[ -n "${on_block}" ] || fail "expected a top-level on: trigger block"
-
-on_keys="$(grep -E '^  [^[:space:]#]' <<<"${on_block}" | sed -E 's/^  ([^:[:space:]]+):.*/\1/' | sort -u)"
-expected_on_keys="$(printf '%s\n' push workflow_dispatch | sort -u)"
-if [ "${on_keys}" != "${expected_on_keys}" ]; then
-	fail "on: must declare exactly push and workflow_dispatch and nothing else: got '$(tr '\n' ' ' <<<"${on_keys}")'"
-fi
-
-push_block="$(
-	awk '
-        $0 == "  push:" { in_push = 1; next }
-        in_push && /^  [^[:space:]]/ && $0 !~ /^[[:space:]]*#/ { in_push = 0 }
-        in_push { print }
-    ' <<<"${on_block}"
-)"
-push_keys="$(grep -E '^    [^[:space:]#]' <<<"${push_block}" | sed -E 's/^    ([^:[:space:]]+):.*/\1/' | sort -u)"
-if [ "${push_keys}" != "tags" ]; then
-	fail "on.push: must declare only tags: and nothing else (no branches:, for instance): got '$(tr '\n' ' ' <<<"${push_keys}")'"
-fi
-
-# The key check above only asserts the shape (a tags: key and nothing else);
-# it says nothing about which tags. Pin the value literally: this file has
-# exactly one entry today, and a caller that changes it or empties the list
-# is deciding what triggers the write path, which is exactly the kind of
-# change this contract exists to catch, not let float in unreviewed.
-
-tags_block="$(
-	awk '
-        $0 == "    tags:" { in_tags = 1; next }
-        in_tags && /^    [^[:space:]]/ && $0 !~ /^[[:space:]]*#/ { in_tags = 0 }
-        in_tags { print }
-    ' <<<"${push_block}"
-)"
-tags_items="$(grep -E '^      -' <<<"${tags_block}" || true)"
-tags_item_count=0
-if [ -n "${tags_items}" ]; then
-	tags_item_count="$(wc -l <<<"${tags_items}" | tr -d '[:space:]')"
-fi
-if [ "${tags_item_count}" -ne 1 ]; then
-	fail "on.push.tags: must contain exactly the one entry this file uses today (found ${tags_item_count})"
-elif [ "${tags_items}" != '      - "v*"' ]; then
-	fail "on.push.tags: must be exactly '      - \"v*\"', this file's own tag pattern: got '${tags_items}'"
-fi
-
-# --- exactly one job, and it's starchart ------------------------------------
+#   `release: [published]`, which the shared workflow documents, is inert here.
+#   release.yml publishes via GoReleaser with GITHUB_TOKEN, and GitHub creates
+#   no workflow run for an event emitted with that credential. It would read as
+#   correctly wired and silently never run. Nothing grants past this.
 #
-# The bypass class every other check below can't reach: a second job. It
-# doesn't need to fake an indentation level or hide inside a block scalar --
-# it's genuinely well-formed YAML a "look inside the starchart job" check
-# never had a reason to visit. Rather than widen every check below to also
-# scan every OTHER job (and still be one GitHub Actions permissions spelling
-# behind), this asserts the job set itself: jobs: may declare exactly one
-# job, and it has to be this one.
-
-jobs_block="$(
-	awk '
-        /^jobs:/ { in_jobs = 1; next }
-        in_jobs && /^[^[:space:]]/ && $0 !~ /^[[:space:]]*#/ { in_jobs = 0 }
-        in_jobs { print }
-    ' "${workflow}"
-)"
-job_key_count="$(grep -cE '^  [^[:space:]#]' <<<"${jobs_block}" || true)"
-if [ "${job_key_count}" -ne 1 ]; then
-	fail "jobs: must declare exactly one job (found ${job_key_count})"
-elif ! grep -Eq '^  starchart:' <<<"${jobs_block}"; then
-	fail "jobs: the sole job must be named starchart"
-fi
-
-# --- the starchart job -----------------------------------------------------
-
-job_block() {
-	awk -v job="  $2:" '
-        $0 == job { in_job = 1; next }
-        in_job && /^  [^[:space:]]/ && $0 !~ /^[[:space:]]*#/ { in_job = 0 }
-        in_job { print }
-    ' "$1"
-}
-
-starchart_job="$(job_block "${workflow}" "starchart")"
-
-# --- allowlist the job's own keys -------------------------------------------
+#   Dispatching from release.yml with RELEASE_PAT returns 403, "Resource not
+#   accessible by personal access token". Creating a workflow_dispatch is an
+#   Actions API write and RELEASE_PAT carries only Contents RW; contents: write
+#   does not imply actions: write. Suppression is NOT the reason here, and
+#   GITHUB_TOKEN would have hit the same wall: workflow_dispatch is exempt from
+#   the rule above, as is repository_dispatch, so a dispatch needs the Actions
+#   scope whichever credential carries it. (Do not read that exemption as "only
+#   these two ever run": a GITHUB_TOKEN pull_request also creates a run, but an
+#   approval-gated one. The dispatch pair is what fires unattended.)
 #
-# A negative regex has to name the thing it's rejecting; an allowlist
-# doesn't. Rather than keep discovering GitHub Actions job-level keys one at
-# a time (concurrency: with the callee's group and cancel-in-progress: true
-# can cancel the write path out from under it; env:, needs:, strategy:,
-# timeout-minutes: are all real keys nobody has reason to add here), this
-# asserts the complete set: the starchart job may declare permissions:,
-# uses:, and with:, and nothing else. Extraction is deliberately strict --
-# exactly 4 spaces of indent, then an unquoted identifier, then a colon --
-# so an indented list item or a block-scalar body line is never mistaken for
-# a key (a quoted key is caught by its own ban below instead, since this
-# pattern wouldn't recognize it as a key at all).
+# The tag push works and is already proven in this repo: release-cut.yml pushes
+# the v* tag with RELEASE_PAT precisely so downstream workflows fire, and
+# release.yml has always been triggered that way. Same event, same credential,
+# nothing new to grant. Do not move this back to `release:` or to a dispatch
+# without re-reading which credential creates the event.
+#
+# Firing at the tag does NOT mean the chart inside tag vN is as of vN. The
+# refresh commits to the dev branch below, not to the tagged revision, so each
+# chart ships with the FOLLOWING release. That is a deliberate one-release lag:
+# committing to the release branch mid-cut would be worse. The bound that
+# matters is that the artifact never changes underneath a tag already pointing
+# at it.
+#
+# `accent` is this repo's logo colour, #7230d2 from the pigeon neck band, and
+# the registry is ops standards/readme-shape.md. It is required upstream with
+# no default so that a caller cannot silently inherit another repo's brand
+# colour. The dark variant is derived from it rather than passed, so there is
+# only one value to keep in sync, and the workflow emits both files: GitHub's
+# theme toggle drives a <picture> in the README but not a media query inside an
+# <img>-embedded SVG.
+#
+# `branch` has no default upstream and must be the dev branch: ruleset
+# 17620625 requires PRs plus two approvals on main, so a commit-back there
+# would be rejected. The reusable workflow rejects main/master before
+# checkout rather than dying at the push.
+#
+# The reusable workflow declares its own harden-runner as its first step, and
+# this caller job has no steps of its own, so this repo's egress allow-lists
+# do not apply and there is nothing to add here.
 
-job_keys="$(grep -oE '^ {4}[A-Za-z0-9_-]+:' <<<"${starchart_job}" | sed -E 's/^ {4}//; s/:$//' | sort -u)"
-while IFS= read -r job_key; do
-	[ -n "${job_key}" ] || continue
-	case "${job_key}" in
-	permissions | uses | with) : ;;
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  starchart:
+    permissions:
+      contents: write
+    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@@PIN@  # @PIN_COMMENT@
+    with:
+      branch: @BRANCH@
+      accent: "#7230d2"
+__STARCHART_TEMPLATE_EOF__
+
+# Bash 3.2 -- macOS's shipped /bin/bash -- has neither readarray/mapfile nor
+# a way to build an array from a heredoc piped straight into $(...): a
+# heredoc body containing an apostrophe breaks that combination's parser
+# outright (reproduced locally; not present on the bash 5.x this also runs
+# under in CI). A line-at-a-time read loop from a real file is portable to
+# both.
+template_lines=()
+while IFS= read -r line || [ -n "${line}" ]; do
+	template_lines+=("${line}")
+done <"${template_file}"
+
+actual_lines=()
+while IFS= read -r line || [ -n "${line}" ]; do
+	actual_lines+=("${line}")
+done <"${workflow}"
+
+template_count=${#template_lines[@]}
+actual_count=${#actual_lines[@]}
+
+structural_ok=1
+pin=""
+pin_comment=""
+pin_line=""
+branch_value=""
+
+uses_prefix="    uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@"
+branch_prefix="      branch: "
+
+i=0
+while [ "${i}" -lt "${template_count}" ] && [ "${i}" -lt "${actual_count}" ]; do
+	t="${template_lines[$i]}"
+	a="${actual_lines[$i]}"
+	line_no=$((i + 1))
+
+	case "${t}" in
+	*'@PIN@'*)
+		if [ "${a#"${uses_prefix}"}" != "${a}" ]; then
+			rest="${a#"${uses_prefix}"}"
+			if [ "${rest#*"  # "}" != "${rest}" ]; then
+				pin="${rest%%"  # "*}"
+				pin_comment="${rest#*"  # "}"
+			else
+				pin="${rest}"
+				pin_comment=""
+			fi
+			pin_line="${a}"
+		else
+			fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
+			structural_ok=0
+		fi
+		;;
+	*'@BRANCH@'*)
+		if [ "${a#"${branch_prefix}"}" != "${a}" ]; then
+			branch_value="${a#"${branch_prefix}"}"
+		else
+			fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
+			structural_ok=0
+		fi
+		;;
 	*)
-		fail "starchart job may only declare permissions, uses and with (found: ${job_key})"
+		if [ "${t}" != "${a}" ]; then
+			fail "starchart.yml deviates from the pinned shape at line ${line_no}: expected '${t}', got '${a}'"
+			structural_ok=0
+		fi
 		;;
 	esac
-done <<<"${job_keys}"
 
-# --- allowlist with:'s keys, and pin accent's value -------------------------
+	if [ "${structural_ok}" -eq 0 ]; then
+		break
+	fi
+	i=$((i + 1))
+done
+
+if [ "${structural_ok}" -eq 1 ] && [ "${template_count}" -ne "${actual_count}" ]; then
+	fail "starchart.yml deviates from the pinned shape: expected ${template_count} lines, got ${actual_count}"
+	structural_ok=0
+fi
+
+# --- the three slots that are allowed to vary --------------------------------
 #
-# Same reasoning, scoped one level deeper: with: may pass branch: and
-# accent:, and nothing else. Without this, an extra with: input (say
-# output-path:, if the reusable workflow ever grows one) can redirect what
-# gets written without this file's branch: check ever noticing, since that
-# check only ever looked at branch:'s value, not at with:'s key set. accent:
-# additionally gets its value pinned outright, the same way the tag pattern
-# and the reusable-workflow pin do: this file has exactly one accent colour
-# today, and a caller that changes it is a decision this contract should
-# see, not let float in unreviewed.
+# Only reached when every non-placeholder line matched exactly and the line
+# counts agree, so pin, pin_comment, and branch_value were captured from the
+# real file's own uses: and branch: lines, not left at their empty defaults.
 
-with_block="$(
-	awk '
-        $0 == "    with:" { in_with = 1; next }
-        in_with && /^    [^[:space:]]/ && $0 !~ /^[[:space:]]*#/ { in_with = 0 }
-        in_with { print }
-    ' <<<"${starchart_job}"
-)"
+if [ "${structural_ok}" -eq 1 ]; then
+	if ! [[ ${pin} =~ ^[0-9a-f]{40}$ ]] || [ -z "$(printf '%s' "${pin_comment}" | tr -d '[:space:]')" ]; then
+		fail "the starchart-refresh.yml pin must be a full 40-hex commit SHA followed by a non-empty comment: ${pin_line}"
+	fi
 
-with_keys="$(grep -oE '^ {6}[A-Za-z0-9_-]+:' <<<"${with_block}" | sed -E 's/^ {6}//; s/:$//' | sort -u)"
-while IFS= read -r with_key; do
-	[ -n "${with_key}" ] || continue
-	case "${with_key}" in
-	branch | accent) : ;;
-	*)
-		fail "with: may only pass branch and accent (found: ${with_key})"
-		;;
-	esac
-done <<<"${with_keys}"
-
-accent_lines="$(grep -E '^      accent: ' <<<"${with_block}" || true)"
-accent_count=0
-if [ -n "${accent_lines}" ]; then
-	accent_count="$(wc -l <<<"${accent_lines}" | tr -d '[:space:]')"
-fi
-if [ "${accent_count}" -ne 1 ]; then
-	fail "expected exactly one 'accent:' line at 6-space indent in the starchart job's with: block (found ${accent_count})"
-elif [ "${accent_lines}" != '      accent: "#7230d2"' ]; then
-	fail "with.accent: must be exactly '\"#7230d2\"', this repo's own accent colour: got '$(sed -E 's/^      accent: //' <<<"${accent_lines}")'"
-fi
-
-# --- no quoted keys, anywhere -------------------------------------------------
-#
-# Every tolerant if:/secrets: regex above grew a double-quote alternative
-# because a decoy used a double-quoted key; a single-quoted 'secrets':
-# inherit or 'if': always() would have sailed past every one of them, and
-# would keep sailing past whatever the next tolerant spelling turns out to
-# be. This bans quoting a key at all, anywhere in the file: the first
-# non-whitespace character on a line must never be a quote mark. Nothing in
-# this file legitimately needs a quoted key -- accent:'s VALUE is quoted,
-# but that quote is never the first character on its line.
-
-quoted_key_lines="$(grep -nE "^[[:space:]]*['\"]" "${workflow}" || true)"
-if [ -n "${quoted_key_lines}" ]; then
-	while IFS= read -r hit; do
-		[ -n "${hit}" ] || continue
-		fail "keys must be unquoted (line ${hit%%:*})"
-	done <<<"${quoted_key_lines}"
-fi
-
-# --- no YAML anchors, aliases, or merge keys, anywhere -----------------------
-#
-# An alias never puts the text it resolves to on its own line, so a regex
-# that reads the if: line's own text (always(), in any spelling) can't see
-# past `if: *unconditional` pointing at an anchor -- &unconditional -- defined
-# anywhere else in the file, however far away, with the value always()
-# resolves the alias to. No check anchored on a single line's content can
-# close that; only banning the anchor/alias/merge-key mechanism itself can.
-# None of the three forms GitHub Actions' YAML parser accepts are used
-# anywhere in this file today, so all three are banned outright: an anchor
-# or alias on a mapping value (key: &name ... or key: *name), one on a
-# sequence item (- &name ... or - *name), and the merge key (<<: *name) that
-# splices an anchored mapping's keys into the one using it -- which would
-# let a single anchored mapping inject keys past the allowlists above
-# without either allowlist ever seeing them arrive on their own line.
-
-anchor_lines="$(grep -nE ':[[:space:]]*[&*]|^[[:space:]]*-[[:space:]]*[&*]|^[[:space:]]*<<' "${workflow}" || true)"
-if [ -n "${anchor_lines}" ]; then
-	while IFS= read -r hit; do
-		[ -n "${hit}" ] || continue
-		fail "YAML anchors, aliases and merge keys are not allowed (line ${hit%%:*})"
-	done <<<"${anchor_lines}"
-fi
-
-# --- file-wide bans on alternate ways to grant more than intended ----------
-#
-# These exist alongside the structural checks below, not instead of them.
-# GitHub Actions accepts more than one spelling for "grant everything" or
-# for the same contents: write this job already declares in block-mapping
-# form: write-all is the workflow-wide shorthand, and {contents: write} (any
-# amount of space after the brace) is the inline flow-mapping form of the
-# grant. A regex anchored to the one spelling this file happens to use today
-# would miss both. None of these belong anywhere in the file, on any job, in
-# any spelling -- so these are unscoped, file-wide bans, not job-scoped ones.
-
-if grep -Fq 'write-all' "${workflow}"; then
-	fail "the file must not contain write-all anywhere; permissions must stay scoped to contents: write on the starchart job"
-fi
-if grep -Fq '{contents' "${workflow}"; then
-	fail "the file must not contain an inline {contents: ...} permissions map anywhere"
-fi
-if grep -Eq 'permissions:[[:space:]]*\{[^}]' "${workflow}"; then
-	fail "the file must not contain a non-empty inline permissions: {...} map anywhere"
-fi
-
-# permissions: itself may appear exactly twice in a compliant file: the
-# workflow-level permissions: {} and the starchart job's own block-form
-# grant. A third occurrence anywhere -- a second job's permissions key in
-# ANY spelling the substring bans above don't happen to catch, or a decoy
-# sitting in a block scalar -- fails here even if it doesn't match write-all
-# or {contents.
-
-permissions_key_count="$(grep -cE '^[[:space:]]*permissions:' "${workflow}" || true)"
-if [ "${permissions_key_count}" -ne 2 ]; then
-	fail "the file may declare permissions: exactly twice -- the workflow-level permissions: {} and the starchart job's own permissions: block -- but found ${permissions_key_count}"
-fi
-
-# --- contents: write is granted to exactly this job, and only this job -----
-#
-# Two independent checks. First, a file-wide count: exactly one line anywhere
-# in the file may read "      contents: write" at that exact indentation, so
-# neither a deleted grant nor a second job quietly picking one up goes
-# unnoticed. Second, a structural check scoped to the starchart job itself:
-# its own `    permissions:` key must be followed immediately by that one
-# line and then a dedent, so a grant that exists somewhere in the file but
-# NOT on this job (moved to an unrelated job, or replaced with an inline
-# `permissions: {}` while a decoy line sits elsewhere) still fails, with a
-# message that says so rather than reporting a false "file-wide count is
-# fine". "Followed immediately" is literal: a blank line or a comment
-# between the grant and whatever comes next fails closed with its own
-# message, rather than resetting the state machine and silently not looking
-# at what's actually on the other side of the gap -- which is exactly where
-# a second, wider grant (an `actions: write` line, say) would try to hide.
-
-write_grant_count="$(grep -cE '^      contents: write$' "${workflow}" || true)"
-if [ "${write_grant_count}" -ne 1 ]; then
-	fail "exactly one line in the file may read '      contents: write' (found ${write_grant_count})"
-fi
-
-permissions_state="$(awk '
-	BEGIN { found = 0; state = 0; ok = 1; gap = 0 }
-	/^    permissions:$/ {
-		found = 1
-		state = 1
-		next
-	}
-	state == 1 {
-		if ($0 == "      contents: write") {
-			state = 2
-		} else {
-			ok = 0
-			state = 0
-		}
-		next
-	}
-	state == 2 {
-		if ($0 == "" || $0 ~ /^[[:space:]]*#/) {
-			gap = 1
-		} else if ($0 ~ /^      /) {
-			ok = 0
-		}
-		state = 0
-		next
-	}
-	END {
-		if (found == 0) {
-			print "missing"
-		} else if (gap == 1) {
-			print "gap"
-		} else if (ok == 0) {
-			print "malformed"
-		} else {
-			print "ok"
-		}
-	}
-' <<<"${starchart_job}")"
-
-case "${permissions_state}" in
-ok) : ;;
-gap)
-	fail "the line directly after '      contents: write' must not be blank or a comment; the permissions block must dedent (or show its next key) on the very next line so a wider grant can't hide behind the gap"
-	;;
-*)
-	fail "the starchart job's own '    permissions:' must be followed immediately by exactly '      contents: write' and nothing else; a grant recorded elsewhere in the file (a different job, or text inside a block scalar) does not satisfy this contract"
-	;;
-esac
-
-# --- no unconditional escape hatch on the write path ------------------------
-#
-# continue-on-error would let a failed refresh (or a failed push) report
-# green. An if: always() -- in either the bare or the ${{ }} expression
-# spelling -- would run the reusable workflow's write path regardless of
-# anything upstream in this job; there's nothing upstream in a single-job
-# file today, but the job block is the one place that guard could reappear
-# and silently defeat the change-detection this delegates to. `secrets:`
-# doesn't need to be conditional to be a problem -- any value at all,
-# `inherit` or otherwise, hands the reusable workflow secrets it doesn't
-# need. Both checks tolerate the key being quoted ("if":, "secrets":) and a
-# space before the colon (if :, secrets :), which YAML permits and a bare
-# `^    if:` or `^    secrets:` anchor would silently pass; the if: check
-# also tolerates space inside always()'s parens.
-
-if grep -Eq '^    "?secrets"?[[:space:]]*:' <<<"${starchart_job}"; then
-	fail "the starchart job must not declare secrets: (inherit or otherwise, however the key is quoted or spaced); the reusable workflow needs none"
-fi
-if grep -Eq 'continue-on-error' <<<"${starchart_job}"; then
-	fail "the starchart job must not carry continue-on-error; a failed refresh or push must report failure"
-fi
-if grep -Eq '^    "?if"?[[:space:]]*:.*always[[:space:]]*\([[:space:]]*\)' <<<"${starchart_job}"; then
-	# shellcheck disable=SC2016 # Literal failure-message text, not a variable expansion.
-	fail 'the starchart job must not run unconditionally via if: always() in any spelling (quoted key, spaced colon, spaced parens, or the ${{ }} expression form all count); the write path is real work, not cleanup'
-fi
-
-# --- the reusable workflow pin ----------------------------------------------
-#
-# A branch or tag ref is mutable, so the write path this file delegates to
-# could change behaviour without a commit to this repo. The pin has to be a
-# full 40-hex commit SHA with a trailing non-empty comment recording why/when,
-# matching how every other reusable-workflow pin in this repo is written, and
-# it has to be the only `uses:` line anywhere in the file -- a second one,
-# wherever it's hiding, is a decoy or a second delegation this contract has
-# not reviewed. The file-wide count matches `uses:` as a step would write it
-# too (`- uses: ...`, optionally quoted), not just the job-level key form, so
-# a second job's step doesn't sneak a delegation past a pattern that only
-# recognized the one shape this file happens to use.
-
-all_uses_count="$(grep -Ec '(^|[[:space:]]|-)"?uses"?[[:space:]]*:' "${workflow}" || true)"
-job_uses_lines="$(grep -E '^    uses: ' <<<"${starchart_job}" || true)"
-job_uses_count=0
-if [ -n "${job_uses_lines}" ]; then
-	job_uses_count="$(wc -l <<<"${job_uses_lines}" | tr -d '[:space:]')"
-fi
-
-if [ "${job_uses_count}" -ne 1 ]; then
-	fail "expected exactly one 'uses:' line at 4-space indent inside the starchart job (found ${job_uses_count})"
-elif [ "${all_uses_count}" -ne 1 ]; then
-	fail "no other 'uses:' lines are allowed anywhere in the file, but found ${all_uses_count} total"
-else
-	echo "${job_uses_lines}" | grep -Eq \
-		'^    uses: CodesWhat/\.github/\.github/workflows/starchart-refresh\.yml@[0-9a-f]{40}[[:space:]]+#[[:space:]]*[^[:space:]]' ||
-		fail "the starchart-refresh.yml pin must be a full 40-hex commit SHA followed by a non-empty comment: ${job_uses_lines}"
-fi
-
-# --- the target branch ------------------------------------------------------
-#
-# The reusable workflow already refuses main/master/HEAD/empty as a
-# commit-back target at run time (starchart-refresh.yml's "Reject a
-# protected branch" step). Asserting the same list here means a caller value
-# that would fail there fails at review time on this side instead, and
-# pinning it to this repo's own dev/vX convention catches a value that
-# clears the reusable workflow's guard but still isn't the dev branch this
-# repo actually promotes from. renovate.json's baseBranchPatterns names that
-# same dev branch for an entirely different reason (where Renovate opens
-# PRs); the two roll together at a release cut, so drift between them is
-# exactly the failure this last check exists to catch. with_block was
-# already extracted above, alongside with:'s key allowlist.
-
-branch_lines="$(grep -E '^      branch: ' <<<"${with_block}" || true)"
-branch_count=0
-if [ -n "${branch_lines}" ]; then
-	branch_count="$(wc -l <<<"${branch_lines}" | tr -d '[:space:]')"
-fi
-
-# The three checks below (forbidden value, shape, renovate.json agreement)
-# are deliberately chained with elif/nesting rather than run unconditionally
-# one after another: a single bad branch_value has exactly one root cause,
-# and it should produce exactly one failure message, not a pile of
-# consequential ones (main/master/HEAD is never going to match dev/vX.Y
-# either, and comparing a value that already failed the shape check against
-# renovate.json adds nothing).
-
-if [ "${branch_count}" -ne 1 ]; then
-	fail "expected exactly one 'branch:' line at 6-space indent in the starchart job's with: block (found ${branch_count})"
-else
-	branch_value="$(sed -E 's/^      branch: //' <<<"${branch_lines}")"
 	case "${branch_value}" in
 	main | master | HEAD | "")
 		fail "branch must not be main/master/HEAD/empty; the reusable workflow refuses these too, but this fails before a run is even needed: got '${branch_value}'"
