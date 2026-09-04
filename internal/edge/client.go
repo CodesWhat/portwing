@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -138,6 +139,18 @@ type dockerAPI interface {
 	ResizeExec(ctx context.Context, execID string, cols, rows int) error
 }
 
+// hostCollector is the *metrics.Collector subset sendMetrics depends on,
+// defined on the consumer side like dockerAPI above. *metrics.Collector
+// satisfies it structurally.
+//
+// The seam is what makes the failed-collection branch testable at all:
+// Collect's only error is a missing /proc, which cannot be arranged on the
+// Linux hosts that run CI, and the field's concrete type meant the branch had
+// no unit coverage anywhere.
+type hostCollector interface {
+	Collect() (*metrics.HostMetrics, error)
+}
+
 // edgeMessageSender wraps the edge Client to implement adapter.MessageSender.
 type edgeMessageSender struct {
 	client *Client
@@ -163,7 +176,7 @@ type Client struct {
 	dockerClient dockerAPI
 	adapter      adapter.EdgeAdapter
 	compose      *docker.ComposeManager
-	collector    *metrics.Collector
+	collector    hostCollector
 	metrics      *metrics.Registry
 	auditor      *audit.Logger
 	startTime    time.Time
@@ -224,6 +237,15 @@ type Client struct {
 	dispatchingBodies map[uint64]int64
 	nextDispatchSeq   uint64
 
+	// metricsCollectFailing records whether the last host-metrics collection
+	// failed, so sendMetrics can log the transitions instead of repeating one
+	// warning every heartbeat forever on a host that can never report them.
+	// It tracks the collection, not the connection, so a reconnect does not
+	// re-announce a condition that never changed. Atomic because Swap is what
+	// makes the transition log fire exactly once, which holds even if a caller
+	// is ever added off the write pump.
+	metricsCollectFailing atomic.Bool
+
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
 }
@@ -241,6 +263,11 @@ type pendingRequestBody struct {
 	// already elapsed, so a timeout callback can still be in flight when a
 	// chunk re-arms the timer; each callback carries the gen it was armed
 	// with and no-ops when it no longer matches. Guarded by pendingBodiesMu.
+	//
+	// It separates armings of this entry and nothing more. Every entry
+	// starts at 0, so it cannot separate this entry from a later one
+	// registered under the same RequestID; that is the entry-pointer half of
+	// failPendingBody's match.
 	gen uint64
 }
 
@@ -539,6 +566,10 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	// their Docker exec conns) don't leak across reconnects; the next
 	// connection starts with a clean exec table.
 	c.closeAllExecSessions()
+	// Same for the streamed request bodies still reassembling: their
+	// stream_end died with the connection, so the next one starts with a
+	// clean pending table instead of rejecting the controller's retries.
+	c.failAllPendingBodies()
 
 	// Close connection.
 	c.connMu.Lock()
@@ -877,11 +908,16 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 		return
 	}
 	pb := &pendingRequestBody{req: req, target: target}
-	// gen 0 is the arming generation for this first timer; appendPendingBody
-	// bumps it on every re-arm so a callback that already fired can tell it
-	// lost the race and must not fail a live upload.
+	// The callback names the entry it was armed for, not just the RequestID
+	// it is filed under: the ID is freed and re-registered while a callback
+	// for it may already be running (the teardown drain then the controller's
+	// retry, or stream_end then a second request under the same ID), and the
+	// successor starts at gen 0 exactly like this one. gen 0 is this first
+	// timer's arming generation; appendPendingBody bumps it on every re-arm
+	// so a callback that already fired can tell it lost the race and must not
+	// fail a live upload.
 	pb.timer = time.AfterFunc(requestBodyStreamIdleTimeout, func() {
-		c.failPendingBody(req.RequestID, 0)
+		c.failPendingBody(req.RequestID, pb, 0)
 	})
 	c.pendingBodies[req.RequestID] = pb
 	c.pendingBodiesMu.Unlock()
@@ -952,7 +988,7 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 	gen := pb.gen
 	pb.timer.Stop()
 	pb.timer = time.AfterFunc(requestBodyStreamIdleTimeout, func() {
-		c.failPendingBody(requestID, gen)
+		c.failPendingBody(requestID, pb, gen)
 	})
 	c.pendingBodiesMu.Unlock()
 	return true
@@ -1080,15 +1116,36 @@ func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestM
 
 // failPendingBody is the idle-timeout callback for a pending body: it
 // removes the entry and reports the timeout to the controller as a
-// TypeError, but only when gen still matches the generation the firing timer
-// was armed with. A mismatch means a chunk re-armed the timer after this
-// callback had already fired, so the upload is alive and this firing must be
-// dropped. (The size-cap and decode-failure paths clean up inline in
+// TypeError, but only when the entry filed under requestID is still the one
+// this callback was armed for (want), at the generation it was armed with
+// (gen).
+//
+// Both halves of that match are needed, and they cover different races.
+//
+// The entry pointer is what stops a fired callback from killing a successor.
+// time.Timer.Stop does not wait for a callback that has already started, so
+// one can be parked on this mutex while its entry is removed and the same
+// RequestID is registered again: failAllPendingBodies then the controller's
+// retry on the new connection is the reachable case, and finishPendingBody or
+// appendPendingBody's cleanup paths followed by a re-use of the ID is the
+// same shape within one connection. The successor is a fresh entry at gen 0,
+// so requestID and gen alone match it and this callback would delete a live
+// upload and time it out on the wire. Comparing the entry instead cannot
+// match a successor: a successor is always a different allocation, and the
+// closure holds want alive, so its address is not recycled underneath the
+// comparison.
+//
+// The generation covers what identity cannot: the same entry re-arming its
+// timer on every chunk. Reset cannot recall an AfterFunc whose deadline
+// already elapsed, so a callback queued before the chunk landed still points
+// at the live entry and must drop its firing.
+//
+// (The size-cap and decode-failure paths clean up inline in
 // appendPendingBody.)
-func (c *Client) failPendingBody(requestID string, gen uint64) {
+func (c *Client) failPendingBody(requestID string, want *pendingRequestBody, gen uint64) {
 	c.pendingBodiesMu.Lock()
 	pb, ok := c.pendingBodies[requestID]
-	if !ok || pb.gen != gen {
+	if !ok || pb != want || pb.gen != gen {
 		c.pendingBodiesMu.Unlock()
 		return
 	}
@@ -1369,12 +1426,51 @@ func (c *Client) writePump(ctx context.Context) {
 	}
 }
 
-// sendMetrics collects and sends host metrics.
+// metricsUnavailableCode is the error frame's `code` when host metrics could
+// not be collected — the wire's marker for "this agent is alive and cannot
+// report these numbers", as distinct from an agent that has gone quiet.
+const metricsUnavailableCode = "host-metrics-unavailable"
+
+// sendMetrics collects and sends host metrics, and reports a failed collection
+// instead of swallowing it.
+//
+// Collect hands back a partially populated snapshot alongside its error, and
+// forwarding that is exactly what ErrHostMetricsUnsupported exists to prevent:
+// a zero-filled metrics frame is indistinguishable from a real reading of a
+// completely idle host. The other two surfaces both answer a failed collection
+// with an explicit marker rather than zeros — Prometheus omits the host series
+// behind `portwing_host_metrics_supported 0`, and the MCP host_metrics tool
+// returns an error naming the missing procfs — so this one answers with the
+// wire's own error frame (SPEC 3.3, 8), carrying metricsUnavailableCode.
+// Staying silent, which is what it used to do, left the controller unable to
+// tell an unsupported host from a dead agent.
+//
+// The frame keeps the metrics cadence: one per heartbeat, same as the metrics
+// frame it stands in for, so the signal is periodic rather than one-shot. The
+// log does not: the level marks the transition, because the failure is
+// permanent on a host with no procfs and warning every 30 seconds forever
+// would bury the tick that actually changed something. First failure (at
+// startup, or the first after a recovery) warns, repeats while failed drop to
+// debug, and a recovery says so once at info. Swap reports the previous state,
+// so exactly one call logs each transition.
 func (c *Client) sendMetrics() {
 	m, err := c.collector.Collect()
 	if err != nil {
-		slog.Debug("metrics collection failed", "error", err)
+		if c.metricsCollectFailing.Swap(true) {
+			slog.Debug("metrics collection failed", "error", err)
+		} else {
+			slog.Warn("metrics collection failed", "error", err)
+		}
+		// Best-effort, like the metrics send below. Sent on every failed tick
+		// whatever the log level, so the controller's signal stays periodic.
+		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
+			Message: err.Error(),
+			Code:    metricsUnavailableCode,
+		})
 		return
+	}
+	if c.metricsCollectFailing.Swap(false) {
+		slog.Info("metrics collection recovered")
 	}
 	// Best-effort metrics send; connection loss surfaces on the read pump.
 	_ = c.sendTypedMessage(protocol.TypeMetrics, m)
@@ -1575,6 +1671,53 @@ func (c *Client) closeAllExecSessions() {
 	})
 }
 
+// failAllPendingBodies drops every streamed request body still reassembling
+// and releases its RequestID. It is closeAllExecSessions' sibling on the same
+// teardown path: both own per-connection state that the next connection must
+// not inherit.
+//
+// Without it a dropped tunnel leaves the entries registered with their idle
+// timers running, so the controller's retry of the same RequestID after
+// reconnect is answered with a duplicate-requestId rejection until
+// requestBodyStreamIdleTimeout expires — up to 30 seconds of a request that
+// can never succeed, on a connection that is otherwise healthy.
+//
+// Nothing goes on the wire. sendPump has already returned by the time teardown
+// runs, so its queue reports closed and every send would take the eviction
+// branch instead: a spurious "evicting controller connection" warning and a
+// second Close on the conn that connect is about to close anyway, per pending
+// body. closeAllExecSessions is silent for the same reason.
+//
+// Swapping the map out under the lock before touching any timer is what makes
+// this safe against a timeout callback racing it: failPendingBody looks the
+// entry up under the same lock, finds nothing, and returns without sending.
+// Stopping an already-fired timer is a no-op, so the two cannot double-fail
+// one request.
+//
+// The swap is not enough on its own once the controller reconnects, because
+// by then the table is not empty: the retry has registered a fresh entry
+// under the same RequestID, at the same gen 0 the drained one was armed at.
+// What keeps a callback parked since the old connection from deleting it is
+// that failPendingBody matches on the entry it was armed for, not on the
+// RequestID.
+func (c *Client) failAllPendingBodies() {
+	c.pendingBodiesMu.Lock()
+	dropped := c.pendingBodies
+	c.pendingBodies = nil
+	c.pendingBodiesMu.Unlock()
+
+	if len(dropped) == 0 {
+		return
+	}
+	for requestID, pb := range dropped {
+		pb.timer.Stop()
+		slog.Debug("dropping streamed request body: controller connection lost",
+			"request_id", applog.Sanitize(requestID))
+	}
+	slog.Warn("controller connection lost with streamed request bodies in flight",
+		"count", len(dropped))
+}
+
 // msEdge returns elapsed milliseconds since start as a float64.
 func msEdge(start time.Time) float64 {
 	return float64(time.Since(start).Nanoseconds()) / 1e6
@@ -1668,7 +1811,12 @@ func (c *Client) startHealthServer() {
 		fmt.Fprintf(&b, "# HELP portwing_uptime_seconds Seconds since the agent started.\n")
 		fmt.Fprintf(&b, "# TYPE portwing_uptime_seconds gauge\n")
 		fmt.Fprintf(&b, "portwing_uptime_seconds %g\n", time.Since(c.startTime).Seconds())
-		metrics.WriteHostPrometheus(&b, c.collector)
+		// The host series need the real collector's concrete type, which
+		// production always holds. A test-injected fake leaves them out, the
+		// same absence a nil collector produced before.
+		if hostCol, ok := c.collector.(*metrics.Collector); ok {
+			metrics.WriteHostPrometheus(&b, hostCol)
+		}
 		if dockerMetrics, ok := c.dockerClient.(metrics.DockerMetricsClient); ok {
 			metrics.WriteContainerPrometheus(r.Context(), &b, dockerMetrics, metrics.EscapeLabelValue)
 		}

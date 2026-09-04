@@ -17,23 +17,6 @@ import (
 
 const outboundQueuedByteLimitForTest = 128 << 20
 
-// runSendPump creates the per-connection send queue and starts the sendPump
-// against the test client, returning the channel so a test can observe/fill it.
-// The pump is torn down via context cancellation registered as a test cleanup.
-func runSendPump(t *testing.T, c *Client) chan protocol.Envelope {
-	t.Helper()
-	ch := make(chan protocol.Envelope, sendQueueSize)
-	c.connMu.Lock()
-	c.sendCh = ch
-	conn := c.conn
-	c.connMu.Unlock()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go c.sendPump(ctx, conn, ch)
-	t.Cleanup(cancel)
-	return ch
-}
-
 func newEdgeMetricsForBackpressureTest() *metrics.Registry {
 	registry := metrics.NewRegistry()
 	registry.SetEdgeMode(true)
@@ -59,7 +42,6 @@ func TestSendPumpDeliversQueuedFrame(t *testing.T) {
 	t.Parallel()
 
 	c, ctrl := newTestClient(t)
-	runSendPump(t, c)
 
 	const ts = int64(42)
 	if err := c.sendTypedMessage(protocol.TypePong, protocol.PongMessage{Timestamp: ts}); err != nil {
@@ -81,7 +63,7 @@ func TestSendPumpDeliversQueuedFrame(t *testing.T) {
 func TestSendMessageEvictsConnectionWhenQueueFull(t *testing.T) {
 	t.Parallel()
 
-	c, ctrl := newTestClient(t)
+	c, ctrl := newHandshakeTestClient(t)
 	c.metrics = newEdgeMetricsForBackpressureTest()
 
 	// Install a capacity-1 queue (no pump running — nobody drains it).
@@ -113,7 +95,7 @@ func TestSendMessageEvictsConnectionWhenQueueFull(t *testing.T) {
 func TestSendMessageEvictsConnectionWhenQueuedBytesExceedLimit(t *testing.T) {
 	t.Parallel()
 
-	c, _ := newTestClient(t)
+	c, _ := newHandshakeTestClient(t)
 	c.metrics = newEdgeMetricsForBackpressureTest()
 	c.connMu.Lock()
 	c.sendCh = make(chan protocol.Envelope, sendQueueSize)
@@ -175,7 +157,7 @@ func TestOutboundByteReservationIncludesDequeuedFrameUntilRelease(t *testing.T) 
 func TestSendMessageCannotResurrectClosedQueueGeneration(t *testing.T) {
 	t.Parallel()
 
-	c, ctrl := newTestClient(t)
+	c, ctrl := newHandshakeTestClient(t)
 	ch := make(chan protocol.Envelope, sendQueueSize)
 	state := &outboundQueueState{}
 	c.connMu.Lock()
@@ -251,7 +233,7 @@ func TestStaleSendPumpLeavesReplacementQueueStateOpen(t *testing.T) {
 func TestSendPumpReleasesReservationWhenConnectionAlreadyClosed(t *testing.T) {
 	t.Parallel()
 
-	c, _ := newTestClient(t)
+	c, _ := newHandshakeTestClient(t)
 	c.connMu.Lock()
 	agentConn := c.conn
 	c.connMu.Unlock()
@@ -282,7 +264,7 @@ func TestSendPumpReleasesReservationWhenConnectionAlreadyClosed(t *testing.T) {
 func TestFailConnCannotEvictReplacementGeneration(t *testing.T) {
 	t.Parallel()
 
-	c, oldController := newTestClient(t)
+	c, oldController := newHandshakeTestClient(t)
 	c.connMu.Lock()
 	oldAgent := c.conn
 	c.connMu.Unlock()
@@ -324,7 +306,6 @@ func TestSendPumpEvictsOnWriteFailure(t *testing.T) {
 	t.Parallel()
 
 	c, ctrl := newTestClient(t)
-	runSendPump(t, c)
 
 	// Capture the agent conn before eviction so we can probe it afterwards.
 	c.connMu.Lock()
@@ -354,15 +335,15 @@ func TestSendPumpEvictsOnWriteFailure(t *testing.T) {
 }
 
 // TestSendMessageDirectWriteWhenNoQueue documents that the handshake (nil
-// sendCh) code path remains intact: with sendCh left nil (as newTestClient
-// always leaves it), sendTypedMessage writes directly to the WebSocket and the
-// controller receives the frame. Every existing dispatch test relies on this
-// behaviour implicitly; this test makes it an explicit contract.
+// sendCh) code path remains intact: with sendCh left nil, sendTypedMessage
+// writes directly to the WebSocket and the controller receives the frame. That
+// is the branch sendHello takes before connect publishes the queue, and this
+// test is the only thing pinning it now that newTestClient starts a send pump.
 func TestSendMessageDirectWriteWhenNoQueue(t *testing.T) {
 	t.Parallel()
 
-	c, ctrl := newTestClient(t)
-	// sendCh is nil — newTestClient does not set it.
+	c, ctrl := newHandshakeTestClient(t)
+	// sendCh is nil — this constructor stops short of publishing the queue.
 
 	const ts = int64(7)
 	if err := c.sendTypedMessage(protocol.TypePong, protocol.PongMessage{Timestamp: ts}); err != nil {
