@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -235,6 +236,15 @@ type Client struct {
 	// first streamed body is dispatched.
 	dispatchingBodies map[uint64]int64
 	nextDispatchSeq   uint64
+
+	// metricsCollectFailing records whether the last host-metrics collection
+	// failed, so sendMetrics can log the transitions instead of repeating one
+	// warning every heartbeat forever on a host that can never report them.
+	// It tracks the collection, not the connection, so a reconnect does not
+	// re-announce a condition that never changed. Atomic because Swap is what
+	// makes the transition log fire exactly once, which holds even if a caller
+	// is ever added off the write pump.
+	metricsCollectFailing atomic.Bool
 
 	// Health server for Docker HEALTHCHECK.
 	healthServer *http.Server
@@ -1405,17 +1415,31 @@ const metricsUnavailableCode = "host-metrics-unavailable"
 // tell an unsupported host from a dead agent.
 //
 // The frame keeps the metrics cadence: one per heartbeat, same as the metrics
-// frame it stands in for, so the signal is periodic rather than one-shot.
+// frame it stands in for, so the signal is periodic rather than one-shot. The
+// log does not: the level marks the transition, because the failure is
+// permanent on a host with no procfs and warning every 30 seconds forever
+// would bury the tick that actually changed something. First failure (at
+// startup, or the first after a recovery) warns, repeats while failed drop to
+// debug, and a recovery says so once at info. Swap reports the previous state,
+// so exactly one call logs each transition.
 func (c *Client) sendMetrics() {
 	m, err := c.collector.Collect()
 	if err != nil {
-		slog.Warn("metrics collection failed", "error", err)
-		// Best-effort, like the metrics send below.
+		if c.metricsCollectFailing.Swap(true) {
+			slog.Debug("metrics collection failed", "error", err)
+		} else {
+			slog.Warn("metrics collection failed", "error", err)
+		}
+		// Best-effort, like the metrics send below. Sent on every failed tick
+		// whatever the log level, so the controller's signal stays periodic.
 		_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 			Message: err.Error(),
 			Code:    metricsUnavailableCode,
 		})
 		return
+	}
+	if c.metricsCollectFailing.Swap(false) {
+		slog.Info("metrics collection recovered")
 	}
 	// Best-effort metrics send; connection loss surfaces on the read pump.
 	_ = c.sendTypedMessage(protocol.TypeMetrics, m)

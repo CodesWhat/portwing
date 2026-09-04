@@ -19,7 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   partially populated snapshot collection returns alongside the error, because
   a zero-filled metrics frame reads as a real measurement of an idle host —
   the same reason the Prometheus endpoint omits the host series behind
-  `portwing_host_metrics_supported 0`. Documented in SPEC section 8.
+  `portwing_host_metrics_supported 0`. The log follows the transitions
+  rather than the ticks — the first failure warns, repeats while the host
+  stays broken drop to debug, and a recovery says so once at info — because
+  a permanent failure warning every 30 seconds buries the tick that changed.
+  Documented in SPEC section 8.
 - **A dropped tunnel no longer wedges a streamed request's `requestId` for 30
   seconds.** Connection teardown closed the exec sessions but left every
   `bodyStream: true` reassembly registered with its idle timer running, so a

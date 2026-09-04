@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -982,6 +983,162 @@ func TestSendMetricsFailureCarriesNoZeroedSnapshot(t *testing.T) {
 	}
 	if _, raw, err := ctrl.ReadMessage(); err == nil {
 		t.Fatalf("a second frame followed the error frame: %s", raw)
+	}
+}
+
+// levelRecordingHandler captures the level and message of every log record,
+// for the transition assertions below. Concurrency-safe because it is
+// installed as the process-wide default logger and other goroutines may still
+// be logging into it.
+type levelRecordingHandler struct {
+	mu      sync.Mutex
+	records []loggedRecord
+}
+
+type loggedRecord struct {
+	level   slog.Level
+	message string
+}
+
+func (h *levelRecordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *levelRecordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, loggedRecord{level: r.Level, message: r.Message})
+	return nil
+}
+
+func (h *levelRecordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *levelRecordingHandler) WithGroup(string) slog.Handler      { return h }
+
+// take returns the records whose message is one of want, and clears the
+// buffer. Filtering by message keeps an unrelated log line from another
+// goroutine out of the assertion.
+func (h *levelRecordingHandler) take(want ...string) []loggedRecord {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []loggedRecord
+	for _, r := range h.records {
+		for _, w := range want {
+			if r.message == w {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	h.records = nil
+	return out
+}
+
+// TestSendMetricsLogsCollectionTransitionsOnly pins the log-level policy for a
+// failure that persists. The error frame is per-tick, but the log is not: a
+// host with no procfs fails every heartbeat forever, so warning each time
+// would bury the tick that actually changed something. Only the transitions
+// are loud.
+//
+// The sequence is failure, failure, success, failure. The fourth call is the
+// first failure after a recovery, so it warns again — a second break after a
+// recovery is a real event an operator has to see, not a repeat.
+func TestSendMetricsLogsCollectionTransitionsOnly(t *testing.T) {
+	// Not t.Parallel(): swaps the process-wide default slog logger.
+
+	const (
+		failedMsg    = "metrics collection failed"
+		recoveredMsg = "metrics collection recovered"
+	)
+
+	handler := &levelRecordingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	failing := stubCollector{
+		snapshot: &metrics.HostMetrics{CPUCores: 8},
+		err:      fmt.Errorf("%w: /proc: no such file or directory", metrics.ErrHostMetricsUnsupported),
+	}
+	healthy := stubCollector{snapshot: &metrics.HostMetrics{CPUCores: 8, MemoryTotal: 1 << 30}}
+
+	steps := []struct {
+		name        string
+		collector   stubCollector
+		wantLevel   slog.Level
+		wantMessage string
+		wantFrame   string
+	}{
+		{
+			name:        "first failure warns",
+			collector:   failing,
+			wantLevel:   slog.LevelWarn,
+			wantMessage: failedMsg,
+			wantFrame:   protocol.TypeError,
+		},
+		{
+			name:        "repeat failure drops to debug",
+			collector:   failing,
+			wantLevel:   slog.LevelDebug,
+			wantMessage: failedMsg,
+			wantFrame:   protocol.TypeError,
+		},
+		{
+			name:        "recovery says so once at info",
+			collector:   healthy,
+			wantLevel:   slog.LevelInfo,
+			wantMessage: recoveredMsg,
+			wantFrame:   protocol.TypeMetrics,
+		},
+		{
+			name:        "failure after a recovery warns again",
+			collector:   failing,
+			wantLevel:   slog.LevelWarn,
+			wantMessage: failedMsg,
+			wantFrame:   protocol.TypeError,
+		},
+	}
+
+	c, ctrl := newTestClient(t)
+	byLevel := map[slog.Level]int{}
+
+	for _, tc := range steps {
+		t.Run(tc.name, func(t *testing.T) {
+			c.collector = tc.collector
+
+			c.sendMetrics()
+
+			// Reading the frame first is the ordering barrier: sendMetrics
+			// logs before it sends, so a frame in hand means the record is
+			// already in the handler.
+			if env := expectEnvelope(t, ctrl); env.Type != tc.wantFrame {
+				t.Fatalf("frame = %q (data=%s), want %q", env.Type, env.Data, tc.wantFrame)
+			}
+
+			got := handler.take(failedMsg, recoveredMsg)
+			if len(got) != 1 {
+				t.Fatalf("collection log records = %+v, want exactly one", got)
+			}
+			if got[0].level != tc.wantLevel {
+				t.Errorf("log level = %v, want %v", got[0].level, tc.wantLevel)
+			}
+			if got[0].message != tc.wantMessage {
+				t.Errorf("log message = %q, want %q", got[0].message, tc.wantMessage)
+			}
+			byLevel[got[0].level]++
+		})
+	}
+
+	// The aggregate over the whole sequence, which is what the policy is for.
+	wantByLevel := map[slog.Level]int{
+		slog.LevelWarn:  2, // the two transitions into failure
+		slog.LevelDebug: 1, // the repeat while already failed
+		slog.LevelInfo:  1, // the single recovery
+	}
+	for level, want := range wantByLevel {
+		if byLevel[level] != want {
+			t.Errorf("%v records = %d, want %d (levels seen: %v)", level, byLevel[level], want, byLevel)
+		}
+	}
+	if len(byLevel) != len(wantByLevel) {
+		t.Errorf("levels seen = %v, want exactly %v", byLevel, wantByLevel)
 	}
 }
 
