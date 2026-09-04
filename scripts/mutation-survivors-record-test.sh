@@ -61,7 +61,7 @@ func Bar() {
 EOF
 
 mkdir -p "${records_dir}/alpha"
-jq -n '{name:"alpha", package:"./internal/alpha", mode:"gated", outcome:"success"}' \
+jq -n '{name:"alpha", package:"./internal/alpha", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/alpha/quality-history-record.json"
 jq -n '{
   name: "alpha", package: "./internal/alpha",
@@ -78,7 +78,7 @@ jq -n '{
 
 # --- gamma: gated, a file_name that escapes the package directory -----------
 mkdir -p "${records_dir}/gamma"
-jq -n '{name:"gamma", package:"./internal/gamma", mode:"gated", outcome:"success"}' \
+jq -n '{name:"gamma", package:"./internal/gamma", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/gamma/quality-history-record.json"
 jq -n '{
   name: "gamma", package: "./internal/gamma",
@@ -88,7 +88,7 @@ jq -n '{
 
 # --- epsilon: gated mode with no mutation-survivors.json ---------------------
 mkdir -p "${records_dir}/epsilon"
-jq -n '{name:"epsilon", package:"./internal/epsilon", mode:"gated", outcome:"success"}' \
+jq -n '{name:"epsilon", package:"./internal/epsilon", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/epsilon/quality-history-record.json"
 # Deliberately no mutation-survivors.json: the leg reported "gated" but its
 # survivors upload never landed.
@@ -97,7 +97,7 @@ jq -n '{name:"epsilon", package:"./internal/epsilon", mode:"gated", outcome:"suc
 mkdir -p "${src_root}/internal/kappa"
 printf 'package kappa\nfunc K() {}\n' >"${src_root}/internal/kappa/short.go"
 mkdir -p "${records_dir}/kappa"
-jq -n '{name:"kappa", package:"./internal/kappa", mode:"gated", outcome:"success"}' \
+jq -n '{name:"kappa", package:"./internal/kappa", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/kappa/quality-history-record.json"
 jq -n '{
   name: "kappa", package: "./internal/kappa",
@@ -118,6 +118,7 @@ func Z() bool {
 EOF
 mkdir -p "${advisory_dir}/mutation-advisory-misc"
 jq -n '{
+  mutants_killed: 0, mutants_lived: 1,
   files: [{
     file_name: "z.go",
     mutations: [
@@ -157,7 +158,7 @@ jq -n '{files: [{file_name: "/etc/passwd", mutations: [{type:"INVERT_LOGICAL", s
 # window_hash; if it ever reached that unvalidated, this would run `touch`
 # in the job that holds contents: write.
 mkdir -p "${records_dir}/iota"
-jq -n '{name:"iota", package:"./internal/iota", mode:"gated", outcome:"success"}' \
+jq -n '{name:"iota", package:"./internal/iota", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/iota/quality-history-record.json"
 pwned_marker="${test_root}/pwned"
 poison_line="x[\$(touch ${pwned_marker})]"
@@ -169,7 +170,7 @@ jq -n --arg poison "${poison_line}" '{
 
 # --- mu: gated, a malformed .survivors shape (a string, not an array) -------
 mkdir -p "${records_dir}/mu"
-jq -n '{name:"mu", package:"./internal/mu", mode:"gated", outcome:"success"}' \
+jq -n '{name:"mu", package:"./internal/mu", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/mu/quality-history-record.json"
 jq -n '{name:"mu", package:"./internal/mu", survivors:"bad", uncovered:[]}' \
 	>"${records_dir}/mu/mutation-survivors.json"
@@ -212,7 +213,7 @@ jq -n '{
 # a bare number. This must demote to unparseable, the same as mu's
 # non-array shape, not abort the whole script.
 mkdir -p "${records_dir}/sigma"
-jq -n '{name:"sigma", package:"./internal/sigma", mode:"gated", outcome:"success"}' \
+jq -n '{name:"sigma", package:"./internal/sigma", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/sigma/quality-history-record.json"
 jq -n '{name:"sigma", package:"./internal/sigma", survivors:[42], uncovered:[]}' \
 	>"${records_dir}/sigma/mutation-survivors.json"
@@ -234,7 +235,7 @@ jq -n '{
 # clean zero-mutants measurement. `false` is a wrong shape, not an empty
 # list, and must demote to unparseable.
 mkdir -p "${records_dir}/upsilon"
-jq -n '{name:"upsilon", package:"./internal/upsilon", mode:"gated", outcome:"success"}' \
+jq -n '{name:"upsilon", package:"./internal/upsilon", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/upsilon/quality-history-record.json"
 jq -n '{name:"upsilon", package:"./internal/upsilon", survivors:false, uncovered:[]}' \
 	>"${records_dir}/upsilon/mutation-survivors.json"
@@ -248,20 +249,23 @@ jq -n '{name:"upsilon", package:"./internal/upsilon", survivors:false, uncovered
 # survivors:null gets folded to zero survivors and recorded measured with
 # complete:true instead of unparseable.
 mkdir -p "${records_dir}/phi"
-jq -n '{name:"phi", package:"./internal/phi", mode:"gated", outcome:"success"}' \
+jq -n '{name:"phi", package:"./internal/phi", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/phi/quality-history-record.json"
 jq -n '{name:"phi", package:"./internal/phi", survivors:null, uncovered:[]}' \
 	>"${records_dir}/phi/mutation-survivors.json"
 
-# --- chi: gated, killed is the JSON string "08" ------------------------------
+# --- chi: gated, killed is the JSON string "08", not a number ---------------
 #
-# is_digits accepts "08" (it's all digits), but bash `$(( killed + lived ))`
-# would try to parse "08" as an octal literal and abort the whole script
-# under set -e, since 8 and 9 aren't valid octal digits. `10#` forces base
-# 10 so "08" reads as 8, not as a syntax error. killed:"08" with lived:0
-# sums to a nonzero 8, so this package is NOT all-timed-out and must fall
-# through to an ordinary measured entry, proving the value was actually
-# read as 8 rather than merely avoiding a crash.
+# The workflow always writes killed as a bare JSON number (`.mutants_killed
+# // null`); a quoted numeral like "08" is a wrong type, not a legitimate
+# value that merely looks unusual, so safe_count rejects it outright (type
+# != "number") rather than coercing it. Before safe_count existed, is_digits
+# accepted "08" on its own (it's all digits), and bash `$((killed + lived))`
+# would then try to parse it as an octal literal and abort the whole script
+# under set -e, since 8 and 9 aren't valid octal digits; `10#` in the
+# arithmetic stays as defense in depth against that class of bug even though
+# safe_count now closes off the path that used to reach it with this exact
+# fixture.
 mkdir -p "${src_root}/internal/chi"
 cat >"${src_root}/internal/chi/c.go" <<'EOF'
 package chi
@@ -288,6 +292,43 @@ jq -n '{name:"psi", package:"./internal/psi", mode:"gated", outcome:"success", t
 jq -n '{name:"psi", package:"./internal/psi", survivors:[], uncovered:[]}' \
 	>"${records_dir}/psi/mutation-survivors.json"
 
+# --- beta: gated, killed is JSON false -------------------------------------
+#
+# `// 0` in the old extraction folded `false` into a passing "0" before
+# is_digits ever saw it, so a corrupt record with killed:false read as a
+# real all-timed-out zero instead of the malformed value it is. safe_count
+# must reject it outright (rc 2 -> unparseable), not silently substitute 0.
+mkdir -p "${records_dir}/beta"
+jq -n '{name:"beta", package:"./internal/beta", mode:"gated", outcome:"success", timed_out:5, killed:false, lived:0}' \
+	>"${records_dir}/beta/quality-history-record.json"
+jq -n '{name:"beta", package:"./internal/beta", survivors:[], uncovered:[]}' \
+	>"${records_dir}/beta/mutation-survivors.json"
+
+# --- lambda: gated, timed_out is entirely absent from the record ------------
+#
+# The workflow's writer step always emits timed_out (as a number or an
+# explicit null via `// null`), so an entry missing the key outright is
+# exactly as untrustworthy as one where it's present and malformed; jq reads
+# a missing key the same as null, and safe_count treats null as "BAD" too.
+mkdir -p "${records_dir}/lambda"
+jq -n '{name:"lambda", package:"./internal/lambda", mode:"gated", outcome:"success", killed:0, lived:0}' \
+	>"${records_dir}/lambda/quality-history-record.json"
+jq -n '{name:"lambda", package:"./internal/lambda", survivors:[], uncovered:[]}' \
+	>"${records_dir}/lambda/mutation-survivors.json"
+
+# --- omega: gated, killed is a 20-digit number ------------------------------
+#
+# is_digits alone (digits-only, no length bound) would accept this and hand
+# it to `$(( ))`, which silently wraps on integer overflow on bash 3.2
+# rather than erroring (`$((10#18446744073709551616))` evaluates to 0
+# there), turning a corrupt count into a wrong-but-plausible one instead of
+# a loud rejection. The 15-digit bound on is_digits must reject it outright.
+mkdir -p "${records_dir}/omega"
+jq -n '{name:"omega", package:"./internal/omega", mode:"gated", outcome:"success", timed_out:5, killed:18446744073709551616, lived:0}' \
+	>"${records_dir}/omega/quality-history-record.json"
+jq -n '{name:"omega", package:"./internal/omega", survivors:[], uncovered:[]}' \
+	>"${records_dir}/omega/mutation-survivors.json"
+
 # --- pi: gated, a pinned anchor digest ---------------------------------------
 #
 # A fixed, fully-in-bounds 5-line window whose hash is computed independently
@@ -303,7 +344,7 @@ func P() int {
 }
 EOF
 mkdir -p "${records_dir}/pi"
-jq -n '{name:"pi", package:"./internal/pi", mode:"gated", outcome:"success"}' \
+jq -n '{name:"pi", package:"./internal/pi", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/pi/quality-history-record.json"
 jq -n '{name:"pi", package:"./internal/pi", survivors:[{file:"p.go", line:3, column:1, mutator:"CONDITIONALS_BOUNDARY"}], uncovered:[]}' \
 	>"${records_dir}/pi/mutation-survivors.json"
@@ -325,7 +366,7 @@ func R() int {
 }
 EOF
 mkdir -p "${records_dir}/rho"
-jq -n '{name:"rho", package:"./internal/rho", mode:"gated", outcome:"success"}' \
+jq -n '{name:"rho", package:"./internal/rho", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/rho/quality-history-record.json"
 jq -n '{
   name: "rho", package: "./internal/rho",
@@ -337,6 +378,7 @@ jq -n '{
   uncovered: []
 }' >"${records_dir}/rho/mutation-survivors.json"
 jq -n '{
+  mutants_killed: 0, mutants_lived: 1,
   files: [{
     file_name: "r.go",
     mutations: [{type:"CONDITIONALS_BOUNDARY", status:"LIVED", line:6, column:99}]
@@ -364,6 +406,9 @@ upsilon|./internal/upsilon
 phi|./internal/phi
 chi|./internal/chi
 psi|./internal/psi
+beta|./internal/beta
+lambda|./internal/lambda
+omega|./internal/omega
 pi|./internal/pi
 rho|./internal/rho
 EOF
@@ -484,7 +529,7 @@ mu="$(jq -c '.packages[] | select(.name == "mu" and .source == "gated")' <<<"${o
 # A malformed shape in one package must demote only that package's entry,
 # never abort the whole run: alpha (processed earlier) and rho (processed
 # later) both still measured proves the script kept going past mu.
-[ "$(jq -r '.packages | length' <<<"${output}")" = "42" ] ||
+[ "$(jq -r '.packages | length' <<<"${output}")" = "48" ] ||
 	fail "a malformed package must not drop other packages from the run (got $(jq -r '.packages | length' <<<"${output}") entries)"
 
 # --- nu/gated, xi/advisory: every mutant TIMED OUT ---------------------------
@@ -523,14 +568,32 @@ phi="$(jq -c '.packages[] | select(.name == "phi" and .source == "gated")' <<<"$
 # --- chi/gated: killed is the JSON string "08" -------------------------------
 
 chi="$(jq -c '.packages[] | select(.name == "chi" and .source == "gated")' <<<"${output}")"
-[ "$(jq -r '.state' <<<"${chi}")" = "measured" ] ||
-	fail "killed:\"08\" with lived:0 must sum to a nonzero 8 and read as measured, not $(jq -r '.state' <<<"${chi}")"
+[ "$(jq -r '.state' <<<"${chi}")" = "unparseable" ] ||
+	fail "killed as the JSON string \"08\" must read as unparseable, not $(jq -r '.state' <<<"${chi}")"
 
 # --- psi/gated: timed_out is the non-numeric JSON string "x" ----------------
 
 psi="$(jq -c '.packages[] | select(.name == "psi" and .source == "gated")' <<<"${output}")"
 [ "$(jq -r '.state' <<<"${psi}")" = "unparseable" ] ||
 	fail "a non-numeric timed_out must read as unparseable, not $(jq -r '.state' <<<"${psi}")"
+
+# --- beta/gated: killed is JSON false ----------------------------------------
+
+beta="$(jq -c '.packages[] | select(.name == "beta" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${beta}")" = "unparseable" ] ||
+	fail "a killed of false must read as unparseable, not $(jq -r '.state' <<<"${beta}")"
+
+# --- lambda/gated: timed_out is absent from the record -----------------------
+
+lambda="$(jq -c '.packages[] | select(.name == "lambda" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${lambda}")" = "unparseable" ] ||
+	fail "a record missing timed_out entirely must read as unparseable, not $(jq -r '.state' <<<"${lambda}")"
+
+# --- omega/gated: killed is a 20-digit number --------------------------------
+
+omega="$(jq -c '.packages[] | select(.name == "omega" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${omega}")" = "unparseable" ] ||
+	fail "a 20-digit killed must read as unparseable, not $(jq -r '.state' <<<"${omega}")"
 
 # --- pi/gated: a pinned anchor digest ----------------------------------------
 

@@ -85,12 +85,18 @@ sha256_hex() {
 }
 
 # A non-negative bash-integer literal: no sign, no decimal point, digits
-# only. The last gate before a value drives `$(( ))` arithmetic.
+# only, and no more than 15 of them. The last gate before a value drives
+# `$(( ))` arithmetic. The length bound matters on its own: bash's integer
+# arithmetic silently wraps rather than erroring on overflow (on bash 3.2,
+# `$((10#18446744073709551616))` evaluates to 0), so an oversized digit
+# string would sail through the earlier digit-only check and then produce a
+# wrong-but-plausible number instead of the loud rejection a corrupt count
+# deserves. 15 digits covers any real mutant count with room to spare.
 is_digits() {
 	case "$1" in
 	'' | *[!0-9]*) return 1 ;;
 	esac
-	return 0
+	[ "${#1}" -le 15 ]
 }
 
 # Rejects a leading "/" (an absolute path escaping src-root) and any ".."
@@ -324,10 +330,25 @@ one_object() {
 # `is_digits` (it is all digits) but `$((killed + lived))` alone would try
 # to parse "08" as octal and abort the whole script under `set -e`, since 8
 # and 9 are not valid octal digits.
+#
+# The extraction below never falls back with `// 0`: the workflow always
+# writes `timed_out`/`killed`/`lived` (gated) and `mutants_killed`/
+# `mutants_lived` (advisory) as either a number or an explicit JSON null
+# (see the writer step's `// null`), so there is no legitimate "absent"
+# case to paper over. `// 0` folded `false` and `null` alike into a
+# passing "0" before `is_digits` ever saw them, so a corrupt record with
+# `"killed": false` read as a real zero instead of the malformed value it
+# is. `safe_count` requires an actual non-negative integer and emits the
+# literal string "BAD" for anything else (`null`, `false`, a string, a
+# float, a negative number, or an array/object); `is_digits` then rejects
+# "BAD" the same way it rejects any other non-digit string.
+SAFE_COUNT_FILTER='def safe_count: if (type == "number") and (. == floor) and (. >= 0) then tostring else "BAD" end;'
 gated_all_timed_out() {
 	local file="$1"
 	local vals timed_out killed lived
-	vals="$(jq -r '[(.timed_out // 0), (.killed // 0), (.lived // 0)] | @tsv' "${file}" 2>/dev/null || true)"
+	vals="$(jq -r "${SAFE_COUNT_FILTER}"'
+        [(.timed_out | safe_count), (.killed | safe_count), (.lived | safe_count)] | @tsv
+    ' "${file}" 2>/dev/null || true)"
 	IFS=$'\t' read -r timed_out killed lived <<<"${vals}"
 	if ! is_digits "${timed_out}" || ! is_digits "${killed}" || ! is_digits "${lived}"; then
 		return 2
@@ -341,9 +362,9 @@ gated_all_timed_out() {
 advisory_all_timed_out() {
 	local file="$1"
 	local vals timed_out killed lived
-	vals="$(jq -r '
-        [ ([ (.files // [])[] | (.mutations // [])[] | select(.status == "TIMED OUT") ] | length),
-          (.mutants_killed // 0), (.mutants_lived // 0) ] | @tsv
+	vals="$(jq -r "${SAFE_COUNT_FILTER}"'
+        [ ([ (.files // [])[] | (.mutations // [])[] | select(.status == "TIMED OUT") ] | length | tostring),
+          (.mutants_killed | safe_count), (.mutants_lived | safe_count) ] | @tsv
     ' "${file}" 2>/dev/null || true)"
 	IFS=$'\t' read -r timed_out killed lived <<<"${vals}"
 	if ! is_digits "${timed_out}" || ! is_digits "${killed}" || ! is_digits "${lived}"; then

@@ -755,7 +755,29 @@ function assertAdvisorySummaryJob(source) {
   const floorCompareBody = floorCompareMatch[1];
   const warningIndex = floorCompareBody.indexOf("::warning::");
   assert.ok(warningIndex !== -1, "the floor-compare loop must contain the floor-miss warning");
+
+  // Checking only the lines AFTER the warning line missed a rewrite on the
+  // SAME line, e.g. `echo "::warning::...";  exit 1`: that has no line of
+  // its own to fail the allow-list below, since exit 1 shares the warning's
+  // line. The whole warning line has to match this exact statement, nothing
+  // appended after the closing quote.
+  const warningLineStart = floorCompareBody.lastIndexOf("\n", warningIndex) + 1;
   const warningLineEnd = floorCompareBody.indexOf("\n", warningIndex);
+  const warningLine = floorCompareBody.slice(
+    warningLineStart,
+    warningLineEnd === -1 ? undefined : warningLineEnd,
+  );
+  const expectedWarningLine =
+    '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"';
+  // assert.ok rather than assert.equal: node:assert/strict's equal/strictEqual
+  // appends its own "+ actual - expected" diff to a custom message even when
+  // one is given, which would make the thrown message depend on exact
+  // string-diff formatting rather than the fixed text asserted below.
+  assert.ok(
+    warningLine === expectedWarningLine,
+    `the floor-compare loop's warning line must be exactly the expected echo statement, with nothing appended after the closing quote (found: ${JSON.stringify(warningLine)})`,
+  );
+
   const afterWarningLine = warningLineEnd === -1 ? "" : floorCompareBody.slice(warningLineEnd + 1);
   for (const rawLine of afterWarningLine.split("\n")) {
     const trimmedLine = rawLine.trim();
@@ -1251,6 +1273,20 @@ test("mutation contract rejects a stray command after the advisory floor warning
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                [ 1 -eq 0 ]\n',
     ),
     'the floor-compare loop must do nothing but close its ifs after the floor-miss warning, or the advisory job stops being advisory (found: "                [ 1 -eq 0 ]")',
+  );
+});
+
+test("mutation contract rejects a rewrite appended to the same line as the advisory floor warning", () => {
+  // Checking only the lines AFTER the warning line would miss this: `exit 1`
+  // tacked onto the end of the warning's own echo statement, sharing its
+  // line, so there is no separate "line after the warning" for the
+  // allow-list above to reject.
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"; exit 1\n',
+    ),
+    'the floor-compare loop\'s warning line must be exactly the expected echo statement, with nothing appended after the closing quote (found: "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"; exit 1")',
   );
 });
 
