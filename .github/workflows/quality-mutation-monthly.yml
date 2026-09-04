@@ -838,12 +838,17 @@ jobs:
             # Same guard the gating job's own script carries: mutants that
             # all TIMED OUT leave killed+lived at zero and
             # Gremlins scores efficacy 0.00 rather than declining to score.
+            # NOT COVERED plays no part in that ratio (Gremlins computes
+            # efficacy as killed/(killed+lived)), so a package that is all
+            # NOT COVERED also has killed+lived at zero and must trip this
+            # guard the same way; folding not_covered into the sum would let
+            # that case fall through and print the 0.00 as measured.
             # Unmeasured is not the same as zero, so say unmeasured.
-            if [ "${mutant_count}" -gt 0 ] && [ "$((killed + lived + not_covered))" -eq 0 ]; then
-              echo "advisory: ${name} produced ${mutant_count} mutants with no KILLED, LIVED or NOT COVERED verdict; check the TIMED OUT count"
+            if [ "${mutant_count}" -gt 0 ] && [ "$((killed + lived))" -eq 0 ]; then
+              echo "advisory: ${name} produced ${mutant_count} mutants with no KILLED or LIVED verdict; check the TIMED OUT and NOT COVERED counts"
               # shellcheck disable=SC2016  # the backticks are literal markdown
-              headline_rows+=("$(printf '| `%s` | %d | unmeasured | unmeasured | unmeasured | unmeasured |' \
-                "${package}" "${mutant_count}")")
+              headline_rows+=("$(printf '| `%s` | %d | %d | %d | %d | unmeasured |' \
+                "${package}" "${mutant_count}" "${killed}" "${lived}" "${not_covered}")")
               # shellcheck disable=SC2016  # the backticks are literal markdown
               mutator_rows+=("$(printf '| `%s` | %d | %d | %d | %d | %d | %d |' \
                 "${package}" "${logical}" "${bitwise}" "${bwassign}" \

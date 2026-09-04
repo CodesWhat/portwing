@@ -420,6 +420,23 @@ function assertAdvisoryJob(source, entries) {
     "the advisory job's zero-mutants branch must record an explicit zero mutator row",
   );
 
+  // Gremlins computes efficacy as killed/(killed+lived); NOT COVERED plays no
+  // part in that ratio. A guard that also sums not_covered would let a
+  // package that is all NOT COVERED (or all TIMED OUT) fall through with
+  // killed+lived+not_covered > 0 and print Gremlins' 0.00 efficacy as a
+  // measured value, the same bug scripts/ci/mutation-gate.sh's own guard
+  // avoids by summing only killed and lived.
+  assert.match(
+    advisory,
+    new RegExp(`^ {12}${escapeForRegExp(advisoryUnmeasuredGuard)}$`, "mu"),
+    "the advisory job's unmeasured guard must sum only killed and lived, not not_covered",
+  );
+  assert.doesNotMatch(
+    advisory,
+    new RegExp(escapeForRegExp(killedPlusLivedPlusNotCovered), "u"),
+    "the advisory job's unmeasured guard must not include not_covered",
+  );
+
   // The single-job form used to publish straight to GITHUB_STEP_SUMMARY.
   // Splitting it into a matrix means each leg only has one group's worth of
   // rows, so the combined table has to move to mutation-advisory-summary; a
@@ -749,6 +766,10 @@ const advisoryNameVar = "$" + "{name}";
 const advisoryPackageVar = "$" + "{package}";
 const missingGroupsCount = "$" + "{#missing_groups[@]}";
 const missingGroupsList = "$" + "{missing_groups[*]}";
+const advisoryMutantCountVar = "$" + "{mutant_count}";
+const killedPlusLived = "$" + "((killed + lived))";
+const killedPlusLivedPlusNotCovered = "$" + "((killed + lived + not_covered))";
+const advisoryUnmeasuredGuard = `if [ "${advisoryMutantCountVar}" -gt 0 ] && [ "${killedPlusLived}" -eq 0 ]; then`;
 
 function assertMutationFailure(source, expectedMessage, expectedPackages) {
   assert.throws(
@@ -1119,6 +1140,14 @@ test("mutation contract rejects an advisory job that reports a report-less succe
   assertMutationFailure(
     workflow.replace(zeroMutantsBlock, ""),
     "the advisory job must treat a report-less success as zero mutants, not unavailable",
+  );
+});
+
+test("mutation contract rejects an advisory job that folds not_covered into the unmeasured guard", () => {
+  const foldedGuard = `if [ "${advisoryMutantCountVar}" -gt 0 ] && [ "${killedPlusLivedPlusNotCovered}" -eq 0 ]; then`;
+  assertMutationFailure(
+    workflow.replace(advisoryUnmeasuredGuard, foldedGuard),
+    "the advisory job's unmeasured guard must sum only killed and lived, not not_covered",
   );
 });
 
