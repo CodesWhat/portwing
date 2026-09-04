@@ -1406,25 +1406,19 @@ func TestStartHealthServerPortConflict(t *testing.T) {
 func TestStartHealthServerTwiceDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
-	addr := freeAddr(t)
+	// Port "0" asks the kernel for a free port at bind time instead of
+	// pre-allocating one with freeAddr and closing it: that allocate/close
+	// window is exactly what let a parallel test's bind race in and take the
+	// address before this test's (re)start got to it.
 	c := &Client{
 		cfg: &config.Config{
 			BindAddress: "127.0.0.1",
-			Port:        portFrom(addr),
+			Port:        "0",
 		},
 	}
 
 	c.startHealthServer()
-	healthURL := "http://" + c.healthServer.Addr + "/health"
-	waitFor(t, "first health server ready", func() bool {
-		//nolint:noctx,bodyclose
-		resp, err := http.Get(healthURL) //nolint:gosec
-		if err != nil {
-			return false
-		}
-		resp.Body.Close()
-		return true
-	})
+	waitForHealthServer(t, c, "/health")
 
 	shutdownCtx1, cancel1 := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel1()
@@ -1437,7 +1431,9 @@ func TestStartHealthServerTwiceDoesNotPanic(t *testing.T) {
 		t.Fatal("first ListenAndServe goroutine did not finish in time")
 	}
 
-	// Start again on the same Client, reusing the now-free address.
+	// Start again on the same Client. Port "0" again — another OS-assigned
+	// port, read back the same way, rather than reusing the first server's
+	// now-closed address.
 	c.startHealthServer()
 	secondDone := c.healthServerDone
 	t.Cleanup(func() {
@@ -1446,15 +1442,7 @@ func TestStartHealthServerTwiceDoesNotPanic(t *testing.T) {
 		}
 	})
 
-	waitFor(t, "second health server ready", func() bool {
-		//nolint:noctx,bodyclose
-		resp, err := http.Get(healthURL) //nolint:gosec
-		if err != nil {
-			return false
-		}
-		resp.Body.Close()
-		return true
-	})
+	waitForHealthServer(t, c, "/health")
 
 	shutdownCtx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel2()

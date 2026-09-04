@@ -226,6 +226,41 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// healthServerLivenessTimeout bounds waitForHealthServer. It is a pure
+// liveness backstop, separate from the generic readTimeout other waitFor
+// callers share: bringing up a health server means an OS-scheduled goroutine
+// has to bind a listener and start Serve, and under CPU load that can take
+// far longer than 2s without indicating any actual bug. A health-server start
+// gets ten times the budget instead of failing spuriously on a loaded box.
+const healthServerLivenessTimeout = 10 * time.Second
+
+// waitForHealthServer polls c.HealthAddr() until the health server's
+// BaseContext hook has recorded its bound address, then GETs urlPath against
+// that address until it answers or healthServerLivenessTimeout elapses,
+// failing the test on timeout. It returns the full URL it finally reached, so
+// callers can reuse it. Binding via an OS-assigned port ("0") and reading the
+// address back this way — rather than pre-allocating one with freeAddr and
+// closing it — closes the window in which a parallel test can grab the same
+// port between allocation and (re)bind.
+func waitForHealthServer(t *testing.T, c *Client, urlPath string) string {
+	t.Helper()
+	deadline := time.Now().Add(healthServerLivenessTimeout)
+	for time.Now().Before(deadline) {
+		if addr := c.HealthAddr(); addr != nil {
+			url := "http://" + addr.String() + urlPath
+			//nolint:noctx,bodyclose
+			resp, err := http.Get(url) //nolint:gosec
+			if err == nil {
+				resp.Body.Close()
+				return url
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for health server to answer %s", urlPath)
+	return ""
+}
+
 // fakeConn is a scripted net.Conn. Read drains the queued chunks then returns
 // readErr (io.EOF by default). Write records bytes unless writeErr is set, in
 // which case it always fails — used to drive the write-retry path.

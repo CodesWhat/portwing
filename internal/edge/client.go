@@ -263,6 +263,12 @@ type Client struct {
 	// second start cannot double-close or leave an earlier channel
 	// unclosed.
 	healthServerDone chan struct{}
+	// healthListenAddr holds the net.Addr the health server's BaseContext
+	// hook captured once its listener bound. It lets callers — chiefly
+	// tests using an OS-assigned port ("0") — discover the real bound
+	// address instead of racing a separate allocate/close/rebind, the same
+	// pattern internal/server.Server.Addr uses for the main HTTP server.
+	healthListenAddr atomic.Value
 }
 
 // pendingRequestBody accumulates the stream/stream_end frames that follow a
@@ -1843,6 +1849,13 @@ func (c *Client) startHealthServer() {
 		Addr:              c.cfg.BindAddress + ":" + c.cfg.Port,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		// BaseContext runs once, right after the listener binds, which is
+		// the only hook stdlib gives us to learn the bound address without
+		// owning the listener ourselves.
+		BaseContext: func(ln net.Listener) context.Context {
+			c.healthListenAddr.Store(ln.Addr())
+			return context.Background()
+		},
 	}
 
 	done := make(chan struct{})
@@ -1853,6 +1866,15 @@ func (c *Client) startHealthServer() {
 		}
 		close(done)
 	}()
+}
+
+// HealthAddr returns the address the health server bound, or nil if it
+// hasn't bound one yet (or startHealthServer hasn't been called). It lets
+// callers — chiefly tests using an OS-assigned port ("0") — discover the
+// real bound address instead of racing a separate allocate/close/rebind.
+func (c *Client) HealthAddr() net.Addr {
+	addr, _ := c.healthListenAddr.Load().(net.Addr)
+	return addr
 }
 
 func (c *Client) ensureOperationalState() {
