@@ -736,9 +736,13 @@ jobs:
           # swallowed by the per-package guard below, so a rename upstream
           # would read as five unavailable packages rather than as a broken
           # job. This is the check --threshold-efficacy never had.
+          # The check reads the already-captured string, never a pipe into
+          # grep -q: a producer piped straight to grep -q under pipefail can
+          # exit before the producer finishes writing, and the repo bans that
+          # shape outright regardless of whether it would misfire here.
           help_text="$(gremlins unleash --help)"
           for flag in "${advisory_flags[@]}"; do
-            if ! printf '%s\n' "${help_text}" | grep -qE -- "[[:space:]]${flag}([[:space:]]|=|$)"; then
+            if ! grep -qE -- "[[:space:]]${flag}([[:space:]]|=|$)" <<<"${help_text}"; then
               echo "advisory: gremlins ${GREMLINS_VERSION} has no ${flag} flag" >&2
               exit 1
             fi
@@ -787,6 +791,21 @@ jobs:
               echo "advisory: ${name} did not complete; reporting it as unavailable"
               headline_rows+=("| \`${package}\` | unavailable | | | | |")
               mutator_rows+=("| \`${package}\` | unavailable | | | | | |")
+              continue
+            fi
+
+            # Gremlins v0.6.0's report.Do() returns without writing the JSON
+            # file when there are zero mutants of the requested types
+            # (report.go:71-73, 243-249), and still exits 0. internal/log
+            # produces zero mutants of these six advisory types, so a missing
+            # report here means "nothing to mutate", not "gremlins failed".
+            # Conflating the two would mislabel it unavailable forever; the
+            # gating matrix's zero_mutants convention for the same package is
+            # the model, an explicit zero row rather than a blank one.
+            if [ ! -f "${report}" ]; then
+              echo "advisory: ${name} produced no mutants of any advisory type; recording zero-mutants"
+              headline_rows+=("| \`${package}\` | 0 | 0 | 0 | 0 | n/a |")
+              mutator_rows+=("| \`${package}\` | 0 | 0 | 0 | 0 | 0 | 0 |")
               continue
             fi
 
@@ -905,8 +924,58 @@ jobs:
           path: rows
 
       - name: Combine and publish the advisory table
+        env:
+          # One line per package in the mutation-advisory matrix above,
+          # group|package, so a leg that produced no artifact still gets an
+          # explicit row instead of silently vanishing from the table.
+          # scripts/mutation-config.test.mjs cross-checks this list against
+          # that matrix's own groups and packages.
+          ADVISORY_GROUP_PACKAGES: |
+            server|./internal/server
+            edge|./internal/edge
+            generic|./internal/generic
+            misc-a|./internal/adapter
+            misc-a|./internal/adapter/drydock
+            misc-a|./internal/auth
+            misc-a|./internal/audit
+            misc-b|./internal/docker
+            misc-b|./internal/mcp
+            misc-b|./internal/metrics
+            misc-c|./cmd/portwing
+            misc-c|./internal/banner
+            misc-c|./internal/config
+            misc-c|./internal/log
+            misc-c|./internal/pool
+            misc-c|./internal/protocol
         run: |
           set -euo pipefail
+
+          # A leg killed before it could upload (the runner's CPU shutdown
+          # signal, PW-6.8's own comment above) leaves no rows file for its
+          # group, and `cat ... || true` below would read that silently: the
+          # summary renders as complete with one group just missing. Every
+          # expected group is checked here, and each package in a missing
+          # group gets an explicit row instead of vanishing.
+          declare -A group_present=()
+          missing_groups=()
+          missing_headline_rows=()
+          missing_mutator_rows=()
+
+          while IFS='|' read -r group package; do
+            [ -n "${group}" ] || continue
+            if [ -z "${group_present[${group}]:-}" ]; then
+              if compgen -G "rows/mutation-advisory-${group}-*/mutation-advisory-headline.txt" >/dev/null; then
+                group_present[${group}]="yes"
+              else
+                group_present[${group}]="no"
+                missing_groups+=("${group}")
+              fi
+            fi
+            if [ "${group_present[${group}]}" = "no" ]; then
+              missing_headline_rows+=("| \`${package}\` | missing (leg produced no artifact) | | | | |")
+              missing_mutator_rows+=("| \`${package}\` | missing | missing | missing | missing | missing | missing |")
+            fi
+          done <<<"${ADVISORY_GROUP_PACKAGES}"
 
           {
             echo "### Mutation advisory: Gremlins' default-disabled mutators"
@@ -919,13 +988,28 @@ jobs:
             echo "| Package | Extra mutants | Killed | Lived | Not covered | Efficacy on extra mutators |"
             echo "|---|---|---|---|---|---|"
             cat rows/*/mutation-advisory-headline.txt 2>/dev/null || true
+            if [ "${#missing_headline_rows[@]}" -gt 0 ]; then
+              printf '%s\n' "${missing_headline_rows[@]}"
+            fi
             echo ""
             echo "Mutants discovered per advisory mutator type:"
             echo ""
             echo "| Package | invert-logical | invert-bitwise | invert-bwassign | invert-assignments | invert-loopctrl | remove-self-assignments |"
             echo "|---|---|---|---|---|---|---|"
             cat rows/*/mutation-advisory-mutators.txt 2>/dev/null || true
+            if [ "${#missing_mutator_rows[@]}" -gt 0 ]; then
+              printf '%s\n' "${missing_mutator_rows[@]}"
+            fi
           } >>"$GITHUB_STEP_SUMMARY"
+
+          # A missing group is the same green-means-nothing failure PW-6.1
+          # was about: this job runs nothing but the download and the render,
+          # so failing it here is safe and is the only place left that can
+          # notice a leg never uploaded.
+          if [ "${#missing_groups[@]}" -gt 0 ]; then
+            echo "::error::advisory legs produced no artifact for group(s): ${missing_groups[*]}" >&2
+            exit 1
+          fi
 
   # PW-6.1: the gate this workflow depends on silently stopped gating, and
   # every job stayed green while five packages measured below their floor.
