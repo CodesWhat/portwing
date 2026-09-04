@@ -466,6 +466,14 @@ jobs:
   # with scripts/ci/mutation-ratchet.sh, and stops. contents: read, same as
   # the workflow default: unlike `history`, this job never writes to the
   # repository, so it never needs more.
+  #
+  # PW-7.36: a package that timed out any mutants used to be skipped outright,
+  # which skipped exactly the packages with the most ratchet headroom (run
+  # 33839463545: adapter, adapter-drydock, docker, edge, mcp, server). The
+  # script now tolerates up to 5% of attempted mutants timing out and
+  # discounts them from the efficacy it feeds the ratchet, so a timed-out
+  # mutant can lower a proposal but never raise one; see the script's own
+  # header for the arithmetic.
   ratchet:
     name: "Quality: Mutation floor ratchet proposal"
     needs: [gremlins, history]
