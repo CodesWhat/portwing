@@ -103,11 +103,13 @@ func TestWriteInputRetriesExactlyTenTimesThenCloses(t *testing.T) {
 	if got := conn.attempts(); got != 10 {
 		t.Errorf("write attempts = %d, want exactly 10", got)
 	}
-	// 9 inter-attempt waits of ~50ms real delay; a generous floor well below
-	// the real ~450ms avoids flakiness while still failing hard against a
-	// near-instant mutant.
-	if elapsed < 200*time.Millisecond {
-		t.Errorf("writeInput returned after %v, want at least ~200ms (9 x 50ms retry waits)", elapsed)
+	// Timing-based: tunnel.go has no injectable sleep/after hook to count
+	// calls/durations against instead, so this measures wall time. 9
+	// inter-attempt waits of ~50ms real delay is ~450ms; a 400ms floor stays
+	// well clear of scheduler jitter on the real path while still failing
+	// hard against a near-instant `/` mutant on the retry delay.
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("writeInput returned after %v, want at least ~400ms (9 x 50ms retry waits)", elapsed)
 	}
 	select {
 	case <-s.done:
@@ -140,9 +142,31 @@ func TestWriteInputRetryLogsOneBasedAttemptNumber(t *testing.T) {
 	}()
 	s.writeInput([]byte("x"))
 
-	if !strings.Contains(logBuf.String(), "attempt=1") {
-		t.Errorf("retry log = %q, want it to contain attempt=1 (1-based)", logBuf.String())
+	// Check the FIRST logged attempt value, not whether "attempt=1" appears
+	// anywhere: under scheduler starvation the background Close() above can
+	// lag past more than one retry, and an attempt-1 mutant's third
+	// iteration logs "attempt=1" too (attempt=2, attempt-1=1), which would
+	// let a substring-anywhere check pass against the mutant.
+	if got := firstLogAttempt(logBuf.String()); got != "1" {
+		t.Errorf("first logged attempt = %q, want %q (1-based)", got, "1")
 	}
+}
+
+// firstLogAttempt returns the value of the first "attempt=" field in the
+// first log line that has one, or "" if none is found.
+func firstLogAttempt(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		idx := strings.Index(line, "attempt=")
+		if idx == -1 {
+			continue
+		}
+		rest := line[idx+len("attempt="):]
+		if sp := strings.IndexByte(rest, ' '); sp != -1 {
+			rest = rest[:sp]
+		}
+		return rest
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -177,8 +201,12 @@ func TestDoResizeRetriesExactlyTenTimesThenGivesUp(t *testing.T) {
 	if attempts != 10 {
 		t.Errorf("ResizeExec attempts = %d, want exactly 10", attempts)
 	}
-	if elapsed < 200*time.Millisecond {
-		t.Errorf("doResize returned after %v, want at least ~200ms (9 x 50ms retry waits)", elapsed)
+	// Timing-based: see the matching comment in
+	// TestWriteInputRetriesExactlyTenTimesThenCloses — no injectable clock,
+	// so a 400ms floor stays close to the real ~450ms while still catching a
+	// near-instant `/` mutant on the retry delay.
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("doResize returned after %v, want at least ~400ms (9 x 50ms retry waits)", elapsed)
 	}
 }
 

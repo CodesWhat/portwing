@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,30 @@ import (
 	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
+
+// syncBuffer is a mutex-guarded bytes.Buffer, used as a slog sink in tests
+// that swap in a capturing logger while a readPump/writePump goroutine is
+// still running. A plain *bytes.Buffer is unsafe here: the pump goroutine's
+// Write and the test goroutine's later String() race on the same memory with
+// no happens-before edge between them (a websocket round trip isn't a Go
+// memory-model synchronization point), which -race correctly flags even
+// though the wire ordering happens to be deterministic.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // ---------------------------------------------------------------------------
 // Package-level constant definitions (client.go:45,46,58,72,95,103)
@@ -399,7 +424,7 @@ func TestReadPumpMalformedExecResizeLogsAndSkips(t *testing.T) {
 	c, ctrl := newTestClient(t)
 	runReadPump(t, c)
 
-	logBuf := &bytes.Buffer{}
+	logBuf := &syncBuffer{}
 	oldLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
 	defer slog.SetDefault(oldLogger)
@@ -425,7 +450,7 @@ func TestReadPumpMalformedExecEndLogsAndSkips(t *testing.T) {
 	c, ctrl := newTestClient(t)
 	runReadPump(t, c)
 
-	logBuf := &bytes.Buffer{}
+	logBuf := &syncBuffer{}
 	oldLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
 	defer slog.SetDefault(oldLogger)
@@ -454,7 +479,7 @@ func TestReadPumpMalformedErrorMessageLogsAndSkips(t *testing.T) {
 	c, ctrl := newTestClient(t)
 	runReadPump(t, c)
 
-	logBuf := &bytes.Buffer{}
+	logBuf := &syncBuffer{}
 	oldLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
 	defer slog.SetDefault(oldLogger)
@@ -748,7 +773,7 @@ func TestWritePumpPollRefreshErrorLogsAndSkipsNotify(t *testing.T) {
 
 	runSendPump(t, c)
 
-	logBuf := &bytes.Buffer{}
+	logBuf := &syncBuffer{}
 	oldLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
 	defer slog.SetDefault(oldLogger)
@@ -761,7 +786,11 @@ func TestWritePumpPollRefreshErrorLogsAndSkipsNotify(t *testing.T) {
 	}()
 	t.Cleanup(cancel)
 
-	time.Sleep(1100 * time.Millisecond)
+	// Poll for the observable side effect (the log line from the first poll
+	// tick) instead of sleeping past the 1s tick with a fixed margin.
+	waitFor(t, "container refresh failed log", func() bool {
+		return strings.Contains(logBuf.String(), "container refresh failed")
+	})
 	cancel()
 	<-pumpDone // writePump must have returned before logBuf is read below
 
@@ -785,7 +814,7 @@ func TestWritePumpPollOnContainerRefreshErrorLogs(t *testing.T) {
 
 	runSendPump(t, c)
 
-	logBuf := &bytes.Buffer{}
+	logBuf := &syncBuffer{}
 	oldLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
 	defer slog.SetDefault(oldLogger)
@@ -798,7 +827,11 @@ func TestWritePumpPollOnContainerRefreshErrorLogs(t *testing.T) {
 	}()
 	t.Cleanup(cancel)
 
-	time.Sleep(1100 * time.Millisecond)
+	// Poll for the observable side effect (the log line from the first poll
+	// tick) instead of sleeping past the 1s tick with a fixed margin.
+	waitFor(t, "container refresh notify failed log", func() bool {
+		return strings.Contains(logBuf.String(), "container refresh notify failed")
+	})
 	cancel()
 	<-pumpDone // writePump must have returned before logBuf is read below
 
