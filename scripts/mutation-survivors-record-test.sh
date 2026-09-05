@@ -392,23 +392,32 @@ jq -n '{
   }]
 }' >"${advisory_dir}/mutation-advisory-misc/mutation-advisory-rho.json"
 
-# --- digamma: gated, a file_name MUTANT_OK_FILTER accepts but real_path_ok
-#     rejects ------------------------------------------------------------
+# --- digamma: gated, a file_name carrying the "*" glob metacharacter ------
 #
-# ".*/d.go" has no split("/") segment jq's string equality would ever call
-# "..", so the jq-side ok gate in MUTANT_OK_FILTER passes it clean. But
-# real_path_ok's own field split (`for seg in $1`, deliberately unquoted)
-# also puts ".*" through pathname expansion, and every directory always has
-# "." and ".." entries for that pattern to match -- so real_path_ok rejects
-# it independently of the jq gate that already ran. Without this fixture,
-# real_path_ok's own logic is only ever exercised by inputs the jq gate
-# already filtered out first, and a regression that neutered real_path_ok
-# entirely (e.g. always returning 0) would go unnoticed.
+# ".*/d.go" used to be the fixture that proved real_path_ok independently
+# rejected something MUTANT_OK_FILTER's jq predicate accepted -- but that
+# rejection turned out to be an accident of real_path_ok's unquoted `for
+# seg in $1` glob-expanding ".*" against the current working directory's
+# always-present "." and ".." entries, not an actual path check. Both
+# layers are fixed now: MUTANT_OK_FILTER rejects any "*", "?", "[" or
+# backslash byte in `f` outright (deterministic, cwd-independent), and
+# real_path_ok runs its own split under `set -f` so it can no longer
+# glob-expand anything. This fixture's rejection now comes from the jq
+# layer, on the "*" byte, before real_path_ok ever runs; "koppa" below is
+# the same check on a different metacharacter ("?"), to prove the jq
+# predicate isn't keyed to "*" specifically.
 mkdir -p "${records_dir}/digamma"
 jq -n '{name:"digamma", package:"./internal/digamma", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
 	>"${records_dir}/digamma/quality-history-record.json"
 jq -n '{name:"digamma", package:"./internal/digamma", survivors:[{file:".*/d.go", line:3, column:1, mutator:"CONDITIONALS_BOUNDARY"}], uncovered:[]}' \
 	>"${records_dir}/digamma/mutation-survivors.json"
+
+# --- koppa: gated, a file_name carrying the "?" glob metacharacter --------
+mkdir -p "${records_dir}/koppa"
+jq -n '{name:"koppa", package:"./internal/koppa", mode:"gated", outcome:"success", timed_out:0, killed:0, lived:0}' \
+	>"${records_dir}/koppa/quality-history-record.json"
+jq -n '{name:"koppa", package:"./internal/koppa", survivors:[{file:"a?b/e.go", line:3, column:1, mutator:"CONDITIONALS_BOUNDARY"}], uncovered:[]}' \
+	>"${records_dir}/koppa/mutation-survivors.json"
 
 expected_list="${test_root}/packages.txt"
 cat >"${expected_list}" <<'EOF'
@@ -437,6 +446,7 @@ omega|./internal/omega
 pi|./internal/pi
 rho|./internal/rho
 digamma|./internal/digamma
+koppa|./internal/koppa
 EOF
 
 output="$(bash "${record}" "${records_dir}" "${advisory_dir}" "${src_root}" "${expected_list}")"
@@ -555,7 +565,7 @@ mu="$(jq -c '.packages[] | select(.name == "mu" and .source == "gated")' <<<"${o
 # A malformed shape in one package must demote only that package's entry,
 # never abort the whole run: alpha (processed earlier) and rho (processed
 # later) both still measured proves the script kept going past mu.
-[ "$(jq -r '.packages | length' <<<"${output}")" = "50" ] ||
+[ "$(jq -r '.packages | length' <<<"${output}")" = "52" ] ||
 	fail "a malformed package must not drop other packages from the run (got $(jq -r '.packages | length' <<<"${output}") entries)"
 
 # --- nu/gated, xi/advisory: every mutant TIMED OUT ---------------------------
@@ -657,11 +667,15 @@ rho_gated_c5_a="$(jq -r '.mutants[] | select(.c == 5) | .a' <<<"${rho_gated}")"
 [ "$(jq -r '.mutants[0].o' <<<"${rho_advisory}")" = "0" ] ||
 	fail "advisory ordinals must be numbered independently of a gated entry sharing the same (f,m,a)"
 
-# --- digamma/gated: real_path_ok rejects what MUTANT_OK_FILTER accepts ------
+# --- digamma/gated, koppa/gated: MUTANT_OK_FILTER rejects glob metacharacters
 
 digamma="$(jq -c '.packages[] | select(.name == "digamma" and .source == "gated")' <<<"${output}")"
 [ "$(jq -r '.state' <<<"${digamma}")" = "unparseable" ] ||
-	fail "a file_name whose only unsafe segment is a glob pattern (matching '.' and '..' unquoted) must still be unparseable, not $(jq -r '.state' <<<"${digamma}")"
+	fail "a file_name carrying a '*' must be unparseable, not $(jq -r '.state' <<<"${digamma}")"
+
+koppa="$(jq -c '.packages[] | select(.name == "koppa" and .source == "gated")' <<<"${output}")"
+[ "$(jq -r '.state' <<<"${koppa}")" = "unparseable" ] ||
+	fail "a file_name carrying a '?' must be unparseable, not $(jq -r '.state' <<<"${koppa}")"
 
 # --- the run as a whole ------------------------------------------------------
 

@@ -303,50 +303,40 @@ function runStepBodies(jobText) {
 }
 
 // Locates a step by its exact `- name: ` line within a job's text and
-// returns its `run: |` block as an array of literal lines, indentation
-// included. Scoped to a named step (not "the first run: block", not "some
-// region matched by an anchor regex") so a rewrite anywhere in the step --
-// wrapped in a dead conditional, duplicated with the copy altered, or
-// followed by an extra statement still inside the same script -- lands
-// inside the returned lines and gets compared. A YAML clipped block scalar
+// returns the step's ENTIRE block -- the `- name:` line itself through
+// every key that follows it (env:, run:, if:, continue-on-error:, shell:,
+// working-directory:, whatever it has) -- as an array of literal lines,
+// indentation included. Pinning only the run: scalar left every OTHER key
+// on the step unchecked: `if: false`, `continue-on-error: true`, or a
+// `shell:` override that changes how the same script text even runs all
+// pass with an identical body. The step name must occur exactly once in
+// the job text first: `indexOf` finding the first match silently accepts a
+// same-named decoy step placed earlier with `if: false` and the real body,
+// shadowing whichever step actually runs. A YAML clipped block scalar
 // (`|`, the default chomping) keeps exactly one trailing newline; the blank
 // line(s) between this step and whatever text follows in the source are
-// formatting, not part of the script, so trailing blank entries are trimmed.
-function stepRunLines(jobText, stepName, missingMessage) {
-  const stepStart = jobText.indexOf(`      - name: ${stepName}`);
-  assert.notEqual(stepStart, -1, missingMessage);
-  const nextStepStart = jobText.indexOf("\n      - name: ", stepStart + 1);
+// formatting, not part of any key's value, so trailing blank entries are
+// trimmed.
+function stepBlockLines(jobText, stepName, missingMessage) {
+  const nameLine = `      - name: ${stepName}`;
+  const nameLineRe = new RegExp(`^ {6}- name: ${escapeForRegExp(stepName)}$`, "gmu");
+  const matches = [...jobText.matchAll(nameLineRe)];
+  assert.notEqual(matches.length, 0, missingMessage);
+  assert.ok(
+    matches.length === 1,
+    `the step named ${JSON.stringify(stepName)} must appear exactly once in the job, found ${matches.length} (a same-named decoy step can shadow the real one)`,
+  );
+  const stepStart = matches[0].index;
+  assert.ok(jobText.slice(stepStart, stepStart + nameLine.length) === nameLine);
+  const nextStepMatch = /^ {6}- name: /mu.exec(jobText.slice(stepStart + nameLine.length));
   const stepText =
-    nextStepStart === -1 ? jobText.slice(stepStart) : jobText.slice(stepStart, nextStepStart);
+    nextStepMatch === null
+      ? jobText.slice(stepStart)
+      : jobText.slice(stepStart, stepStart + nameLine.length + nextStepMatch.index);
   const lines = stepText.split("\n");
-  let collecting = false;
-  let bodyLines = [];
-  let bodyIndent = null;
-  for (const line of lines) {
-    if (/^ {8}run: \|$/u.test(line)) {
-      collecting = true;
-      bodyLines = [];
-      bodyIndent = null;
-      continue;
-    }
-    if (collecting) {
-      if (line.trim() === "") {
-        bodyLines.push(line);
-        continue;
-      }
-      const indentMatch = line.match(/^( +)/u);
-      const indent = indentMatch ? indentMatch[1].length : 0;
-      if (bodyIndent === null) bodyIndent = indent;
-      if (indent < bodyIndent) {
-        collecting = false;
-      } else {
-        bodyLines.push(line);
-      }
-    }
-  }
-  while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1] === "") bodyLines.pop();
-  assert.ok(bodyLines.length > 0, `${missingMessage} (no run: block found)`);
-  return bodyLines;
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  assert.ok(lines.length > 0, `${missingMessage} (empty step block)`);
+  return lines;
 }
 
 // PW-5.5's split applies here too: the ratchet job reads this run's own
@@ -800,19 +790,52 @@ function assertAdvisorySummaryJob(source) {
   );
 
   // The `mutation-gate.sh` check above catches a re-measure-and-gate rewrite,
-  // but region checks anchored to a start/end pattern only prove a matching
-  // block exists SOMEWHERE, not that it is the only one or that it runs:
-  // wrapping the floor-compare loop in `if false; then ... fi` still matches
-  // the anchor and passes; a dead pinned copy followed by a live altered
-  // copy passes too, since regex match() returns the first hit; and an
-  // `exit 1` placed before the start anchor or after the end anchor, still
-  // inside the same `run:` script, sits entirely outside the checked region.
-  // Pinning the region tighter (a deny-list, or an allow-list restricted to
-  // "before" or "after" some anchor line) only moves the blind spot, it
-  // doesn't close it. Pin the step's ENTIRE `run:` script instead: a script
-  // this test owns byte-for-byte can't be wrapped, duplicated, or extended
-  // without changing its line count or some line's exact text.
+  // but pinning only the run: scalar leaves every OTHER key on the step
+  // unchecked: `if: false`, `continue-on-error: true`, or a `shell:`
+  // override all pass with an identical, correct-looking body, since none
+  // of them touch the text this test used to compare. Pin the step's
+  // ENTIRE block instead -- the `- name:` line through env:, run:, and
+  // anything else it carries -- so an added or changed key anywhere on the
+  // step fails the same way a rewritten script line does.
   const expectedSummaryStepLines = [
+    "      - name: Combine and publish the advisory table",
+    "        env:",
+    "          # One line per package in the mutation-advisory matrix above,",
+    "          # group|package, so a leg that produced no artifact still gets an",
+    "          # explicit row instead of silently vanishing from the table.",
+    "          # scripts/mutation-config.test.mjs cross-checks this list against",
+    "          # that matrix's own groups and packages.",
+    "          ADVISORY_GROUP_PACKAGES: |",
+    "            server|./internal/server",
+    "            edge|./internal/edge",
+    "            generic|./internal/generic",
+    "            misc-a|./internal/adapter",
+    "            misc-a|./internal/adapter/drydock",
+    "            misc-a|./internal/auth",
+    "            misc-a|./internal/audit",
+    "            misc-b|./internal/docker",
+    "            misc-b|./internal/mcp",
+    "            misc-b|./internal/metrics",
+    "            misc-c|./cmd/portwing",
+    "            misc-c|./internal/banner",
+    "            misc-c|./internal/config",
+    "            misc-c|./internal/log",
+    "            misc-c|./internal/pool",
+    "            misc-c|./internal/protocol",
+    "          # PW-6.8: one line per advisory leg, group|floor, mirroring the",
+    "          # matrix.include `floor:` field above. Duplicated for the same",
+    "          # reason ADVISORY_GROUP_PACKAGES is: this job runs after the",
+    "          # matrix and has no context left to read it from.",
+    "          # scripts/mutation-config.test.mjs cross-checks this against the",
+    "          # advisory matrix's own floors.",
+    "          ADVISORY_GROUP_FLOORS: |",
+    "            server|93",
+    "            edge|80",
+    "            generic|81",
+    "            misc-a|92",
+    "            misc-b|92",
+    "            misc-c|90",
+    "        run: |",
     "          set -euo pipefail",
     "",
     "          # A leg killed before it could upload (the runner's CPU shutdown",
@@ -905,7 +928,7 @@ function assertAdvisorySummaryJob(source) {
     "            exit 1",
     "          fi",
   ];
-  const summaryStepLines = stepRunLines(
+  const summaryStepLines = stepBlockLines(
     summary,
     "Combine and publish the advisory table",
     "the advisory summary job must have a 'Combine and publish the advisory table' step",
@@ -1395,7 +1418,7 @@ test("mutation contract rejects a hard exit inserted after the advisory floor wa
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                exit 1\n',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
   );
 });
 
@@ -1407,7 +1430,7 @@ test("mutation contract rejects a stray command inserted after the advisory floo
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                [ 1 -eq 0 ]\n',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
   );
 });
 
@@ -1422,7 +1445,7 @@ test("mutation contract rejects a rewrite appended to the same line as the advis
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"; exit 1\n',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 54 must be "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"", found "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"; exit 1"',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 92 must be "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"", found "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"; exit 1"',
   );
 });
 
@@ -1436,7 +1459,7 @@ test("mutation contract rejects a hard exit inserted before the advisory floor w
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                exit 1\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
   );
 });
 
@@ -1450,7 +1473,7 @@ test("mutation contract rejects a line-continuation rewrite of the advisory floo
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
       '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%" \\\n                ; exit 1\n',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
   );
 });
 
@@ -1465,7 +1488,7 @@ test("mutation contract rejects the floor-compare loop wrapped in a dead conditi
       '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
       '          if false; then\n          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          fi',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 93',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 131',
   );
 });
 
@@ -1481,7 +1504,7 @@ test("mutation contract rejects a duplicated floor-compare loop whose second cop
       '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
       '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                true\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 112',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 150',
   );
 });
 
@@ -1495,7 +1518,7 @@ test("mutation contract rejects a hard exit spliced in right after the floor-com
       '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
       '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          exit 1',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 91 lines, found 92',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
   );
 });
 
@@ -1509,7 +1532,7 @@ test("mutation contract rejects a same-length rewrite of the floor-compare loop'
       '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
       '          while IFS=\'|\' read -r group floor; do\n            [ -z "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 38 must be "            [ -n \\"${group}\\" ] || continue", found "            [ -z \\"${group}\\" ] || continue"',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 76 must be "            [ -n \\"${group}\\" ] || continue", found "            [ -z \\"${group}\\" ] || continue"',
   );
 });
 
@@ -1522,7 +1545,64 @@ test("mutation contract rejects a same-length rewrite of the floor-compare loop'
       '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
       '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fu\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
     ),
-    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 56 must be "            fi", found "            fu"',
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 94 must be "            fi", found "            fu"',
+  );
+});
+
+test("mutation contract rejects a same-named decoy step shadowing the real advisory summary step", () => {
+  // `indexOf` finding the first `- name: Combine and publish the advisory
+  // table` line would happily pick up a decoy placed earlier in the same
+  // job, `if: false`, real name, and never notice the genuine step (with
+  // whatever the decoy doesn't have) running unpinned right after it. The
+  // step name has to be unique in the job before anything else about it
+  // gets checked.
+  assertMutationFailure(
+    workflow.replace(
+      "      - name: Combine and publish the advisory table\n        env:",
+      '      - name: Combine and publish the advisory table\n        if: false\n        run: |\n          echo "decoy"\n\n      - name: Combine and publish the advisory table\n        env:',
+    ),
+    'the step named "Combine and publish the advisory table" must appear exactly once in the job, found 2 (a same-named decoy step can shadow the real one)',
+  );
+});
+
+test("mutation contract rejects an advisory summary step that gains an if: false", () => {
+  // A key added to the step, not a line rewritten inside its run: script:
+  // the old run-scalar-only pin never looked at anything above `run: |`,
+  // so `if: false` here would have shipped a step that never executes with
+  // a body identical to the one this test already approved.
+  assertMutationFailure(
+    workflow.replace(
+      "      - name: Combine and publish the advisory table\n        env:",
+      "      - name: Combine and publish the advisory table\n        if: false\n        env:",
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects an advisory summary step that gains continue-on-error: true", () => {
+  // Same blind spot, a different key: `continue-on-error: true` turns the
+  // missing-group `exit 1` this job depends on into a no-op for the
+  // workflow's own pass/fail result, without touching a single line the
+  // old pin compared.
+  assertMutationFailure(
+    workflow.replace(
+      "      - name: Combine and publish the advisory table\n        env:",
+      "      - name: Combine and publish the advisory table\n        continue-on-error: true\n        env:",
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects an advisory summary step that gains a shell override", () => {
+  // `shell: bash -n {0}` parses the script and exits without running a
+  // single line of it -- the run: text stays byte-for-byte identical, so
+  // only a check that looks at the step's OTHER keys catches it.
+  assertMutationFailure(
+    workflow.replace(
+      "      - name: Combine and publish the advisory table\n        env:",
+      "      - name: Combine and publish the advisory table\n        shell: bash -n {0}\n        env:",
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
   );
 });
 

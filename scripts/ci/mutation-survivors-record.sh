@@ -99,38 +99,40 @@ is_digits() {
 	[ "${#1}" -le 15 ]
 }
 
-# Rejects a leading "/" (an absolute path escaping src-root) and any ".."
-# path segment (escaping the package directory). Field splitting on "/" is
+# Rejects a leading "/" (an absolute path escaping src-root) and any ".",
+# ".." or empty path segment (escaping the package directory, or a
+# double-slash/trailing-slash malformation). Field splitting on "/" is
 # deliberate here rather than a regex: POSIX ERE has no reliable word
 # boundary for a bare ".." segment without pulling in GNU-only extensions.
 #
-# Not provably redundant with MUTANT_OK_FILTER's identical-looking jq
-# predicate (leading "/", any split("/") segment equal to ".."), and this
-# is the reachable case that proves it: `for seg in $1` below is
-# deliberately unquoted for the field split, but that also puts every
-# resulting word through pathname expansion. A raw `f` field such as
-# ".*/x.go" has no segment jq's string-equality check would ever call
-# "..", so MUTANT_OK_FILTER's `ok` comes back true -- but bash's unquoted
-# expansion of the ".*" segment matches the "." and ".." entries every
-# directory always has, and one of those literal matches trips the ".."
-# comparison below. scripts/mutation-survivors-record-test.sh's "digamma"
-# fixture is exactly this input, gated-side, asserting build_from_raw
-# demotes it to unparseable through this function specifically, not
-# through the jq gate that runs before it.
+# `for seg in $1` is unquoted (required for the field split to happen at
+# all), which also puts every resulting word through pathname expansion --
+# a real bug this function used to have: a raw `f` field such as ".*/x.go"
+# glob-expanded ".*" against whatever the current working directory
+# happened to contain, and every directory always has "." and ".." entries
+# for that pattern to match, so the rejection this function appeared to
+# produce for that input was an accident of `shopt`/`GLOBIGNORE` state, not
+# an actual path check. The subshell below runs the split under `set -f`
+# (noglob) so `for seg in $1` performs field splitting ONLY, no expansion,
+# and is scoped to the subshell so it never leaks noglob into the caller.
+# MUTANT_OK_FILTER at :131 is the layer that actually has to reject glob
+# metacharacters (`*?[\`) deterministically; this function only ever needs
+# to be a pure, CWD-independent "/", ".", "..", empty-segment check.
 real_path_ok() {
 	case "$1" in
 	/*) return 1 ;;
 	esac
-	local seg old_ifs="${IFS}"
-	IFS='/'
-	for seg in $1; do
-		if [ "${seg}" = ".." ]; then
-			IFS="${old_ifs}"
-			return 1
-		fi
-	done
-	IFS="${old_ifs}"
-	return 0
+	(
+		set -f
+		IFS='/'
+		local seg
+		for seg in $1; do
+			case "${seg}" in
+			'' | . | ..) exit 1 ;;
+			esac
+		done
+		exit 0
+	)
 }
 
 # Applied to a JSON array of raw {f,m,s,l,c} objects (still on stdin, still
@@ -138,12 +140,26 @@ real_path_ok() {
 # back out one per line. Shared between the gated and advisory extractions
 # so the field-validation rule behind finding 1 lives in exactly one place,
 # and runs before any field is ever pulled out of JSON into a bash string.
+#
+# This is the layer that has to reject a glob metacharacter (`*`, `?`,
+# `[`, backslash) deterministically: jq's own `split("/")` never expands
+# anything, so a segment equal to "." or ".." is rejected here by plain
+# string equality, cwd-independent and shell-independent. real_path_ok
+# below does the same "/", ".", "..", empty-segment check again, in bash,
+# as defense in depth once a field is pulled out of JSON into a shell
+# string -- it used to ALSO be where the glob-metacharacter question got
+# answered, by accident, because its unquoted `for seg in $1` glob-expanded
+# a metacharacter segment against the current working directory. That
+# accident is fixed there (a noglob subshell), which means it can no
+# longer answer the question at all, so it has to be answered here
+# instead, on the string, before either check ever runs.
 MUTANT_OK_FILTER='
     map(. + {ok: (
         (.f? != null) and ((.f | type) == "string")
         and ((.f | explode | any(. < 32 or . == 127)) | not)
+        and ((.f | explode | any(. == 42 or . == 63 or . == 91 or . == 92)) | not)
         and ((.f | startswith("/")) | not)
-        and ((.f | split("/") | any(. == "..")) | not)
+        and ((.f | split("/") | any(. == ".." or . == "." or . == "")) | not)
         and (.f != "")
         and (.m? != null) and ((.m | type) == "string") and (.m | test("^[A-Z_]+$"))
         and (.s == "L" or .s == "U")
