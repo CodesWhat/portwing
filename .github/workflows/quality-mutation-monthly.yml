@@ -395,7 +395,12 @@ jobs:
   # that width; sixteen sequential appends from one job race nothing.
   history:
     name: "Record the mutation run in the quality history"
-    needs: gremlins
+    # PW-2.5. The survivor-identity record below reads mutation-advisory's
+    # own reports (mutation-advisory-*.json), not just the gating legs', so
+    # this job now waits on both. always() (already on this job) already
+    # tolerates a killed advisory leg; the cost is waiting on a matrix
+    # capped at timeout-minutes: 20.
+    needs: [gremlins, mutation-advisory]
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -432,6 +437,49 @@ jobs:
           pattern: mutation-history-*-${{ github.run_id }}
           path: records
 
+      # PW-2.5. The survivor record needs each advisory leg's own raw
+      # Gremlins report (mutation-advisory-<name>.json) to compute mutant
+      # identities for the advisory source; the 30-day retention on this
+      # artifact (mutation-advisory's own "Upload advisory rows and
+      # reports" step) is what makes it still be here.
+      - name: Download the advisory records
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: mutation-advisory-*-${{ github.run_id }}
+          path: advisory
+
+      # PW-2.5. One name|package per line, equal to the gating matrix above
+      # (scripts/mutation-config.test.mjs cross-checks it the same way it
+      # already cross-checks mutation-advisory-summary's own
+      # ADVISORY_GROUP_PACKAGES). This job runs after the matrix and has no
+      # access to its context, so the set is duplicated here rather than
+      # read from it.
+      - name: Record mutation survivors for the quality history
+        env:
+          MUTATION_PACKAGES: |
+            portwing|./cmd/portwing
+            server|./internal/server
+            adapter|./internal/adapter
+            adapter-drydock|./internal/adapter/drydock
+            audit|./internal/audit
+            auth|./internal/auth
+            banner|./internal/banner
+            config|./internal/config
+            docker|./internal/docker
+            edge|./internal/edge
+            generic|./internal/generic
+            log|./internal/log
+            mcp|./internal/mcp
+            metrics|./internal/metrics
+            pool|./internal/pool
+            protocol|./internal/protocol
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${MUTATION_PACKAGES}" >mutation-packages.txt
+          scripts/ci/mutation-survivors-record.sh records advisory . mutation-packages.txt >survivors.json
+          cat survivors.json
+
       - name: Append each package to the quality history
         env:
           QUALITY_HISTORY_CREDENTIAL: ${{ secrets.GITHUB_TOKEN }}
@@ -442,7 +490,6 @@ jobs:
 
           if [ "${#records[@]}" -eq 0 ]; then
             echo "::warning::No per-package records were downloaded; nothing to append."
-            exit 0
           fi
 
           # Every record is untrusted input from another job: read as data
@@ -457,6 +504,17 @@ jobs:
             fi
             scripts/ci/quality-history-append.sh mutation "${numbers}"
           done
+
+          # Read via QUALITY_HISTORY_RECORD_FILE, not as an inline argument:
+          # a mutation-survivors record can reach the spec's 1 MiB ceiling,
+          # well past Linux's 128 KiB single-argument limit (MAX_ARG_STRLEN),
+          # so it is never captured into a shell variable or passed on argv.
+          if [ -s survivors.json ] && jq -e 'type == "object"' survivors.json >/dev/null 2>&1; then
+            QUALITY_HISTORY_RETAIN=12 QUALITY_HISTORY_RECORD_FILE=survivors.json \
+              scripts/ci/quality-history-append.sh mutation-survivors
+          else
+            echo "::warning::survivors.json is missing or not a JSON object; not appending mutation-survivors."
+          fi
 
   # Proposes, never pushes. Raising a floor stays a reviewed two-file edit (the
   # matrix above and expectedFloors in scripts/mutation-config.test.mjs) plus a
@@ -665,12 +723,22 @@ jobs:
       matrix:
         include:
           - group: server
+            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run
+            # 33901506579 (2026-09-04): killed 68, lived 3 across
+            # ./internal/server. Floor is floor(measured) - 2pp of slack.
+            floor: 93
             packages: |
               ./internal/server|server|77.88
           - group: edge
+            # Measured 82.56% in run 33901506579 (2026-09-04): killed 71,
+            # lived 15 across ./internal/edge.
+            floor: 80
             packages: |
               ./internal/edge|edge|74.73
           - group: generic
+            # Measured 83.33% in run 33901506579 (2026-09-04): killed 5,
+            # lived 1 across ./internal/generic.
+            floor: 81
             packages: |
               ./internal/generic|generic|85.00
           - group: misc-a
@@ -680,17 +748,28 @@ jobs:
             # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.
             # drydock's tests are slow relative to its coverage gather, so
             # it gets the same |40 coefficient.
+            #
+            # Measured 94.02% in run 33901506579 (2026-09-04): killed 110,
+            # lived 7 summed across adapter, adapter-drydock, auth and audit.
+            floor: 92
             packages: |
               ./internal/adapter|adapter|84.68
               ./internal/adapter/drydock|adapter-drydock|82.50|40
               ./internal/auth|auth|88.58
               ./internal/audit|audit|88.31
           - group: misc-b
+            # Measured 94.52% in run 33901506579 (2026-09-04): killed 138,
+            # lived 8 summed across docker, mcp and metrics.
+            floor: 92
             packages: |
               ./internal/docker|docker|90.39
               ./internal/mcp|mcp|79.49
               ./internal/metrics|metrics|90.00
           - group: misc-c
+            # Measured 92.86% in run 33901506579 (2026-09-04): killed 39,
+            # lived 3 summed across portwing, banner, config, log, pool and
+            # protocol.
+            floor: 90
             packages: |
               ./cmd/portwing|portwing|100
               ./internal/banner|banner|76.92
@@ -974,6 +1053,19 @@ jobs:
             misc-c|./internal/log
             misc-c|./internal/pool
             misc-c|./internal/protocol
+          # PW-6.8: one line per advisory leg, group|floor, mirroring the
+          # matrix.include `floor:` field above. Duplicated for the same
+          # reason ADVISORY_GROUP_PACKAGES is: this job runs after the
+          # matrix and has no context left to read it from.
+          # scripts/mutation-config.test.mjs cross-checks this against the
+          # advisory matrix's own floors.
+          ADVISORY_GROUP_FLOORS: |
+            server|93
+            edge|80
+            generic|81
+            misc-a|92
+            misc-b|92
+            misc-c|90
         run: |
           set -euo pipefail
 
@@ -1003,6 +1095,35 @@ jobs:
               missing_mutator_rows+=("| \`${package}\` | missing | missing | missing | missing | missing | missing |")
             fi
           done <<<"${ADVISORY_GROUP_PACKAGES}"
+
+          # PW-6.8: each present leg's headline rows already carry killed and
+          # lived per package (this job never re-runs Gremlins); this sums
+          # them per group and compares the sum's efficacy on the 6 extra
+          # mutators against the floor measured in run 33901506579. A miss is
+          # a ::warning::, never a failing exit: this job stays advisory the
+          # same way the legs above do, and the missing-group check below is
+          # the only thing in this job allowed to fail it.
+          while IFS='|' read -r group floor; do
+            [ -n "${group}" ] || continue
+            [ "${group_present[${group}]:-no}" = "yes" ] || continue
+            killed_sum=0
+            lived_sum=0
+            while IFS='|' read -r _ _ killed lived _ _; do
+              killed="${killed// /}"
+              lived="${lived// /}"
+              case "${killed}" in ''|*[!0-9]*) continue ;; esac
+              case "${lived}" in ''|*[!0-9]*) continue ;; esac
+              killed_sum=$((killed_sum + killed))
+              lived_sum=$((lived_sum + lived))
+            done < <(sed 's/^|//;s/|$//' rows/mutation-advisory-"${group}"-*/mutation-advisory-headline.txt)
+            total=$((killed_sum + lived_sum))
+            if [ "${total}" -gt 0 ]; then
+              efficacy="$(awk -v k="${killed_sum}" -v t="${total}" 'BEGIN { printf "%.2f", (k / t) * 100 }')"
+              if awk -v e="${efficacy}" -v f="${floor}" 'BEGIN { exit !(e < f) }'; then
+                echo "::warning::advisory group ${group} measured ${efficacy}% efficacy on the 6 extra mutators, below its floor of ${floor}%"
+              fi
+            fi
+          done <<<"${ADVISORY_GROUP_FLOORS}"
 
           {
             echo "### Mutation advisory: Gremlins' default-disabled mutators"
