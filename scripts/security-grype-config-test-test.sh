@@ -155,7 +155,7 @@ assert_rejected \
 
 # A selector that accepts a different ARM variant must fail behavioral checks.
 reset_fixture
-sed -i.bak "s/== \$variant/!= \$variant/" "${fixture}"
+sed -i.bak 's/== $variant/!= $variant/' "${fixture}"
 assert_rejected \
 	"digest selection for linux/arm/v7 must select only variant v7" \
 	"contract must reject selecting the wrong ARM variant"
