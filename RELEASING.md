@@ -119,11 +119,11 @@ A second active ruleset restricts creation of `refs/tags/v*` to the maintainer
 identity used by the release-cut workflow. `release.yml` then proves that the
 tag resolves to a commit on `origin/main` and that the exact commit passed
 `ci-verify.yml` before the privileged job can enter the protected `Production`
-environment. Production accepts only `v*` tags, requires approval from the
-separate release-review account, prevents self-review, and must not allow
-administrators to bypass its protection rules. Keep the source-verification job
-read-only and outside the environment so untrusted tag content cannot receive
-publish permissions before those checks pass.
+environment. Production accepts only `v*` tags and proceeds automatically after
+those checks pass, without a manual environment approval. Administrators cannot
+bypass its protection rules. Keep the source-verification job read-only and
+outside the environment so untrusted tag content cannot receive publish
+permissions before those checks pass.
 
 The release job also requires **`HOMEBREW_TAP_TOKEN`**, a fine-grained token
 with Contents read/write access to `CodesWhat/homebrew-tap`. The default
@@ -177,16 +177,16 @@ the Git-backed deployment or update its GitHub status.
    Private repositories need GHAS for code-scanning uploads; the scan and
    failure gate still run without it, with findings retained in the job log.
 
-   **ARMv7 runtime.** Wolfi publishes no armv7 repository, so this image uses
-   Alpine 3.24 with SHA256-pinned official static Docker CLI 29.8.0 and Compose
-   5.5.1 artifacts. It retains Alpine release metadata for correct distribution
-   matching and uses BusyBox wget with `ssl_client` for HTTP/TLS health checks.
-   The 2026-09-12 database scan of the rebuilt source image found zero Critical
-   or High findings and four Medium matches: CVE-2025-60876 in BusyBox,
-   busybox-binsh, and ssl_client, plus GHSA-7jxh-36q5-gcqv in Compose's bundled
-   containerd 2.3.4. The static Docker CLI does not embed a complete Go module
-   inventory, so the scanner result is not a complete audit of its dependencies.
-   The release job scans the actual published image again and gates all three
+   **ARMv7 runtime.** Wolfi publishes no armv7 repository, so this image retains
+   Alpine 3.24 release metadata and CA certificates alongside static binaries.
+   Docker CLI 29.8.0 is an official download pinned by SHA256. Compose is built
+   from checksum-pinned upstream 5.5.1 source with containerd 2.3.5 and Go 1.27.1,
+   identifies itself as `v5.5.1-portwing.1`, and runs directly or as a CLI plugin.
+   Both ARM recipes omit BusyBox; image health checks use `portwing healthcheck`
+   for HTTP/TLS probes, with HTTPS pinned to the configured `TLS_CERT` leaf.
+   The static Docker CLI does not embed a complete Go module inventory, so a
+   scanner result is not a complete audit of its dependencies.
+   The release job scans the actual published image and gates all three
    platforms equally. `scripts/package-release-config-test.sh` asserts the
    platform list and thresholds.
 4. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.
