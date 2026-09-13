@@ -57,7 +57,7 @@ services:
       - portwing_tls_cert
       - portwing_tls_key
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --no-check-certificate --spider https://localhost:3000/health"]
+      test: ["CMD", "/usr/bin/portwing", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

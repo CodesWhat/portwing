@@ -36,6 +36,7 @@ cp scripts/package-release-config-test.sh "${fixture}/scripts/"
 cp scripts/verify-scanner-exclusions.sh "${fixture}/scripts/"
 cp .grype.yaml Dockerfile.armv7 Dockerfile.release "${fixture}/"
 cp api/openapi.yaml "${fixture}/api/"
+cp examples/observability/docker-compose.yml "${fixture}/examples/observability/"
 cp docs/content/docs/api-reference.mdx "${fixture}/docs/content/docs/"
 cp docs/content/docs/standalone-mode.mdx "${fixture}/docs/content/docs/"
 cp docs/content/docs/observability.mdx "${fixture}/docs/content/docs/"
@@ -89,6 +90,31 @@ if [ "${shallow_status}" -ne 0 ] || ! grep -Fq "SKIP: shallow checkout carries n
 fi
 
 git -C "${fixture}" tag "v${release_version}"
+
+# A healthcheck in a build stage cannot protect the final scratch image.
+for recipe in Dockerfile.armv7 Dockerfile.release; do
+	awk '
+		/^FROM / && !inserted {
+			print
+			print "HEALTHCHECK CMD [\"/usr/bin/portwing\", \"healthcheck\"]"
+			inserted = 1
+			next
+		}
+		/^HEALTHCHECK / { getline; next }
+		{ print }
+	' "${recipe}" >"${fixture}/${recipe}"
+	expect_release_contract_failure \
+		"${recipe} must use the shell-free Portwing healthcheck" \
+		"a build-stage healthcheck must not satisfy the final runtime contract"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
+
+observability_example="examples/observability/docker-compose.yml"
+sed -i.bak 's#test: \["CMD", "/usr/bin/portwing", "healthcheck"\]#test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/health"]#' "${fixture}/${observability_example}"
+expect_release_contract_failure \
+	"the observability example must use the shell-free Portwing healthcheck" \
+	"a wget healthcheck override must not survive in the observability example"
+cp "${observability_example}" "${fixture}/${observability_example}"
 
 if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
 	echo "FAIL: complete package release fixture must pass" >&2

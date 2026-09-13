@@ -246,7 +246,8 @@ for dockerfile in Dockerfile.armv7 Dockerfile.release; do
 		echo "FAIL: ${dockerfile} ARM rootfs must not retain BusyBox" >&2
 		failures=$((failures + 1))
 	fi
-	if ! grep -Fq 'CMD ["/usr/bin/portwing", "healthcheck"]' "${dockerfile}"; then
+	runtime_stage="$(active_lines "${dockerfile}" | awk '/^FROM / { stage = "" } { stage = stage $0 ORS } END { printf "%s", stage }')"
+	if ! grep -Eq '^[[:space:]]*CMD \["/usr/bin/portwing", "healthcheck"\]$' <<<"${runtime_stage}"; then
 		echo "FAIL: ${dockerfile} must use the shell-free Portwing healthcheck" >&2
 		failures=$((failures + 1))
 	fi
@@ -359,6 +360,9 @@ require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must 
 require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`" "the compatibility matrix must identify the current release"
 require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
 require_text "examples/observability/docker-compose.yml" "ghcr.io/codeswhat/portwing:${release_version}" "the observability example must pin the current release"
+require_exactly_one_active "examples/observability/docker-compose.yml" '^[[:space:]]+test:' \
+	'test: ["CMD", "/usr/bin/portwing", "healthcheck"]' \
+	"the observability example must use the shell-free Portwing healthcheck"
 openapi_agent_version_examples="$(awk '
 	/^        (version|agentVersion):[[:space:]]*$/ { in_agent_version = 1; next }
 	in_agent_version && /^[[:space:]]+example: "[0-9]+\.[0-9]+\.[0-9]+"$/ {
