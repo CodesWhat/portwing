@@ -675,15 +675,12 @@ require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/pk
 # rather than the substring "--fail-on high" — that string survives intact even
 # if every leg is flipped to report-only.
 #
-# Wolfi has no armv7, so that leg is built from Alpine and carries a different
-# (worse) package set than amd64/arm64; it is report-only on purpose, and
-# RELEASING.md records why and when it flips. It is also the leg most likely to
-# be dropped to make the gate quiet, which is why it is asserted by name here.
-# Changing any of these three values is a security decision that has to update
-# this list, RELEASING.md, and the matrix comment together.
+# All three platforms now gate on HIGH and above. Keep ARMv7 explicit so a
+# future package regression cannot be hidden by dropping or un-gating its leg.
+# Changing these values must update RELEASING.md and the matrix comment too.
 expected_grype_gates="linux/amd64=high
 linux/arm64=high
-linux/arm/v7=none"
+linux/arm/v7=high"
 actual_grype_gates="$(awk '
 	$0 == "  grype-published-image:" { injob = 1; next }
 	injob && /^  [^ ]/ { injob = 0 }

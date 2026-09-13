@@ -232,35 +232,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # All three published platforms. security-grype.yml's grype-image job
-        # scans an image it builds itself from the root Dockerfile, which is a
-        # Wolfi-only from-source build resolved to the runner's own
-        # architecture. That is not what ships. This job scans the actual
-        # pushed manifest, per platform.
-        #
-        # `gate: high` fails the release on HIGH and above. `gate: none`
-        # reports to the Security tab without failing.
-        #
-        # arm/v7 is report-only, and that is a stated exception rather than a
-        # default. Wolfi publishes no armv7 repo, so Dockerfile.release builds
-        # that leg from Alpine using its prebuilt docker-cli/docker-cli-compose,
-        # now compiled with Go 1.26.8. Their bundled Go modules still carry
-        # Critical/High findings (including x/crypto, x/net, grpc and
-        # containerd), so the compiler update alone does not clear this leg.
-        # The 2026-09-12 scan found none in portwing itself; RELEASING.md
-        # records the current package versions and remaining exception.
-        #
-        # Suppressing those to force the leg green would hide real, fixable
-        # CVEs, so the gap is left visible instead. Flip armv7 to `high` once
-        # the shipped image clears its Critical/High findings. Do NOT quietly drop the leg from this
-        # matrix; the contract test asserts linux/arm/v7 by name.
+        # Scan the actual published manifest for all three platforms.
+        # Every leg fails on HIGH and above. ARMv7 uses Alpine with pinned
+        # official static Docker/Compose clients; its former report-only
+        # exception ended after the rebuilt image cleared Critical/High.
         include:
           - platform: linux/amd64
             gate: high
           - platform: linux/arm64
             gate: high
           - platform: linux/arm/v7
-            gate: none
+            gate: high
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
