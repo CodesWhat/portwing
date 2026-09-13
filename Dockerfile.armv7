@@ -34,7 +34,6 @@ ADD --checksum=sha256:e5fc27c730a503192c2bcd5462f9316a0626c6b62d7b8cff9fe41116f7
 ADD --checksum=sha256:32e8e0182e7a94570ef60542e25346d465eaf5e2ca766d54bf9d64573ddaa52e https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-armv7 /out/usr/bin/docker-compose
 RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker \
     && chmod 755 /out/usr/bin/docker /out/usr/bin/docker-compose \
-    && ln -s /bin/busybox /out/usr/bin/wget \
     && mkdir -p /out/usr/libexec/docker/cli-plugins \
     && ln -s ../../../bin/docker-compose /out/usr/libexec/docker/cli-plugins/docker-compose \
     && rm /tmp/docker.tgz
