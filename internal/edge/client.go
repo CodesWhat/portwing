@@ -930,6 +930,9 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Warn("invalid error message", "error", err)
 				continue
 			}
+			if errMsg.Code == "request-cancelled" {
+				c.cancelPendingBody(errMsg.RequestID)
+			}
 			slog.Warn("received error from controller",
 				"code", applog.Sanitize(errMsg.Code),
 				"message", applog.Sanitize(errMsg.Message),
@@ -997,6 +1000,18 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 	})
 	c.pendingBodies[req.RequestID] = pb
 	c.pendingBodiesMu.Unlock()
+}
+
+// cancelPendingBody abandons an upload without ever dispatching a partial body.
+// Older agents ignore the cancellation frame and expire the upload normally.
+func (c *Client) cancelPendingBody(requestID string) {
+	c.pendingBodiesMu.Lock()
+	pb := c.pendingBodies[requestID]
+	delete(c.pendingBodies, requestID)
+	c.pendingBodiesMu.Unlock()
+	if pb != nil {
+		pb.timer.Stop()
+	}
 }
 
 // appendPendingBody decodes and appends one stream chunk to the pending body

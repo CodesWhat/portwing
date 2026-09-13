@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.18] - 2026-09-12
+
 ### Security
 
 - Refresh the Wolfi runtime base for patched glibc 2.44-r6 and Docker Compose
   5.5.1-r1, which updates its embedded containerd dependency.
+- Replace ARMv7's older Alpine Docker clients with pinned official Docker CLI
+  29.8.0 and Compose 5.5.1 binaries, retain Alpine distribution metadata for
+  scanning, and use BusyBox's HTTP/TLS health checker. The rebuilt image clears
+  Critical/High findings, so ARMv7 now uses the same release scan gate as the
+  other platforms. Four Medium matches remain in bundled tools.
+
+### Fixed
+
+- Release pending Edge request-body buffers immediately when the controller
+  sends a `request-cancelled` error. Canceled partial uploads never reach Docker;
+  older agents retain their existing idle-timeout cleanup.
 
 ### Changed
 

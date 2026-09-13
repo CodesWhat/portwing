@@ -7,7 +7,7 @@
 # grype-published-image scans the real manifest exactly once, at tag-cut time.
 # The assertions below lock the properties that make the weekly re-scan
 # meaningful — that it resolves a GA tag rather than a release candidate, that
-# it scans both gating platforms of the published manifest rather than whatever
+# it scans all three published platforms of the published manifest rather than whatever
 # the runner's own architecture happens to be, and that it asks for no more
 # permission than reading a package and writing a code-scanning result.
 set -euo pipefail
@@ -119,7 +119,7 @@ grep -Fq "if: needs.resolve-latest-release.outputs.version != ''" <<<"${scan_blo
 grep -Fq "needs: resolve-latest-release" <<<"${scan_block}" ||
 	fail "grype-published-release must depend on resolve-latest-release"
 
-# --- both published platforms are scanned ------------------------------------
+# --- all published platforms are scanned ------------------------------------
 #
 # The failure this guards against is silent: anchore/scan-action exposes no
 # --platform input, so a job handed a multi-arch tag scans only the runner's
@@ -136,9 +136,9 @@ scan_platforms="$(
     ' <<<"${scan_block}"
 )"
 
-expected_platforms=$'linux/amd64\nlinux/arm64'
+expected_platforms=$'linux/amd64\nlinux/arm64\nlinux/arm/v7'
 if [ "${scan_platforms}" != "${expected_platforms}" ]; then
-	fail "grype-published-release must scan exactly linux/amd64 and linux/arm64 (found: $(tr '\n' ' ' <<<"${scan_platforms}"))"
+	fail "grype-published-release must scan exactly linux/amd64, linux/arm64 and linux/arm/v7 (found: $(tr '\n' ' ' <<<"${scan_platforms}"))"
 fi
 
 # The SARIF category below is keyed on matrix.slug. A duplicated slug is
@@ -183,6 +183,10 @@ grep -Fq 'echo "ref=registry:ghcr.io/${repo_lower}@${digest}"' <<<"${scan_block}
 grep -Fq '.platform.architecture == $arch' <<<"${scan_block}" ||
 	fail "digest resolution must select the manifest by platform architecture"
 
+# shellcheck disable=SC2016 # Assert the literal workflow platform split.
+grep -Fq 'IFS=/ read -r os arch variant <<<"${PLATFORM}"' <<<"${scan_block}" ||
+	fail "digest resolution must split os, architecture and variant from PLATFORM"
+
 # The text check above only proves the substring survives; it cannot tell an
 # `and` from an `or`, both of which contain the same substring. Extract the
 # actual jq program between the `jq -r --arg os ... '` open and the closing
@@ -194,6 +198,9 @@ digest_fixture='{
   "manifests": [
     {"platform": {"os": "linux", "architecture": "amd64"}, "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
     {"platform": {"os": "linux", "architecture": "arm64"}, "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    {"platform": {"os": "linux", "architecture": "arm", "variant": "v6"}, "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+    {"platform": {"os": "linux", "architecture": "arm", "variant": "v7"}, "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+    {"platform": {"os": "linux", "architecture": "arm"}, "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},
     {"platform": {"os": "unknown", "architecture": "unknown"}, "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
   ]
 }'
@@ -201,16 +208,27 @@ digest_fixture='{
 if [ -z "${digest_jq_filter}" ]; then
 	fail "could not extract the digest-selection jq filter from grype-published-release to test it behaviourally"
 else
-	amd64_selected="$(printf '%s' "${digest_fixture}" | jq -r --arg os linux --arg arch amd64 "${digest_jq_filter}" 2>/dev/null || echo '<jq error>')"
+	amd64_selected="$(printf '%s' "${digest_fixture}" | jq -r --arg os linux --arg arch amd64 --arg variant "" "${digest_jq_filter}" 2>/dev/null || echo '<jq error>')"
 	if [ "${amd64_selected}" != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]; then
 		fail "digest selection for linux/amd64 must resolve exactly one digest, the amd64 manifest's (got: ${amd64_selected})"
 	fi
 
-	arm64_selected="$(printf '%s' "${digest_fixture}" | jq -r --arg os linux --arg arch arm64 "${digest_jq_filter}" 2>/dev/null || echo '<jq error>')"
+	arm64_selected="$(printf '%s' "${digest_fixture}" | jq -r --arg os linux --arg arch arm64 --arg variant "" "${digest_jq_filter}" 2>/dev/null || echo '<jq error>')"
 	if [ "${arm64_selected}" != "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]; then
 		fail "digest selection for linux/arm64 must resolve exactly one digest, the arm64 manifest's (got: ${arm64_selected})"
 	fi
+	armv7_selected="$(printf '%s' "${digest_fixture}" | jq -r --arg os linux --arg arch arm --arg variant v7 "${digest_jq_filter}" 2>/dev/null || echo '<jq error>')"
+	if [ "${armv7_selected}" != "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ]; then
+		fail "digest selection for linux/arm/v7 must select only variant v7 (got: ${armv7_selected})"
+	fi
+
 fi
+
+# Source-image ARM findings must gate the scheduled/manual run too.
+source_block="$(job_block grype-image)"
+arm_source_entry="$(sed -n '/platform: linux\/arm\/v7/,/fail-build:/p' <<<"${source_block}")"
+grep -Fq 'fail-build: true' <<<"${arm_source_entry}" ||
+	fail "the source ARMv7 image scan must set fail-build: true"
 
 # --- scan policy matches the in-repo image job -------------------------------
 

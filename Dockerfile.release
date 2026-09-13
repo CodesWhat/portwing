@@ -1,3 +1,4 @@
+# checkov:skip=CKV_DOCKER_4:Remote official artifacts use ADD --checksum for mandatory SHA256 verification.
 # Release image assembled by GoReleaser (dockers_v2) from the prebuilt
 # `portwing` binaries — one image per target platform from this single
 # Dockerfile. (For a from-source build use the top-level Dockerfile instead.)
@@ -37,11 +38,20 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
         --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
         --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community" \
         --keys-dir /etc/apk/keys \
-        ca-certificates busybox docker-cli docker-cli-compose wget \
+        ca-certificates busybox alpine-release ssl_client \
     && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
     && echo 'portwing:x:65532:' >>/out/etc/group \
     && install -d -o 65532 -g 65532 /out/home/portwing /out/data/stacks \
     && rm -rf /out/var/cache/apk/*
+
+# Official static ARMv7 clients avoid Alpine's older bundled Go dependencies.
+ADD --checksum=sha256:e5fc27c730a503192c2bcd5462f9316a0626c6b62d7b8cff9fe41116f740b0aa https://download.docker.com/linux/static/stable/armhf/docker-29.8.0.tgz /tmp/docker.tgz
+ADD --checksum=sha256:32e8e0182e7a94570ef60542e25346d465eaf5e2ca766d54bf9d64573ddaa52e https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-armv7 /out/usr/bin/docker-compose
+RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker \
+    && chmod 755 /out/usr/bin/docker /out/usr/bin/docker-compose \
+    && mkdir -p /out/usr/libexec/docker/cli-plugins \
+    && ln -s ../../../bin/docker-compose /out/usr/libexec/docker/cli-plugins/docker-compose \
+    && rm /tmp/docker.tgz
 
 # Select the rootfs by target arch. TARGETARCH is a buildx-predefined global arg
 # (amd64 / arm64 / arm) usable directly in FROM without an explicit ARG.

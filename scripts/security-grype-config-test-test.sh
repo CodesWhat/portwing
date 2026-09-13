@@ -130,23 +130,50 @@ assert_rejected \
 # --- platform coverage -------------------------------------------------------
 
 # arm64 leg dropped. This is the silent-coverage-loss case: the job stays green
-# while half the published manifest goes unscanned.
+# while one published platform goes unscanned.
 reset_fixture
 sed -i.bak '/^          - platform: linux\/arm64$/,+1d' "${fixture}"
 assert_rejected \
-	"must scan exactly linux/amd64 and linux/arm64" \
+	"must scan exactly linux/amd64, linux/arm64 and linux/arm/v7" \
 	"contract must reject a matrix that drops the arm64 leg"
 
-# A third leg added without updating the contract. armv7 is report-only in
-# release.yml for reasons this lane cannot express, so it must not appear here
-# by accident.
+# ARMv7 is now gated and must not disappear from the recurring scan.
 reset_fixture
-insert_after "            slug: linux-arm64" \
-	"          - platform: linux/arm/v7" \
-	"            slug: linux-armv7"
+sed -i.bak '/^          - platform: linux\/arm\/v7$/,+1d' "${fixture}"
 assert_rejected \
-	"must scan exactly linux/amd64 and linux/arm64" \
+	"must scan exactly linux/amd64, linux/arm64 and linux/arm/v7" \
+	"contract must reject a matrix that drops the ARMv7 leg"
+
+# An unrelated ARM variant must not silently expand the supported platforms.
+reset_fixture
+insert_after "            slug: linux-armv7" \
+	"          - platform: linux/arm/v6" \
+	"            slug: linux-armv6"
+assert_rejected \
+	"must scan exactly linux/amd64, linux/arm64 and linux/arm/v7" \
 	"contract must reject an unaccounted-for extra platform leg"
+
+# A selector that accepts a different ARM variant must fail behavioral checks.
+reset_fixture
+# shellcheck disable=SC2016 # Mutate the literal jq variable in the workflow.
+sed -i.bak 's/== $variant/!= $variant/' "${fixture}"
+assert_rejected \
+	"digest selection for linux/arm/v7 must select only variant v7" \
+	"contract must reject selecting the wrong ARM variant"
+
+# Variant-less ARM descriptors cannot stand in for ARMv7.
+reset_fixture
+sed -i.bak 's/platform.variant \/\/ ""/platform.variant \/\/ "v7"/' "${fixture}"
+assert_rejected \
+	"digest selection for linux/arm/v7 must select only variant v7" \
+	"contract must reject treating missing ARM variant as v7"
+
+# Source ARM scans must fail instead of reverting to report-only mode.
+reset_fixture
+sed -i.bak '/^  grype-image:/,/^  grype-deps:/s/fail-build: true/fail-build: false/' "${fixture}"
+assert_rejected \
+	"the source ARMv7 image scan must set fail-build: true" \
+	"contract must reject a report-only source ARMv7 scan"
 
 # fail-fast on: a red amd64 leg would cancel arm64 before it reported.
 reset_fixture
@@ -168,7 +195,7 @@ assert_rejected \
 # --- what actually gets scanned ---------------------------------------------
 
 # Scanner pointed at a tag instead of the resolved per-platform digest. Because
-# anchore/scan-action has no --platform input, this silently collapses both
+# anchore/scan-action has no --platform input, this silently collapses all
 # legs onto the runner's native architecture.
 reset_fixture
 sed -i.bak "${scan_range} s|image: \${{ steps.platform_digest.outputs.ref }}|image: ghcr.io/codeswhat/portwing:latest|" "${fixture}"
@@ -194,7 +221,7 @@ assert_rejected \
 # The digest selector's `and` flipped to `or`. The text check on the literal
 # `.platform.architecture == $arch` substring cannot see this: it is still
 # there, just no longer combined with the os check the way it needs to be.
-# Against the behavioural check's fixture, ORing matches both linux manifests
+# Against the behavioural check's fixture, ORing matches all linux manifests
 # for a single arch, collapses `unique` to more than one entry, and the
 # selector's own `if length == 1` guard returns "" instead of a digest.
 reset_fixture

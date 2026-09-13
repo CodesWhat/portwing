@@ -49,13 +49,13 @@
 
 ## Required checks and the promotion order
 
-`main` requires 12 check contexts, declared in
+`main` requires 14 check contexts, declared in
 `scripts/apply-branch-protection.sh`. Seven are `Go CI / ...`, produced by
 the caller job's name in `ci-verify.yml` plus a job name inside the upstream
-reusable workflow. The other five are this repo's own jobs:
-`Security: Secrets`, `Dependency Review`, `CodeQL Analysis`,
-`Security: Gosec SAST`, and
-`Security: Grype Dependency Scan (Go + npm)`.
+reusable workflow. Six are this repo's own jobs: `Security: Secrets`,
+`Dependency Review`, `CodeQL Analysis`, `Security: Gosec SAST`,
+`Security: Grype Dependency Scan (Go + npm)`, and `Release Contract`.
+The remaining context is Codecov's `codecov/patch`.
 
 Two rules keep this from wedging the repo:
 
@@ -163,7 +163,7 @@ the Git-backed deployment or update its GitHub status.
 
 1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; publishes the stable Homebrew cask; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
 2. **Attestations** — SLSA Build L2 provenance for every checksummed release asset (archives, native packages, and per-archive SBOMs) and for the container manifest (`gh attestation verify <asset> --repo CodesWhat/portwing`)
-3. **grype-published-image** — scans the pushed manifest by digest with Grype, once per published platform (`linux/amd64`, `linux/arm64`, `linux/arm/v7`), using `.grype.yaml` for suppressions. This is the only scan that sees what users actually pull: `security-grype.yml`'s container scan builds its own image from the root `Dockerfile` and resolves to a single architecture. Unlike `verify-published` this job is **not** gated on repository visibility; only its SARIF upload is, so the gate keeps working if the repo ever goes private.
+3. **grype-published-image** — scans the pushed manifest by digest with Grype, once per published platform (`linux/amd64`, `linux/arm64`, `linux/arm/v7`), using `.grype.yaml` for suppressions. This checks what users actually pull at release time; `security-grype.yml` also rescans the latest published release and builds separate amd64 and ARMv7 images from source. Unlike `verify-published` this job is **not** gated on repository visibility; only its SARIF upload is, so the gate keeps working if the repo ever goes private.
 
    The gate is per platform, and the matrix's `gate:` field is the single source of truth:
 
@@ -171,16 +171,24 @@ the Git-backed deployment or update its GitHub status.
    |---|---|
    | `linux/amd64` | fails the release on HIGH and above |
    | `linux/arm64` | fails the release on HIGH and above |
-   | `linux/arm/v7` | **report-only** — does not fail the release |
+   | `linux/arm/v7` | fails the release on HIGH and above |
 
-   Every leg uploads SARIF to the Security tab, but only while the repo is
-   public: code scanning uploads need GHAS, which free private repos don't
-   have. So on a private repo the `arm/v7` findings exist only in that job's
-   log, which is the one case where report-only is close to invisible.
+   Every leg uploads SARIF to the Security tab while the repo is public.
+   Private repositories need GHAS for code-scanning uploads; the scan and
+   failure gate still run without it, with findings retained in the job log.
 
-   **The `arm/v7` exception, and when it ends.** Wolfi publishes no armv7 repo, so `Dockerfile.release` builds that leg from `alpine:3.24` using Alpine's prebuilt `docker-cli` and `docker-cli-compose` instead of Wolfi's `docker-compose`. Those packages are compiled with Go 1.26.3 and carry ~29 Critical/High stdlib advisories that are all fixed in Go 1.26.6. Portwing's own `go.mod` pins `toolchain go1.27.1` and portwing's binary carries **zero** findings on all three platforms — the vulnerable toolchain is Alpine's, not this repo's, and no Alpine branch ships a `go >= 1.26.6`-built docker package yet (edge is on 1.26.5, one patch short). `musl` additionally carries CVE-2026-40200 with no fix anywhere.
-
-   Suppressing those to force the leg green would hide real, fixable CVEs behind an entry nobody would revisit, so the gap is left visible instead. **Flip `gate: none` to `gate: high` in the matrix once Alpine ships those packages**, then delete this paragraph. Do not quietly drop `linux/arm/v7` from the matrix to quiet the job — `scripts/package-release-config-test.sh` asserts all three platforms and their exact gate values, so changing one is a deliberate edit to that list, this table, and the matrix comment together.
+   **ARMv7 runtime.** Wolfi publishes no armv7 repository, so this image uses
+   Alpine 3.24 with SHA256-pinned official static Docker CLI 29.8.0 and Compose
+   5.5.1 artifacts. It retains Alpine release metadata for correct distribution
+   matching and uses BusyBox wget with `ssl_client` for HTTP/TLS health checks.
+   The 2026-09-12 database scan of the rebuilt source image found zero Critical
+   or High findings and four Medium matches: CVE-2025-60876 in BusyBox,
+   busybox-binsh, and ssl_client, plus GHSA-7jxh-36q5-gcqv in Compose's bundled
+   containerd 2.3.4. The static Docker CLI does not embed a complete Go module
+   inventory, so the scanner result is not a complete audit of its dependencies.
+   The release job scans the actual published image again and gates all three
+   platforms equally. `scripts/package-release-config-test.sh` asserts the
+   platform list and thresholds.
 4. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.
 5. **verify-native-packages** — verifies every package's Sigstore bundle, installs the `amd64` deb and rpm in digest-pinned clean distribution containers, checks the systemd unit, and runs `portwing version`.
 6. **verify-homebrew** — on stable tags, installs the published cask on macOS, runs `portwing version`, and uninstalls it.

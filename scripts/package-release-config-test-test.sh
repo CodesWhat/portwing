@@ -34,7 +34,7 @@ restore_grype_workflow() {
 git archive HEAD | tar -x -C "${fixture}"
 cp scripts/package-release-config-test.sh "${fixture}/scripts/"
 cp scripts/verify-scanner-exclusions.sh "${fixture}/scripts/"
-cp .grype.yaml "${fixture}/"
+cp .grype.yaml Dockerfile.armv7 Dockerfile.release "${fixture}/"
 cp api/openapi.yaml "${fixture}/api/"
 cp docs/content/docs/api-reference.mdx "${fixture}/docs/content/docs/"
 cp docs/content/docs/standalone-mode.mdx "${fixture}/docs/content/docs/"
@@ -467,5 +467,15 @@ expect_release_contract_failure \
 	"the package release contract must reject a heading-shaped substring that is not anchored at the start of the line"
 git -C "${fixture}" tag -d v0.0.2 >/dev/null
 mv "${changelog_decoy_backup}" "${fixture}/CHANGELOG.md"
+
+for recipe in Dockerfile.armv7 Dockerfile.release; do
+	cp "${recipe}" "${fixture}/${recipe}"
+	sed -i.bak 's/--checksum=sha256:[0-9a-f]*/--checksum=sha256:short/' "${fixture}/${recipe}"
+	expect_release_contract_failure "ARM Docker assets must use official versioned URLs and SHA256 checksums" "ARM downloads without a full checksum must fail"
+	cp "${recipe}" "${fixture}/${recipe}"
+	sed -i.bak 's/ alpine-release / /' "${fixture}/${recipe}"
+	expect_release_contract_failure "ARM rootfs must retain Alpine distro metadata" "Missing ARM distro metadata must fail"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
 
 echo "Package release contract self-tests passed."
