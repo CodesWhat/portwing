@@ -139,22 +139,18 @@ spec:
             - name: stacks
               mountPath: /data/stacks
           livenessProbe:
-            exec:
-              command:
-                - wget
-                - -q
-                - --spider
-                - http://127.0.0.1:3000/health
+            httpGet:
+              path: /health
+              port: operations
+              scheme: HTTP
             initialDelaySeconds: 10
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
-            exec:
-              command:
-                - wget
-                - -q
-                - --spider
-                - http://127.0.0.1:3000/ready
+            httpGet:
+              path: /ready
+              port: operations
+              scheme: HTTP
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3

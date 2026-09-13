@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.19] - 2026-09-13
+
+### Security
+
+- Build ARMv7's Compose 5.5.1 with containerd 2.3.5 as `v5.5.1-portwing.1`,
+  remove BusyBox from that runtime, and use Portwing's built-in Go probe for
+  image health checks. HTTPS probes require the server certificate to match
+  the configured `TLS_CERT` leaf certificate.
+
+### Changed
+
+- Publish releases automatically after source and CI verification, without a
+  manual Production environment approval. Release tag restrictions and branch
+  review requirements remain in place.
+
 ## [v0.9.18] - 2026-09-12
 
 ### Security

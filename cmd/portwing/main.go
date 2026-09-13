@@ -34,6 +34,14 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) >= 2 && args[1] == "healthcheck" {
+		if err := runHealthcheck(); err != nil {
+			fmt.Fprintf(stderr, "portwing healthcheck: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
 	if len(args) >= 2 && args[1] == "hash-token" {
 		return runHashToken(stdin, stdout, stderr)
 	}
@@ -166,6 +174,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "https://portwing.codeswhat.com/docs/configuration for the full reference.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  healthcheck  probe the local health endpoint")
 	fmt.Fprintln(w, "  hash-token   hash a token from stdin for use as TOKEN_HASH")
 	fmt.Fprintln(w, "  keygen       generate an Ed25519 keypair for AUTHORIZED_KEYS auth")
 	fmt.Fprintln(w, "  version      print the agent version")
