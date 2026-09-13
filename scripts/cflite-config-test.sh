@@ -155,7 +155,7 @@ for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
 	fi
 
 	# gcr.io and storage.googleapis.com serve the OSS-Fuzz images; the Go proxy
-	# and checksum database serve both the modules and the go1.27.0 toolchain
+	# and checksum database serve both the modules and the go1.27.1 toolchain
 	# that base-builder-go's Go 1.25.0 downloads on first use. Any of the four
 	# missing is a silent network failure inside a container, so name them.
 	for endpoint in gcr.io:443 storage.googleapis.com:443 proxy.golang.org:443 sum.golang.org:443 github.com:443; do

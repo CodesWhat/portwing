@@ -95,7 +95,7 @@ the comment block at the top of
 - **Runner:** GitHub-hosted `ubuntu-24.04`, `cpu: Intel(R) Xeon(R) 6973P-C`
   (`goos: linux`, `goarch: amd64`).
 - **Go:** `go1.26.6` — the toolchain `go.mod` pinned on `main` at that commit.
-  `dev/v0.9` has since moved to `toolchain go1.27.0`; the next monthly run
+  `dev/v0.9` has since moved to `toolchain go1.27.1`; the next monthly run
   will record numbers on that toolchain, and `benchstat`'s hardware-match
   walk-back means a run on a new toolchain still compares fine as long as the
   CPU model matches.
