@@ -616,7 +616,7 @@ Chainguard Wolfi OS packages assembled into a `FROM scratch` image (Alpine on ar
 Packages:
 
 - **Wolfi (amd64/arm64):** `ca-certificates-bundle`, `busybox`, `docker-cli`, `docker-compose`, `wget`
-- **Alpine (armv7):** `ca-certificates`, `busybox`, `docker-cli`, `docker-cli-compose`, `wget`
+- **Alpine (armv7):** `ca-certificates`, `busybox`, `alpine-release`, `ssl_client`. BusyBox provides wget for HTTP/TLS health checks. Docker CLI 29.8.0 and Compose 5.5.1 are separate official static ARMv7 downloads, pinned by SHA256 in both ARM image recipes; Compose is available directly and as a Docker CLI plugin.
 
 ## 15. Migration Strategy
 
