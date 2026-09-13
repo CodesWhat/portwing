@@ -65,12 +65,15 @@ def main():
             subprocess.run(["docker", "rm", container], check=True,
                            capture_output=True, timeout=20)
 
-            def execute(command, *arguments, environment=()):
+            def execute(command, *arguments, environment=(), certificate=None):
                 env_args = [item for value in environment for item in ("-e", value)]
+                cert_args = (["--mount",
+                              f"type=bind,source={certificate},target=/tmp/health-cert.pem,readonly"]
+                             if certificate else [])
                 return subprocess.run(
                     ["docker", "run", "--rm", "--name", container,
                      "--platform", "linux/arm/v7", "--network", "host",
-                     *env_args, "--entrypoint", command, image, *arguments],
+                     *env_args, *cert_args, "--entrypoint", command, image, *arguments],
                     capture_output=True, text=True, timeout=30,
                 )
 
@@ -97,9 +100,10 @@ def main():
                     result = execute(
                         "/usr/bin/portwing", "healthcheck",
                         environment=(f"PORT={server.server_port}",
-                                     "TLS_CERT=self-signed" if secure else "TLS_CERT=",
+                                     "TLS_CERT=/tmp/health-cert.pem" if secure else "TLS_CERT=",
                                      "HTTP_PROXY=http://127.0.0.1:1",
                                      "HTTPS_PROXY=http://127.0.0.1:1"),
+                        certificate=cert if secure else None,
                     )
                     if (result.returncode == 0) != (status == 200):
                         raise RuntimeError(f"TLS={secure} HTTP={status}: {result.stderr}")

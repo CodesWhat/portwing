@@ -221,8 +221,10 @@ Edge-mode not-ready response:
 `GET /_portwing/health` remains as a compatibility alias for `/ready`.
 
 The container image's built-in healthcheck uses `/health` and automatically
-selects HTTP or HTTPS from `TLS_CERT`, while the Kubernetes examples use
-`/health` for liveness and `/ready` for readiness.
+selects HTTP or HTTPS from `TLS_CERT`. HTTPS probes require an exact match to
+the configured leaf certificate, so self-signed certificates and certificates
+without a `localhost` name still work. The Kubernetes examples use `/health`
+for liveness and `/ready` for readiness.
 
 ### GET /_portwing/info
 

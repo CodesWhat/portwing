@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
@@ -31,10 +34,12 @@ func runHealthcheck() error {
 	if err != nil {
 		return err
 	}
+	verification, err := healthcheckCertificateVerification(os.Getenv("TLS_CERT"))
+	if err != nil {
+		return err
+	}
 	transport := &http.Transport{
-		// The probe only connects to localhost and never follows redirects. Like
-		// the container's previous wget probe, it accepts a self-signed local cert.
-		TLSClientConfig:        &tls.Config{InsecureSkipVerify: true}, // #nosec G402 -- loopback-only health probe
+		TLSClientConfig:        verification,
 		DisableKeepAlives:      true,
 		MaxResponseHeaderBytes: 64 << 10,
 	}
@@ -53,4 +58,41 @@ func runHealthcheck() error {
 		return fmt.Errorf("unhealthy HTTP status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// healthcheckCertificateVerification pins the server's configured leaf instead
+// of requiring a public CA or a localhost SAN for the local health probe.
+func healthcheckCertificateVerification(path string) (*tls.Config, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read TLS_CERT: %w", err)
+	}
+	var block *pem.Block
+	for {
+		block, data = pem.Decode(data)
+		if block == nil {
+			return nil, fmt.Errorf("TLS_CERT contains no PEM certificate")
+		}
+		if block.Type == "CERTIFICATE" {
+			break
+		}
+	}
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse TLS_CERT: %w", err)
+	}
+	return &tls.Config{
+		// Replace CA/hostname verification with an exact leaf pin. The TLS
+		// handshake still proves possession of the corresponding private key.
+		InsecureSkipVerify: true, // #nosec G402 -- VerifyConnection enforces the configured certificate pin
+		VerifyConnection: func(state tls.ConnectionState) error {
+			if len(state.PeerCertificates) == 0 || !bytes.Equal(state.PeerCertificates[0].Raw, certificate.Raw) {
+				return fmt.Errorf("health endpoint certificate does not match TLS_CERT")
+			}
+			return nil
+		},
+	}, nil
 }

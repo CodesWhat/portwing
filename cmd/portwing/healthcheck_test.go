@@ -2,9 +2,18 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -41,7 +50,7 @@ func TestRunHealthcheck(t *testing.T) {
 			t.Setenv("PORT", port)
 			t.Setenv("TLS_CERT", "")
 			if tc.tls {
-				t.Setenv("TLS_CERT", "/not/read/by/probe")
+				t.Setenv("TLS_CERT", writeHealthCertificate(t, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})))
 			}
 			t.Setenv("TOKEN", "conflict")
 			t.Setenv("TOKEN_HASH", "conflict")
@@ -117,5 +126,91 @@ func TestHealthcheckURL(t *testing.T) {
 				t.Fatal("accepted invalid port")
 			}
 		})
+	}
+}
+
+func writeHealthCertificate(t *testing.T, data []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "health-cert.pem")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestRunHealthcheckCertificateVerification(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "agent.example"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, pub, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1) }))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: priv}}}
+	srv.StartTLS()
+	defer srv.Close()
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	t.Setenv("PORT", port)
+	other := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer other.Close()
+	good := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	wrong := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: other.Certificate().Raw})
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want int
+	}{
+		{"self signed without localhost SAN", good, 0},
+		{"leaf first chain", append(append([]byte{}, good...), wrong...), 0},
+		{"different leaf rejects", wrong, 1},
+		{"matching cert later in chain rejects", append(append([]byte{}, wrong...), good...), 1},
+		{"invalid PEM", []byte("invalid"), 1},
+		{"wrong PEM type", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 1},
+		{"invalid DER", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("invalid")}), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TLS_CERT", writeHealthCertificate(t, tc.data))
+			before := requests.Load()
+			var out bytes.Buffer
+			code := run([]string{"portwing", "healthcheck"}, strings.NewReader(""), &out, &out)
+			if code != tc.want {
+				t.Fatalf("exit=%d want=%d: %s", code, tc.want, &out)
+			}
+			if tc.want != 0 && requests.Load() != before {
+				t.Fatal("sent HTTP request without certificate verification")
+			}
+		})
+	}
+	t.Run("missing certificate", func(t *testing.T) {
+		t.Setenv("TLS_CERT", filepath.Join(t.TempDir(), "missing.pem"))
+		var out bytes.Buffer
+		if code := run([]string{"portwing", "healthcheck"}, strings.NewReader(""), &out, &out); code != 1 {
+			t.Fatalf("exit=%d", code)
+		}
+	})
+}
+
+func TestRunHealthcheckInvalidPort(t *testing.T) {
+	t.Setenv("PORT", "invalid")
+	var out bytes.Buffer
+	if code := run([]string{"portwing", "healthcheck"}, strings.NewReader(""), &out, &out); code != 1 || !strings.Contains(out.String(), "invalid PORT") {
+		t.Fatalf("exit=%d: %s", code, &out)
+	}
+}
+
+func TestHealthcheckCertificateVerificationMissingPeer(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	path := writeHealthCertificate(t, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
+	config, err := healthcheckCertificateVerification(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = config.VerifyConnection(tls.ConnectionState{}); err == nil {
+		t.Fatal("accepted absent peer certificate")
 	}
 }

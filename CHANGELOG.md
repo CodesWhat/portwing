@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Build ARMv7's Compose 5.5.1 with containerd 2.3.5 as `v5.5.1-portwing.1`,
   remove BusyBox from that runtime, and use Portwing's built-in Go probe for
-  image health checks.
+  image health checks. HTTPS probes require the server certificate to match
+  the configured `TLS_CERT` leaf certificate.
 
 ### Changed
 

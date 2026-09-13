@@ -183,8 +183,9 @@ the Git-backed deployment or update its GitHub status.
    from checksum-pinned upstream 5.5.1 source with containerd 2.3.5 and Go 1.27.1,
    identifies itself as `v5.5.1-portwing.1`, and runs directly or as a CLI plugin.
    Both ARM recipes omit BusyBox; image health checks use `portwing healthcheck`
-   for HTTP/TLS probes. The static Docker CLI does not embed a complete Go module
-   inventory, so a scanner result is not a complete audit of its dependencies.
+   for HTTP/TLS probes, with HTTPS pinned to the configured `TLS_CERT` leaf.
+   The static Docker CLI does not embed a complete Go module inventory, so a
+   scanner result is not a complete audit of its dependencies.
    The release job scans the actual published image and gates all three
    platforms equally. `scripts/package-release-config-test.sh` asserts the
    platform list and thresholds.
