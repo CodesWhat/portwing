@@ -138,7 +138,8 @@ controller that doesn't send `bodyStream: true` is unaffected; this is purely
 additive, gated by the agent's own hello advertisement rather than a version
 bump.
 
-Drydock sends raw request bytes in 32 KiB chunks, waiting for each WebSocket
+The Drydock sender is implemented on its `dev/v1.8` branch and is not yet in a
+stable release. Drydock sends raw request bytes in 32 KiB chunks, waiting for each WebSocket
 write to complete before sending the next. Uploads have a 512 MiB per-body
 and per-connection aggregate sender limit, plus a 30 second inactivity timeout.
 For agents without this capability, Drydock keeps the inline JSON request path
