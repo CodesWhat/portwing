@@ -217,7 +217,8 @@ fi
 
 builder_ref=""
 for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
-	current_ref="$(grep -E '^FROM golang:' "${dockerfile}" | sed -n '1p' || true)"
+	# shellcheck disable=SC2016 # Match the literal Docker BUILDPLATFORM arg.
+	current_ref="$(sed 's/^FROM --platform=\$BUILDPLATFORM /FROM /' "${dockerfile}" | grep -E '^FROM golang:' | sed -n '1p' || true)"
 	if ! grep -Eq "^FROM golang:${toolchain_version//./\\.}-alpine@sha256:[0-9a-f]{64}([[:space:]]+AS[[:space:]]+builder)?$" <<<"${current_ref}"; then
 		echo "FAIL: ${dockerfile} must use the exact go.mod toolchain in a digest-pinned Alpine builder" >&2
 		failures=$((failures + 1))
@@ -228,6 +229,27 @@ for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
 		echo "FAIL: all from-source Dockerfiles must use the same Go builder reference" >&2
 		failures=$((failures + 1))
 	fi
+done
+
+# ARM32 uses checksum-pinned official static clients; Alpine supplies the OS.
+for dockerfile in Dockerfile.armv7 Dockerfile.release; do
+	arm_recipe="$(active_lines "${dockerfile}" | sed -n '/^FROM alpine:/,/^FROM /p')"
+	if ! grep -Eq '^[[:space:]]+ca-certificates busybox alpine-release ssl_client' <<<"${arm_recipe}"; then
+		echo "FAIL: ${dockerfile} ARM rootfs must retain Alpine distro metadata" >&2
+		failures=$((failures + 1))
+	fi
+	if grep -Eq '^[[:space:]]+ca-certificates.*docker-cli' <<<"${arm_recipe}"; then
+		echo "FAIL: ${dockerfile} ARM rootfs must not install outdated Alpine Docker clients" >&2
+		failures=$((failures + 1))
+	fi
+	for asset_pattern in \
+		'^ADD --checksum=sha256:[0-9a-f]{64} https://download[.]docker[.]com/linux/static/stable/armhf/docker-[0-9]+[.][0-9]+[.][0-9]+[.]tgz /tmp/docker[.]tgz$' \
+		'^ADD --checksum=sha256:[0-9a-f]{64} https://github[.]com/docker/compose/releases/download/v[0-9]+[.][0-9]+[.][0-9]+/docker-compose-linux-armv7 /out/usr/bin/docker-compose$'; do
+		if ! grep -Eq "${asset_pattern}" <<<"${arm_recipe}"; then
+			echo "FAIL: ${dockerfile} ARM Docker assets must use official versioned URLs and SHA256 checksums" >&2
+			failures=$((failures + 1))
+		fi
+	done
 done
 
 # release_version, release_date, and previous_version come from CHANGELOG.md

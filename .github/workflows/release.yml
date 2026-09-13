@@ -108,6 +108,7 @@ jobs:
             cgr.dev:443
             dl-cdn.alpinelinux.org:443
             dl.google.com:443
+            download.docker.com:443
             fulcio.sigstore.dev:443
             get.anchore.io:443
             ghcr.io:443
