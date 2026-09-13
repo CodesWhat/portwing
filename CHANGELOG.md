@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Refresh the Wolfi runtime base for patched glibc 2.44-r6 and Docker Compose
+  5.5.1-r1, which updates its embedded containerd dependency.
+
+### Changed
+
+- Update the Go toolchain and builder images to 1.27.1, x/crypto to 0.57.0,
+  web dependencies, and pinned GitHub Actions.
+
 ## [v0.9.17] - 2026-09-08
 
 ### Fixed

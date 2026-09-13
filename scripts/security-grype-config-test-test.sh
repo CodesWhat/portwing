@@ -301,7 +301,7 @@ assert_rejected \
 # Full SHA kept but the version comment dropped, so a bump has nothing human
 # readable to review against.
 reset_fixture
-sed -i.bak "${scan_range} s|@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0|@05e31511f85b41b11d1cf0ef85d0992719546e2c|" "${fixture}"
+sed -i.bak "${scan_range} s|@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1|@e14015d583714f6e62063499dc959a02595150a1|" "${fixture}"
 assert_rejected \
 	"action must be pinned to a full 40-hex SHA with a version comment" \
 	"contract must reject a pin with no version comment"

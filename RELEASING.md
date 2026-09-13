@@ -143,6 +143,22 @@ git push origin v<version>
 
 ## After tagging
 
+### Website deployment settings
+
+The `getportwing` Vercel project tracks `main` for production and must have
+preview deployments disabled in its project settings
+(`previewDeploymentsDisabled: true`). Keep the main-only rule in `vercel.json`
+too. The project setting covers orphan branches such as `clusterfuzzlite-corpus`
+and `quality-history`, which have no `vercel.json`. Without it, corpus uploads
+start failing npm builds and consume the deployment quota needed for releases.
+
+After promoting `main`, verify the Vercel GitHub status and the live home and
+installation pages. For CLI deployment recovery, use the explicit
+`--scope codeswhat` team scope. A successful local build alone does not verify
+the Git-backed deployment or update its GitHub status.
+
+### Published artifacts
+
 `release.yml` runs on the tag push:
 
 1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; publishes the stable Homebrew cask; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
