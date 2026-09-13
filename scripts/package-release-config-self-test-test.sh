@@ -79,8 +79,15 @@ check_stale_builder_ref() {
 	local stale_builder_status
 
 	stale_builder_fixture="$(new_fixture)"
-	sed -E 's/^FROM golang:[^ ]+/FROM golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df/' \
+	# shellcheck disable=SC2016 # Preserve the literal Docker BUILDPLATFORM arg.
+	sed -E 's/^(FROM (--platform=\$BUILDPLATFORM )?)golang:[^ ]+/\1golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df/' \
 		"${stale_builder_fixture}/${dockerfile}" >"${stale_builder_fixture}/${dockerfile}.tmp"
+	if cmp -s "${stale_builder_fixture}/${dockerfile}" "${stale_builder_fixture}/${dockerfile}.tmp"; then
+		echo "FAIL: stale builder fixture must change ${dockerfile}" >&2
+		failures=$((failures + 1))
+		rm -rf "${stale_builder_fixture}"
+		return
+	fi
 	mv "${stale_builder_fixture}/${dockerfile}.tmp" "${stale_builder_fixture}/${dockerfile}"
 
 	set +e

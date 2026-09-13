@@ -31,20 +31,34 @@ concurrency:
 
 jobs:
   grype-image:
-    name: "Security: Grype Container Scan"
+    name: ${{ matrix.name }}
     # Image build is the heavy step; keep it on scheduled/manual runs.
     # PRs get fast, accurate dependency coverage from grype-deps here plus
     # the required "Go CI / Govulncheck" context, without paying for a
     # Docker build on every push.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Security: Grype Container Scan"
+            platform: linux/amd64
+            dockerfile: Dockerfile
+            category: grype-image
+            fail-build: true
+          - name: "Security: Grype ARMv7 Container Scan"
+            platform: linux/arm/v7
+            dockerfile: Dockerfile.armv7
+            category: grype-image-armv7
+            fail-build: true
     permissions:
       contents: read
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # 9236a389bd48b984df91adc1bc924620.r2.cloudflarestorage.com is the R2
@@ -57,6 +71,7 @@ jobs:
             auth.docker.io:443
             cgr.dev:443
             dl-cdn.alpinelinux.org:443
+            download.docker.com:443
             get.anchore.io:443
             github.com:443
             grype.anchore.io:443
@@ -74,6 +89,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up QEMU
+        if: matrix.platform == 'linux/arm/v7'
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4.3.0
+        with:
+          platforms: arm
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
 
@@ -81,12 +102,18 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
           push: false
           load: true
           tags: portwing:grype-scan
           # Keep the vulnerability scan honest: cached apk-install layers can
           # preserve stale distro packages after Wolfi publishes fixes.
           no-cache: true
+
+      - name: Verify ARMv7 clients and HTTP/TLS health checks
+        if: matrix.platform == 'linux/arm/v7'
+        run: python3 scripts/armv7-image-smoke.py portwing:grype-scan
 
       - name: Verify scoped scanner exclusions are not linked
         run: |
@@ -102,25 +129,27 @@ jobs:
         with:
           image: portwing:grype-scan
           severity-cutoff: high
-          fail-build: true
+          fail-build: ${{ matrix.fail-build }}
           output-format: sarif
           config: .grype.yaml
 
       - name: Upload Grype SARIF to code scanning
         # Code scanning uploads require GHAS, not available on free private repos.
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # v4.38.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
-          category: grype-image
+          category: ${{ matrix.category }}
 
       - name: Summarize
         if: always()
+        env:
+          SCAN_PLATFORM: ${{ matrix.platform }}
         run: |
           {
-            echo "### Grype Container Scan"
+            echo "### Grype Container Scan (${SCAN_PLATFORM})"
             echo "- Scanned the built image (binary build-info → real shipped deps) for HIGH/CRITICAL CVEs"
-            echo "- Base image: Wolfi (Chainguard) packages on FROM scratch"
+            echo "- Base image: Wolfi on amd64, Alpine with official static clients on ARMv7; both FROM scratch"
           } >> "$GITHUB_STEP_SUMMARY"
 
   grype-deps:
@@ -132,7 +161,7 @@ jobs:
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # dl.google.com and go.dev are for setup-go below, which the
@@ -189,7 +218,7 @@ jobs:
 
       - name: Upload Grype dependency SARIF
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # v4.38.0
         with:
           sarif_file: ${{ steps.grype-deps.outputs.sarif }}
           category: grype-deps
@@ -212,7 +241,7 @@ jobs:
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -240,7 +269,7 @@ jobs:
 
       - name: Upload Gosec SARIF
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # v4.38.0
         with:
           sarif_file: gosec-results.sarif
           category: gosec
@@ -300,7 +329,7 @@ jobs:
       version: ${{ steps.latest_release.outputs.version }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # Narrower than the sibling jobs on purpose: this one only calls the
@@ -356,20 +385,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # amd64 and arm64 only. release.yml's tag-time job carries a third,
-        # linux/arm/v7 leg as report-only (`gate: none`) because Wolfi
-        # publishes no armv7 repo and that leg is built from Alpine.
-        # anchore/scan-action has no per-leg report-only mode short of
-        # fail-build: false, which would un-gate the whole matrix, so this lane
-        # covers the two gating platforms and leaves armv7 to release.yml.
+        # Every supported release platform uses the same HIGH/CRITICAL gate.
         include:
           - platform: linux/amd64
             slug: linux-amd64
           - platform: linux/arm64
             slug: linux-arm64
+          - platform: linux/arm/v7
+            slug: linux-armv7
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # ghcr.io is the GHCR manifest API and pkg-containers is its blob
@@ -424,8 +450,7 @@ jobs:
           # hardcoding the string release.yml hardcodes.
           repo_lower="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           image_ref="ghcr.io/${repo_lower}:${IMAGE_TAG}"
-          os="${PLATFORM%%/*}"
-          arch="${PLATFORM##*/}"
+          IFS=/ read -r os arch variant <<<"${PLATFORM}"
 
           manifest="$(docker buildx imagetools inspect "${image_ref}" --raw)"
           # Resolving the per-platform CHILD digest, not the index digest, is
@@ -439,8 +464,8 @@ jobs:
           # empty string and fail below, rather than scanning the first of
           # several or handing grype a two-line digest. The `unknown/unknown`
           # entries in the index (attestation manifests) match neither.
-          digest="$(printf '%s' "${manifest}" | jq -r --arg os "${os}" --arg arch "${arch}" '
-            [.manifests[]? | select(.platform.os == $os and .platform.architecture == $arch) | .digest]
+          digest="$(printf '%s' "${manifest}" | jq -r --arg os "${os}" --arg arch "${arch}" --arg variant "${variant}" '
+            [.manifests[]? | select(.platform.os == $os and .platform.architecture == $arch and ($variant == "" or (.platform.variant // "") == $variant)) | .digest]
             | unique
             | if length == 1 then .[0] else "" end
           ')"
@@ -478,7 +503,7 @@ jobs:
         # and uploading a path that was never written just adds a second,
         # misleading red step on top of the real one.
         if: always() && github.event.repository.visibility == 'public' && steps.grype.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # v4.38.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype-published-release-${{ matrix.slug }}

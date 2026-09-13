@@ -138,6 +138,21 @@ controller that doesn't send `bodyStream: true` is unaffected; this is purely
 additive, gated by the agent's own hello advertisement rather than a version
 bump.
 
+The Drydock sender is implemented on its `dev/v1.8` branch and is not yet in a
+stable release. Drydock sends raw request bytes in 32 KiB chunks, waiting for each WebSocket
+write to complete before sending the next. Uploads have a 512 MiB per-body
+and per-connection aggregate sender limit, plus a 30 second inactivity timeout.
+For agents without this capability, Drydock keeps the inline JSON request path
+and rejects binary bodies before sending any request.
+
+An interrupted upload never sends `stream_end`. The controller may send an
+`error` frame with `code: "request-cancelled"` and the upload's `requestId` to
+discard a pending reassembly immediately. This cancels only the upload stage,
+not a Docker request already dispatched after `stream_end`. Older agents ignore
+that error and discard the incomplete upload on their existing idle timeout;
+they never receive a terminal frame that could dispatch a partial body.
+Disconnects discard pending uploads through the existing connection cleanup.
+
 All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`, `timestamp`, `nonce`, `signature`) and rejects token-hash hellos with `ed25519-required`. `tokenHash` (SHA-256 of the shared token) is only a fallback for non-edge endpoints.
@@ -601,7 +616,7 @@ Chainguard Wolfi OS packages assembled into a `FROM scratch` image (Alpine on ar
 Packages:
 
 - **Wolfi (amd64/arm64):** `ca-certificates-bundle`, `busybox`, `docker-cli`, `docker-compose`, `wget`
-- **Alpine (armv7):** `ca-certificates`, `busybox`, `docker-cli`, `docker-cli-compose`, `wget`
+- **Alpine (armv7):** `ca-certificates`, `busybox`, `alpine-release`, `ssl_client`. BusyBox provides wget for HTTP/TLS health checks. Docker CLI 29.8.0 and Compose 5.5.1 are separate official static ARMv7 downloads, pinned by SHA256 in both ARM image recipes; Compose is available directly and as a Docker CLI plugin.
 
 ## 15. Migration Strategy
 

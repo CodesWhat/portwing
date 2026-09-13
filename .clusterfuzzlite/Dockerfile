@@ -7,8 +7,8 @@
 # `website/`, `node_modules/` and `.git/` out of the context.
 #
 # base-builder-go currently ships Go 1.25.0 while go.mod asks for 1.26.0 with
-# `toolchain go1.27.0`. GOTOOLCHAIN is `auto` in this image, so the go command
-# downloads go1.27.0 from the module proxy on first use. That is why
+# `toolchain go1.27.1`. GOTOOLCHAIN is `auto` in this image, so the go command
+# downloads go1.27.1 from the module proxy on first use. That is why
 # proxy.golang.org and sum.golang.org are in the egress allow-lists of both
 # ClusterFuzzLite workflows — without them the toolchain switch fails before a
 # single fuzzer is built.

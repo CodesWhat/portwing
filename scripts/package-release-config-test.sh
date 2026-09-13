@@ -217,7 +217,8 @@ fi
 
 builder_ref=""
 for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
-	current_ref="$(grep -E '^FROM golang:' "${dockerfile}" | sed -n '1p' || true)"
+	# shellcheck disable=SC2016 # Match the literal Docker BUILDPLATFORM arg.
+	current_ref="$(sed 's/^FROM --platform=\$BUILDPLATFORM /FROM /' "${dockerfile}" | grep -E '^FROM golang:' | sed -n '1p' || true)"
 	if ! grep -Eq "^FROM golang:${toolchain_version//./\\.}-alpine@sha256:[0-9a-f]{64}([[:space:]]+AS[[:space:]]+builder)?$" <<<"${current_ref}"; then
 		echo "FAIL: ${dockerfile} must use the exact go.mod toolchain in a digest-pinned Alpine builder" >&2
 		failures=$((failures + 1))
@@ -228,6 +229,27 @@ for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
 		echo "FAIL: all from-source Dockerfiles must use the same Go builder reference" >&2
 		failures=$((failures + 1))
 	fi
+done
+
+# ARM32 uses checksum-pinned official static clients; Alpine supplies the OS.
+for dockerfile in Dockerfile.armv7 Dockerfile.release; do
+	arm_recipe="$(active_lines "${dockerfile}" | sed -n '/^FROM alpine:/,/^FROM /p')"
+	if ! grep -Eq '^[[:space:]]+ca-certificates busybox alpine-release ssl_client' <<<"${arm_recipe}"; then
+		echo "FAIL: ${dockerfile} ARM rootfs must retain Alpine distro metadata" >&2
+		failures=$((failures + 1))
+	fi
+	if grep -Eq '^[[:space:]]+ca-certificates.*docker-cli' <<<"${arm_recipe}"; then
+		echo "FAIL: ${dockerfile} ARM rootfs must not install outdated Alpine Docker clients" >&2
+		failures=$((failures + 1))
+	fi
+	for asset_pattern in \
+		'^ADD --checksum=sha256:[0-9a-f]{64} https://download[.]docker[.]com/linux/static/stable/armhf/docker-[0-9]+[.][0-9]+[.][0-9]+[.]tgz /tmp/docker[.]tgz$' \
+		'^ADD --checksum=sha256:[0-9a-f]{64} https://github[.]com/docker/compose/releases/download/v[0-9]+[.][0-9]+[.][0-9]+/docker-compose-linux-armv7 /out/usr/bin/docker-compose$'; do
+		if ! grep -Eq "${asset_pattern}" <<<"${arm_recipe}"; then
+			echo "FAIL: ${dockerfile} ARM Docker assets must use official versioned URLs and SHA256 checksums" >&2
+			failures=$((failures + 1))
+		fi
+	done
 done
 
 # release_version, release_date, and previous_version come from CHANGELOG.md
@@ -362,7 +384,7 @@ require_current_release_examples "docs/content/docs/security-model.mdx" \
 # example, a sample JSON payload, an attestation command in a doc. Enumerating
 # surfaces only ever finds the surfaces someone remembered to enumerate.
 # A "since v<previous>" callout in README.md is the one deliberate exception:
-# a docs-only patch's release note (README's [!NOTE] block, v0.9.13) names the
+# a docs-only patch's release note (README's advisory block, v0.9.13) names the
 # prior release on purpose to say nothing binary changed since it, which is
 # not a forgotten bump. The exemption is scoped to that one file and that
 # exact phrase, so the same stale literal sitting in any other matched file -
@@ -653,15 +675,12 @@ require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/pk
 # rather than the substring "--fail-on high" — that string survives intact even
 # if every leg is flipped to report-only.
 #
-# Wolfi has no armv7, so that leg is built from Alpine and carries a different
-# (worse) package set than amd64/arm64; it is report-only on purpose, and
-# RELEASING.md records why and when it flips. It is also the leg most likely to
-# be dropped to make the gate quiet, which is why it is asserted by name here.
-# Changing any of these three values is a security decision that has to update
-# this list, RELEASING.md, and the matrix comment together.
+# All three platforms now gate on HIGH and above. Keep ARMv7 explicit so a
+# future package regression cannot be hidden by dropping or un-gating its leg.
+# Changing these values must update RELEASING.md and the matrix comment too.
 expected_grype_gates="linux/amd64=high
 linux/arm64=high
-linux/arm/v7=none"
+linux/arm/v7=high"
 actual_grype_gates="$(awk '
 	$0 == "  grype-published-image:" { injob = 1; next }
 	injob && /^  [^ ]/ { injob = 0 }
