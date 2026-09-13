@@ -362,7 +362,7 @@ require_current_release_examples "docs/content/docs/security-model.mdx" \
 # example, a sample JSON payload, an attestation command in a doc. Enumerating
 # surfaces only ever finds the surfaces someone remembered to enumerate.
 # A "since v<previous>" callout in README.md is the one deliberate exception:
-# a docs-only patch's release note (README's [!NOTE] block, v0.9.13) names the
+# a docs-only patch's release note (README's advisory block, v0.9.13) names the
 # prior release on purpose to say nothing binary changed since it, which is
 # not a forgotten bump. The exemption is scoped to that one file and that
 # exact phrase, so the same stale literal sitting in any other matched file -
