@@ -66,6 +66,7 @@ func healthcheckCertificateVerification(path string) (*tls.Config, error) {
 	if path == "" {
 		return nil, nil
 	}
+	// #nosec G304 G703 -- TLS_CERT is explicit operator configuration, never request input.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read TLS_CERT: %w", err)
