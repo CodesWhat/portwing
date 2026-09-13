@@ -1454,3 +1454,31 @@ func TestConnectDropFreesStreamedRequestIDForTheRetry(t *testing.T) {
 		t.Errorf("dispatched body = %q, want %q", calls[0].body, retry)
 	}
 }
+
+func TestReadPumpCancelledUploadNeverDispatches(t *testing.T) {
+	t.Parallel()
+	c, ctrl := newTestClient(t)
+	c.adapter = &fakeAdapter{}
+	fd := &fakeDocker{}
+	c.dockerClient = fd
+	runReadPump(t, c)
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{RequestID: "cancel-me", Method: http.MethodPost, Path: "/build", BodyStream: true})
+	sendEnvelope(t, ctrl, protocol.TypeStream, protocol.StreamMessage{RequestID: "cancel-me", Data: "YWJj"})
+	sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{RequestID: "cancel-me", Code: "request-cancelled", Message: "upload cancelled"})
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{})
+	expectType(t, ctrl, protocol.TypePong)
+	c.pendingBodiesMu.Lock()
+	n := len(c.pendingBodies)
+	c.pendingBodiesMu.Unlock()
+	if n != 0 {
+		t.Fatalf("pending uploads = %d, want 0", n)
+	}
+	sendEnvelope(t, ctrl, protocol.TypeStreamEnd, protocol.StreamEndMessage{RequestID: "cancel-me"})
+	sendEnvelope(t, ctrl, protocol.TypePing, protocol.PingMessage{})
+	expectType(t, ctrl, protocol.TypePong)
+	fd.mu.Lock()
+	defer fd.mu.Unlock()
+	if len(fd.doCalls) != 0 {
+		t.Fatal("cancelled upload reached Docker")
+	}
+}
