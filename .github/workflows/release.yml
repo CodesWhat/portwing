@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -98,7 +98,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -160,7 +160,7 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4.3.0
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
@@ -245,7 +245,7 @@ jobs:
         # that leg from Alpine using its prebuilt docker-cli/docker-cli-compose,
         # which are themselves compiled with Go 1.26.3. Every stdlib advisory
         # they carry is fixed in Go 1.26.6, and portwing's own go.mod already
-        # pins toolchain go1.27.0 — the vulnerable toolchain is Alpine's, not
+        # pins toolchain go1.27.1 — the vulnerable toolchain is Alpine's, not
         # this repo's, and no Alpine branch ships a go>=1.26.6-built package
         # yet (edge is on 1.26.5, one patch short). portwing's own binary
         # carries zero findings on all three platforms.
@@ -263,7 +263,7 @@ jobs:
             gate: none
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # ghcr.io + pkg-containers from verify-published (same image pull);
@@ -425,7 +425,7 @@ jobs:
         # Code scanning uploads require GHAS, not available on free private
         # repos. Only the reporting is conditional; the gate above always runs.
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8  # v4.38.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: ${{ steps.grype.outputs.category }}
@@ -464,7 +464,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -512,7 +512,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -610,7 +610,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >

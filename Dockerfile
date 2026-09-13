@@ -3,7 +3,7 @@
 # Dockerfile.release; this file is the standalone equivalent.)
 
 # Stage 1: Build the binary from source.
-FROM golang:1.27.0-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS builder
+FROM golang:1.27.1-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS builder
 RUN apk add --no-cache git
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwin
 
 # Stage 2: Assemble the Wolfi runtime rootfs (CVE-minimal, no package manager
 # in the final image; the apk database is retained for scanners/SBOM).
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:03c6561658909fc4eadd0b2dc717375df40a22cc05455b8f82f1f1974e7e4427 AS rootfs
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:65e1acb87a2bf356b92c5f70f3980f03b4bb51dfd483c834e01557525f15c1d9 AS rootfs
 RUN apk add --no-cache --initdb --root /out \
     --repository https://packages.wolfi.dev/os \
     --keys-dir /etc/apk/keys \

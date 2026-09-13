@@ -67,7 +67,7 @@ run-name: >-
 # StepSecurity insights link lists what was actually attempted; add the host
 # there rather than guessing. storage.googleapis.com is for the gcr.io blob
 # layers, and proxy.golang.org/sum.golang.org carry both the modules and the
-# go1.27.0 toolchain that base-builder-go's Go 1.25.0 downloads on first use.
+# go1.27.1 toolchain that base-builder-go's Go 1.25.0 downloads on first use.
 #
 # The three artifact hosts (*.actions.githubusercontent.com,
 # results-receiver.actions.githubusercontent.com, *.blob.core.windows.net) are
@@ -106,7 +106,7 @@ jobs:
   code-change-fuzz:
     name: "ClusterFuzzLite (code change)"
     runs-on: ubuntu-24.04
-    # Pulling base-builder-go, downloading the go1.27.0 toolchain, building ten
+    # Pulling base-builder-go, downloading the go1.27.1 toolchain, building ten
     # libFuzzer targets, and 300 seconds of fuzzing. 30 minutes is roughly
     # double the expected wall time.
     timeout-minutes: 30
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >

@@ -44,7 +44,7 @@ jobs:
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # 9236a389bd48b984df91adc1bc924620.r2.cloudflarestorage.com is the R2
@@ -109,7 +109,7 @@ jobs:
       - name: Upload Grype SARIF to code scanning
         # Code scanning uploads require GHAS, not available on free private repos.
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8  # v4.38.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype-image
@@ -132,7 +132,7 @@ jobs:
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # dl.google.com and go.dev are for setup-go below, which the
@@ -189,7 +189,7 @@ jobs:
 
       - name: Upload Grype dependency SARIF
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8  # v4.38.0
         with:
           sarif_file: ${{ steps.grype-deps.outputs.sarif }}
           category: grype-deps
@@ -212,7 +212,7 @@ jobs:
       security-events: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -240,7 +240,7 @@ jobs:
 
       - name: Upload Gosec SARIF
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8  # v4.38.0
         with:
           sarif_file: gosec-results.sarif
           category: gosec
@@ -300,7 +300,7 @@ jobs:
       version: ${{ steps.latest_release.outputs.version }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # Narrower than the sibling jobs on purpose: this one only calls the
@@ -369,7 +369,7 @@ jobs:
             slug: linux-arm64
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c  # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
         with:
           egress-policy: block
           # ghcr.io is the GHCR manifest API and pkg-containers is its blob
@@ -478,7 +478,7 @@ jobs:
         # and uploading a path that was never written just adds a second,
         # misleading red step on top of the real one.
         if: always() && github.event.repository.visibility == 'public' && steps.grype.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8  # v4.38.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype-published-release-${{ matrix.slug }}

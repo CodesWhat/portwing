@@ -46,17 +46,17 @@ ignore:
   # scripts/verify-scanner-exclusions.sh against the extracted binary). There
   # is no fixed x/crypto version because the advisory deprecates that package.
   - vulnerability: GO-2026-5932
-    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.56.0."
+    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.57.0."
     package:
       name: golang.org/x/crypto
-      version: v0.56.0
+      version: v0.57.0
       type: go-module
       location: "/go.mod"
   - vulnerability: GO-2026-5932
-    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.56.0."
+    reason: "Portwing uses x/crypto/argon2 only; scripts/verify-scanner-exclusions.sh guards source and binary linkage. Review if x/crypto changes from v0.57.0."
     package:
       name: golang.org/x/crypto
-      version: v0.56.0
+      version: v0.57.0
       type: go-module
       location: "**/usr/bin/portwing"
   - vulnerability: GO-2026-5932
