@@ -36,6 +36,7 @@ def main():
              "-subj", "/CN=localhost"],
             check=True, capture_output=True, timeout=20,
         )
+        cert.chmod(0o644)
         try:
             # Inspect the exact filesystem and user without assuming any shell
             # or helper applets exist in the runtime image.
