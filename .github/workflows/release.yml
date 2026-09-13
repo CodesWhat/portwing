@@ -243,16 +243,15 @@ jobs:
         # arm/v7 is report-only, and that is a stated exception rather than a
         # default. Wolfi publishes no armv7 repo, so Dockerfile.release builds
         # that leg from Alpine using its prebuilt docker-cli/docker-cli-compose,
-        # which are themselves compiled with Go 1.26.3. Every stdlib advisory
-        # they carry is fixed in Go 1.26.6, and portwing's own go.mod already
-        # pins toolchain go1.27.0 — the vulnerable toolchain is Alpine's, not
-        # this repo's, and no Alpine branch ships a go>=1.26.6-built package
-        # yet (edge is on 1.26.5, one patch short). portwing's own binary
-        # carries zero findings on all three platforms.
+        # now compiled with Go 1.26.8. Their bundled Go modules still carry
+        # Critical/High findings (including x/crypto, x/net, grpc and
+        # containerd), so the compiler update alone does not clear this leg.
+        # The 2026-09-12 scan found none in portwing itself; RELEASING.md
+        # records the current package versions and remaining exception.
         #
         # Suppressing those to force the leg green would hide real, fixable
         # CVEs, so the gap is left visible instead. Flip armv7 to `high` once
-        # Alpine ships those packages. Do NOT quietly drop the leg from this
+        # the shipped image clears its Critical/High findings. Do NOT quietly drop the leg from this
         # matrix; the contract test asserts linux/arm/v7 by name.
         include:
           - platform: linux/amd64
