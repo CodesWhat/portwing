@@ -473,8 +473,11 @@ for recipe in Dockerfile.armv7 Dockerfile.release; do
 	sed -i.bak 's/--checksum=sha256:[0-9a-f]*/--checksum=sha256:short/' "${fixture}/${recipe}"
 	expect_release_contract_failure "ARM Docker assets must use official versioned URLs and SHA256 checksums" "ARM downloads without a full checksum must fail"
 	cp "${recipe}" "${fixture}/${recipe}"
-	sed -i.bak 's/ alpine-release / /' "${fixture}/${recipe}"
+	sed -i.bak 's/ alpine-release/ /' "${fixture}/${recipe}"
 	expect_release_contract_failure "ARM rootfs must retain Alpine distro metadata" "Missing ARM distro metadata must fail"
+	cp "${recipe}" "${fixture}/${recipe}"
+	sed -i.bak 's/containerd\/v2@v2.3.5/containerd\/v2@v2.3.4/' "${fixture}/${recipe}"
+	expect_release_contract_failure "Compose must build with patched containerd" "A vulnerable Compose dependency must fail"
 	cp "${recipe}" "${fixture}/${recipe}"
 done
 

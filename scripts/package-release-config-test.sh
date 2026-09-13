@@ -234,7 +234,7 @@ done
 # ARM32 uses checksum-pinned official static clients; Alpine supplies the OS.
 for dockerfile in Dockerfile.armv7 Dockerfile.release; do
 	arm_recipe="$(active_lines "${dockerfile}" | sed -n '/^FROM alpine:/,/^FROM /p')"
-	if ! grep -Eq '^[[:space:]]+ca-certificates busybox alpine-release ssl_client' <<<"${arm_recipe}"; then
+	if ! grep -Eq '^[[:space:]]+ca-certificates-bundle alpine-release' <<<"${arm_recipe}"; then
 		echo "FAIL: ${dockerfile} ARM rootfs must retain Alpine distro metadata" >&2
 		failures=$((failures + 1))
 	fi
@@ -242,10 +242,22 @@ for dockerfile in Dockerfile.armv7 Dockerfile.release; do
 		echo "FAIL: ${dockerfile} ARM rootfs must not install outdated Alpine Docker clients" >&2
 		failures=$((failures + 1))
 	fi
+	if grep -Eq '^[[:space:]]+ca-certificates.*(busybox|ssl_client)' <<<"${arm_recipe}"; then
+		echo "FAIL: ${dockerfile} ARM rootfs must not retain BusyBox" >&2
+		failures=$((failures + 1))
+	fi
+	if ! grep -Fq 'CMD ["/usr/bin/portwing", "healthcheck"]' "${dockerfile}"; then
+		echo "FAIL: ${dockerfile} must use the shell-free Portwing healthcheck" >&2
+		failures=$((failures + 1))
+	fi
+	if ! grep -Fq 'github.com/containerd/containerd/v2@v2.3.5' "${dockerfile}"; then
+		echo "FAIL: ${dockerfile} Compose must build with patched containerd" >&2
+		failures=$((failures + 1))
+	fi
 	for asset_pattern in \
 		'^ADD --checksum=sha256:[0-9a-f]{64} https://download[.]docker[.]com/linux/static/stable/armhf/docker-[0-9]+[.][0-9]+[.][0-9]+[.]tgz /tmp/docker[.]tgz$' \
-		'^ADD --checksum=sha256:[0-9a-f]{64} https://github[.]com/docker/compose/releases/download/v[0-9]+[.][0-9]+[.][0-9]+/docker-compose-linux-armv7 /out/usr/bin/docker-compose$'; do
-		if ! grep -Eq "${asset_pattern}" <<<"${arm_recipe}"; then
+		'^ADD --checksum=sha256:[0-9a-f]{64} https://github[.]com/docker/compose/archive/[0-9a-f]{40}[.]tar[.]gz /tmp/compose[.]tar[.]gz$'; do
+		if ! grep -Eq "${asset_pattern}" "${dockerfile}"; then
 			echo "FAIL: ${dockerfile} ARM Docker assets must use official versioned URLs and SHA256 checksums" >&2
 			failures=$((failures + 1))
 		fi
