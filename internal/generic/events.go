@@ -71,14 +71,17 @@ type EventBroadcaster struct {
 
 // NewEventBroadcaster creates an EventBroadcaster.
 func NewEventBroadcaster(dockerClient *docker.Client) *EventBroadcaster {
+	// newEventStream goes last. The cover tool ends a statement's block at
+	// its first function literal, so a field written after one is in no
+	// block and mutation testing scores it as not covered.
 	return &EventBroadcaster{
-		dockerClient: dockerClient,
-		clients:      make(map[string]*sseClient),
+		dockerClient:      dockerClient,
+		clients:           make(map[string]*sseClient),
+		marshalEvent:      json.Marshal,
+		heartbeatInterval: 30 * time.Second,
 		newEventStream: func(client *docker.Client) eventSubscriber {
 			return docker.NewEventStream(client)
 		},
-		marshalEvent:      json.Marshal,
-		heartbeatInterval: 30 * time.Second,
 	}
 }
 

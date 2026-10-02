@@ -257,9 +257,14 @@ func (a *Adapter) HandleMessage(ctx context.Context, sender adapter.MessageSende
 			slog.Warn("invalid container_delete_request message", "error", err)
 			return true
 		}
-		if !a.spawnMessageHandler(ctx, msgType, func() {
+		// The result is named rather than tested inline: the cover tool ends
+		// a statement's block at its function literal, which would leave the
+		// rest of an inline condition in no block and unseen by mutation
+		// testing.
+		spawned := a.spawnMessageHandler(ctx, msgType, func() {
 			a.handleContainerDeleteRequest(ctx, sender, msg)
-		}) && ctx.Err() == nil {
+		})
+		if !spawned && ctx.Err() == nil {
 			a.sendTypedMessage(sender, protocol.TypeDDContainerDeleteResponse, protocol.DDContainerDeleteResponseMessage{
 				RequestID:   msg.RequestID,
 				ContainerID: msg.ContainerID,
@@ -416,21 +421,22 @@ func (a *Adapter) startContainerLogStream(ctx context.Context, sender adapter.Me
 	if a.logStreams == nil {
 		a.logStreams = make(map[string]activeContainerLogStream)
 	}
-	switch {
-	case len(a.logStreams) >= maxContainerLogStreams:
+	// Guard clauses rather than a tagless switch: a case expression is in no
+	// coverage block, so mutation testing can't see either check there.
+	if len(a.logStreams) >= maxContainerLogStreams {
 		a.logStreamsMu.Unlock()
 		cancel()
 		a.sendContainerLogStreamError(sender, msg, "too many active container log streams")
 		return
-	case a.logStreams[msg.RequestID].cancel != nil:
+	}
+	if a.logStreams[msg.RequestID].cancel != nil {
 		a.logStreamsMu.Unlock()
 		cancel()
 		a.sendContainerLogStreamError(sender, msg, "duplicate requestId")
 		return
-	default:
-		a.logStreams[msg.RequestID] = active
-		a.logStreamsMu.Unlock()
 	}
+	a.logStreams[msg.RequestID] = active
+	a.logStreamsMu.Unlock()
 
 	go a.runContainerLogStream(streamCtx, cancel, sender, msg)
 }
