@@ -199,8 +199,8 @@ the Git-backed deployment or update its GitHub status.
    **ARMv7 runtime.** Wolfi publishes no armv7 repository, so this image retains
    Alpine 3.24 release metadata and CA certificates alongside static binaries.
    Docker CLI 29.8.0 is an official download pinned by SHA256. Compose is built
-   from checksum-pinned upstream 5.5.1 source with containerd 2.3.5 and Go 1.27.1,
-   identifies itself as `v5.5.1-portwing.1`, and runs directly or as a CLI plugin.
+   from checksum-pinned upstream 5.5.1 source with containerd 2.3.6 and Go 1.27.1,
+   identifies itself as `v5.5.1-portwing.2`, and runs directly or as a CLI plugin.
    Both ARM recipes omit BusyBox; image health checks use `portwing healthcheck`
    for HTTP/TLS probes, with HTTPS pinned to the configured `TLS_CERT` leaf.
    The static Docker CLI does not embed a complete Go module inventory, so a

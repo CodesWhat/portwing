@@ -254,7 +254,7 @@ for dockerfile in Dockerfile.armv7 Dockerfile.release; do
 		echo "FAIL: ${dockerfile} must use the shell-free Portwing healthcheck" >&2
 		failures=$((failures + 1))
 	fi
-	if ! grep -Fq 'github.com/containerd/containerd/v2@v2.3.5' "${dockerfile}"; then
+	if ! grep -Fq 'github.com/containerd/containerd/v2@v2.3.6' "${dockerfile}"; then
 		echo "FAIL: ${dockerfile} Compose must build with patched containerd" >&2
 		failures=$((failures + 1))
 	fi
@@ -614,78 +614,6 @@ require_in_grype_command "--config .grype.yaml" \
 require_in_grype_command '${fail_on[@]+"${fail_on[@]}"}' \
 	"the per-platform gate must actually reach the grype command; the gate map is decoration if the flags never get passed"
 
-# Grype can report either the Go vulnerability ID or the GitHub advisory ID
-# for the same finding as its databases and alias selection change. Both IDs
-# must remain paired and scoped to the exact third-party Compose binary; an
-# unscoped alias suppresses a real future import into Portwing itself, while a
-# missing alias makes the release gate depend on which identifier Grype emits.
-require_scoped_compose_advisory_alias() {
-	local advisory_id="$1"
-	local block
-	local count
-
-	count="$(grep -Fc -- "  - vulnerability: ${advisory_id}" .grype.yaml || true)"
-	block="$(awk -v advisory_id="${advisory_id}" '
-		$1 == "-" && $2 == "vulnerability:" {
-			if (capture) exit
-			capture = ($3 == advisory_id)
-		}
-		capture { print }
-	' .grype.yaml)"
-
-	if [ "${count}" -ne 1 ] ||
-		! grep -Fq 'name: github.com/docker/docker' <<<"${block}" ||
-		! grep -Fq 'version: v28.5.2+incompatible' <<<"${block}" ||
-		! grep -Fq 'type: go-module' <<<"${block}" ||
-		! grep -Fq 'location: "**/usr/bin/docker-compose"' <<<"${block}"; then
-		echo "FAIL: .grype.yaml must contain exactly one ${advisory_id} ignore scoped to github.com/docker/docker v28.5.2+incompatible at **/usr/bin/docker-compose" >&2
-		failures=$((failures + 1))
-	fi
-}
-
-require_scoped_compose_advisory_alias "GHSA-pxq6-2prw-chj9"
-require_scoped_compose_advisory_alias "GO-2026-4883"
-require_scoped_compose_advisory_alias "GHSA-x744-4wpc-v9h2"
-require_scoped_compose_advisory_alias "GO-2026-4887"
-
-# The Compose grpc suppression is a reachability argument about one third-party
-# binary, not a claim about Portwing. Portwing's own module graph carries no
-# google.golang.org/grpc at all, so an ignore that lost its package, version or
-# location scope would quietly cover a real future grpc import into the agent
-# itself. Version-scoped for the same reason the entries above are: the next
-# grpc the Wolfi Compose package embeds has to come back through review.
-require_scoped_compose_grpc_advisory() {
-	local advisory_id="$1"
-	local block
-	local scrubbed_block
-	local count
-
-	count="$(grep -Fc -- "  - vulnerability: ${advisory_id}" .grype.yaml || true)"
-	block="$(awk -v advisory_id="${advisory_id}" '
-		$1 == "-" && $2 == "vulnerability:" {
-			if (capture) exit
-			capture = ($3 == advisory_id)
-		}
-		capture { print }
-	' .grype.yaml)"
-	# A field commented out (e.g. "#      location: ...") is absent as far
-	# as YAML and grype are concerned, but a plain substring grep over the
-	# raw block still sees the text and passes. Strip full comment lines and
-	# trailing comments before matching, then anchor each field to a key at
-	# the start of a line so a comment can no longer stand in for scope.
-	scrubbed_block="$(sed -e 's/[[:space:]]#.*$//' -e '/^[[:space:]]*#/d' <<<"${block}")"
-
-	if [ "${count}" -ne 1 ] ||
-		! grep -Eq '^[[:space:]]+name: google\.golang\.org/grpc[[:space:]]*$' <<<"${scrubbed_block}" ||
-		! grep -Eq '^[[:space:]]+version: v1\.83\.0[[:space:]]*$' <<<"${scrubbed_block}" ||
-		! grep -Eq '^[[:space:]]+type: go-module[[:space:]]*$' <<<"${scrubbed_block}" ||
-		! grep -Eq '^[[:space:]]+location: "\*\*/usr/bin/docker-compose"[[:space:]]*$' <<<"${scrubbed_block}"; then
-		echo "FAIL: .grype.yaml must contain exactly one ${advisory_id} ignore scoped to google.golang.org/grpc v1.83.0 at **/usr/bin/docker-compose" >&2
-		failures=$((failures + 1))
-	fi
-}
-
-require_scoped_compose_grpc_advisory "GHSA-vp52-pcj8-j9qc"
 require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/daemon/pkg/plugin" \
 	"the Compose advisory exclusion must stay guarded against linking Docker Engine's daemon plugin package"
 require_text "scripts/verify-scanner-exclusions.sh" "github.com/docker/docker/pkg/authorization" \
