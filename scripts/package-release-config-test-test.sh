@@ -502,7 +502,7 @@ for recipe in Dockerfile.armv7 Dockerfile.release; do
 	sed -i.bak 's/ alpine-release/ /' "${fixture}/${recipe}"
 	expect_release_contract_failure "ARM rootfs must retain Alpine distro metadata" "Missing ARM distro metadata must fail"
 	cp "${recipe}" "${fixture}/${recipe}"
-	sed -i.bak 's/containerd\/v2@v2.3.5/containerd\/v2@v2.3.4/' "${fixture}/${recipe}"
+	sed -i.bak 's/containerd\/v2@v[0-9.]*/containerd\/v2@v2.3.4/' "${fixture}/${recipe}"
 	expect_release_contract_failure "Compose must build with patched containerd" "A vulnerable Compose dependency must fail"
 	cp "${recipe}" "${fixture}/${recipe}"
 done

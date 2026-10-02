@@ -313,14 +313,14 @@ assert_rejected \
 
 # Pin replaced with a mutable tag.
 reset_fixture
-sed -i.bak "${scan_range} s|anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439|anchore/scan-action@v7.4.2|" "${fixture}"
+sed -i.bak -E "${scan_range} s|anchore/scan-action@[0-9a-f]{40}|anchore/scan-action@v7.4.2|" "${fixture}"
 assert_rejected \
 	"action must be pinned to a full 40-hex SHA" \
 	"contract must reject an action pinned to a tag"
 
 # Pin truncated to an abbreviated SHA, which GitHub still resolves.
 reset_fixture
-sed -i.bak "${scan_range} s|docker/login-action@dbcb813823bdd20940b903addbd779551569679f|docker/login-action@dbcb813|" "${fixture}"
+sed -i.bak -E "${scan_range} s|(docker/login-action@[0-9a-f]{7})[0-9a-f]{33}|\\1|" "${fixture}"
 assert_rejected \
 	"action must be pinned to a full 40-hex SHA" \
 	"contract must reject an action pinned to an abbreviated SHA"
@@ -328,7 +328,7 @@ assert_rejected \
 # Full SHA kept but the version comment dropped, so a bump has nothing human
 # readable to review against.
 reset_fixture
-sed -i.bak "${scan_range} s|@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1|@e14015d583714f6e62063499dc959a02595150a1|" "${fixture}"
+sed -i.bak -E "${scan_range} s|(step-security/harden-runner@[0-9a-f]{40})  # v[0-9][0-9.]*|\\1|" "${fixture}"
 assert_rejected \
 	"action must be pinned to a full 40-hex SHA with a version comment" \
 	"contract must reject a pin with no version comment"

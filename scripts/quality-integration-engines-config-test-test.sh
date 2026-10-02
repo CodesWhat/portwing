@@ -63,6 +63,16 @@ assert_rejected() {
 	fi
 }
 
+# A sed that matches nothing leaves the fixture identical to the real workflow,
+# so the contract passes and the failure points at the wrong thing. Fail on the
+# no-op itself.
+assert_fixture_mutated() {
+	if cmp -s "${fixture}" .github/workflows/quality-integration-engines.yml; then
+		echo "FAIL: $1 (the sed matched nothing, so the fixture is unchanged)" >&2
+		exit 1
+	fi
+}
+
 reset_all() {
 	reset_fixture
 	reset_base_fixture
@@ -212,7 +222,8 @@ assert_rejected \
 
 # A mutable tag ref in place of a SHA.
 reset_all
-sed -i.bak "s|uses: docker/setup-docker-action@[0-9a-f]*  # v5.4.0|uses: docker/setup-docker-action@v5.4.0|" "${fixture}"
+sed -i.bak -E "s|uses: docker/setup-docker-action@[0-9a-f]+  # v[0-9][0-9.]*|uses: docker/setup-docker-action@v5.4.0|" "${fixture}"
+assert_fixture_mutated "the tag-ref mutation for docker/setup-docker-action"
 assert_rejected \
 	"must be pinned to a 40-hex commit SHA" \
 	"contract must reject a tag-ref action"
