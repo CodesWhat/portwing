@@ -140,14 +140,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, req.ID, errInvalidRequest, "method must be a string")
 		return
 	}
-	var method any
-	_ = json.Unmarshal(rawMethod, &method)
-	methodName, ok := method.(string)
-	if !ok {
+	if !isJSONString(rawMethod) || json.Unmarshal(rawMethod, &req.Method) != nil {
 		writeError(w, req.ID, errInvalidRequest, "method must be a string")
 		return
 	}
-	req.Method = methodName
 	if rawParams, ok := fields["params"]; ok {
 		var params map[string]json.RawMessage
 		if err := json.Unmarshal(rawParams, &params); err != nil || params == nil {
@@ -234,18 +230,30 @@ func validRPCError(raw json.RawMessage) bool {
 	return ok
 }
 
-func validRequestID(raw json.RawMessage) bool {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var id any
-	if err := decoder.Decode(&id); err != nil {
-		return false
+// firstNonSpace returns the first byte of raw that is not JSON whitespace, or
+// 0 when there is none. Callers hold raw values already validated by the
+// parent Unmarshal, so the first byte alone identifies the JSON type.
+func firstNonSpace(raw json.RawMessage) byte {
+	for _, c := range raw {
+		switch c {
+		case ' ', '\t', '\r', '\n':
+			continue
+		default:
+			return c
+		}
 	}
+	return 0
+}
 
-	switch id.(type) {
-	case string:
-		return true
-	case json.Number:
+func isJSONString(raw json.RawMessage) bool {
+	return firstNonSpace(raw) == '"'
+}
+
+// validRequestID accepts JSON strings and numbers (including fractional and
+// exponent forms) and rejects null, booleans, objects, arrays and empty input.
+func validRequestID(raw json.RawMessage) bool {
+	switch c := firstNonSpace(raw); {
+	case c == '"', c == '-', c >= '0' && c <= '9':
 		return true
 	default:
 		return false
