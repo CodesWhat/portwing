@@ -3,13 +3,11 @@ package config
 import (
 	"fmt"
 	"log/slog"
-	"math"
 	"net"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -288,7 +286,13 @@ func Load() (*Config, error) {
 // (readDeadline in internal/edge/client.go), so the bound is math.MaxInt64
 // divided by two seconds' worth of nanoseconds. That is roughly 146 years, far
 // past any real interval and short of the overflow.
-const MaxIntervalSeconds = int64(math.MaxInt64) / (2 * int64(time.Second))
+//
+// It is written out rather than computed, and TestMaxIntervalSecondsDerivation
+// holds it to math.MaxInt64 / (2 * int64(time.Second)). A package-level
+// expression is in no coverage block, so mutation testing scores its operators
+// as not covered whatever the tests do; as a literal there is nothing to
+// mutate and the derivation is checked where a failure is reported.
+const MaxIntervalSeconds int64 = 4_611_686_018
 
 // ValidateIntervalSeconds rejects a seconds-valued interval that time.NewTicker
 // would panic on: non-positive, or large enough that the conversion to a

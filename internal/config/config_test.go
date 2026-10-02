@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -489,6 +490,28 @@ func TestLoadRejectsNonPositiveOrOverflowingIntervals(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestMaxIntervalSecondsDerivation holds the written-out MaxIntervalSeconds to
+// the expression it stands for, and to the property that expression exists
+// for: doubled and scaled to nanoseconds the bound still fits a time.Duration,
+// and one second more wraps negative.
+func TestMaxIntervalSecondsDerivation(t *testing.T) {
+	t.Parallel()
+
+	if want := int64(math.MaxInt64) / (2 * int64(time.Second)); MaxIntervalSeconds != want {
+		t.Fatalf("MaxIntervalSeconds = %d, want math.MaxInt64 / (2 * int64(time.Second)) = %d", MaxIntervalSeconds, want)
+	}
+
+	// Variables, not constants: the compiler rejects a constant expression
+	// that overflows, and the wrap is the thing being shown.
+	atBound, pastBound := MaxIntervalSeconds, MaxIntervalSeconds+1
+	if d := 2 * time.Duration(atBound) * time.Second; d <= 0 {
+		t.Fatalf("2 * %d s overflows a time.Duration (%d)", atBound, d)
+	}
+	if d := 2 * time.Duration(pastBound) * time.Second; d > 0 {
+		t.Fatalf("2 * %d s still fits a time.Duration (%d), so MaxIntervalSeconds is not the largest safe value", pastBound, d)
 	}
 }
 
