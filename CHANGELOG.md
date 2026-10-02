@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.20] - 2026-10-02
+
+### Security
+
+- Update the docs and website builds to Next.js 16.3.6 for GHSA-vcvr-r3jv-pc5j
+  and DOMPurify 3.4.16 for GHSA-p98j-92pf-mc4p. Both sites are static exports
+  that don't use `next/og`, so the published sites were not exposed.
+
+### Changed
+
+- The MCP handler checks request ids and method names without decoding them a
+  second time, which removes 11 allocations per request. Accepted and rejected
+  requests are unchanged.
+- `Dockerfile` and `Dockerfile.dev` declare their `HEALTHCHECK` in exec form.
+  The probe itself is the same. Release images are unaffected; they use the
+  built-in `portwing healthcheck` probe.
+
+### Fixed
+
+- The competitive landscape docs page no longer links to a file that was
+  removed from the repository.
+
 ## [v0.9.19] - 2026-09-13
 
 ### Security
