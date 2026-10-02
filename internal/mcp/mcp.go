@@ -258,12 +258,8 @@ func decodeMethod(raw json.RawMessage, dst *string) bool {
 // validRequestID accepts JSON strings and numbers (including fractional and
 // exponent forms) and rejects null, booleans, objects, arrays and empty input.
 func validRequestID(raw json.RawMessage) bool {
-	switch c := firstNonSpace(raw); {
-	case c == '"', c == '-', c >= '0' && c <= '9':
-		return true
-	default:
-		return false
-	}
+	c := firstNonSpace(raw)
+	return c == '"' || c == '-' || (c >= '0' && c <= '9')
 }
 
 // handleInitialize responds to the MCP initialization handshake.
