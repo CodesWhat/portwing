@@ -43,7 +43,7 @@ FROM rootfs-amd64 AS rootfs-arm64
 # Alpine rootfs — armv7 only (Wolfi has no armv7). The branch (vMAJOR.MINOR) is
 # derived from the base image so the FROM tag is the single source of truth for
 # the version: Dependabot bumps the tag and the repositories follow.
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS rootfs-arm
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs-arm
 RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && apk add --no-cache --initdb --root /out \
         --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
