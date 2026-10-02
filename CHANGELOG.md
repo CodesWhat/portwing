@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for GHSA-pg57-6jwg-q645 (medium). The amd64 and arm64 images already carry
   containerd 2.3.6 through Wolfi's 5.5.1-r2 Compose package as of v0.9.20.
 
+### Changed
+
+- Retire the Grype suppressions for `github.com/docker/docker`,
+  `google.golang.org/grpc` v1.83.0 and Compose's `x/crypto` v0.54.0. None of
+  them matched anything in the published v0.9.20 images any more, so scan
+  results are unchanged.
+
 ## [v0.9.20] - 2026-10-02
 
 ### Security
