@@ -254,7 +254,7 @@ for dockerfile in Dockerfile.armv7 Dockerfile.release; do
 		echo "FAIL: ${dockerfile} must use the shell-free Portwing healthcheck" >&2
 		failures=$((failures + 1))
 	fi
-	if ! grep -Fq 'github.com/containerd/containerd/v2@v2.3.5' "${dockerfile}"; then
+	if ! grep -Fq 'github.com/containerd/containerd/v2@v2.3.6' "${dockerfile}"; then
 		echo "FAIL: ${dockerfile} Compose must build with patched containerd" >&2
 		failures=$((failures + 1))
 	fi

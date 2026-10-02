@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Rebuild ARMv7's Compose 5.5.1 with containerd 2.3.6 as `v5.5.1-portwing.2`
+  for GHSA-pg57-6jwg-q645 (medium). The amd64 and arm64 images already carry
+  containerd 2.3.6 through Wolfi's 5.5.1-r2 Compose package as of v0.9.20.
+
 ## [v0.9.20] - 2026-10-02
 
 ### Security
