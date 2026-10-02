@@ -109,6 +109,23 @@ for recipe in Dockerfile.armv7 Dockerfile.release; do
 	cp "${recipe}" "${fixture}/${recipe}"
 done
 
+# A bare final-stage CMD is not a healthcheck: without the HEALTHCHECK
+# instruction the image runs the probe as its default command and has no probe.
+for recipe in Dockerfile.armv7 Dockerfile.release; do
+	awk '
+		/^HEALTHCHECK / { getline; print "CMD [\"/usr/bin/portwing\", \"healthcheck\"]"; next }
+		{ print }
+	' "${recipe}" >"${fixture}/${recipe}"
+	if cmp -s "${recipe}" "${fixture}/${recipe}"; then
+		echo "FAIL: the bare-CMD mutation of ${recipe} changed nothing" >&2
+		exit 1
+	fi
+	expect_release_contract_failure \
+		"${recipe} must use the shell-free Portwing healthcheck" \
+		"a bare final-stage CMD must not satisfy the healthcheck contract"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
+
 observability_example="examples/observability/docker-compose.yml"
 sed -i.bak 's#test: \["CMD", "/usr/bin/portwing", "healthcheck"\]#test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/health"]#' "${fixture}/${observability_example}"
 expect_release_contract_failure \

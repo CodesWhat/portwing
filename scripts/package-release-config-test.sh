@@ -247,7 +247,10 @@ for dockerfile in Dockerfile.armv7 Dockerfile.release; do
 		failures=$((failures + 1))
 	fi
 	runtime_stage="$(active_lines "${dockerfile}" | awk '/^FROM / { stage = "" } { stage = stage $0 ORS } END { printf "%s", stage }')"
-	if ! grep -Eq '^[[:space:]]*CMD \["/usr/bin/portwing", "healthcheck"\]$' <<<"${runtime_stage}"; then
+	# A bare CMD runs the probe as the container's default command, so the check
+	# has to see it inside a HEALTHCHECK instruction, continuation lines joined.
+	runtime_instructions="$(awk '{ if (sub(/\\$/, "")) { joined = joined $0; next } print joined $0; joined = "" }' <<<"${runtime_stage}")"
+	if ! grep -Eq '^[[:space:]]*HEALTHCHECK[[:space:]].*CMD \["/usr/bin/portwing", "healthcheck"\]$' <<<"${runtime_instructions}"; then
 		echo "FAIL: ${dockerfile} must use the shell-free Portwing healthcheck" >&2
 		failures=$((failures + 1))
 	fi
