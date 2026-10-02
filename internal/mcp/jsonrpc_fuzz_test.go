@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,10 @@ func FuzzMCPHandler(f *testing.F) {
 	f.Add(`{"jsonrpc":"2.0","id":1,"method":"ping","params":true}`)
 	f.Add(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + strings.Repeat("x", 10000) + `"}}`)
 	f.Add(`{"0000000":"000","id":"&"}`)
+	f.Add(`{"jsonrpc":"2.0","id":-1.5e3,"method":"ping"}`)
+	f.Add(`{"jsonrpc":"2.0","id":"a","method":1}`)
+	f.Add(`{"jsonrpc":"2.0","id":"a","method":{}}`)
+	f.Add(`{"jsonrpc":"2.0","id": "a" ,"method": "ping" }`)
 
 	// Use a nil docker client and nil collector; the handler must not reach
 	// them for the JSON-RPC error paths exercised by fuzz inputs. For the
@@ -63,6 +68,16 @@ func FuzzMCPHandler(f *testing.F) {
 		var requestFields map[string]json.RawMessage
 		requestObject := json.Unmarshal([]byte(body), &requestFields) == nil && requestFields != nil
 		requestID, hadID := requestFields["id"]
+		// The raw id and method are valid JSON here (the parent Unmarshal
+		// succeeded), so the byte-prefix checks must match their decoder-based
+		// references.
+		for _, key := range []string{"id", "method"} {
+			if raw, ok := requestFields[key]; ok {
+				if err := envelopeParityError(raw); err != nil {
+					t.Error(err)
+				}
+			}
+		}
 		requestIDValue, requestIDErr := decodeJSONValue(requestID)
 		version, versionOK := decodeJSONValue(requestFields["jsonrpc"])
 		_, hasMethod := requestFields["method"]
@@ -215,4 +230,59 @@ func decodeJSONValue(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	return value, nil
+}
+
+// The reference helpers live in this file because the ClusterFuzzLite build
+// compiles each fuzz file on its own, without the package's other test files.
+
+// referenceValidRequestID is the decoder-based implementation that
+// validRequestID replaced. It stays here as the oracle for the differential
+// checks. It agrees with validRequestID on every valid JSON value, which is
+// all the handler ever passes (values come out of a parent Unmarshal).
+func referenceValidRequestID(raw json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var id any
+	if err := decoder.Decode(&id); err != nil {
+		return false
+	}
+	switch id.(type) {
+	case string, json.Number:
+		return true
+	default:
+		return false
+	}
+}
+
+// referenceMethodName is the any-based method decode that the string-prefix
+// check plus direct Unmarshal replaced.
+func referenceMethodName(raw json.RawMessage) (string, bool) {
+	var method any
+	_ = json.Unmarshal(raw, &method)
+	name, ok := method.(string)
+	return name, ok
+}
+
+// methodName adapts the production decodeMethod to the reference's shape.
+func methodName(raw json.RawMessage) (string, bool) {
+	var name string
+	if !decodeMethod(raw, &name) {
+		return "", false
+	}
+	return name, true
+}
+
+// envelopeParityError reports a disagreement between the production checks
+// and their references on raw. Callers must pass valid JSON. It takes no
+// testing type so the fuzz body and the table test can both call it.
+func envelopeParityError(raw json.RawMessage) error {
+	if got, want := validRequestID(raw), referenceValidRequestID(raw); got != want {
+		return fmt.Errorf("validRequestID(%q) = %v, reference = %v", raw, got, want)
+	}
+	gotName, gotOK := methodName(raw)
+	wantName, wantOK := referenceMethodName(raw)
+	if gotOK != wantOK || gotName != wantName {
+		return fmt.Errorf("method(%q) = (%q, %v), reference = (%q, %v)", raw, gotName, gotOK, wantName, wantOK)
+	}
+	return nil
 }
