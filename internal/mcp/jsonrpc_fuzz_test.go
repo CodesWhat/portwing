@@ -263,9 +263,10 @@ func referenceMethodName(raw json.RawMessage) (string, bool) {
 	return name, ok
 }
 
+// methodName adapts the production decodeMethod to the reference's shape.
 func methodName(raw json.RawMessage) (string, bool) {
 	var name string
-	if !isJSONString(raw) || json.Unmarshal(raw, &name) != nil {
+	if !decodeMethod(raw, &name) {
 		return "", false
 	}
 	return name, true

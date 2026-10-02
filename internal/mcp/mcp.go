@@ -140,7 +140,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, req.ID, errInvalidRequest, "method must be a string")
 		return
 	}
-	if !isJSONString(rawMethod) || json.Unmarshal(rawMethod, &req.Method) != nil {
+	if !decodeMethod(rawMethod, &req.Method) {
 		writeError(w, req.ID, errInvalidRequest, "method must be a string")
 		return
 	}
@@ -247,6 +247,12 @@ func firstNonSpace(raw json.RawMessage) byte {
 
 func isJSONString(raw json.RawMessage) bool {
 	return firstNonSpace(raw) == '"'
+}
+
+// decodeMethod decodes raw into dst when it is a JSON string. The quote check
+// comes first because null unmarshals into a string without an error.
+func decodeMethod(raw json.RawMessage, dst *string) bool {
+	return isJSONString(raw) && json.Unmarshal(raw, dst) == nil
 }
 
 // validRequestID accepts JSON strings and numbers (including fractional and
