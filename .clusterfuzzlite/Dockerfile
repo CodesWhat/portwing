@@ -19,7 +19,7 @@
 # floating `gcr.io/oss-fuzz-base/clusterfuzzlite-*:v1` tag inside Google's
 # action definition, so pinning the action to a commit SHA does not pin what
 # actually executes.
-FROM gcr.io/oss-fuzz-base/base-builder-go:v1@sha256:e5e5ecf4fb18a2f47bf0462c37e35728e8f6023ee4b7ff8bc5f903e6acba46da
+FROM gcr.io/oss-fuzz-base/base-builder-go:v1@sha256:5a43cfd13e3b7602eaba5825f93f291d5384c08cc55b05ab6e4e6b948e229cb7
 
 COPY . $SRC/portwing
 COPY ./.clusterfuzzlite/build.sh $SRC/
