@@ -53,7 +53,7 @@ function assertSharpPackagesCurrent(lock, packageJson) {
     const platform = name.slice(name.indexOf("@img/"));
     const expected = name.includes("sharp-libvips")
       ? sharp.optionalDependencies[platform]
-      : sharp.version;
+      : (sharp.optionalDependencies[platform] ?? sharp.version);
     assert.ok(expected, `${name} is not an optional dependency of sharp`);
     assert.equal(packageData.version, expected, name);
   }

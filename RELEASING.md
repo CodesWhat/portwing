@@ -159,7 +159,8 @@ branch doesn't have. The daily `Release: Main Is Released` run checks that every
 commit on `main` is an ancestor of the dev branch, and it stays red until dev
 is fast-forwarded, even though the trees are identical. If something already
 merged to dev, the push is no longer a fast-forward. Open a PR to dev with
-`git merge -s ours origin/main` instead.
+`git merge -s ours origin/main` instead, and after it merges run the workflow
+without `require_tree_parity`, because the dev tree has moved on from `main`.
 
 ### Website deployment settings
 
