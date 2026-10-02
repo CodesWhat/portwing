@@ -3,7 +3,7 @@
 # location-scoped so dependency updates automatically force a new review. CI
 # separately rejects any source dependency or shipped binary that links openpgp.
 #
-# 2026-10-02 audit: the published v0.9.20 images were extracted and checked
+# 2026-10-02 audit: the published v0.9.21 images were extracted and checked
 # with `go version -m`, and Grype was run with and without this file on all
 # three platforms. amd64 and arm64 ship Wolfi's docker-compose 5.5.1-r2
 # (docker/compose/v5 v5.5.1, containerd/v2 v2.3.6, google.golang.org/grpc

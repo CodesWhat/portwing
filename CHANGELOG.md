@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.21] - 2026-10-02
+
 ### Security
 
 - Rebuild ARMv7's Compose 5.5.1 with containerd 2.3.6 as `v5.5.1-portwing.2`
