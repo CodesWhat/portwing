@@ -3,14 +3,39 @@
 # location-scoped so dependency updates automatically force a new review. CI
 # separately rejects any source dependency or shipped binary that links openpgp.
 #
+# 2026-10-02 audit: the published v0.9.20 images were extracted and checked
+# with `go version -m`, and Grype was run with and without this file on all
+# three platforms. amd64 and arm64 ship Wolfi's docker-compose 5.5.1-r2
+# (docker/compose/v5 v5.5.1, containerd/v2 v2.3.6, google.golang.org/grpc
+# v1.83.2, golang.org/x/crypto v0.56.0) and carry no github.com/docker/docker
+# module at all, since Compose now uses github.com/moby/moby/api and /client.
+# Grype's `ignoredMatches` was empty on every platform and scanning with an
+# empty ignore list gave identical results, so no image-scoped entry matched
+# anything. Removed as dead config: the seven github.com/docker/docker
+# v28.5.2+incompatible entries (GHSA-pxq6-2prw-chj9, GO-2026-4883,
+# GHSA-x744-4wpc-v9h2, GO-2026-4887, GHSA-vp62-88p7-qqf5, GHSA-rg2x-37c3-w2rh,
+# GHSA-x86f-5xw2-fm2r), the google.golang.org/grpc v1.83.0 entry
+# (GHSA-vp52-pcj8-j9qc, fixed in the v1.83.2 that Compose now carries), and the
+# docker-compose GO-2026-5932 entry pinned to x/crypto v0.54.0, which a v0.56.0
+# re-pin would not have matched either. verify-scanner-exclusions.sh still
+# checks the shipped Compose binary for openpgp, so linkage stays guarded
+# without a suppression. Of the two portwing-owned GO-2026-5932 entries that
+# stay (x/crypto v0.57.0), /go.mod matches in a source scan; the
+# **/usr/bin/portwing one matched nothing in this audit and is kept because
+# Grype's handling of stripped Go binaries has flipped before. The
+# arm/v7 image builds Compose from source and carried containerd v2.3.5; that
+# is fixed by rebuilding on v2.3.6, not by a suppression. The 2026-11-15
+# review date went away with the entries it covered, and the older dated
+# paragraphs below describe entries that no longer exist.
+#
 # 2026-09-02 image audit: the first live run of the weekly published-image
 # rescan (run 33697361140) failed both gating legs of the then-current
 # published image on GHSA-vp52-pcj8-j9qc / CVE-2026-84304, google.golang.org/grpc v1.83.0
 # HIGH. Portwing's own module graph has no grpc in it at all (`go list -m all`
 # on dev/v0.9 and main), and `go version -m` on the extracted amd64 and arm64
 # binaries puts the carrier in Wolfi's docker-compose (v5.5.0+dirty), so the
-# entry below is scoped to that third-party binary exactly like the
-# docker/docker ones. Nothing exists to bump to: docker/compose's newest
+# entry (removed 2026-10-02) was scoped to that third-party binary exactly like
+# the docker/docker ones. Nothing exists to bump to: docker/compose's newest
 # release is v5.5.0 (2026-08-17) and pins grpc v1.83.0, Wolfi's newest package
 # 5.5.0-r4 still embeds v1.83.0, and the advisory's vulnerable range is
 # <= 1.83.0 so no older Compose is any better. compose@main has already moved
@@ -37,12 +62,35 @@
 # vulnerabilities — but v0.55.0 is the fix line, so taking it is cheaper than
 # carrying another suppression. The two GO-2026-5932 entries below that track
 # portwing's own module and shipped binary moved to v0.55.0 in lockstep; the
-# third stays pinned to v0.54.0 because it describes the Wolfi-packaged
-# docker-compose binary, whose embedded x/crypto is not ours to bump.
+# third (removed 2026-10-02) stayed pinned to v0.54.0 because it described the
+# Wolfi-packaged docker-compose binary, whose embedded x/crypto was not ours to
+# bump.
+#
+# 2026-08-11 audit: Wolfi's docker-compose package moved from v5.3.1 to
+# v5.4.0-r0, which vendors golang.org/x/net v0.57.0 (>= the v0.55.0 fix for
+# GO-2026-5025/5026/5027/5028/5029/5030), github.com/docker/cli v29.6.2
+# (>= the v29.2.0 fix for GO-2026-4610), and docker-compose itself is past
+# the v5.1.0 fix line for that same advisory — all now upstream-fixed, so
+# those six x/net entries and the docker/cli entry were dropped as dead
+# config (confirmed zero matches via `grype dir:<extracted docker-compose
+# binary> --config .grype.yaml`). Grype selected the GHSA identifiers for
+# GO-2026-4883 and GO-2026-4887 through 2026-08-27, then selected the latter's
+# Go alias on 2026-08-28. Keep both ID pairs scoped below so database alias
+# selection cannot flip the release gate again. The five GHSA entries were
+# then still open: github.com/docker/docker v28.5.2+incompatible was still
+# vendored, and none had a fix on that legacy import path (removed 2026-10-02).
+#
+# 2026-08-16 audit (code-scanning alert 191): the v5.4.0 compose binary
+# embeds x/crypto v0.54.0, so the GO-2026-5932 ignore above was re-scoped
+# from v0.53.0 after re-confirming openpgp is not linked
+# (scripts/verify-scanner-exclusions.sh against the extracted binary). The
+# GO-2026-5841 klauspost/compress entry was dropped as dead config: v5.4.0
+# embeds v1.19.1, past the v1.18.7 fix line, so the advisory no longer
+# matches at all.
 ignore:
   # GO-2026-5932 affects only golang.org/x/crypto/openpgp. Portwing imports
-  # x/crypto/argon2 only (confirmed by source-mode govulncheck), and Docker
-  # Compose v5.4.0's shipped binary does not link openpgp (confirmed by
+  # x/crypto/argon2 only (confirmed by source-mode govulncheck), and the
+  # shipped Docker Compose binary does not link openpgp (confirmed by
   # scripts/verify-scanner-exclusions.sh against the extracted binary). There
   # is no fixed x/crypto version because the advisory deprecates that package.
   - vulnerability: GO-2026-5932
@@ -59,124 +107,3 @@ ignore:
       version: v0.57.0
       type: go-module
       location: "**/usr/bin/portwing"
-  - vulnerability: GO-2026-5932
-    reason: "Docker Compose v5.4.0 does not link openpgp; scripts/verify-scanner-exclusions.sh inspects the shipped binary. Review when Wolfi changes x/crypto from v0.54.0."
-    package:
-      name: golang.org/x/crypto
-      version: v0.54.0
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-
-  # Grype reports Go module vulnerabilities embedded in the third-party
-  # docker-compose executable packaged from Wolfi. Keep these ignores scoped
-  # to that binary and review them when Wolfi ships updated packages.
-  #
-  # 2026-08-11 audit: Wolfi's docker-compose package moved from v5.3.1 to
-  # v5.4.0-r0, which vendors golang.org/x/net v0.57.0 (>= the v0.55.0 fix for
-  # GO-2026-5025/5026/5027/5028/5029/5030), github.com/docker/cli v29.6.2
-  # (>= the v29.2.0 fix for GO-2026-4610), and docker-compose itself is past
-  # the v5.1.0 fix line for that same advisory — all now upstream-fixed, so
-  # those six x/net entries and the docker/cli entry were dropped as dead
-  # config (confirmed zero matches via `grype dir:<extracted docker-compose
-  # binary> --config .grype.yaml`). Grype selected the GHSA identifiers for
-  # GO-2026-4883 and GO-2026-4887 through 2026-08-27, then selected the latter's
-  # Go alias on 2026-08-28. Keep both ID pairs scoped below so database alias
-  # selection cannot flip the release gate again. The five GHSA entries remain
-  # genuinely open: github.com/docker/docker
-  # v28.5.2+incompatible is still vendored, and none has a fix on that legacy
-  # import path — only the github.com/moby/moby/v2 rewrite is patched, which is
-  # Wolfi's call, not portwing's.
-  #
-  # 2026-08-16 audit (code-scanning alert 191): the v5.4.0 compose binary
-  # embeds x/crypto v0.54.0, so the GO-2026-5932 ignore above was re-scoped
-  # from v0.53.0 after re-confirming openpgp is not linked
-  # (scripts/verify-scanner-exclusions.sh against the extracted binary). The
-  # GO-2026-5841 klauspost/compress entry was dropped as dead config: v5.4.0
-  # embeds v1.19.1, past the v1.18.7 fix line, so the advisory no longer
-  # matches at all.
-  - vulnerability: GHSA-pxq6-2prw-chj9
-    reason: "Docker Engine daemon plugin-install advisory; the shipped Docker Compose executable is a client and does not link daemon/pkg/plugin. Wolfi still vendors docker/docker v28.5.2+incompatible. Review by 2026-11-15."
-    package:
-      name: github.com/docker/docker
-      version: v28.5.2+incompatible
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-  - vulnerability: GO-2026-4883
-    reason: "Go-vulndb alias of GHSA-pxq6-2prw-chj9; Docker Compose is a client and does not link the affected Docker Engine daemon/pkg/plugin package. Wolfi still vendors docker/docker v28.5.2+incompatible. Review by 2026-11-15."
-    package:
-      name: github.com/docker/docker
-      version: v28.5.2+incompatible
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-  - vulnerability: GHSA-x744-4wpc-v9h2
-    reason: "Docker Engine daemon AuthZ-plugin advisory; the shipped Docker Compose executable is a client and cannot host daemon authorization plugins. Wolfi still vendors docker/docker v28.5.2+incompatible. Review by 2026-11-15."
-    package:
-      name: github.com/docker/docker
-      version: v28.5.2+incompatible
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-  - vulnerability: GO-2026-4887
-    reason: "Go-vulndb alias of GHSA-x744-4wpc-v9h2; Docker Compose is a client and cannot host the affected Docker Engine daemon AuthZ plugins. Wolfi still vendors docker/docker v28.5.2+incompatible. Review by 2026-11-15."
-    package:
-      name: github.com/docker/docker
-      version: v28.5.2+incompatible
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-  - vulnerability: GHSA-vp62-88p7-qqf5
-    reason: "Embedded in Wolfi docker-compose binary (docker/docker v28.5.2+incompatible, legacy import path); no fix exists on that path, only the moby/moby/v2 rewrite (2.0.0-beta.14) is patched. Review by 2026-11-15."
-    package:
-      name: github.com/docker/docker
-      version: v28.5.2+incompatible
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-  - vulnerability: GHSA-rg2x-37c3-w2rh
-    reason: "Embedded in Wolfi docker-compose binary (docker/docker v28.5.2+incompatible, legacy import path); no fix exists on that path, only the moby/moby/v2 rewrite (2.0.0-beta.14) is patched. Review by 2026-11-15."
-    package:
-      name: github.com/docker/docker
-      version: v28.5.2+incompatible
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-  - vulnerability: GHSA-x86f-5xw2-fm2r
-    reason: "Embedded in Wolfi docker-compose binary (docker/docker v28.5.2+incompatible, legacy import path); no fix exists on that path, only the moby/moby/v2 rewrite (2.0.0-beta.14) is patched. Review by 2026-11-15."
-    package:
-      name: github.com/docker/docker
-      version: v28.5.2+incompatible
-      type: go-module
-      location: "**/usr/bin/docker-compose"
-
-  # GHSA-vp52-pcj8-j9qc / CVE-2026-84304 is a heap-exhaustion DoS: an
-  # unauthenticated peer fragments its payload across millions of tiny HTTP/2
-  # DATA frames on concurrent multiplexed streams and each fragment costs a
-  # separate recvMsg in grpc's shared internal/transport recvBuffer.
-  #
-  # Unlike the openpgp entries above this is NOT a linkage argument, and saying
-  # so plainly matters: grpc's server code *is* linked into the shipped Compose
-  # binary. `go tool nm` finds google.golang.org/grpc.(*Server).Serve, and the
-  # pclntab carries internal/transport/http2_server.go. The argument is
-  # reachability. The only gRPC server Compose can run is BuildKit's session
-  # (the registered services are moby.filesync.v1 and moby.buildkit.v1), and
-  # that is served over the single already-established hijacked /session
-  # connection to the Docker daemon the operator configured, never a network
-  # listener, so the unauthenticated-remote position the advisory describes does
-  # not exist. Its gRPC clients dial only operator-configured endpoints:
-  # buildkitd through that same daemon, and the OTLP trace exporter, which this
-  # image sets no endpoint for. Portwing runs Compose as a short-lived
-  # subprocess per request (internal/docker/compose.go, buildCommand) via
-  # exec.CommandContext, sharing this container's memory cgroup rather than one
-  # of its own, so a cgroup-level OOM kill can take down the whole container,
-  # not just Compose. The argument here is not isolation, it's reachability:
-  # there is no listener for an unauthenticated peer to hit.
-  #
-  # Version-scoped, so the pin keeps this ignore from silently following
-  # whatever grpc Wolfi's Compose package embeds next; once the version drifts,
-  # the weekly rescan stops matching and this entry goes dead rather than
-  # forcing a review on its own. The dated review deadline is what actually
-  # drives cleanup: review when Wolfi ships a Compose past v5.5.0, or by
-  # 2026-11-15 alongside the docker/docker entries above, whichever is sooner.
-  - vulnerability: GHSA-vp52-pcj8-j9qc
-    reason: "Embedded in the Wolfi docker-compose binary; Compose's only gRPC server is BuildKit's session over the hijacked Docker /session connection, never a network listener, and its gRPC clients dial only operator-configured endpoints. No fixed Compose release exists yet (v5.5.0 pins grpc v1.83.0; compose@main is already on v1.83.2). Review when Wolfi ships a Compose past v5.5.0, or by 2026-11-15."
-    package:
-      name: google.golang.org/grpc
-      version: v1.83.0
-      type: go-module
-      location: "**/usr/bin/docker-compose"
