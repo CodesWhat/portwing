@@ -111,6 +111,7 @@ jobs:
         radarlint-releases.s3.amazonaws.com:443
         registry.npmjs.org:443
         release-assets.githubusercontent.com:443
+        storage.googleapis.com:443
         sum.golang.org:443
         tmaproduction.blob.core.windows.net:443
         tuf-repo-cdn.sigstore.dev:443

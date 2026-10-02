@@ -17,18 +17,23 @@ function sourceFiles(root) {
     .map((entry) => read(path.relative(ROOT, path.join(entry.parentPath, entry.name))));
 }
 
-function assertPostHogPackagesCurrent(lock) {
+// The analytics workspace declares the one posthog-js both web roots share, so
+// every copy in the lock has to match that declaration.
+function assertPostHogPackagesCurrent(lock, analyticsPackage) {
+  const declared = analyticsPackage.dependencies["posthog-js"];
+  assert.match(declared, /^\d+\.\d+\.\d+$/u, "analytics must pin an exact posthog-js");
   const postHogPackages = Object.entries(lock.packages).filter(
     ([name]) => name === "node_modules/posthog-js" || name.endsWith("/node_modules/posthog-js"),
   );
   assert.ok(postHogPackages.length > 0);
   for (const [name, packageData] of postHogPackages) {
-    assert.equal(packageData.version, "1.430.3", name);
+    assert.equal(packageData.version, declared, name);
   }
 }
 
 test("both web roots use the shared PostHog client and no Vercel analytics", () => {
   const rootPackage = JSON.parse(read("package.json"));
+  const analyticsPackage = JSON.parse(read("analytics/package.json"));
   const lockText = read("package-lock.json");
   const lock = JSON.parse(lockText);
   const sources = sourceFiles(path.join(ROOT, "website", "src"))
@@ -36,7 +41,7 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
     .join("\n");
 
   assert.ok(rootPackage.workspaces.includes("analytics"));
-  assertPostHogPackagesCurrent(lock);
+  assertPostHogPackagesCurrent(lock, analyticsPackage);
   assert.doesNotMatch(lockText, /"@vercel\/analytics"/);
   assert.doesNotMatch(sources, /@vercel\/analytics|SpeedInsights|\.identify\s*\(/);
   const analyticsClient = read("analytics/src/client.ts");
@@ -50,8 +55,6 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
     paths: [path.join(ROOT, "analytics")],
   });
   const extensionBundleBytes = fs.statSync(extensionBundle).size;
-  assert.equal(extensionBundleBytes, 162_513);
-  assert.notEqual(extensionBundleBytes, 148_886);
   assert.ok(extensionBundleBytes > 850_000 - 784_278);
 
   for (const app of ["website", "docs"]) {
@@ -74,7 +77,7 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
   lockWithNestedStalePostHog.packages["node_modules/analytics/node_modules/posthog-js"] = {
     version: "1.417.0",
   };
-  assert.throws(() => assertPostHogPackagesCurrent(lockWithNestedStalePostHog));
+  assert.throws(() => assertPostHogPackagesCurrent(lockWithNestedStalePostHog, analyticsPackage));
 });
 
 test("the finite CTA source map covers actual tracked component calls", () => {

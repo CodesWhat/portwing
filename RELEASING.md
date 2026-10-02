@@ -143,6 +143,25 @@ git push origin v<version>
 
 ## After tagging
 
+### Reconcile the dev branch
+
+Do this as soon as the tag verifies, before anything else merges to the dev
+branch:
+
+```bash
+git fetch origin
+git push origin origin/main:dev/v0.9
+gh workflow run main-is-released.yml --ref main -f require_tree_parity=true
+```
+
+A promotion is a two-parent merge, so `main` gains a merge commit the dev
+branch doesn't have. The daily `Release: Main Is Released` run checks that every
+commit on `main` is an ancestor of the dev branch, and it stays red until dev
+is fast-forwarded, even though the trees are identical. If something already
+merged to dev, the push is no longer a fast-forward. Open a PR to dev with
+`git merge -s ours origin/main` instead, and after it merges run the workflow
+without `require_tree_parity`, because the dev tree has moved on from `main`.
+
 ### Website deployment settings
 
 The `getportwing` Vercel project tracks `main` for production and must have
