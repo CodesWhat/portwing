@@ -66,6 +66,11 @@ name = "dockerfmt"
 
 [[plugin]]
 name = "hadolint"
+# Pinned so the hadolint ruleset is identical locally and in CI. Left unpinned,
+# qlty resolves whatever hadolint the installed CLI defaults to, which drifts
+# between a developer's qlty and CI's (latest) qlty. This is the version qlty
+# 0.650.0 resolved when the pin was added.
+version = "2.15.1"
 
 [[plugin]]
 name = "markdownlint"

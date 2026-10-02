@@ -111,6 +111,7 @@ jobs:
         radarlint-releases.s3.amazonaws.com:443
         registry.npmjs.org:443
         release-assets.githubusercontent.com:443
+        storage.googleapis.com:443
         sum.golang.org:443
         tmaproduction.blob.core.windows.net:443
         tuf-repo-cdn.sigstore.dev:443
@@ -208,7 +209,7 @@ jobs:
         # design: the vendor-free coverage floor enforced in
         # scripts/ci/go-test.sh is the real gate, so a Codecov hiccup never
         # flakes the required "Build & Test" context.
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
           files: artifacts/go-test/coverage.out
           use_oidc: true
