@@ -50,6 +50,10 @@ func FuzzMCPHandler(f *testing.F) {
 	f.Add(`{"jsonrpc":"2.0","id":1,"method":"ping","params":true}`)
 	f.Add(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + strings.Repeat("x", 10000) + `"}}`)
 	f.Add(`{"0000000":"000","id":"&"}`)
+	f.Add(`{"jsonrpc":"2.0","id":-1.5e3,"method":"ping"}`)
+	f.Add(`{"jsonrpc":"2.0","id":"a","method":1}`)
+	f.Add(`{"jsonrpc":"2.0","id":"a","method":{}}`)
+	f.Add(`{"jsonrpc":"2.0","id": "a" ,"method": "ping" }`)
 
 	// Use a nil docker client and nil collector; the handler must not reach
 	// them for the JSON-RPC error paths exercised by fuzz inputs. For the
@@ -63,6 +67,14 @@ func FuzzMCPHandler(f *testing.F) {
 		var requestFields map[string]json.RawMessage
 		requestObject := json.Unmarshal([]byte(body), &requestFields) == nil && requestFields != nil
 		requestID, hadID := requestFields["id"]
+		// The raw id and method are valid JSON here (the parent Unmarshal
+		// succeeded), so the byte-prefix checks must match their decoder-based
+		// references.
+		for _, key := range []string{"id", "method"} {
+			if raw, ok := requestFields[key]; ok {
+				assertEnvelopeParity(t, raw)
+			}
+		}
 		requestIDValue, requestIDErr := decodeJSONValue(requestID)
 		version, versionOK := decodeJSONValue(requestFields["jsonrpc"])
 		_, hasMethod := requestFields["method"]
