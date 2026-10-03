@@ -110,6 +110,7 @@ Setting `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is rejected at startup with a f
 | `WELCOME_TIMEOUT` | `30` | Seconds to wait for the controller welcome message |
 | `TLS_SKIP_VERIFY` | `false` | Skip controller TLS verification (testing only) |
 | `CA_CERT` | — | Path to a PEM CA bundle for self-signed controller certs |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | — | Standard proxy variables for the outbound controller connection. Hosts matched by `NO_PROXY` connect directly. The proxy URL must be `http://` or `socks5://` |
 
 ### Handshake sequence
 

@@ -21,6 +21,7 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 | `TLS_KEY` | — | Path to server TLS private key (Standard mode). Must be set together with `TLS_CERT`; partial configuration is a startup error. |
 | `CA_CERT` | — | Path to a custom CA certificate used when verifying the Drydock server in Edge mode. |
 | `TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification on the outbound Edge connection. **Testing only.** |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | — | Standard proxy variables. The Edge connection to the controller goes through the proxy they select, using an HTTP CONNECT tunnel, and hosts matched by `NO_PROXY` connect directly. Credentials can be given in the proxy URL (`http://user:pass@proxy:3128`). Loopback controllers are never proxied. The proxy URL must use `http://` or `socks5://`; an `https://` proxy URL is rejected with an error. |
 | `TRUSTED_PROXIES` | — | Comma-separated list of CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`) for reverse proxies whose `X-Forwarded-For` header Portwing will trust for real-IP resolution. When unset, forwarding headers are ignored entirely. |
 
 <Callout type="warn">
