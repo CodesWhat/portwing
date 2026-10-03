@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Edge mode now honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` for the
+  outbound WebSocket connection to the controller. The dial ignored them, so a
+  host behind a corporate egress proxy could not connect. The Docker socket
+  client and the `portwing healthcheck` probe still ignore the proxy variables.
+
 ## [v0.9.21] - 2026-10-02
 
 ### Security

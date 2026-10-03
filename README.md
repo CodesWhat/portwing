@@ -590,6 +590,7 @@ the connection alive through proxies.
 | `PRIVATE_KEY_FILE` | -- | Ed25519 private key (PEM PKCS#8) for signing edge-mode hello |
 | `CA_CERT` | -- | Custom CA certificate for Edge mode |
 | `TLS_SKIP_VERIFY` | `false` | Skip TLS verification (testing only) |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | -- | Standard proxy variables. Edge mode sends its outbound controller connection through the proxy they select; `NO_PROXY` hosts connect directly. Loopback controllers are never proxied |
 | `PORT` | `3000` | HTTP server port |
 | `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | HTTP/operations listener bind address. Edge mode refuses a non-loopback address unless `ALLOW_UNAUTHENTICATED_REMOTE=true` — the operations listener carries no authentication, so set it only on an isolated monitoring network. |
 | `TLS_CERT` | -- | Server TLS certificate (Standard mode) |
