@@ -18,7 +18,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/metrics"
@@ -35,6 +37,21 @@ const (
 	errMethodNotFound = -32601
 	errInvalidParams  = -32602
 	errInternalError  = -32603
+)
+
+// container_logs output bounds. Docker's tail parameter caps how many lines
+// the daemon sends but not how long a line is, so the tool keeps the newest
+// lines that fit and reports truncated: true when it dropped or cut any.
+const (
+	maxLogLines = 500       // also the largest tail a caller may ask for
+	maxLogBytes = 256 << 10 // every returned line together, prefixes included
+
+	// maxLogLineBytes is the longest line that fits the budget on its own
+	// once its 8-byte "stdout: " or "stderr: " prefix is added. A longer line
+	// keeps its first maxLogLineBytes bytes. It is maxLogBytes minus 8,
+	// spelled as a literal so mutation testing has no package-level
+	// arithmetic it can't cover; TestLogBoundConstants pins the relationship.
+	maxLogLineBytes = 262_136
 )
 
 // rpcRequest is the incoming JSON-RPC 2.0 envelope.
@@ -304,8 +321,9 @@ func (h *Handler) toolsList() map[string]any {
 				},
 			},
 			map[string]any{
-				"name":        "container_logs",
-				"description": "Return the last N lines (max 500) of stdout/stderr from a container.",
+				"name": "container_logs",
+				"description": "Return the last N lines (max 500) of stdout/stderr from a container. " +
+					"Output is capped at 256 KiB of log text, keeping the newest lines; truncated is true when lines were dropped or one was cut to fit.",
 				"inputSchema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -317,7 +335,7 @@ func (h *Handler) toolsList() map[string]any {
 							"type":        "integer",
 							"description": "Number of log lines to return (1–500, default 100).",
 							"minimum":     1,
-							"maximum":     500,
+							"maximum":     maxLogLines,
 						},
 					},
 					"required": []string{"id"},
@@ -475,7 +493,8 @@ func (h *Handler) toolInspectContainer(ctx context.Context, w http.ResponseWrite
 }
 
 // toolContainerLogs returns demuxed log lines (stdout/stderr) for a container.
-// Tail is capped at 500 lines.
+// Tail is capped at maxLogLines and the output at the other container_logs
+// bounds; truncated reports whether anything was dropped or cut.
 func (h *Handler) toolContainerLogs(ctx context.Context, w http.ResponseWriter, id json.RawMessage, args json.RawMessage) {
 	if h.docker == nil {
 		writeToolError(w, id, "docker client not available")
@@ -494,8 +513,8 @@ func (h *Handler) toolContainerLogs(ctx context.Context, w http.ResponseWriter, 
 	if tail <= 0 {
 		tail = 100
 	}
-	if tail > 500 {
-		tail = 500
+	if tail > maxLogLines {
+		tail = maxLogLines
 	}
 
 	tailStr := fmt.Sprintf("%d", tail)
@@ -506,15 +525,16 @@ func (h *Handler) toolContainerLogs(ctx context.Context, w http.ResponseWriter, 
 	}
 	defer rc.Close()
 
-	lines, err := decodeContainerLogLines(rc)
+	lines, truncated, err := decodeContainerLogTail(rc)
 	if err != nil {
 		writeToolError(w, id, fmt.Sprintf("decode logs: %v", err))
 		return
 	}
 
 	out := map[string]any{
-		"id":    p.ID,
-		"lines": lines,
+		"id":        p.ID,
+		"lines":     lines,
+		"truncated": truncated,
 	}
 	writeToolResult(w, id, out)
 }
@@ -573,50 +593,111 @@ func (h *Handler) toolContainerStats(ctx context.Context, w http.ResponseWriter,
 	writeToolResult(w, id, out)
 }
 
+// decodeContainerLogLines decodes a container log stream into lines prefixed
+// with their stream, within the container_logs bounds.
 func decodeContainerLogLines(r io.Reader) ([]string, error) {
-	var lines []string
-	var pending strings.Builder
-	var pendingStream docker.ContainerLogStream
-	hasPending := false
-
-	appendLine := func(stream docker.ContainerLogStream, line string) {
-		prefix := "stdout"
-		if stream == docker.ContainerLogStderr {
-			prefix = "stderr"
-		}
-		lines = append(lines, prefix+": "+line)
-	}
-
-	err := docker.DecodeContainerLogStream(r, func(stream docker.ContainerLogStream, payload []byte) error {
-		if hasPending && stream != pendingStream {
-			if pending.Len() > 0 {
-				appendLine(pendingStream, pending.String())
-				pending.Reset()
-			}
-			hasPending = false
-		}
-		if !hasPending {
-			pendingStream = stream
-			hasPending = true
-		}
-
-		text := string(payload)
-		for {
-			newline := strings.IndexByte(text, '\n')
-			if newline < 0 {
-				pending.WriteString(text)
-				return nil
-			}
-			pending.WriteString(text[:newline])
-			appendLine(stream, pending.String())
-			pending.Reset()
-			text = text[newline+1:]
-		}
-	})
-	if hasPending && pending.Len() > 0 {
-		appendLine(pendingStream, pending.String())
-	}
+	lines, _, err := decodeContainerLogTail(r)
 	return lines, err
+}
+
+// decodeContainerLogTail decodes a container log stream into lines prefixed
+// with their stream and keeps the newest ones inside the container_logs
+// bounds. truncated reports whether any line was dropped or cut.
+func decodeContainerLogTail(r io.Reader) (lines []string, truncated bool, err error) {
+	t := new(logTail)
+	err = docker.DecodeContainerLogStream(r, t.write)
+	if t.pending.Len() > 0 {
+		t.flush()
+	}
+	return t.lines(), t.truncated, err
+}
+
+// logTail accumulates decoded log lines in a ring that holds the newest
+// maxLogLines of them, dropping the oldest while their total size exceeds
+// maxLogBytes. Memory stays bounded however much the daemon sends.
+type logTail struct {
+	ring      [maxLogLines]string
+	start     int // ring index of the oldest kept line
+	count     int // kept lines
+	size      int // bytes in the kept lines
+	truncated bool
+
+	// pending is the line being assembled. It holds at most one byte more
+	// than maxLogLineBytes, which is enough for flush to see it is too long.
+	pending       strings.Builder
+	pendingStream docker.ContainerLogStream
+}
+
+// write receives one decoded payload. A partial line is completed by the
+// next payload from the same stream; a payload from the other stream ends it.
+func (t *logTail) write(stream docker.ContainerLogStream, payload []byte) error {
+	if stream != t.pendingStream && t.pending.Len() > 0 {
+		t.flush()
+	}
+	t.pendingStream = stream
+	for {
+		newline := bytes.IndexByte(payload, '\n')
+		if newline < 0 {
+			t.buffer(payload)
+			return nil
+		}
+		t.buffer(payload[:newline])
+		t.flush()
+		payload = payload[newline+1:]
+	}
+}
+
+func (t *logTail) buffer(p []byte) {
+	t.pending.Write(p[:min(len(p), maxLogLineBytes+1-t.pending.Len())])
+}
+
+// flush ends the pending line, cutting it to maxLogLineBytes on a UTF-8
+// boundary when it is longer.
+func (t *logTail) flush() {
+	line := t.pending.String()
+	t.pending.Reset()
+	if len(line) > maxLogLineBytes {
+		cut := maxLogLineBytes
+		for cut > 0 && !utf8.RuneStart(line[cut]) {
+			cut--
+		}
+		line = line[:cut]
+		t.truncated = true
+	}
+	prefix := "stdout: "
+	if t.pendingStream == docker.ContainerLogStderr {
+		prefix = "stderr: "
+	}
+	t.add(prefix + line)
+}
+
+func (t *logTail) add(line string) {
+	if t.count == maxLogLines {
+		t.dropOldest()
+	}
+	t.ring[(t.start+t.count)%maxLogLines] = line
+	t.count++
+	t.size += len(line)
+	for t.size > maxLogBytes {
+		t.dropOldest()
+	}
+}
+
+func (t *logTail) dropOldest() {
+	t.size -= len(t.ring[t.start])
+	t.ring[t.start] = ""
+	t.start = (t.start + 1) % maxLogLines
+	t.count--
+	t.truncated = true
+}
+
+// lines returns the kept lines oldest first, or nil when there are none.
+func (t *logTail) lines() []string {
+	out := slices.Grow([]string(nil), t.count)
+	for i := range t.count {
+		out = append(out, t.ring[(t.start+i)%maxLogLines])
+	}
+	return out
 }
 
 // writeResult encodes a successful JSON-RPC response.
