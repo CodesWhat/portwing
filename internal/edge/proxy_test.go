@@ -171,7 +171,7 @@ func TestProxyFuncDefaultsToEnvironment(t *testing.T) {
 	t.Parallel()
 
 	c := &Client{}
-	got := reflect.ValueOf(c.proxyFunc()).Pointer()
+	got := reflect.ValueOf(c.proxySelector()).Pointer()
 	want := reflect.ValueOf(http.ProxyFromEnvironment).Pointer()
 	if got != want {
 		t.Errorf("default proxyFunc is not http.ProxyFromEnvironment")
@@ -179,7 +179,7 @@ func TestProxyFuncDefaultsToEnvironment(t *testing.T) {
 
 	injected := func(*http.Request) (*url.URL, error) { return nil, nil }
 	c.proxy = injected
-	if reflect.ValueOf(c.proxyFunc()).Pointer() != reflect.ValueOf(injected).Pointer() {
+	if reflect.ValueOf(c.proxySelector()).Pointer() != reflect.ValueOf(injected).Pointer() {
 		t.Errorf("injected proxy hook not returned by proxyFunc")
 	}
 }
