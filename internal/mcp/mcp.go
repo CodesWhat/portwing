@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/codeswhat/portwing/internal/docker"
@@ -296,74 +297,109 @@ func (h *Handler) handleInitialize(w http.ResponseWriter, req rpcRequest) {
 
 // toolsList returns the MCP tools/list result body.
 func (h *Handler) toolsList() map[string]any {
-	return map[string]any{
-		"tools": []any{
-			map[string]any{
-				"name":        "list_containers",
-				"description": "List all Docker containers (running and stopped) with id, names, image, state, status, and labels.",
-				"inputSchema": map[string]any{
-					"type":                 "object",
-					"additionalProperties": false,
-				},
+	return map[string]any{"tools": encodedTools()}
+}
+
+// encodedTools returns the tools array as JSON. The list is fixed at compile
+// time, so it is encoded once per process rather than on every tools/list;
+// the response bytes are the same either way.
+var encodedTools = sync.OnceValue(marshalTools)
+
+func marshalTools() json.RawMessage {
+	// A tree of maps, slices, strings, ints and bools always marshals.
+	encoded, _ := json.Marshal(toolDefinitions())
+	return encoded
+}
+
+// toolDefinitions returns the tool definitions served by tools/list.
+//
+// Every tool is read-only. openWorldHint is false where a tool reports Docker
+// or host metadata, and true for container_logs: the daemon is local, but the
+// text it returns is written by the workload and often records outside
+// traffic, so a client should treat it as untrusted input.
+func toolDefinitions() []any {
+	return []any{
+		map[string]any{
+			"name":        "list_containers",
+			"description": "List all Docker containers (running and stopped) with id, names, image, state, status, and labels.",
+			"inputSchema": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
 			},
-			map[string]any{
-				"name":        "inspect_container",
-				"description": "Inspect a container: state, image, env var count (no values), mounts, network names, and restart policy.",
-				"inputSchema": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"id": map[string]any{
-							"type":        "string",
-							"description": "Container ID or name.",
-						},
-					},
-					"required": []string{"id"},
-				},
-			},
-			map[string]any{
-				"name": "container_logs",
-				"description": "Return the last N lines (max 500) of stdout/stderr from a container. " +
-					"Output is capped at 256 KiB of log text, keeping the newest lines; truncated is true when lines were dropped or one was cut to fit.",
-				"inputSchema": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"id": map[string]any{
-							"type":        "string",
-							"description": "Container ID or name.",
-						},
-						"tail": map[string]any{
-							"type":        "integer",
-							"description": "Number of log lines to return (1–500, default 100).",
-							"minimum":     1,
-							"maximum":     maxLogLines,
-						},
-					},
-					"required": []string{"id"},
-				},
-			},
-			map[string]any{
-				"name":        "host_metrics",
-				"description": "Return a snapshot of host-level resource metrics: CPU, memory, disk, network, and uptime.",
-				"inputSchema": map[string]any{
-					"type":                 "object",
-					"additionalProperties": false,
-				},
-			},
-			map[string]any{
-				"name":        "container_stats",
-				"description": "Return a one-shot CPU/memory/network stats snapshot for a single container.",
-				"inputSchema": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"id": map[string]any{
-							"type":        "string",
-							"description": "Container ID or name.",
-						},
-					},
-					"required": []string{"id"},
-				},
-			},
+			"annotations": readOnlyAnnotations("List containers", false),
 		},
+		map[string]any{
+			"name":        "inspect_container",
+			"description": "Inspect a container: state, image, env var count (no values), mounts, network names, and restart policy.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Container ID or name.",
+					},
+				},
+				"required": []string{"id"},
+			},
+			"annotations": readOnlyAnnotations("Inspect container", false),
+		},
+		map[string]any{
+			"name": "container_logs",
+			"description": "Return the last N lines (max 500) of stdout/stderr from a container. " +
+				"Output is capped at 256 KiB of log text, keeping the newest lines; truncated is true when lines were dropped or one was cut to fit.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Container ID or name.",
+					},
+					"tail": map[string]any{
+						"type":        "integer",
+						"description": "Number of log lines to return (1–500, default 100).",
+						"minimum":     1,
+						"maximum":     maxLogLines,
+					},
+				},
+				"required": []string{"id"},
+			},
+			"annotations": readOnlyAnnotations("Container logs", true),
+		},
+		map[string]any{
+			"name":        "host_metrics",
+			"description": "Return a snapshot of host-level resource metrics: CPU, memory, disk, network, and uptime.",
+			"inputSchema": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+			},
+			"annotations": readOnlyAnnotations("Host metrics", false),
+		},
+		map[string]any{
+			"name":        "container_stats",
+			"description": "Return a one-shot CPU/memory/network stats snapshot for a single container.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Container ID or name.",
+					},
+				},
+				"required": []string{"id"},
+			},
+			"annotations": readOnlyAnnotations("Container stats", false),
+		},
+	}
+}
+
+// readOnlyAnnotations returns the standard ToolAnnotations for a tool that
+// never modifies its environment. destructiveHint and idempotentHint are left
+// out because the spec makes them meaningful only when readOnlyHint is false.
+func readOnlyAnnotations(title string, openWorld bool) map[string]any {
+	return map[string]any{
+		"title":         title,
+		"readOnlyHint":  true,
+		"openWorldHint": openWorld,
 	}
 }
 
