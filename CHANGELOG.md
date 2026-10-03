@@ -15,16 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client and the `portwing healthcheck` probe still ignore the proxy variables.
   The proxy URL must be `http://` or `socks5://`; an `https://` proxy URL is
   rejected with an error that says so.
-- Match Docker API paths the way the daemon routes them. The daemon accepts
-  any run of digits and dots as the version prefix, so `/v1.47.0/`, `/v1/` and
-  `/v./` reach the same handlers as `/v1.47/`, but Portwing only recognised
-  `MAJOR.MINOR`. Exec start and attach under those prefixes skipped the exec
-  audit record and exec session limit, and stats and push skipped the stream
-  session limit. Portwing now classifies on the decoded path with the daemon's
-  prefix shape, so encoded spellings such as `/containers/x/%73tats` are
-  covered too, and still forwards the original request bytes unchanged. This
-  affected Portwing's own audit and session limits only. Sockguard still denies
-  these paths when a preset is in front.
+- Match Docker API paths the way the daemon routes them. The daemon's router
+  accepts any run of digits and dots as the version prefix, so `/v1.47.0/`,
+  `/v1/` and `/v./` are routed like `/v1.47/` (whether the version is then
+  supported is decided after routing), but Portwing only recognised
+  `MAJOR.MINOR`. It also matched names without a slash, where the daemon
+  accepts any name, such as a linked container `webapp/db`. Exec start and
+  attach under those spellings skipped the exec audit record and exec session
+  limit, and stats and push skipped the stream session limit. Portwing now
+  classifies on the decoded path with the daemon's prefix and name shapes, so
+  encoded spellings such as `/containers/x/%73tats` are covered too, and
+  `attach/ws` is treated as a stream and a hijack. This affected Portwing's own
+  audit and session limits only. Sockguard still denies these paths when a
+  preset is in front.
+- Return the daemon's redirect for an unclean path instead of following it. The
+  daemon answers a doubled slash or a dot segment with a 301 to the cleaned
+  path. Portwing followed it after classifying the unclean request, so a stats
+  stream could skip the stream session limit. The caller now gets the 301 and
+  its retry is classified on its own path.
+- Forward a `#` in the query to the daemon. Portwing rebuilt the outbound URL
+  from a string, which read everything after `#` as a fragment and dropped it,
+  so the daemon could see a different query than the one Portwing classified,
+  for example without a `stream=0`. This applied to the proxy, exec and attach
+  upgrades, and edge-mode requests.
 
 ## [v0.9.21] - 2026-10-02
 

@@ -7,8 +7,9 @@ import (
 
 // The Docker daemon's router accepts a version prefix of "/v" followed by any
 // run of digits and dots ("/v1.47.0/", "/v1/"), not only MAJOR.MINOR (moby
-// daemon/server/server.go, versionMatcher). These requests reach the same
-// handler as their canonical form, so they must be classified the same way.
+// daemon/server/server.go, versionMatcher). The router sends these requests to
+// the same handler as their canonical form (whether the version is then
+// supported is decided after routing), so they must be classified the same way.
 
 func TestIsStreamingRequestDaemonAcceptedPrefixes(t *testing.T) {
 	t.Parallel()

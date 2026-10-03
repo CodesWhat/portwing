@@ -55,6 +55,7 @@ func isStreamingPath(path string) bool {
 	streamSuffixes := []string{
 		"/logs",
 		"/attach",
+		"/attach/ws", // GET /containers/{id}/attach/ws, a websocket stream
 		"/events",
 		"/build",
 		"/images/create",
@@ -87,18 +88,9 @@ func isStreamingPath(path string) bool {
 }
 
 // streamingRouteFamily matches the stats and named-image push routes after an
-// optional Docker API version prefix (see StripAPIVersion).
+// optional Docker API version prefix. Container and image names may contain
+// slashes, so the name is matched the way the daemon's router does (see
+// IsResourceRoute).
 func streamingRouteFamily(path string) (stats, push bool) {
-	path = StripAPIVersion(path)
-	if name, ok := strings.CutPrefix(path, "/containers/"); ok {
-		if id, matched := strings.CutSuffix(name, "/stats"); matched && id != "" && !strings.Contains(id, "/") {
-			stats = true
-		}
-	}
-	if name, ok := strings.CutPrefix(path, "/images/"); ok {
-		if image, matched := strings.CutSuffix(name, "/push"); matched && image != "" {
-			push = true
-		}
-	}
-	return stats, push
+	return IsResourceRoute(path, "containers", "stats"), IsResourceRoute(path, "images", "push")
 }

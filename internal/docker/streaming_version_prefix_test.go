@@ -33,7 +33,7 @@ func TestIsStreamingRequestVersionPrefixes(t *testing.T) {
 		{"stats uppercase V is not a version; daemon 404s it", http.MethodGet, "/V1.47/containers/abc/stats", false},
 		{"stats trailing slash is not the route; daemon 404s it", http.MethodGet, "/v1.47/containers/abc/stats/", false},
 		{"stats doubled slash after prefix is not the route", http.MethodGet, "/v1.47//containers/abc/stats", false},
-		{"stats id containing a slash is not the route", http.MethodGet, "/v1.47/containers/a/b/stats", false},
+		{"stats name containing a slash is a route: the daemon registers {name:.*}", http.MethodGet, "/v1.47/containers/webapp/db/stats", true},
 		{"stats dot-dot id errs toward streaming, the guarded side", http.MethodGet, "/v1.47/containers/../stats", true},
 
 		// Push family (POST only).
@@ -172,7 +172,7 @@ func TestIsStreamingRequestDecodesOnce(t *testing.T) {
 		{"encoded slash in the prefix position streams", http.MethodGet, "/v1.47%2Fcontainers/abc/stats", true},
 		{"encoded suffix word streams", http.MethodGet, "/v1.47/containers/abc/%6Cogs", true},
 		{"encoded exec start streams", http.MethodPost, "/v1.47/exec/abc/%73tart", true},
-		{"encoded slash in a stats id is decoded to a non-route", http.MethodGet, "/v1.47/containers/a%2Fb/stats", false},
+		{"encoded slash in a stats name decodes to a slash-bearing name the daemon routes", http.MethodGet, "/v1.47/containers/webapp%2Fdb/stats", true},
 		{"double-encoded letters are decoded once and stay a non-route", http.MethodGet, "/v1.47/containers/abc/%2573tats", false},
 		{"invalid escape is classified as written", http.MethodGet, "/v1.47/containers/abc/stats%zz", false},
 		{"invalid escape does not hide a suffix", http.MethodGet, "/v1.47/containers/abc%zz/logs", true},
@@ -196,6 +196,66 @@ func TestIsStreamingPathDecodesAndDropsQuery(t *testing.T) {
 		"/v1/images/nginx/push":                    true,
 		"/v1.47/containers/abc/%6Cogs?follow=1":    true,
 		"/v1.47/containers/abc/json?x=/logs":       false,
+	} {
+		if got := IsStreamingPath(path); got != want {
+			t.Errorf("IsStreamingPath(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+// TestIsResourceRouteNameShapes pins the daemon's route shape
+// "/{resource}/{name:.*}/{action}": a non-empty name that may contain slashes,
+// then the action, under an optional version prefix.
+func TestIsResourceRouteNameShapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		path     string
+		resource string
+		action   string
+		want     bool
+	}{
+		{"plain name", "/containers/abc/stats", "containers", "stats", true},
+		{"slash-bearing name for a linked container", "/containers/webapp/db/stats", "containers", "stats", true},
+		{"slash-bearing registry image name", "/v1.47/images/registry.example/team/app/push", "images", "push", true},
+		{"name that itself ends in the action word", "/containers/a/stats/stats", "containers", "stats", true},
+		{"name that starts with the action word", "/containers/stats/stats", "containers", "stats", true},
+		{"one-byte name", "/containers/a/stats", "containers", "stats", true},
+		{"two-segment action", "/v01.47/containers/abc/attach/ws", "containers", "attach/ws", true},
+		{"empty name", "/containers//stats", "containers", "stats", false},
+		{"no name", "/containers/stats", "containers", "stats", false},
+		{"no name with trailing slash", "/containers/stats/", "containers", "stats", false},
+		{"action without a separating slash", "/containers/abcstats", "containers", "stats", false},
+		{"trailing slash after the action", "/containers/abc/stats/", "containers", "stats", false},
+		{"extra segment after the action", "/containers/abc/stats/extra", "containers", "stats", false},
+		{"other resource", "/images/abc/stats", "containers", "stats", false},
+		{"resource as a prefix of a longer word", "/containersx/abc/stats", "containers", "stats", false},
+		{"resource not at the root", "/other/containers/abc/stats", "containers", "stats", false},
+		{"resource with no slash after it", "/containers", "containers", "stats", false},
+		{"relative path", "containers/abc/stats", "containers", "stats", false},
+		{"empty path", "", "containers", "stats", false},
+		{"root", "/", "containers", "stats", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsResourceRoute(tc.path, tc.resource, tc.action); got != tc.want {
+				t.Fatalf("IsResourceRoute(%q, %q, %q) = %v, want %v", tc.path, tc.resource, tc.action, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsStreamingPathAttachWebsocket(t *testing.T) {
+	t.Parallel()
+
+	for path, want := range map[string]bool{
+		"/v1.47/containers/abc/attach/ws":         true,
+		"/containers/webapp/db/attach/ws?logs=1":  true,
+		"/v1.47/containers/abc/attach/ws/":        false,
+		"/v1.47/containers/abc/attach/wsx":        false,
+		"/v1.47/containers/abc/attach/ws/inspect": false,
 	} {
 		if got := IsStreamingPath(path); got != want {
 			t.Errorf("IsStreamingPath(%q) = %v, want %v", path, got, want)

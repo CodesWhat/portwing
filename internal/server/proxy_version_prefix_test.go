@@ -44,8 +44,12 @@ func TestIsDockerHijackPathVersionPrefixes(t *testing.T) {
 		{"attach trailing slash is not the route; daemon 404s it", "/v1.47/containers/abc/attach/", false},
 		{"exec start doubled slash after prefix is not the route", "/v1.47//exec/abc/start", false},
 		{"exec start doubled slash in the middle is not the route", "/v1.47/exec//start", false},
-		{"exec start decoded slash in the id is not the route", "/v1.47/exec/a/b/start", false},
-		{"attach decoded slash in the id is not the route", "/v1.47/containers/a/b/attach", false},
+		{"exec start name containing a slash is a route: the daemon registers {name:.*}", "/v1.47/exec/a/b/start", true},
+		{"attach name containing a slash is a route: the daemon registers {name:.*}", "/v1.47/containers/webapp/db/attach", true},
+		{"attach websocket route hijacks", "/v1.47/containers/abc/attach/ws", true},
+		{"attach websocket route with a slash in the name hijacks", "/v1.47/containers/webapp/db/attach/ws", true},
+		{"attach websocket route with an empty name is not a route", "/v1.47/containers//attach/ws", false},
+		{"attach websocket route with a trailing slash is not a route", "/v1.47/containers/abc/attach/ws/", false},
 		{"exec start with dot-dot segments is not the route", "/v1.47/../exec/abc/start", false},
 		{"exec start four-part prefix hijacks like the daemon", "/v1.47.0.1/exec/abc/start", true},
 		{"exec start dots-only prefix hijacks like the daemon", "/v./exec/abc/start", true},
@@ -208,7 +212,8 @@ func TestProxyStreamClassificationVersionPrefixes(t *testing.T) {
 		{"push leading-zero prefix", http.MethodPost, "/v01.47/images/nginx/push", streamed},
 		{"stats uppercase V", http.MethodGet, "/V1.47/containers/abc/stats", unguarded},
 		{"stats trailing slash", http.MethodGet, "/v1.47/containers/abc/stats/", unguarded},
-		{"stats encoded slash in the id is decoded to a non-route", http.MethodGet, "/v1.47/containers/a%2Fb/stats", unguarded},
+		{"stats encoded slash in the name decodes to a slash-bearing name the daemon routes", http.MethodGet, "/v1.47/containers/webapp%2Fdb/stats", streamed},
+		{"stats slash-bearing name", http.MethodGet, "/v1.47/containers/webapp/db/stats", streamed},
 		{"stats with stream disabled", http.MethodGet, "/v1.47/containers/abc/stats?stream=0", unguarded},
 		{"logs odd prefix still suffix-matched", http.MethodGet, "/v1.47.0/containers/abc/logs", streamed},
 	}
@@ -262,7 +267,10 @@ func TestProxyHijackClassificationVersionPrefixes(t *testing.T) {
 		{"exec start encoded letter in the route word", "/v1.47/exec/abc/%73tart", hijacked, 1},
 		{"exec start uppercase V", "/V1.47/exec/abc/start", plain, 0},
 		{"exec start trailing slash", "/v1.47/exec/abc/start/", plain, 0},
-		{"exec start encoded slash in the id", "/v1.47/exec/a%2Fb/start", plain, 0},
+		{"exec start encoded slash in the name decodes to a name the daemon routes", "/v1.47/exec/a%2Fb/start", hijacked, 1},
+		{"exec start slash-bearing name", "/v1.47/exec/a/b/start", hijacked, 1},
+		{"attach slash-bearing name", "/v1.47/containers/webapp/db/attach", hijacked, 0},
+		{"attach websocket route", "/v1.47/containers/abc/attach/ws", hijacked, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name+": "+tc.want, func(t *testing.T) {
