@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -190,6 +191,11 @@ type Client struct {
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
+
+	// proxy picks the HTTP proxy for the controller dial. Nil means
+	// http.ProxyFromEnvironment (HTTPS_PROXY, HTTP_PROXY, NO_PROXY); tests
+	// inject their own because the environment lookup is cached per process.
+	proxy func(*http.Request) (*url.URL, error)
 
 	// sendCh fronts all post-handshake writes with a single sendPump goroutine,
 	// so a slow controller backs up here instead of head-of-line-blocking every
@@ -399,6 +405,16 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 }
 
+// proxyFunc returns the proxy selector for the controller dial: the injected
+// hook when set, otherwise the standard environment lookup so hosts behind an
+// egress proxy can reach the controller.
+func (c *Client) proxyFunc() func(*http.Request) (*url.URL, error) {
+	if c.proxy != nil {
+		return c.proxy
+	}
+	return http.ProxyFromEnvironment
+}
+
 // connect dials the WebSocket, performs the hello/welcome handshake, syncs
 // state, and runs the read and write pumps.
 func (c *Client) connect(ctx context.Context) (bool, error) {
@@ -431,6 +447,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	dialer := websocket.Dialer{
 		TLSClientConfig:  tlsConfig,
 		HandshakeTimeout: 10 * time.Second,
+		Proxy:            c.proxyFunc(),
 	}
 
 	slog.Info("connecting to controller", "url", wsURL)
