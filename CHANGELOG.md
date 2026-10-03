@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The MCP server speaks protocol revision 2026-07-28 as well as
+  2025-11-25.** A request whose `params._meta` carries
+  `io.modelcontextprotocol/protocolVersion`, or whose `MCP-Protocol-Version`
+  header is `2026-07-28`, is handled statelessly under that revision:
+  `server/discover` answers with the supported versions and capabilities,
+  every result carries `resultType` and the server's identity in `_meta`,
+  `tools/list` and `server/discover` carry `ttlMs: 3600000` and
+  `cacheScope: "public"`, and the `MCP-Protocol-Version`, `Mcp-Method` and
+  `Mcp-Name` headers are checked against the body. Errors use the revision's
+  codes and HTTP statuses: `-32020` for a header mismatch and `-32022` for an
+  unsupported version, both on 400, and `-32601` on 404 for `ping`,
+  `initialize` and any other method the revision doesn't define. Every other
+  request takes the 2025-11-25 path, which answers exactly as before.
+- **All five MCP tools carry tool annotations**, on both revisions:
+  `readOnlyHint: true`, a display `title`, and `openWorldHint`, which is
+  `true` only for `container_logs` because its text comes from the workload.
+- **`container_logs` output is bounded and says when it was cut.** Docker's
+  `tail` limits how many lines come back but not how long they are, so the
+  tool now keeps the newest lines that fit in 500 lines and 256 KiB, and reports
+  `truncated: true` when it dropped any or cut an oversized line. Memory use
+  while decoding is bounded the same way.
+
+### Changed
+
+- `tools/list` encodes its tool definitions once per process instead of on
+  every call, which takes the 2025-11-25 request from 85 allocations to 40
+  even with the new annotations. Encoding once produces the same bytes as
+  encoding per request.
+
 ### Fixed
 
 - Edge mode now honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` for the

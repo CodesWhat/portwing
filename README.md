@@ -358,7 +358,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
-| **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
+| **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol revisions 2026-07-28 and 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting. Portwing marks watcher execution as controller-owned so compatible Drydock runs native watcher/update calls through the Standard or Edge Docker proxy. |
 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_portwing/metrics`. Zero external dependencies. |
 | **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Recent records are retained in memory by default; file/stdout/stderr persistence is opt-in. |
@@ -681,7 +681,7 @@ Kubernetes examples use `/health` for liveness and `/ready` for readiness.
 | `/metrics` | GET | Yes | Prometheus metrics (Drydock agent secret) |
 | `/_portwing/audit` | GET | Yes | Recent audit records (JSON, newest-first; `?limit=N`) |
 | `/_portwing/audit/export` | GET | Standard: yes; edge: no | Cursor-based NDJSON export (oldest-first) |
-| `/_portwing/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol 2025-11-25) |
+| `/_portwing/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol revisions 2026-07-28 and 2025-11-25) |
 
 In Edge Mode, `/_portwing/audit/export` is served without inbound
 authentication on the same limited operations listener as `/metrics`,
@@ -696,7 +696,16 @@ Portwing exposes a read-only [Model Context Protocol](https://modelcontextprotoc
 at `POST /_portwing/mcp`. AI assistants (Claude, Cursor, Windsurf, or any MCP client) can query
 live container state through this endpoint using their standard tool-call flow.
 
-**Protocol:** MCP 2025-11-25 — Streamable HTTP, stateless single-request mode, `Content-Type: application/json`.
+**Protocol:** MCP revisions 2026-07-28 and 2025-11-25 over Streamable HTTP, in stateless
+single-request mode with `Content-Type: application/json`. A request takes the 2026-07-28 path
+when `params._meta` contains `io.modelcontextprotocol/protocolVersion` (any value) or when its
+`MCP-Protocol-Version` header is `2026-07-28`. On that path `server/discover` is available, results
+carry `resultType`, `tools/list` carries `ttlMs` and `cacheScope`, and the `MCP-Protocol-Version`,
+`Mcp-Method` and `Mcp-Name` headers must match the body. A `_meta` version other than 2026-07-28
+is rejected with `-32022` on HTTP 400, and the header alone without that `_meta` key is rejected
+with `-32602`. Every other request gets the 2025-11-25 behaviour, with `initialize` and `ping`,
+unchanged.
+Clients on either revision connect to the same URL with no extra configuration.
 
 **Available tools:**
 
@@ -704,9 +713,12 @@ live container state through this endpoint using their standard tool-call flow.
 |------|-------------|
 | `list_containers` | All containers — id, names, image, state, status, labels |
 | `inspect_container(id)` | State, image, env-var count (values never exposed via this MCP tool), mounts, networks, restart policy |
-| `container_logs(id, tail)` | Last N lines of stdout/stderr (max 500) |
+| `container_logs(id, tail)` | Last N lines of stdout/stderr (max 500 lines and 256 KiB; `truncated` reports a cut) |
 | `host_metrics` | CPU, memory, disk, network, uptime snapshot (Linux only, see below) |
 | `container_stats(id)` | One-shot CPU/memory/network stats for a container |
+
+Every tool is annotated `readOnlyHint: true`. `openWorldHint` is `false` except on
+`container_logs`, whose text is written by the workload and should be treated as untrusted input.
 
 **Platform support:** `host_metrics` reads everything except the CPU core count and disk from
 `/proc`, so it works on the Linux container, `.deb` and `.rpm` builds and on no other platform. On

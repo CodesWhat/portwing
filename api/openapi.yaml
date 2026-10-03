@@ -668,6 +668,10 @@ components:
               type: integer
             message:
               type: string
+            data:
+              description: >
+                Present on `-32022` (UnsupportedProtocolVersion) as
+                `{"supported": ["2026-07-28"], "requested": "<version>"}`.
 
 paths:
   /health:
@@ -1003,17 +1007,58 @@ paths:
       operationId: postPortwingMcp
       summary: MCP server (Model Context Protocol, read-only)
       description: >
-        Read-only MCP server over the Streamable HTTP transport (protocol
-        revision `2025-11-25`). Each POST carries a single JSON-RPC 2.0 request
-        and returns one JSON-RPC 2.0 response (`application/json`); the server
-        is stateless and assigns no `Mcp-Session-Id`. Supported methods include
-        `initialize`, `tools/list`, and `tools/call`. Bearer auth required.
+        Read-only MCP server over the Streamable HTTP transport, serving
+        protocol revisions `2026-07-28` and `2025-11-25`. Each POST carries a
+        single JSON-RPC 2.0 request and returns one JSON-RPC 2.0 response
+        (`application/json`); the server is stateless and assigns no
+        `Mcp-Session-Id`. Bearer auth required.
+
+        A request whose `params._meta` carries
+        `io.modelcontextprotocol/protocolVersion`, or whose
+        `MCP-Protocol-Version` header is `2026-07-28`, is served under
+        revision 2026-07-28: supported methods are `server/discover`,
+        `tools/list`, and `tools/call`, results carry `resultType` and
+        `_meta`, and the `MCP-Protocol-Version`, `Mcp-Method`, and (for
+        `tools/call`) `Mcp-Name` headers are required and must match the body.
+        Every other request is served under revision 2025-11-25 with
+        `initialize`, `ping`, `tools/list`, and `tools/call`, and those
+        headers are not checked.
 
         `GET /_portwing/mcp` returns 405 (no server-initiated SSE stream).
       tags: [MCP]
       security:
         - bearerToken: []
         - portwingToken: []
+      parameters:
+        - name: MCP-Protocol-Version
+          in: header
+          required: false
+          description: >
+            Protocol revision. Required on 2026-07-28 requests, where it must
+            equal `params._meta["io.modelcontextprotocol/protocolVersion"]`.
+            A value of `2026-07-28` selects that revision even without the
+            `_meta` field, which then fails validation. Ignored on
+            2025-11-25 requests.
+          schema:
+            type: string
+            example: "2026-07-28"
+        - name: Mcp-Method
+          in: header
+          required: false
+          description: Required on 2026-07-28 requests; must equal the body's `method`.
+          schema:
+            type: string
+            example: tools/call
+        - name: Mcp-Name
+          in: header
+          required: false
+          description: >
+            Required on 2026-07-28 `tools/call` requests; must equal
+            `params.name`. A value that is not plain ASCII is sent as
+            `=?base64?<Base64 of the UTF-8 value>?=`.
+          schema:
+            type: string
+            example: list_containers
       requestBody:
         required: true
         content:
@@ -1039,13 +1084,32 @@ paths:
             `method`); the server does not reply to either.
         "400":
           description: >
-            Bad request, empty body. Returned only for notification-shaped
-            bodies: a `result`/`error` object with no `method` that fails
-            JSON-RPC response validation, or a notification (no `id`) whose
-            `params` is present but not a JSON object. Requests carrying an
-            `id` report errors inside a 200 JSON-RPC error envelope instead.
+            Bad request. With an empty body, returned only for
+            notification-shaped bodies: a `result`/`error` object with no
+            `method` that fails JSON-RPC response validation, or a notification
+            (no `id`) whose `params` is present but not a JSON object. With a
+            JSON-RPC error body, returned only for 2026-07-28 requests:
+            `-32602` when a required `_meta` field is missing or malformed,
+            `-32020` (HeaderMismatch) when a required header is missing or
+            disagrees with the body, and `-32022` (UnsupportedProtocolVersion)
+            when `_meta` names another revision, with `error.data.supported`
+            and `error.data.requested`. 2025-11-25 requests carrying an `id`
+            report errors inside a 200 JSON-RPC error envelope instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPResponse'
         "401":
           description: Missing or invalid token.
+        "404":
+          description: >
+            Returned only for 2026-07-28 requests naming a method that
+            revision doesn't define, including `ping` and `initialize`. The
+            body is a JSON-RPC error with code `-32601`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPResponse'
         "405":
           description: Method not allowed (POST required; GET has no SSE stream).
         "429":

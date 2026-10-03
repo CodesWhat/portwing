@@ -16,12 +16,34 @@ The MCP server is supported in Portwing v0.9.x. Its tool names, input schemas, a
 | Property | Value |
 |---|---|
 | Endpoint | `POST /_portwing/mcp` |
-| Protocol revision | MCP 2025-11-25 |
-| Transport | Streamable HTTP — stateless single-request mode |
+| Protocol revisions | MCP 2026-07-28 and MCP 2025-11-25 |
+| Transport | Streamable HTTP, stateless single-request mode |
 | Content-Type | `application/json` (request and response) |
-| Session management | None — no `Mcp-Session-Id` is issued or required |
+| Session management | None. No `Mcp-Session-Id` is issued or required |
 
 Every POST returns one JSON-RPC 2.0 response object. `GET /_portwing/mcp` returns `405 Method Not Allowed` to signal that no SSE stream is offered at this endpoint.
+
+### Protocol revisions
+
+Clients on either revision use the same URL, and the server picks the revision per request.
+
+A request is served as **2026-07-28** when `params._meta` carries `io.modelcontextprotocol/protocolVersion`, or when the `MCP-Protocol-Version` header is `2026-07-28`. That revision is stateless, so there is no `initialize` handshake:
+
+- `server/discover` returns `supportedVersions` (`["2026-07-28"]`), `capabilities` (`{"tools": {}}`), and cache hints.
+- Every result carries `"resultType": "complete"` and the server's name and version in `_meta["io.modelcontextprotocol/serverInfo"]`.
+- `tools/list` and `server/discover` carry `"ttlMs": 3600000` and `"cacheScope": "public"`. The tool list is fixed for a given Portwing binary and is the same for every caller, so a client or shared cache may keep it for an hour. A client that calls a tool removed by an upgrade gets an unknown-tool error, which the spec names as a reason to re-fetch early.
+- `_meta` must carry `io.modelcontextprotocol/protocolVersion` (a string) and `io.modelcontextprotocol/clientCapabilities` (an object). The `MCP-Protocol-Version` and `Mcp-Method` headers are required and must match the body, and `tools/call` also needs `Mcp-Name` matching `params.name`. A name that isn't plain ASCII is sent as `=?base64?...?=`.
+- `ping`, `initialize`, `logging/setLevel`, and any other method the revision doesn't define return `-32601` with HTTP `404`.
+
+| Failure | JSON-RPC code | HTTP status |
+|---|---|---|
+| Required `_meta` field missing or malformed | `-32602` | `400` |
+| Header missing, or not matching the body | `-32020` (HeaderMismatch) | `400` |
+| `_meta` names a version other than 2026-07-28 | `-32022` (UnsupportedProtocolVersion), with `data.supported` and `data.requested` | `400` |
+| Unknown method | `-32601` | `404` |
+| Unknown tool or malformed `tools/call` params | `-32602` | `200` |
+
+Every other request is served as **2025-11-25**, exactly as before: `initialize` negotiates `2025-11-25`, `ping` works, results carry no `resultType`, and the 2026-07-28 headers are ignored. A 2025-11-25 client that sends `MCP-Protocol-Version: 2025-11-25` after `initialize` stays on this path.
 
 Authentication follows the same bearer-token scheme used by all other Portwing endpoints. See [Authentication](/authentication).
 
@@ -56,7 +78,7 @@ Additionally, `inspect_container` returns only the *count* of environment variab
 
 ## Tools
 
-The server advertises five tools via `tools/list`. All are read-only.
+The server advertises five tools via `tools/list`, in the same order on both revisions. All are read-only, and each carries standard tool annotations: a display `title`, `readOnlyHint: true`, and `openWorldHint`. `openWorldHint` is `false` for every tool except `container_logs`, whose text is written by the workload and often records outside traffic, so clients should treat it as untrusted input.
 
 ### `list_containers`
 
@@ -106,6 +128,8 @@ Returns detailed state for a single container.
 
 Returns the last N lines of stdout and stderr from a container. Each line is prefixed with `stdout:` or `stderr:`.
 
+The output is bounded. Docker's `tail` limits how many lines come back but not how long they are, so the tool keeps at most 500 lines and at most 256 KiB of line text, prefixes included, dropping the oldest lines first. A single line longer than the whole budget keeps its first 262,136 bytes, cut on a UTF-8 boundary. `truncated` is `true` whenever a line was dropped or cut.
+
 **Parameters:**
 
 | Name | Type | Required | Description |
@@ -118,7 +142,8 @@ Returns the last N lines of stdout and stderr from a container. Each line is pre
 | Field | Type | Description |
 |---|---|---|
 | `id` | string | Container ID echoed back |
-| `lines` | string[] | Log lines, each prefixed `stdout:` or `stderr:` |
+| `lines` | string[] | Log lines, oldest first, each prefixed `stdout:` or `stderr:` |
+| `truncated` | boolean | `true` when lines were dropped or one was cut to fit the bounds |
 
 ---
 
