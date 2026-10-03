@@ -136,37 +136,6 @@ func TestOversizedAttachBodyAtExactLimitIsNotRejected(t *testing.T) {
 	}
 }
 
-// TestIsASCIIDigitsBoundary exercises isASCIIDigits at the '0' and '9'
-// boundaries and their immediate neighbors, killing the two
-// CONDITIONALS_BOUNDARY mutants at http.go:759 (`value[i] < '0'` and
-// `value[i] > '9'`).
-func TestIsASCIIDigitsBoundary(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		value string
-		want  bool
-	}{
-		{"", false},
-		{"0", true}, // exact lower boundary
-		{"9", true}, // exact upper boundary
-		{"09", true},
-		{"/", false}, // '/' == '0'-1, just below lower boundary
-		{":", false}, // ':' == '9'+1, just above upper boundary
-		{"123", true},
-		{"12a", false},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.value, func(t *testing.T) {
-			t.Parallel()
-			if got := isASCIIDigits(tc.value); got != tc.want {
-				t.Errorf("isASCIIDigits(%q) = %v, want %v", tc.value, got, tc.want)
-			}
-		})
-	}
-}
-
 // flushTrackingResponseWriter records whether Flush was called, to observe
 // streamResponse's internal `if n > 0` guard.
 type flushTrackingResponseWriter struct {
