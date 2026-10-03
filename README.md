@@ -697,11 +697,14 @@ at `POST /_portwing/mcp`. AI assistants (Claude, Cursor, Windsurf, or any MCP cl
 live container state through this endpoint using their standard tool-call flow.
 
 **Protocol:** MCP revisions 2026-07-28 and 2025-11-25 over Streamable HTTP, in stateless
-single-request mode with `Content-Type: application/json`. A request that names 2026-07-28 in
-`params._meta["io.modelcontextprotocol/protocolVersion"]` is served under that revision:
-`server/discover` is available, results carry `resultType`, `tools/list` carries `ttlMs` and
-`cacheScope`, and the `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` headers must match the
-body. Any other request gets the 2025-11-25 behaviour, with `initialize` and `ping`, unchanged.
+single-request mode with `Content-Type: application/json`. A request takes the 2026-07-28 path
+when `params._meta` contains `io.modelcontextprotocol/protocolVersion` (any value) or when its
+`MCP-Protocol-Version` header is `2026-07-28`. On that path `server/discover` is available, results
+carry `resultType`, `tools/list` carries `ttlMs` and `cacheScope`, and the `MCP-Protocol-Version`,
+`Mcp-Method` and `Mcp-Name` headers must match the body. A `_meta` version other than 2026-07-28
+is rejected with `-32022` on HTTP 400, and the header alone without that `_meta` key is rejected
+with `-32602`. Every other request gets the 2025-11-25 behaviour, with `initialize` and `ping`,
+unchanged.
 Clients on either revision connect to the same URL with no extra configuration.
 
 **Available tools:**

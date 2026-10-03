@@ -63,6 +63,7 @@ func FuzzMCPHandler(f *testing.F) {
 	f.Add(fuzzModernSeed("tools/call", `"2026-07-28"`, `{}`, `,"name":"list_containers","arguments":{}`))
 	f.Add(fuzzModernSeed("tools/call", `"2026-07-28"`, `{}`, `,"name":"héllo"`))
 	f.Add(fuzzModernSeed("tools/call", `"2026-07-28"`, `{}`, `,"name":"=?base64?x?="`))
+	f.Add(fuzzModernSeed("tools/call", `"2026-07-28"`, `{}`, `,"name":"=?base64?="`))
 	f.Add(fuzzModernSeed("tools/call", `"2026-07-28"`, `{}`, `,"name":7`))
 	f.Add(fuzzModernSeed("resources/read", `"2026-07-28"`, `{}`, `,"uri":"file:///x"`))
 	f.Add(fuzzModernSeed("ping", `"2026-07-28"`, `{}`, ``))
@@ -392,7 +393,10 @@ func fuzzNameField(method string) string {
 // to: plain when it is visible ASCII, space or tab and doesn't look like the
 // sentinel, Base64 otherwise.
 func fuzzHeaderValue(v string) string {
-	plain := !strings.HasPrefix(v, fuzzBase64Sentinel) || !strings.HasSuffix(v, "?=")
+	// Matches decodeHeaderValue: the sentinel only applies when prefix and
+	// suffix don't overlap, so "=?base64?=" (10 bytes) is plain text.
+	plain := len(v) < len(fuzzBase64Sentinel)+len("?=") ||
+		!strings.HasPrefix(v, fuzzBase64Sentinel) || !strings.HasSuffix(v, "?=")
 	for _, c := range []byte(v) {
 		if c != '\t' && (c < 0x20 || c > 0x7e) {
 			plain = false
