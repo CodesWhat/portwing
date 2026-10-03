@@ -13,6 +13,7 @@ func toolAnnotationResponses(t *testing.T, h *Handler) map[string]*httptest.Resp
 	t.Helper()
 	return map[string]*httptest.ResponseRecorder{
 		"2025-11-25": postMCPRaw(h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`),
+		"2026-07-28": postWithHeaders(h, modernBody(t, 1, "tools/list", nil, modernMeta()), modernHeaders("tools/list")),
 	}
 }
 
