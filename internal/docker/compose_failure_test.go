@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -70,12 +71,15 @@ func TestExecuteReportsSelfKilledSubprocess(t *testing.T) {
 func TestExecuteReportsSubprocessKilledByContextCancel(t *testing.T) {
 	cm := composeScriptManager(t, "touch started\nexec sleep 30\n")
 	startedFile := filepath.Join(cm.stacksDir, "app", "started")
-	ctx, cancel := contextWithCancelOnFile(t, startedFile)
+	ctx, cancel, started := contextWithCancelOnFile(t, startedFile)
 	defer cancel()
 
 	resp, err := cm.Execute(ctx, ComposeRequest{StackName: "app", Operation: "up"})
 	if err != nil {
 		t.Fatalf("Execute: unexpected error %v", err)
+	}
+	if !started() {
+		t.Fatal("the compose script never wrote its start marker, so the cancel did not prove an in-flight kill")
 	}
 	if resp.Success {
 		t.Fatal("Success = true for a subprocess killed by context cancellation")
@@ -125,13 +129,15 @@ func TestExecuteReportsMissingComposeBinary(t *testing.T) {
 // so a test kills the subprocess only after it has really started. The 10s
 // bound only stops the watcher if the script never starts; a healthy run
 // cancels within milliseconds.
-func contextWithCancelOnFile(t *testing.T, path string) (context.Context, context.CancelFunc) {
+func contextWithCancelOnFile(t *testing.T, path string) (context.Context, context.CancelFunc, func() bool) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
+	var seen atomic.Bool
 	go func() {
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
 			if _, err := os.Stat(path); err == nil {
+				seen.Store(true)
 				break
 			}
 			select {
@@ -142,5 +148,5 @@ func contextWithCancelOnFile(t *testing.T, path string) (context.Context, contex
 		}
 		cancel()
 	}()
-	return ctx, cancel
+	return ctx, cancel, seen.Load
 }

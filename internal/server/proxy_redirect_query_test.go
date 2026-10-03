@@ -163,3 +163,16 @@ func TestProxyForwardsEmptyQueryMarker(t *testing.T) {
 		t.Fatalf("daemon saw %+v, want one request for %q", got, target)
 	}
 }
+
+// TestNewDockerProxyRequestRejectsAnInvalidMethod covers the one error
+// newDockerProxyRequest can return: http.NewRequestWithContext refuses a
+// method that isn't an HTTP token, so the proxy reports it instead of building
+// a request with no URL.
+func TestNewDockerProxyRequestRejectsAnInvalidMethod(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodGet, "/v1.47/containers/json?all=1", nil)
+	r.Method = "BAD METHOD"
+	if req, err := newDockerProxyRequest(r, nil); err == nil {
+		t.Fatalf("newDockerProxyRequest accepted method %q and built %v", r.Method, req.URL)
+	}
+}
