@@ -383,8 +383,8 @@ func TestDockerHijackPathMatchesOnlyDockerExecAndAttachRoutes(t *testing.T) {
 		{path: "/proxy/exec/abc123/start", want: false},
 		{path: "/v1.44/proxy/exec/abc123/start", want: false},
 		{path: "/proxy/containers/abc123/attach", want: false},
-		{path: "/v1/containers/abc123/attach", want: false},
-		{path: "/v.44/containers/abc123/attach", want: false},
+		{path: "/v1/containers/abc123/attach", want: true}, // the daemon accepts any digits-and-dots version
+		{path: "/v.44/containers/abc123/attach", want: true},
 		{path: "/v1.x/containers/abc123/attach", want: false},
 		{path: "/v1.44/containers//attach", want: false},
 		{path: "/v1.44/containers/abc123/attach/", want: false},

@@ -47,6 +47,12 @@ func TestIsDockerHijackPathVersionPrefixes(t *testing.T) {
 		{"exec start decoded slash in the id is not the route", "/v1.47/exec/a/b/start", false},
 		{"attach decoded slash in the id is not the route", "/v1.47/containers/a/b/attach", false},
 		{"exec start with dot-dot segments is not the route", "/v1.47/../exec/abc/start", false},
+		{"exec start four-part prefix hijacks like the daemon", "/v1.47.0.1/exec/abc/start", true},
+		{"exec start dots-only prefix hijacks like the daemon", "/v./exec/abc/start", true},
+		{"exec start dot-dot prefix hijacks like the daemon", "/v1../exec/abc/start", true},
+		{"exec start empty version is not a prefix", "/v/exec/abc/start", false},
+		{"exec start letters in the version are not a prefix", "/v1.x/exec/abc/start", false},
+		{"exec start doubled prefix is not the route", "/v1.47/v1.47/exec/abc/start", false},
 		{"exec resize is not a hijack route", "/v1.47/exec/abc/resize", false},
 		{"container start is not a hijack route", "/v1.47/containers/abc/start", false},
 		{"empty path is not a hijack route", "", false},
@@ -57,35 +63,6 @@ func TestIsDockerHijackPathVersionPrefixes(t *testing.T) {
 			t.Parallel()
 			if got := isDockerHijackPath(tc.path); got != tc.want {
 				t.Fatalf("isDockerHijackPath(%q) = %v, want %v", tc.path, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestIsDockerAPIVersionShapes(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		segment string
-		want    bool
-	}{
-		{"v1.47", true},
-		{"v01.47", true},
-		{"v1.047", true},
-		{"v1.47.0", false},
-		{"v1", false},
-		{"V1.47", false},
-		{"v1.", false},
-		{"v.47", false},
-		{"v1.x", false},
-		{"1.47", false},
-		{"", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.segment, func(t *testing.T) {
-			t.Parallel()
-			if got := isDockerAPIVersion(tc.segment); got != tc.want {
-				t.Fatalf("isDockerAPIVersion(%q) = %v, want %v", tc.segment, got, tc.want)
 			}
 		})
 	}
@@ -231,7 +208,7 @@ func TestProxyStreamClassificationVersionPrefixes(t *testing.T) {
 		{"push leading-zero prefix", http.MethodPost, "/v01.47/images/nginx/push", streamed},
 		{"stats uppercase V", http.MethodGet, "/V1.47/containers/abc/stats", unguarded},
 		{"stats trailing slash", http.MethodGet, "/v1.47/containers/abc/stats/", unguarded},
-		{"stats encoded slash in the id errs toward streaming, the guarded side", http.MethodGet, "/v1.47/containers/a%2Fb/stats", streamed},
+		{"stats encoded slash in the id is decoded to a non-route", http.MethodGet, "/v1.47/containers/a%2Fb/stats", unguarded},
 		{"stats with stream disabled", http.MethodGet, "/v1.47/containers/abc/stats?stream=0", unguarded},
 		{"logs odd prefix still suffix-matched", http.MethodGet, "/v1.47.0/containers/abc/logs", streamed},
 	}

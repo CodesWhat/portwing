@@ -78,13 +78,16 @@ func TestStreamingRouteFamilyVersionPrefixes(t *testing.T) {
 		{"canonical push", "/v1.47/images/nginx/push", false, true},
 		{"unversioned stats", "/containers/abc/stats", true, false},
 		{"leading zero major and minor", "/v01.047/containers/abc/stats", true, false},
-		{"prefix without dot is not stripped", "/v1/containers/abc/stats", false, false},
-		{"prefix with empty minor is not stripped", "/v1./containers/abc/stats", false, false},
+		{"prefix without dot is stripped like the daemon", "/v1/containers/abc/stats", true, false},
+		{"prefix with empty minor is stripped like the daemon", "/v1./containers/abc/stats", true, false},
+		{"three-part prefix is stripped like the daemon", "/v1.47.0/containers/abc/stats", true, false},
+		{"dots-only prefix is stripped like the daemon", "/v./containers/abc/stats", true, false},
 		{"prefix with non-digit minor is not stripped", "/v1.x/containers/abc/stats", false, false},
 		{"prefix with no rest is not stripped", "/v1.47", false, false},
 		{"uppercase V is not stripped", "/V1.47/containers/abc/stats", false, false},
 		{"prefix then slash then stats is not stripped", "/v1.47//containers/abc/stats", false, false},
 		{"bare v prefix is not stripped", "/v/containers/abc/stats", false, false},
+		{"doubled prefix strips once", "/v1.47/v1.47/containers/abc/stats", false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,5 +97,108 @@ func TestStreamingRouteFamilyVersionPrefixes(t *testing.T) {
 				t.Fatalf("streamingRouteFamily(%q) = (%v, %v), want (%v, %v)", tc.path, stats, push, tc.wantStats, tc.wantPush)
 			}
 		})
+	}
+}
+
+func TestStripAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		// The daemon matches "/v" + [0-9.]+ and then the route path, which starts with "/".
+		{"/v1.47/containers/json", "/containers/json"},
+		{"/v01.47/containers/json", "/containers/json"},
+		{"/v1.47.0/containers/json", "/containers/json"},
+		{"/v1.47.0.1/containers/json", "/containers/json"},
+		{"/v1/containers/json", "/containers/json"},
+		{"/v./containers/json", "/containers/json"},
+		{"/v1../containers/json", "/containers/json"},
+		{"/v0/containers/json", "/containers/json"},
+		{"/v9.9/", "/"},
+		// Not a daemon version prefix, so returned unchanged.
+		{"/containers/json", "/containers/json"},
+		{"/V1.47/containers/json", "/V1.47/containers/json"},
+		{"/v/containers/json", "/v/containers/json"},
+		{"/v1.x/containers/json", "/v1.x/containers/json"},
+		{"/v1.47", "/v1.47"},
+		{"/v1.47x/containers/json", "/v1.47x/containers/json"},
+		{"/v:/containers/json", "/v:/containers/json"},
+		{"/v1.47//containers/json", "//containers/json"},
+		{"v1.47/containers/json", "v1.47/containers/json"},
+		{"", ""},
+		{"/", "/"},
+		{"/v", "/v"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+			if got := StripAPIVersion(tc.path); got != tc.want {
+				t.Fatalf("StripAPIVersion(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsVersionByteBoundaries pins the digit range at '0' and '9' and the
+// bytes just outside it, plus the dot.
+func TestIsVersionByteBoundaries(t *testing.T) {
+	t.Parallel()
+
+	for c, want := range map[byte]bool{
+		'.': true, '0': true, '5': true, '9': true,
+		'/': false, ':': false, '-': false, 'v': false, 'a': false, 0: false, 255: false,
+	} {
+		if got := isVersionByte(c); got != want {
+			t.Errorf("isVersionByte(%q) = %v, want %v", c, got, want)
+		}
+	}
+}
+
+// Classification runs on the decoded path, as the daemon routes it, and
+// decodes exactly once.
+func TestIsStreamingRequestDecodesOnce(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		want   bool
+	}{
+		{"encoded letters in a route word stream", http.MethodGet, "/v1.47/containers/abc/%73tats", true},
+		{"encoded letters in a push route stream", http.MethodPost, "/v1.47/images/nginx/pus%68", true},
+		{"encoded slash in the prefix position streams", http.MethodGet, "/v1.47%2Fcontainers/abc/stats", true},
+		{"encoded suffix word streams", http.MethodGet, "/v1.47/containers/abc/%6Cogs", true},
+		{"encoded exec start streams", http.MethodPost, "/v1.47/exec/abc/%73tart", true},
+		{"encoded slash in a stats id is decoded to a non-route", http.MethodGet, "/v1.47/containers/a%2Fb/stats", false},
+		{"double-encoded letters are decoded once and stay a non-route", http.MethodGet, "/v1.47/containers/abc/%2573tats", false},
+		{"invalid escape is classified as written", http.MethodGet, "/v1.47/containers/abc/stats%zz", false},
+		{"invalid escape does not hide a suffix", http.MethodGet, "/v1.47/containers/abc%zz/logs", true},
+		{"encoded question mark stays in the path", http.MethodGet, "/v1.47/containers/abc/stats%3Fx", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsStreamingRequest(tc.method, tc.path); got != tc.want {
+				t.Fatalf("IsStreamingRequest(%s, %q) = %v, want %v", tc.method, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsStreamingPathDecodesAndDropsQuery(t *testing.T) {
+	t.Parallel()
+
+	for path, want := range map[string]bool{
+		"/v1.47.0/containers/abc/%73tats?stream=1": true,
+		"/v1/images/nginx/push":                    true,
+		"/v1.47/containers/abc/%6Cogs?follow=1":    true,
+		"/v1.47/containers/abc/json?x=/logs":       false,
+	} {
+		if got := IsStreamingPath(path); got != want {
+			t.Errorf("IsStreamingPath(%q) = %v, want %v", path, got, want)
+		}
 	}
 }

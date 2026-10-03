@@ -9,8 +9,12 @@ import (
 // IsStreamingRequest returns true when the Docker request method and path
 // produce a streaming response. Container archive paths are method-sensitive:
 // GET downloads a tar stream, while PUT uploads one and returns no tar body.
+//
+// The path is classified percent-decoded, as the daemon routes it, so an
+// encoded spelling of a streaming route cannot dodge streaming treatment.
 func IsStreamingRequest(method, path string) bool {
 	pathOnly, query, _ := strings.Cut(path, "?")
+	pathOnly = decodePath(pathOnly)
 	stats, push := streamingRouteFamily(pathOnly)
 	if stats {
 		if method != http.MethodGet {
@@ -31,13 +35,19 @@ func IsStreamingRequest(method, path string) bool {
 	if strings.Contains(pathOnly, "/containers/") && strings.HasSuffix(pathOnly, "/archive") {
 		return method == http.MethodGet
 	}
-	return IsStreamingPath(pathOnly)
+	return isStreamingPath(pathOnly)
 }
 
 // IsStreamingPath returns true if the path corresponds to a Docker API
-// endpoint that produces a streaming response.
+// endpoint that produces a streaming response. The path is classified
+// percent-decoded, as the daemon routes it.
 func IsStreamingPath(path string) bool {
 	path, _, _ = strings.Cut(path, "?")
+	return isStreamingPath(decodePath(path))
+}
+
+// isStreamingPath classifies an already decoded path with no query.
+func isStreamingPath(path string) bool {
 	if stats, push := streamingRouteFamily(path); stats || push {
 		return true
 	}
@@ -77,26 +87,9 @@ func IsStreamingPath(path string) bool {
 }
 
 // streamingRouteFamily matches the stats and named-image push routes after an
-// optional numeric Docker API version prefix.
+// optional Docker API version prefix (see StripAPIVersion).
 func streamingRouteFamily(path string) (stats, push bool) {
-	if strings.HasPrefix(path, "/v") {
-		version, rest, found := strings.Cut(path[2:], "/")
-		major, minor, dotted := strings.Cut(version, ".")
-		numeric := func(s string) bool {
-			if s == "" {
-				return false
-			}
-			for _, c := range s {
-				if c < '0' || c > '9' {
-					return false
-				}
-			}
-			return true
-		}
-		if found && dotted && numeric(major) && numeric(minor) {
-			path = "/" + rest
-		}
-	}
+	path = StripAPIVersion(path)
 	if name, ok := strings.CutPrefix(path, "/containers/"); ok {
 		if id, matched := strings.CutSuffix(name, "/stats"); matched && id != "" && !strings.Contains(id, "/") {
 			stats = true

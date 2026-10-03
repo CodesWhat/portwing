@@ -764,43 +764,16 @@ func isContainerAttachPath(path string) bool {
 	return isDockerResourceAction(path, "containers", "attach")
 }
 
+// isDockerResourceAction reports whether path, as the daemon would route it,
+// is /{resource}/{id}/{action} under an optional API version prefix. The path
+// must be the decoded URL.Path.
 func isDockerResourceAction(path, resource, action string) bool {
-	if path == "" || path[0] != '/' || strings.HasSuffix(path, "/") {
+	if path == "" || path[0] != '/' {
 		return false
 	}
-	parts := strings.Split(path[1:], "/")
-	switch len(parts) {
-	case 3:
-	case 4:
-		if !isDockerAPIVersion(parts[0]) {
-			return false
-		}
-		parts = parts[1:]
-	default:
-		return false
-	}
-	return parts[0] == resource && parts[1] != "" && parts[2] == action
-}
-
-func isDockerAPIVersion(segment string) bool {
-	version, ok := strings.CutPrefix(segment, "v")
-	if !ok {
-		return false
-	}
-	major, minor, ok := strings.Cut(version, ".")
-	return ok && isASCIIDigits(major) && isASCIIDigits(minor)
-}
-
-func isASCIIDigits(value string) bool {
-	if value == "" {
-		return false
-	}
-	for i := range len(value) {
-		if value[i] < '0' || value[i] > '9' {
-			return false
-		}
-	}
-	return true
+	name, rest, _ := strings.Cut(docker.StripAPIVersion(path)[1:], "/")
+	id, act, _ := strings.Cut(rest, "/")
+	return name == resource && id != "" && act == action
 }
 
 // isWebSocketUpgrade checks if the request is a WebSocket upgrade request.

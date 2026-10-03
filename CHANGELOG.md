@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client and the `portwing healthcheck` probe still ignore the proxy variables.
   The proxy URL must be `http://` or `socks5://`; an `https://` proxy URL is
   rejected with an error that says so.
+- Match Docker API paths the way the daemon routes them. The daemon accepts
+  any run of digits and dots as the version prefix, so `/v1.47.0/`, `/v1/` and
+  `/v./` reach the same handlers as `/v1.47/`, but Portwing only recognised
+  `MAJOR.MINOR`. Exec start and attach under those prefixes skipped the exec
+  audit record and exec session limit, and stats and push skipped the stream
+  session limit. Portwing now classifies on the decoded path with the daemon's
+  prefix shape, so encoded spellings such as `/containers/x/%73tats` are
+  covered too, and still forwards the original request bytes unchanged. This
+  affected Portwing's own audit and session limits only. Sockguard still denies
+  these paths when a preset is in front.
 
 ## [v0.9.21] - 2026-10-02
 
