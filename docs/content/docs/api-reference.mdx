@@ -194,20 +194,36 @@ shipping guidance.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/_portwing/mcp` | Required | Read-only Model Context Protocol server (Streamable HTTP, protocol revision `2025-11-25`). Not registered in Edge mode. |
+| `POST` | `/_portwing/mcp` | Required | Read-only Model Context Protocol server (Streamable HTTP, protocol revisions `2026-07-28` and `2025-11-25`). Not registered in Edge mode. |
 
 Each POST carries a single JSON-RPC 2.0 request and returns one JSON-RPC 2.0
-response; the server is stateless and assigns no `Mcp-Session-Id`. Supported
-methods: `initialize`, `ping`, `tools/list`, `tools/call`. `GET
+response; the server is stateless and assigns no `Mcp-Session-Id`. `GET
 /_portwing/mcp` returns HTTP `405` (no server-initiated SSE stream).
+
+The revision is chosen per request. A request whose
+`params._meta["io.modelcontextprotocol/protocolVersion"]` is set, or whose
+`MCP-Protocol-Version` header is `2026-07-28`, is a 2026-07-28 request.
+Supported methods there are `server/discover`, `tools/list` and `tools/call`;
+it must also send the `MCP-Protocol-Version` and `Mcp-Method` headers, plus
+`Mcp-Name` on `tools/call`, each matching the body. Every other request is a
+2025-11-25 request, with supported methods `initialize`, `ping`,
+`tools/list` and `tools/call`, and the headers are not checked.
 
 A notification (a request with no `id`) or a JSON-RPC response message sent
 to the server (a `result`/`error` object with no `method`) returns HTTP `202`
 with an empty body. HTTP `400` with an empty body is returned only for two
 notification-shaped cases: a `result`/`error` object with no `method` that
 fails JSON-RPC response validation, or a notification (no `id`) whose
-`params` is present but not a JSON object. Requests carrying an `id`
-report errors inside a `200` JSON-RPC error envelope instead.
+`params` is present but not a JSON object. A 2025-11-25 request carrying an
+`id` reports every error inside a `200` JSON-RPC error envelope. A 2026-07-28
+request does too, except for the errors that revision gives an HTTP status:
+
+| Error | Code | HTTP status |
+|-------|------|-------------|
+| Required `_meta` field missing or malformed | `-32602` | `400` |
+| Header missing or not matching the body (HeaderMismatch) | `-32020` | `400` |
+| Version other than `2026-07-28` (UnsupportedProtocolVersion) | `-32022` | `400` |
+| Unknown method, including `ping` and `initialize` | `-32601` | `404` |
 
 <Callout type="info">
 This section covers the HTTP contract only. See [MCP Server](/mcp-server) for the tool catalog, read-only guarantees, and client configuration for Claude Desktop, Claude Code, Cursor, and Windsurf.
@@ -246,6 +262,21 @@ curl -s -X POST \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
   http://localhost:3000/_portwing/mcp | jq .
 ```
+
+The same call as a 2026-07-28 request:
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/list" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  http://localhost:3000/_portwing/mcp | jq .
+```
+
+Its result also carries `"resultType": "complete"`, `"ttlMs": 3600000`,
+`"cacheScope": "public"`, and the server identity in `_meta`.
 
 ---
 

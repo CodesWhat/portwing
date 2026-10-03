@@ -225,6 +225,20 @@ continuous tailing uses the `request`/`stream`/`stream_end` path against
 | `/_portwing/metrics` | GET | Yes | Prometheus metrics (build/host/container + agent request series) |
 | `/_portwing/audit` | GET | Yes | Recent audit records (JSON, newest-first) |
 | `/_portwing/audit/export` | GET | Yes | Cursor-based audit records (NDJSON, oldest-first) |
+| `/_portwing/mcp` | POST | Yes | Read-only MCP server, protocol revisions 2026-07-28 and 2025-11-25 (see below) |
+
+The MCP endpoint serves both revisions on one URL and picks one per request. A
+request whose `params._meta` carries `io.modelcontextprotocol/protocolVersion`,
+or whose `MCP-Protocol-Version` header is `2026-07-28`, is served statelessly
+under 2026-07-28: `server/discover`, `resultType` and server identity on every
+result, `ttlMs: 3600000` and `cacheScope: "public"` on `tools/list` and
+`server/discover`, and the `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name`
+headers validated against the body (`-32020` on 400). A version other than
+2026-07-28 in `_meta` gets `-32022` on 400, and a method that revision doesn't
+define, `ping` and `initialize` included, gets `-32601` on 404. Every other
+request is served under 2025-11-25 with the `initialize` handshake, unchanged.
+All five tools carry `readOnlyHint: true`. The endpoint is not registered in
+Edge mode.
 
 Edge mode keeps a local operations listener on `BIND_ADDRESS:PORT` for
 `/health`, `/ready`, `/_portwing/health`, `/metrics`, and
@@ -549,6 +563,8 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 | Streamed request body (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every streamed body held in memory, reassembling and already dispatched alike, the latter until its Docker round trip ends; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
+| MCP request body | 1 MiB; a longer body is cut there and fails to parse |
+| MCP `container_logs` output | 500 lines and 256 KiB of line text, newest kept; `truncated: true` when anything was dropped or cut |
 | Concurrent enrollment handlers | 32 agent-wide / 2 per client |
 | Concurrent exec sessions | 100 (edge: fixed; standard: `MAX_EXEC_SESSIONS`, non-positive disables) |
 | Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Shared by streaming proxy responses and the adapter `/api/events` SSE and follow-mode log routes; a rejected adapter stream answers `503`. Non-follow log reads are not gated. |
