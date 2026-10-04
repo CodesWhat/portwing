@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -74,4 +75,15 @@ func decodePath(path string) string {
 		return path
 	}
 	return decoded
+}
+
+// ValidateAPIPath rejects a caller-supplied API path that does not begin with
+// "/". The client joins the API version prefix and the path with no separator
+// of its own, so ".0/exec/x/start" would reach the daemon as
+// "/v1.44.0/exec/x/start", a route no classifier saw as an exec start.
+func ValidateAPIPath(path string) error {
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("invalid Docker API path %q: must begin with \"/\"", path)
+	}
+	return nil
 }

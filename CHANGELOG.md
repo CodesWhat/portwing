@@ -40,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Edge mode now rejects a request path that doesn't start with `/`. The Docker
+  client glued the API version and the path together with no separator, so a
+  path like `.0/exec/<id>/start` reached the daemon as
+  `/v1.44.0/exec/<id>/start`, which it routes to exec start, while the agent's
+  exec and stream checks never saw it as one. The client now refuses such a
+  path before any network call and the controller gets an error for the request
+  ID. The standalone proxy only treats POST as an exec start.
 - Every exec start through the Docker proxy is now audited and counted against
   the exec session limit. Only a start that carried a WebSocket upgrade was
   treated as an exec, so `docker exec -d` (a `{"Detach":true}` body with no

@@ -2,11 +2,17 @@ package edge
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/codeswhat/portwing/internal/audit"
+	"github.com/codeswhat/portwing/internal/docker"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -41,6 +47,41 @@ func TestRawExecStartIDClassification(t *testing.T) {
 	}
 }
 
+// realDockerDaemon serves a fake daemon on a Unix socket behind a real
+// docker.Client, so the request path goes through the client's URL join.
+// Every request other than the version negotiation is reported on paths.
+func realDockerDaemon(t *testing.T) (*docker.Client, <-chan string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "lk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "docker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := make(chan string, 16)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/version" {
+			_, _ = w.Write([]byte(`{"ApiVersion":"1.44"}`))
+			return
+		}
+		paths <- r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	_ = srv.Listener.Close()
+	srv.Listener = listener
+	srv.Start()
+	t.Cleanup(srv.Close)
+	dc, err := docker.NewClient(socket, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dc, paths
+}
+
 func TestRawDetachedExecStartAuditedAndSlotReleased(t *testing.T) {
 	t.Parallel()
 
@@ -51,11 +92,11 @@ func TestRawDetachedExecStartAuditedAndSlotReleased(t *testing.T) {
 	}
 	t.Cleanup(closeAudit)
 	c.auditor = logger
-	//nolint:bodyclose // the response body is consumed and closed by handleRequest, the code under test.
-	c.dockerClient = &fakeDocker{doResp: mkResp(http.StatusOK, "", ""), streamResp: mkResp(http.StatusOK, "", "")}
+	dc, paths := realDockerDaemon(t)
+	c.dockerClient = dc
 
 	c.handleRequest(context.Background(), protocol.RequestMessage{
-		RequestID: "raw1", Method: http.MethodPost, Path: "/v1.47/exec/abc123/start",
+		RequestID: "raw1", Method: http.MethodPost, Path: "/exec/abc/start",
 		Body: []byte(`{"Detach":true}`),
 	})
 	var resp protocol.ResponseMessage
@@ -63,9 +104,12 @@ func TestRawDetachedExecStartAuditedAndSlotReleased(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
+	if got := <-paths; got != "/v1.44/exec/abc/start" {
+		t.Fatalf("daemon path = %q", got)
+	}
 
 	records := execRecords(logger)
-	if len(records) != 1 || records[0].ExecID != "abc123" || records[0].Outcome != audit.OutcomeAllowed {
+	if len(records) != 1 || records[0].ExecID != "abc" || records[0].Outcome != audit.OutcomeAllowed {
 		t.Fatalf("exec records = %+v", records)
 	}
 	c.execAdmissionMu.Lock()
@@ -73,6 +117,36 @@ func TestRawDetachedExecStartAuditedAndSlotReleased(t *testing.T) {
 	c.execAdmissionMu.Unlock()
 	if held != 0 {
 		t.Fatalf("rawExecStarts = %d after response, want 0", held)
+	}
+}
+
+// A path with no leading slash is glued to the API version prefix, so these
+// would reach the daemon as /v1.44.0/exec/abc/start. They must be refused
+// before any network call, with an error for the request ID.
+func TestRawSlashlessExecStartPathsNeverReachDaemon(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{".0/exec/abc/start", "./exec/abc/start", "%2E0/exec/abc/start"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			c, ctrl := newTestClient(t)
+			dc, paths := realDockerDaemon(t)
+			c.dockerClient = dc
+
+			c.handleRequest(context.Background(), protocol.RequestMessage{
+				RequestID: "slashless", Method: http.MethodPost, Path: path,
+			})
+			var e protocol.ErrorMessage
+			decodeData(t, expectType(t, ctrl, protocol.TypeError), &e)
+			if e.RequestID != "slashless" || !strings.Contains(e.Message, "must begin with") {
+				t.Fatalf("error = %+v", e)
+			}
+			select {
+			case got := <-paths:
+				t.Fatalf("daemon was reached with %q", got)
+			default:
+			}
+		})
 	}
 }
 
@@ -101,7 +175,7 @@ func TestRawExecStartRefusedWhenTypedSessionsFillCap(t *testing.T) {
 		t.Fatalf("error = %+v", e)
 	}
 	if got := len(execRecords(logger)); got != 1 {
-		t.Fatalf("exec records = %d, want 1 (refused attempts are audited like the typed path)", got)
+		t.Fatalf("exec records = %d, want 1 (a refused start that got this far is audited; one refused earlier by the stream cap never reaches here)", got)
 	}
 }
 

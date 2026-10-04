@@ -544,13 +544,13 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// An exec start that carries no upgrade (docker exec -d sends {"Detach":true},
+	// An exec start (the daemon routes only POST there) that carries no upgrade (docker exec -d sends {"Detach":true},
 	// and an attached start without Upgrade is still hijacked by the daemon) is
 	// audited and bounded exactly like an upgraded one. The decision uses only
 	// the route, never the body: the slot is held until the daemon's response
 	// has been forwarded, which for a detached start is immediate and for an
 	// attached one is the life of the stream.
-	if isExecStartPath(r.URL.Path) {
+	if r.Method == http.MethodPost && isExecStartPath(r.URL.Path) {
 		s.auditExecStart(r)
 		if !s.acquireExecSlot(w) {
 			return

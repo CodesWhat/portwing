@@ -1313,6 +1313,17 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		return
 	}
 
+	// A path with no leading slash would be glued to the API version prefix
+	// and routed by the daemon differently than it was classified here.
+	if err := docker.ValidateAPIPath(req.Path); err != nil {
+		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, 0, 0)
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   err.Error(),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
 	if execID, ok := rawExecStartID(req.Method, req.Path); ok {
 		c.auditor.ExecStart(c.cfg.DrydockURL, "", execID)
 		if !c.acquireRawExecSlot() {

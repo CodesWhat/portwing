@@ -237,3 +237,27 @@ func TestExecStartRoutesClassifiedAsDaemonRoutes(t *testing.T) {
 		t.Fatalf("containers/json produced an exec start record")
 	}
 }
+
+// The daemon routes only POST to exec start, so any other method on that path
+// is not an exec start: no record, no slot, normal handling.
+func TestNonPostExecStartPathIsNotAnExecStart(t *testing.T) {
+	t.Parallel()
+
+	client, bodies, _, _ := execStartDaemon(t)
+	s := newExecStartServer(t, client, 1, 0)
+	if !s.execSem.acquire() {
+		t.Fatal("could not fill the exec slot")
+	}
+
+	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodOptions} {
+		rec := httptest.NewRecorder()
+		s.handleDockerProxy(rec, httptest.NewRequest(method, "/v1.47/exec/abc/start", strings.NewReader(`{"Detach":true}`)))
+		if rec.Code == http.StatusServiceUnavailable {
+			t.Fatalf("%s took an exec slot and was refused", method)
+		}
+		<-bodies
+	}
+	if got := len(execStartRecords(s)); got != 0 {
+		t.Fatalf("non-POST requests produced %d exec start records", got)
+	}
+}
