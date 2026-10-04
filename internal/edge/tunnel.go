@@ -10,10 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/codeswhat/portwing/internal/docker"
 	applog "github.com/codeswhat/portwing/internal/log"
 	"github.com/codeswhat/portwing/internal/pool"
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -128,12 +131,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	defer c.execAdmissionMu.Unlock()
 
 	// Check concurrent session limit.
-	var count int
-	c.execSessions.Range(func(_, _ any) bool {
-		count++
-		return count < maxExecSessions
-	})
-	if count >= maxExecSessions {
+	if c.execSlotsFullLocked() {
 		slog.Warn("exec session limit reached", "max", maxExecSessions)
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
@@ -643,4 +641,72 @@ func recoverSession(where, execID string) {
 		slog.Error("recovered from panic in exec session goroutine",
 			"where", where, "execID", applog.Sanitize(execID), "panic", applog.Sanitize(fmt.Sprint(r)))
 	}
+}
+
+// execSlotsFullLocked reports whether typed exec sessions plus raw exec starts
+// have used every maxExecSessions slot. The caller holds execAdmissionMu.
+func (c *Client) execSlotsFullLocked() bool {
+	count := c.rawExecStarts
+	c.execSessions.Range(func(_, _ any) bool {
+		count++
+		return count < maxExecSessions
+	})
+	return count >= maxExecSessions
+}
+
+// acquireRawExecSlot takes a slot for a raw exec start, or reports false when
+// the cap shared with typed exec sessions is full.
+func (c *Client) acquireRawExecSlot() bool {
+	c.execAdmissionMu.Lock()
+	defer c.execAdmissionMu.Unlock()
+	if c.execSlotsFullLocked() {
+		return false
+	}
+	c.rawExecStarts++
+	return true
+}
+
+// releaseRawExecSlot returns a slot taken by acquireRawExecSlot.
+func (c *Client) releaseRawExecSlot() {
+	c.execAdmissionMu.Lock()
+	c.rawExecStarts--
+	c.execAdmissionMu.Unlock()
+}
+
+// rawExecStart reports whether a request message is an exec start sent as
+// plain HTTP rather than as a typed exec_start. It returns the exec ID and the
+// decoded path, both parsed the way the standalone proxy does. The path may
+// carry a query and is classified percent-decoded, as the daemon routes it.
+func rawExecStart(method, path string) (execID, routePath string, ok bool) {
+	if method != http.MethodPost {
+		return "", "", false
+	}
+	pathOnly, _, _ := strings.Cut(path, "?")
+	if decoded, err := url.PathUnescape(pathOnly); err == nil {
+		pathOnly = decoded
+	}
+	if !docker.IsResourceRoute(pathOnly, "exec", "start") {
+		return "", "", false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(pathOnly), "/exec/"), "/start")
+	return id, pathOnly, true
+}
+
+// auditRawExecStart writes the exec_start record for a raw exec start, with the
+// route path in the container field as the standalone proxy does, and reports
+// whether the request is one.
+func (c *Client) auditRawExecStart(method, path string) bool {
+	id, routePath, ok := rawExecStart(method, path)
+	if ok {
+		c.auditor.ExecStart(c.cfg.DrydockURL, routePath, id)
+	}
+	return ok
+}
+
+// auditRefusedRawExecStart records a raw exec start the dispatch sites turned
+// away at the request cap, which never reaches handleRequestTo. A request
+// admitted there is recorded by handleRequestTo instead, so none is recorded
+// twice.
+func (c *Client) auditRefusedRawExecStart(method, path string) {
+	c.auditRawExecStart(method, path)
 }

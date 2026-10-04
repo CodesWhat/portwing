@@ -544,10 +544,22 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bound concurrent streams (SPEC 7.3). Checked after the hijack branch so
-	// an upgraded exec takes an exec slot rather than one of each, and only for
-	// streaming paths so a short proxied request is never turned away.
-	if isStream {
+	// An exec start (the daemon routes only POST there) that carries no upgrade (docker exec -d sends {"Detach":true},
+	// and an attached start without Upgrade is still hijacked by the daemon) is
+	// audited and bounded exactly like an upgraded one. The decision uses only
+	// the route, never the body: the slot is held until the daemon's response
+	// has been forwarded, which for a detached start is immediate and for an
+	// attached one is the life of the stream.
+	if r.Method == http.MethodPost && isExecStartPath(r.URL.Path) {
+		s.auditExecStart(r)
+		if !s.acquireExecSlot(w) {
+			return
+		}
+		defer s.execSem.release()
+	} else if isStream {
+		// Bound concurrent streams (SPEC 7.3). Checked after the hijack branch so
+		// an upgraded exec takes an exec slot rather than one of each, and only
+		// for streaming paths so a short proxied request is never turned away.
 		if !s.streamSem.acquire() {
 			slog.Warn("concurrent stream limit reached, rejecting", "max", s.streamSem.limit())
 			http.Error(w, "agent busy: too many concurrent streams", http.StatusServiceUnavailable)
@@ -629,16 +641,13 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 // request are relayed through clientBuf once the upgrade succeeds.
 func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	if isExecStartPath(r.URL.Path) {
-		execID := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(r.URL.Path), "/exec/"), "/start")
-		s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID)
+		s.auditExecStart(r)
 	}
 
 	// Bound concurrent exec/attach sessions (SPEC 7.3) before the body read and
 	// the hijack, so a rejected session costs nothing and can still be answered
 	// with a normal HTTP response.
-	if !s.execSem.acquire() {
-		slog.Warn("exec session limit reached, rejecting", "max", s.execSem.limit())
-		http.Error(w, "agent busy: exec session limit reached", http.StatusServiceUnavailable)
+	if !s.acquireExecSlot(w) {
 		return
 	}
 	defer s.execSem.release()
@@ -769,6 +778,23 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	wg.Wait()
+}
+
+// auditExecStart records an exec start for r, whose path is an exec start route.
+func (s *Server) auditExecStart(r *http.Request) {
+	execID := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(r.URL.Path), "/exec/"), "/start")
+	s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID)
+}
+
+// acquireExecSlot takes an exec session slot, or answers 503 and returns false
+// when the limit is reached. The caller releases s.execSem on true.
+func (s *Server) acquireExecSlot(w http.ResponseWriter) bool {
+	if !s.execSem.acquire() {
+		slog.Warn("exec session limit reached, rejecting", "max", s.execSem.limit())
+		http.Error(w, "agent busy: exec session limit reached", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
 }
 
 func isDockerHijackPath(path string) bool {

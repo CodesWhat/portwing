@@ -207,6 +207,10 @@ type Client struct {
 
 	execSessions    sync.Map
 	execAdmissionMu sync.Mutex
+	// rawExecStarts counts raw HTTP-style exec starts (POST /exec/{id}/start
+	// sent as a request message) in flight. They share maxExecSessions with
+	// execSessions. Guarded by execAdmissionMu.
+	rawExecStarts int
 
 	// streamSem bounds concurrent in-flight request handlers (maxStreams).
 	streamSem chan struct{}
@@ -876,6 +880,7 @@ func (c *Client) readPump(ctx context.Context) error {
 				}()
 			default:
 				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
+				c.auditRefusedRawExecStart(req.Method, req.Path)
 				_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 					Message:   "agent busy: too many concurrent requests",
 					RequestID: req.RequestID,
@@ -1239,6 +1244,7 @@ func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestM
 		c.handleRequestTo(ctx, req, target)
 	default:
 		slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
+		c.auditRefusedRawExecStart(req.Method, req.Path)
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   "agent busy: too many concurrent requests",
 			RequestID: req.RequestID,
@@ -1307,6 +1313,29 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	if strings.HasPrefix(req.Path, composeRequestPrefix) {
 		c.handleComposeRequestTo(ctx, req, target)
 		return
+	}
+
+	// A path with no leading slash would be glued to the API version prefix
+	// and routed by the daemon differently than it was classified here.
+	if err := docker.ValidateAPIPath(req.Path); err != nil {
+		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, 0, 0)
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   err.Error(),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	if c.auditRawExecStart(req.Method, req.Path) {
+		if !c.acquireRawExecSlot() {
+			slog.Warn("exec session limit reached, rejecting", "max", maxExecSessions, "request_id", applog.Sanitize(req.RequestID))
+			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+				Message:   "agent busy: exec session limit reached",
+				RequestID: req.RequestID,
+			})
+			return
+		}
+		defer c.releaseRawExecSlot()
 	}
 
 	start := time.Now()

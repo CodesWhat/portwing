@@ -238,6 +238,9 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, headers
 }
 
 func (c *Client) do(ctx context.Context, method, path string, headers http.Header, body io.Reader, client *http.Client) (*http.Response, error) {
+	if err := ValidateAPIPath(path); err != nil {
+		return nil, err
+	}
 	// ParseRequestURI keeps a '#' in the query, where http.NewRequest would
 	// parse it as a fragment and drop everything after it.
 	target, err := url.ParseRequestURI(c.buildURL(path))
