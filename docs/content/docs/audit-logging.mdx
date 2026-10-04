@@ -71,7 +71,7 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 | `auth_failure` | An invalid or missing token is presented |
 | `rate_limited` | A request is blocked by the rate limiter |
 | `compose_op` | A Docker Compose lifecycle operation runs |
-| `exec_start` | An interactive exec tunnel opens |
+| `exec_start` | An exec start is proxied: an interactive tunnel, a detached `docker exec -d`, or an attached start sent without an upgrade |
 | `enrollment` | An Ed25519 key is enrolled via `/api/portwing/enroll` |
 
 ### Additional fields by event type

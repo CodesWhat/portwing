@@ -163,11 +163,13 @@ func NewClient(socketPath string, requestTimeout int) (*Client, error) {
 		socketPath:  socketPath,
 		dialTimeout: timeout,
 		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   timeout,
+			Transport:     transport,
+			Timeout:       timeout,
+			CheckRedirect: returnRedirect,
 		},
 		streamClient: &http.Client{
-			Transport: streamTransport,
+			Transport:     streamTransport,
+			CheckRedirect: returnRedirect,
 			// No timeout for streaming operations.
 		},
 	}
@@ -208,6 +210,16 @@ func (c *Client) negotiateAPIVersion(ctx context.Context) error {
 	return nil
 }
 
+// returnRedirect hands a redirect from the daemon back to the caller instead of
+// following it. The daemon's router answers an unclean path (a doubled slash, a
+// dot segment) with a 301 to the cleaned path. Following that here would run
+// the cleaned request after the proxy already classified the unclean one, so a
+// stats stream could skip the stream limit. The caller's retry is classified on
+// its own path.
+func returnRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
 // buildURL returns a full URL with the negotiated API version prefix.
 // The host is irrelevant for Unix-socket transport.
 func (c *Client) buildURL(path string) string {
@@ -226,10 +238,20 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, headers
 }
 
 func (c *Client) do(ctx context.Context, method, path string, headers http.Header, body io.Reader, client *http.Client) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.buildURL(path), body)
+	if err := ValidateAPIPath(path); err != nil {
+		return nil, err
+	}
+	// ParseRequestURI keeps a '#' in the query, where http.NewRequest would
+	// parse it as a fragment and drop everything after it.
+	target, err := url.ParseRequestURI(c.buildURL(path))
 	if err != nil {
 		return nil, fmt.Errorf("creating Docker API request: %w", err)
 	}
+	req, err := http.NewRequestWithContext(ctx, method, "http://localhost", body)
+	if err != nil {
+		return nil, fmt.Errorf("creating Docker API request: %w", err)
+	}
+	req.URL = target
 	if headers != nil {
 		req.Header = headers.Clone()
 	}

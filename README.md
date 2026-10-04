@@ -32,7 +32,7 @@
 <hr>
 
 > [!WARNING]
-> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.21`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.22`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <h2 align="center">Contents</h2>
 
@@ -59,7 +59,7 @@
 <hr>
 
 > [!NOTE]
-> **v0.9.21 is the current release.** This patch rebuilds ARMv7's Compose with containerd 2.3.6 for GHSA-pg57-6jwg-q645. Agent behavior and configuration are unchanged. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.22 is the current release.** This patch rebuilds ARMv7's Compose with containerd 2.3.6 for GHSA-pg57-6jwg-q645. Agent behavior and configuration are unchanged. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 ```mermaid
 flowchart LR
@@ -148,10 +148,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.9.21_linux_amd64.deb
+sudo apt install ./portwing_0.9.22_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.9.21_linux_amd64.rpm
+sudo rpm --install ./portwing_0.9.22_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -203,7 +203,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.21
+    image: ghcr.io/codeswhat/portwing:0.9.22
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -256,7 +256,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.21
+    image: ghcr.io/codeswhat/portwing:0.9.22
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -297,7 +297,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:0.9.21
+  ghcr.io/codeswhat/portwing:0.9.22
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -331,7 +331,7 @@ changing the bind for remote access.
 <details>
 <summary><strong>Early release highlights (v0.1.0 – v0.3.0)</strong></summary>
 
-For v0.4.0 and later — including v0.9.21, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+For v0.4.0 and later — including v0.9.22, the current release — see [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 - **v0.3.0** — startup banner, Lookout→Portwing rename completed, GoReleaser `dockers_v2` migration, and two edge-mode bug fixes (reconnect backoff reset, steady-state read deadline).
 - **v0.2.0** — the security & observability release. Ed25519 per-request authentication with signed requests via `X-Portwing-Key-ID` / `X-Portwing-Timestamp` / `X-Portwing-Nonce` / `X-Portwing-Signature` headers, verified against an `authorized_keys` file. Replay protection via nonce LRU and timestamp window, SIGHUP hot-reload of the key file, `portwing keygen` CLI subcommand, and `X-Portwing-Reason` diagnostic header on 401s. Signed edge-mode hello via `PRIVATE_KEY_FILE`. Also shipped in v0.2.0:
@@ -358,7 +358,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
-| **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
+| **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol revisions 2026-07-28 and 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting. Portwing marks watcher execution as controller-owned so compatible Drydock runs native watcher/update calls through the Standard or Edge Docker proxy. |
 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_portwing/metrics`. Zero external dependencies. |
 | **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Recent records are retained in memory by default; file/stdout/stderr persistence is opt-in. |
@@ -388,7 +388,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:0.9.21
+  ghcr.io/codeswhat/portwing:0.9.22
 ```
 
 </details>
@@ -423,7 +423,7 @@ docker run -d --name portwing \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:0.9.21
+  ghcr.io/codeswhat/portwing:0.9.22
 ```
 
 **Key rotation (zero-downtime):**
@@ -510,7 +510,7 @@ docker run -d \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:0.9.21
+  ghcr.io/codeswhat/portwing:0.9.22
 ```
 
 ### Endpoints
@@ -590,6 +590,7 @@ the connection alive through proxies.
 | `PRIVATE_KEY_FILE` | -- | Ed25519 private key (PEM PKCS#8) for signing edge-mode hello |
 | `CA_CERT` | -- | Custom CA certificate for Edge mode |
 | `TLS_SKIP_VERIFY` | `false` | Skip TLS verification (testing only) |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | -- | Standard proxy variables. Edge mode sends its outbound controller connection through the proxy they select; `NO_PROXY` hosts connect directly. Loopback controllers are never proxied. The proxy URL must be `http://` or `socks5://` |
 | `PORT` | `3000` | HTTP server port |
 | `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | HTTP/operations listener bind address. Edge mode refuses a non-loopback address unless `ALLOW_UNAUTHENTICATED_REMOTE=true` — the operations listener carries no authentication, so set it only on an isolated monitoring network. |
 | `TLS_CERT` | -- | Server TLS certificate (Standard mode) |
@@ -680,7 +681,7 @@ Kubernetes examples use `/health` for liveness and `/ready` for readiness.
 | `/metrics` | GET | Yes | Prometheus metrics (Drydock agent secret) |
 | `/_portwing/audit` | GET | Yes | Recent audit records (JSON, newest-first; `?limit=N`) |
 | `/_portwing/audit/export` | GET | Standard: yes; edge: no | Cursor-based NDJSON export (oldest-first) |
-| `/_portwing/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol 2025-11-25) |
+| `/_portwing/mcp` | POST | Yes | MCP server (JSON-RPC 2.0, protocol revisions 2026-07-28 and 2025-11-25) |
 
 In Edge Mode, `/_portwing/audit/export` is served without inbound
 authentication on the same limited operations listener as `/metrics`,
@@ -695,7 +696,16 @@ Portwing exposes a read-only [Model Context Protocol](https://modelcontextprotoc
 at `POST /_portwing/mcp`. AI assistants (Claude, Cursor, Windsurf, or any MCP client) can query
 live container state through this endpoint using their standard tool-call flow.
 
-**Protocol:** MCP 2025-11-25 — Streamable HTTP, stateless single-request mode, `Content-Type: application/json`.
+**Protocol:** MCP revisions 2026-07-28 and 2025-11-25 over Streamable HTTP, in stateless
+single-request mode with `Content-Type: application/json`. A request takes the 2026-07-28 path
+when `params._meta` contains `io.modelcontextprotocol/protocolVersion` (any value) or when its
+`MCP-Protocol-Version` header is `2026-07-28`. On that path `server/discover` is available, results
+carry `resultType`, `tools/list` carries `ttlMs` and `cacheScope`, and the `MCP-Protocol-Version`,
+`Mcp-Method` and `Mcp-Name` headers must match the body. A `_meta` version other than 2026-07-28
+is rejected with `-32022` on HTTP 400, and the header alone without that `_meta` key is rejected
+with `-32602`. Every other request gets the 2025-11-25 behaviour, with `initialize` and `ping`,
+unchanged.
+Clients on either revision connect to the same URL with no extra configuration.
 
 **Available tools:**
 
@@ -703,9 +713,12 @@ live container state through this endpoint using their standard tool-call flow.
 |------|-------------|
 | `list_containers` | All containers — id, names, image, state, status, labels |
 | `inspect_container(id)` | State, image, env-var count (values never exposed via this MCP tool), mounts, networks, restart policy |
-| `container_logs(id, tail)` | Last N lines of stdout/stderr (max 500) |
+| `container_logs(id, tail)` | Last N lines of stdout/stderr (max 500 lines and 256 KiB; `truncated` reports a cut) |
 | `host_metrics` | CPU, memory, disk, network, uptime snapshot (Linux only, see below) |
 | `container_stats(id)` | One-shot CPU/memory/network stats for a container |
+
+Every tool is annotated `readOnlyHint: true`. `openWorldHint` is `false` except on
+`container_logs`, whose text is written by the workload and should be treated as untrusted input.
 
 **Platform support:** `host_metrics` reads everything except the CPU core count and disk from
 `/proc`, so it works on the Linux container, `.deb` and `.rpm` builds and on no other platform. On
@@ -859,7 +872,7 @@ documented,” not guessed as absent.
 ```bash
 # Generate a strong token
 TOKEN=$(openssl rand -hex 32)
-docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:0.9.21
+docker run -e TOKEN="$TOKEN" ... ghcr.io/codeswhat/portwing:0.9.22
 ```
 
 ### File-based token (production)
@@ -870,7 +883,7 @@ printf '%s' "$TOKEN" > /run/secrets/portwing-token
 chown 65532:65532 /run/secrets/portwing-token && chmod 0400 /run/secrets/portwing-token
 docker run -e TOKEN_FILE=/run/secrets/portwing-token \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
-  ... ghcr.io/codeswhat/portwing:0.9.21
+  ... ghcr.io/codeswhat/portwing:0.9.22
 ```
 
 ### Hash-at-rest with TOKEN_HASH
@@ -884,7 +897,7 @@ HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
 # $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
 
 # Use the hash instead of the plaintext
-docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:0.9.21
+docker run -e TOKEN_HASH="$HASH" ... ghcr.io/codeswhat/portwing:0.9.22
 ```
 
 Or write the hash to a file and use `TOKEN_HASH_FILE`:
@@ -910,7 +923,7 @@ verified without managing signing keys.
 ### Verify the checksums file
 
 ```bash
-VERSION=0.9.21
+VERSION=0.9.22
 
 cosign verify-blob \
   --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
@@ -922,7 +935,7 @@ cosign verify-blob \
 ### Verify the container image
 
 ```bash
-VERSION=0.9.21
+VERSION=0.9.22
 
 cosign verify \
   --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
@@ -933,7 +946,7 @@ cosign verify \
 ### SBOM
 
 Each binary archive has a matching CycloneDX release asset, for example
-`portwing_0.9.21_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
+`portwing_0.9.22_linux_amd64.tar.gz.cyclonedx.json`. The SBOM has no standalone
 cosign bundle; verify the signed `checksums.txt`, then verify the SBOM's digest
 against that manifest. Public releases also give every checksummed asset its
 own GitHub build-provenance attestation. The container image carries a separate

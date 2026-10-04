@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.22] - 2026-10-04
+
+### Added
+
+- **The MCP server speaks protocol revision 2026-07-28 as well as
+  2025-11-25.** A request whose `params._meta` carries
+  `io.modelcontextprotocol/protocolVersion`, or whose `MCP-Protocol-Version`
+  header is `2026-07-28`, is handled statelessly under that revision:
+  `server/discover` answers with the supported versions and capabilities,
+  every result carries `resultType` and the server's identity in `_meta`,
+  `tools/list` and `server/discover` carry `ttlMs: 3600000` and
+  `cacheScope: "public"`, and the `MCP-Protocol-Version`, `Mcp-Method` and
+  `Mcp-Name` headers are checked against the body. Errors use the revision's
+  codes and HTTP statuses: `-32020` for a header mismatch and `-32022` for an
+  unsupported version, both on 400, and `-32601` on 404 for `ping`,
+  `initialize` and any other method the revision doesn't define. Every other
+  request takes the 2025-11-25 path, which answers exactly as before.
+- **All five MCP tools carry tool annotations**, on both revisions:
+  `readOnlyHint: true`, a display `title`, and `openWorldHint`, which is
+  `true` only for `container_logs` because its text comes from the workload.
+- **`container_logs` output is bounded and says when it was cut.** Docker's
+  `tail` limits how many lines come back but not how long they are, so the
+  tool now keeps the newest lines that fit in 500 lines and 256 KiB, and reports
+  `truncated: true` when it dropped any or cut an oversized line. Memory use
+  while decoding is bounded the same way.
+
+### Changed
+
+- `tools/list` encodes its tool definitions once per process instead of on
+  every call, which takes the 2025-11-25 request from 85 allocations to 40
+  even with the new annotations. Encoding once produces the same bytes as
+  encoding per request.
+
+### Fixed
+
+- Edge mode now rejects a request path that doesn't start with `/`. The Docker
+  client glued the API version and the path together with no separator, so a
+  path like `.0/exec/<id>/start` reached the daemon as
+  `/v1.44.0/exec/<id>/start`, which it routes to exec start, while the agent's
+  exec and stream checks never saw it as one. The client now refuses such a
+  path before any network call and the controller gets an error for the request
+  ID. The standalone proxy only treats POST as an exec start.
+- Every exec start through the Docker proxy is now audited and counted against
+  the exec session limit. Only a start that carried a WebSocket upgrade was
+  treated as an exec, so `docker exec -d` (a `{"Detach":true}` body with no
+  upgrade) and an attached start sent without an upgrade were forwarded with
+  just the generic API request record, and they ignored `MAX_EXEC_SESSIONS`.
+  They now write the same `exec_start` record and are refused with the same
+  503 when the limit is full. A detached start holds its slot until the
+  daemon answers and an attached one until its stream ends. The decision uses
+  the route only, so the request body is forwarded untouched. Edge mode had
+  the same gap for an exec start sent as a plain request message instead of a
+  typed `exec_start`. It now writes the same record and counts against the
+  same 100 session cap as typed exec sessions, and is refused with an
+  `agent busy: exec session limit reached` error when the cap is full. The
+  record carries the request path in `container`, as the standalone proxy's
+  does, and a start turned away by the concurrent request limit is recorded too.
+- Edge mode now honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` for the
+  outbound WebSocket connection to the controller. The dial ignored them, so a
+  host behind a corporate egress proxy could not connect. The Docker socket
+  client and the `portwing healthcheck` probe still ignore the proxy variables.
+  The proxy URL must be `http://` or `socks5://`; an `https://` proxy URL is
+  rejected with an error that says so.
+- Match Docker API paths the way the daemon routes them. The daemon's router
+  accepts any run of digits and dots as the version prefix, so `/v1.47.0/`,
+  `/v1/` and `/v./` are routed like `/v1.47/` (whether the version is then
+  supported is decided after routing), but Portwing only recognised
+  `MAJOR.MINOR`. It also matched names without a slash, where the daemon
+  accepts any name, such as a linked container `webapp/db`. Exec start and
+  attach under those spellings skipped the exec audit record and exec session
+  limit, and stats and push skipped the stream session limit. Portwing now
+  classifies on the decoded path with the daemon's prefix and name shapes, so
+  encoded spellings such as `/containers/x/%73tats` are covered too, and
+  `attach/ws` is treated as a stream and a hijack. This affected Portwing's own
+  audit and session limits only. Sockguard still denies these paths when a
+  preset is in front.
+- Return the daemon's redirect for an unclean path instead of following it. The
+  daemon answers a doubled slash or a dot segment with a 301 to the cleaned
+  path. Portwing followed it after classifying the unclean request, so a stats
+  stream could skip the stream session limit. The caller now gets the 301 and
+  its retry is classified on its own path.
+- Forward a `#` in the query to the daemon. Portwing rebuilt the outbound URL
+  from a string, which read everything after `#` as a fragment and dropped it,
+  so the daemon could see a different query than the one Portwing classified,
+  for example without a `stream=0`. This applied to the proxy, exec and attach
+  upgrades, and edge-mode requests.
+
 ## [v0.9.21] - 2026-10-02
 
 ### Security

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -543,10 +544,22 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bound concurrent streams (SPEC 7.3). Checked after the hijack branch so
-	// an upgraded exec takes an exec slot rather than one of each, and only for
-	// streaming paths so a short proxied request is never turned away.
-	if isStream {
+	// An exec start (the daemon routes only POST there) that carries no upgrade (docker exec -d sends {"Detach":true},
+	// and an attached start without Upgrade is still hijacked by the daemon) is
+	// audited and bounded exactly like an upgraded one. The decision uses only
+	// the route, never the body: the slot is held until the daemon's response
+	// has been forwarded, which for a detached start is immediate and for an
+	// attached one is the life of the stream.
+	if r.Method == http.MethodPost && isExecStartPath(r.URL.Path) {
+		s.auditExecStart(r)
+		if !s.acquireExecSlot(w) {
+			return
+		}
+		defer s.execSem.release()
+	} else if isStream {
+		// Bound concurrent streams (SPEC 7.3). Checked after the hijack branch so
+		// an upgraded exec takes an exec slot rather than one of each, and only
+		// for streaming paths so a short proxied request is never turned away.
 		if !s.streamSem.acquire() {
 			slog.Warn("concurrent stream limit reached, rejecting", "max", s.streamSem.limit())
 			http.Error(w, "agent busy: too many concurrent streams", http.StatusServiceUnavailable)
@@ -556,9 +569,7 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build Docker API request.
-	dockerURL := fmt.Sprintf("http://localhost%s", r.URL.RequestURI())
-	// #nosec G704 -- URL is fixed to localhost for the Docker socket proxy; RequestURI only selects the Docker API path/query.
-	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, dockerURL, r.Body)
+	proxyReq, err := newDockerProxyRequest(r, r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -596,6 +607,29 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// newDockerProxyRequest builds the outbound Docker request for r. The URL is
+// assembled from r's own parsed parts and assigned directly. Rendering it to a
+// string and parsing it again would read a '#' in the query as a fragment and
+// drop everything after it, so the daemon would see a different query (for
+// example without a "stream=0" that Portwing classified on) than the one
+// Portwing acted on.
+func newDockerProxyRequest(r *http.Request, body io.Reader) (*http.Request, error) {
+	// #nosec G704 -- URL is fixed to localhost for the Docker socket proxy; only the path and query come from the request.
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, "http://localhost", body)
+	if err != nil {
+		return nil, err
+	}
+	proxyReq.URL = &url.URL{
+		Scheme:     "http",
+		Host:       "localhost",
+		Path:       r.URL.Path,
+		RawPath:    r.URL.RawPath,
+		RawQuery:   r.URL.RawQuery,
+		ForceQuery: r.URL.ForceQuery,
+	}
+	return proxyReq, nil
+}
+
 // handleExecHijack retains the exec-specific entry point used by focused tests.
 // Actual routing for exec and attach upgrades goes through handleDockerHijack.
 func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
@@ -607,17 +641,13 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 // request are relayed through clientBuf once the upgrade succeeds.
 func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	if isExecStartPath(r.URL.Path) {
-		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		execID := parts[len(parts)-2]
-		s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID)
+		s.auditExecStart(r)
 	}
 
 	// Bound concurrent exec/attach sessions (SPEC 7.3) before the body read and
 	// the hijack, so a rejected session costs nothing and can still be answered
 	// with a normal HTTP response.
-	if !s.execSem.acquire() {
-		slog.Warn("exec session limit reached, rejecting", "max", s.execSem.limit())
-		http.Error(w, "agent busy: exec session limit reached", http.StatusServiceUnavailable)
+	if !s.acquireExecSlot(w) {
 		return
 	}
 	defer s.execSem.release()
@@ -684,9 +714,7 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	// headers cannot reach Docker. Preserve the requested upgrade protocol and
 	// end-to-end Docker headers, consume Expect after buffering the body, and
 	// derive Content-Length from the bounded body read above.
-	dockerURL := fmt.Sprintf("http://localhost%s", r.URL.RequestURI())
-	// #nosec G704 -- URL is fixed to localhost for the Docker socket proxy; RequestURI only selects the Docker API path/query.
-	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, dockerURL, bytes.NewReader(body))
+	proxyReq, err := newDockerProxyRequest(r, bytes.NewReader(body))
 	if err != nil {
 		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
@@ -752,6 +780,23 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 }
 
+// auditExecStart records an exec start for r, whose path is an exec start route.
+func (s *Server) auditExecStart(r *http.Request) {
+	execID := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(r.URL.Path), "/exec/"), "/start")
+	s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID)
+}
+
+// acquireExecSlot takes an exec session slot, or answers 503 and returns false
+// when the limit is reached. The caller releases s.execSem on true.
+func (s *Server) acquireExecSlot(w http.ResponseWriter) bool {
+	if !s.execSem.acquire() {
+		slog.Warn("exec session limit reached, rejecting", "max", s.execSem.limit())
+		http.Error(w, "agent busy: exec session limit reached", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
 func isDockerHijackPath(path string) bool {
 	return isExecStartPath(path) || isContainerAttachPath(path)
 }
@@ -761,46 +806,16 @@ func isExecStartPath(path string) bool {
 }
 
 func isContainerAttachPath(path string) bool {
-	return isDockerResourceAction(path, "containers", "attach")
+	return isDockerResourceAction(path, "containers", "attach") ||
+		isDockerResourceAction(path, "containers", "attach/ws")
 }
 
+// isDockerResourceAction reports whether path, as the daemon would route it,
+// is /{resource}/{name}/{action} under an optional API version prefix. The name
+// may contain slashes, as it does in the daemon's route. The path must be the
+// decoded URL.Path.
 func isDockerResourceAction(path, resource, action string) bool {
-	if path == "" || path[0] != '/' || strings.HasSuffix(path, "/") {
-		return false
-	}
-	parts := strings.Split(path[1:], "/")
-	switch len(parts) {
-	case 3:
-	case 4:
-		if !isDockerAPIVersion(parts[0]) {
-			return false
-		}
-		parts = parts[1:]
-	default:
-		return false
-	}
-	return parts[0] == resource && parts[1] != "" && parts[2] == action
-}
-
-func isDockerAPIVersion(segment string) bool {
-	version, ok := strings.CutPrefix(segment, "v")
-	if !ok {
-		return false
-	}
-	major, minor, ok := strings.Cut(version, ".")
-	return ok && isASCIIDigits(major) && isASCIIDigits(minor)
-}
-
-func isASCIIDigits(value string) bool {
-	if value == "" {
-		return false
-	}
-	for i := range len(value) {
-		if value[i] < '0' || value[i] > '9' {
-			return false
-		}
-	}
-	return true
+	return docker.IsResourceRoute(path, resource, action)
 }
 
 // isWebSocketUpgrade checks if the request is a WebSocket upgrade request.

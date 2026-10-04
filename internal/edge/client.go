@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -191,6 +192,11 @@ type Client struct {
 	conn   *websocket.Conn
 	connMu sync.Mutex
 
+	// proxy picks the HTTP proxy for the controller dial. Nil means
+	// http.ProxyFromEnvironment (HTTPS_PROXY, HTTP_PROXY, NO_PROXY); tests
+	// inject their own because the environment lookup is cached per process.
+	proxy func(*http.Request) (*url.URL, error)
+
 	// sendCh fronts all post-handshake writes with a single sendPump goroutine,
 	// so a slow controller backs up here instead of head-of-line-blocking every
 	// sender or stalling the read pump. It is nil outside an active connection;
@@ -201,6 +207,10 @@ type Client struct {
 
 	execSessions    sync.Map
 	execAdmissionMu sync.Mutex
+	// rawExecStarts counts raw HTTP-style exec starts (POST /exec/{id}/start
+	// sent as a request message) in flight. They share maxExecSessions with
+	// execSessions. Guarded by execAdmissionMu.
+	rawExecStarts int
 
 	// streamSem bounds concurrent in-flight request handlers (maxStreams).
 	streamSem chan struct{}
@@ -399,6 +409,40 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 }
 
+// proxyFunc returns the proxy selector for the controller dial: the injected
+// hook when set, otherwise the standard environment lookup so hosts behind an
+// egress proxy can reach the controller.
+func (c *Client) proxyFunc() func(*http.Request) (*url.URL, error) {
+	selector := c.proxySelector()
+	return func(req *http.Request) (*url.URL, error) {
+		proxyURL, err := selector(req)
+		if err != nil || proxyURL == nil {
+			return proxyURL, err
+		}
+		return proxyURL, checkProxyScheme(proxyURL)
+	}
+}
+
+// proxySelector is the injected hook when set, otherwise the standard
+// environment lookup.
+func (c *Client) proxySelector() func(*http.Request) (*url.URL, error) {
+	if c.proxy != nil {
+		return c.proxy
+	}
+	return http.ProxyFromEnvironment
+}
+
+// checkProxyScheme rejects proxy URLs the WebSocket dialer can't use.
+// gorilla/websocket v1.5.3 tunnels only through http:// (CONNECT) and
+// socks5:// proxies; an https:// proxy would otherwise fail every reconnect
+// with "proxy: unknown scheme: https", which doesn't say what to change.
+func checkProxyScheme(proxyURL *url.URL) error {
+	if proxyURL.Scheme == "http" || proxyURL.Scheme == "socks5" {
+		return nil
+	}
+	return fmt.Errorf("unsupported proxy scheme %q for the controller connection: use an http:// or socks5:// proxy URL in HTTPS_PROXY or HTTP_PROXY", proxyURL.Scheme)
+}
+
 // connect dials the WebSocket, performs the hello/welcome handshake, syncs
 // state, and runs the read and write pumps.
 func (c *Client) connect(ctx context.Context) (bool, error) {
@@ -431,6 +475,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	dialer := websocket.Dialer{
 		TLSClientConfig:  tlsConfig,
 		HandshakeTimeout: 10 * time.Second,
+		Proxy:            c.proxyFunc(),
 	}
 
 	slog.Info("connecting to controller", "url", wsURL)
@@ -835,6 +880,7 @@ func (c *Client) readPump(ctx context.Context) error {
 				}()
 			default:
 				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
+				c.auditRefusedRawExecStart(req.Method, req.Path)
 				_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 					Message:   "agent busy: too many concurrent requests",
 					RequestID: req.RequestID,
@@ -1198,6 +1244,7 @@ func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestM
 		c.handleRequestTo(ctx, req, target)
 	default:
 		slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
+		c.auditRefusedRawExecStart(req.Method, req.Path)
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   "agent busy: too many concurrent requests",
 			RequestID: req.RequestID,
@@ -1266,6 +1313,29 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	if strings.HasPrefix(req.Path, composeRequestPrefix) {
 		c.handleComposeRequestTo(ctx, req, target)
 		return
+	}
+
+	// A path with no leading slash would be glued to the API version prefix
+	// and routed by the daemon differently than it was classified here.
+	if err := docker.ValidateAPIPath(req.Path); err != nil {
+		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, 0, 0)
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   err.Error(),
+			RequestID: req.RequestID,
+		})
+		return
+	}
+
+	if c.auditRawExecStart(req.Method, req.Path) {
+		if !c.acquireRawExecSlot() {
+			slog.Warn("exec session limit reached, rejecting", "max", maxExecSessions, "request_id", applog.Sanitize(req.RequestID))
+			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+				Message:   "agent busy: exec session limit reached",
+				RequestID: req.RequestID,
+			})
+			return
+		}
+		defer c.releaseRawExecSlot()
 	}
 
 	start := time.Now()
