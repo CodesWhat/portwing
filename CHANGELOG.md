@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.22] - 2026-10-04
+
 ### Added
 
 - **The MCP server speaks protocol revision 2026-07-28 as well as
