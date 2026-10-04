@@ -48,7 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   They now write the same `exec_start` record and are refused with the same
   503 when the limit is full. A detached start holds its slot until the
   daemon answers and an attached one until its stream ends. The decision uses
-  the route only, so the request body is forwarded untouched.
+  the route only, so the request body is forwarded untouched. Edge mode had
+  the same gap for an exec start sent as a plain request message instead of a
+  typed `exec_start`. It now writes the same record and counts against the
+  same 100 session cap as typed exec sessions, and is refused with an
+  `agent busy: exec session limit reached` error when the cap is full.
 - Edge mode now honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` for the
   outbound WebSocket connection to the controller. The dial ignored them, so a
   host behind a corporate egress proxy could not connect. The Docker socket

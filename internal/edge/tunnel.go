@@ -10,10 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/codeswhat/portwing/internal/docker"
 	applog "github.com/codeswhat/portwing/internal/log"
 	"github.com/codeswhat/portwing/internal/pool"
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -128,12 +131,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	defer c.execAdmissionMu.Unlock()
 
 	// Check concurrent session limit.
-	var count int
-	c.execSessions.Range(func(_, _ any) bool {
-		count++
-		return count < maxExecSessions
-	})
-	if count >= maxExecSessions {
+	if c.execSlotsFullLocked() {
 		slog.Warn("exec session limit reached", "max", maxExecSessions)
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
@@ -643,4 +641,53 @@ func recoverSession(where, execID string) {
 		slog.Error("recovered from panic in exec session goroutine",
 			"where", where, "execID", applog.Sanitize(execID), "panic", applog.Sanitize(fmt.Sprint(r)))
 	}
+}
+
+// execSlotsFullLocked reports whether typed exec sessions plus raw exec starts
+// have used every maxExecSessions slot. The caller holds execAdmissionMu.
+func (c *Client) execSlotsFullLocked() bool {
+	count := c.rawExecStarts
+	c.execSessions.Range(func(_, _ any) bool {
+		count++
+		return count < maxExecSessions
+	})
+	return count >= maxExecSessions
+}
+
+// acquireRawExecSlot takes a slot for a raw exec start, or reports false when
+// the cap shared with typed exec sessions is full.
+func (c *Client) acquireRawExecSlot() bool {
+	c.execAdmissionMu.Lock()
+	defer c.execAdmissionMu.Unlock()
+	if c.execSlotsFullLocked() {
+		return false
+	}
+	c.rawExecStarts++
+	return true
+}
+
+// releaseRawExecSlot returns a slot taken by acquireRawExecSlot.
+func (c *Client) releaseRawExecSlot() {
+	c.execAdmissionMu.Lock()
+	c.rawExecStarts--
+	c.execAdmissionMu.Unlock()
+}
+
+// rawExecStartID reports whether a request message is an exec start sent as
+// plain HTTP rather than as a typed exec_start, and returns the exec ID parsed
+// from its path the way the standalone proxy does. The path may carry a query
+// and is classified percent-decoded, as the daemon routes it.
+func rawExecStartID(method, path string) (string, bool) {
+	if method != http.MethodPost {
+		return "", false
+	}
+	pathOnly, _, _ := strings.Cut(path, "?")
+	if decoded, err := url.PathUnescape(pathOnly); err == nil {
+		pathOnly = decoded
+	}
+	if !docker.IsResourceRoute(pathOnly, "exec", "start") {
+		return "", false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(pathOnly), "/exec/"), "/start")
+	return id, true
 }

@@ -207,6 +207,10 @@ type Client struct {
 
 	execSessions    sync.Map
 	execAdmissionMu sync.Mutex
+	// rawExecStarts counts raw HTTP-style exec starts (POST /exec/{id}/start
+	// sent as a request message) in flight. They share maxExecSessions with
+	// execSessions. Guarded by execAdmissionMu.
+	rawExecStarts int
 
 	// streamSem bounds concurrent in-flight request handlers (maxStreams).
 	streamSem chan struct{}
@@ -1307,6 +1311,19 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	if strings.HasPrefix(req.Path, composeRequestPrefix) {
 		c.handleComposeRequestTo(ctx, req, target)
 		return
+	}
+
+	if execID, ok := rawExecStartID(req.Method, req.Path); ok {
+		c.auditor.ExecStart(c.cfg.DrydockURL, "", execID)
+		if !c.acquireRawExecSlot() {
+			slog.Warn("exec session limit reached, rejecting", "max", maxExecSessions, "request_id", applog.Sanitize(req.RequestID))
+			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+				Message:   "agent busy: exec session limit reached",
+				RequestID: req.RequestID,
+			})
+			return
+		}
+		defer c.releaseRawExecSlot()
 	}
 
 	start := time.Now()
