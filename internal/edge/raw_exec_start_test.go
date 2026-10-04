@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/docker"
@@ -26,23 +27,23 @@ func execRecords(logger *audit.Logger) []audit.Record {
 	return out
 }
 
-func TestRawExecStartIDClassification(t *testing.T) {
+func TestRawExecStartClassification(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		method, path, id string
-		ok               bool
+		method, path, id, route string
+		ok                      bool
 	}{
-		{http.MethodPost, "/exec/abc/start", "abc", true},
-		{http.MethodPost, "/v1.47/exec/abc/start", "abc", true},
-		{http.MethodPost, "/v1.47/exec/abc/start?x=1", "abc", true},
-		{http.MethodPost, "/v1.47/exec/a%2Fb/start", "a/b", true},
-		{http.MethodGet, "/v1.47/exec/abc/start", "", false},
-		{http.MethodPost, "/v1.47/exec/abc/json", "", false},
-		{http.MethodPost, "/containers/create", "", false},
+		{http.MethodPost, "/exec/abc/start", "abc", "/exec/abc/start", true},
+		{http.MethodPost, "/v1.47/exec/abc/start", "abc", "/v1.47/exec/abc/start", true},
+		{http.MethodPost, "/v1.47/exec/abc/start?x=1", "abc", "/v1.47/exec/abc/start", true},
+		{http.MethodPost, "/v1.47/exec/a%2Fb/start", "a/b", "/v1.47/exec/a/b/start", true},
+		{http.MethodGet, "/v1.47/exec/abc/start", "", "", false},
+		{http.MethodPost, "/v1.47/exec/abc/json", "", "", false},
+		{http.MethodPost, "/containers/create", "", "", false},
 	} {
-		id, ok := rawExecStartID(tc.method, tc.path)
-		if id != tc.id || ok != tc.ok {
-			t.Errorf("%s %s = (%q, %v), want (%q, %v)", tc.method, tc.path, id, ok, tc.id, tc.ok)
+		id, route, ok := rawExecStart(tc.method, tc.path)
+		if id != tc.id || route != tc.route || ok != tc.ok {
+			t.Errorf("%s %s = (%q, %q, %v), want (%q, %q, %v)", tc.method, tc.path, id, route, ok, tc.id, tc.route, tc.ok)
 		}
 	}
 }
@@ -51,6 +52,14 @@ func TestRawExecStartIDClassification(t *testing.T) {
 // docker.Client, so the request path goes through the client's URL join.
 // Every request other than the version negotiation is reported on paths.
 func realDockerDaemon(t *testing.T) (*docker.Client, <-chan string) {
+	t.Helper()
+	return realDockerDaemonHolding(t, nil)
+}
+
+// realDockerDaemonHolding is realDockerDaemon whose non-version responses stay
+// open after the headers are flushed until hold is closed (or the request is
+// cancelled), so a test can keep a stream in flight. A nil hold answers at once.
+func realDockerDaemonHolding(t *testing.T, hold <-chan struct{}) (*docker.Client, <-chan string) {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "lk")
 	if err != nil {
@@ -70,6 +79,15 @@ func realDockerDaemon(t *testing.T) (*docker.Client, <-chan string) {
 		}
 		paths <- r.URL.Path
 		w.WriteHeader(http.StatusOK)
+		if hold != nil {
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			select {
+			case <-hold:
+			case <-r.Context().Done():
+			}
+		}
 	}))
 	_ = srv.Listener.Close()
 	srv.Listener = listener
@@ -109,7 +127,7 @@ func TestRawDetachedExecStartAuditedAndSlotReleased(t *testing.T) {
 	}
 
 	records := execRecords(logger)
-	if len(records) != 1 || records[0].ExecID != "abc" || records[0].Outcome != audit.OutcomeAllowed {
+	if len(records) != 1 || records[0].ExecID != "abc" || records[0].Container != "/exec/abc/start" || records[0].Outcome != audit.OutcomeAllowed {
 		t.Fatalf("exec records = %+v", records)
 	}
 	c.execAdmissionMu.Lock()
@@ -175,7 +193,7 @@ func TestRawExecStartRefusedWhenTypedSessionsFillCap(t *testing.T) {
 		t.Fatalf("error = %+v", e)
 	}
 	if got := len(execRecords(logger)); got != 1 {
-		t.Fatalf("exec records = %d, want 1 (a refused start that got this far is audited; one refused earlier by the stream cap never reaches here)", got)
+		t.Fatalf("exec records = %d, want 1 (a start refused by the exec cap inside handleRequestTo is audited; one refused earlier by the stream cap is audited by the dispatch site)", got)
 	}
 }
 
@@ -234,5 +252,125 @@ func TestNonExecRawRequestUnchanged(t *testing.T) {
 	expectType(t, ctrl, protocol.TypeResponse)
 	if got := len(execRecords(logger)); got != 0 {
 		t.Fatalf("non-exec request produced %d exec records", got)
+	}
+}
+
+// An attached raw start keeps its exec slot for as long as the daemon's stream
+// stays open, so typed sessions see the cap shrink, and returns it at the end.
+func TestRawAttachedExecStartHoldsSlotUntilStreamEnds(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	hold := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-hold:
+		default:
+			close(hold)
+		}
+	})
+	dc, paths := realDockerDaemonHolding(t, hold)
+	c.dockerClient = dc
+	for i := 0; i < maxExecSessions-1; i++ {
+		c.execSessions.Store("s-"+strconv.Itoa(i), &ExecSession{})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.handleRequest(context.Background(), protocol.RequestMessage{
+			RequestID: "att", Method: http.MethodPost, Path: "/exec/abc/start",
+			Body: []byte(`{"Detach":false,"Tty":true}`),
+		})
+	}()
+	expectType(t, ctrl, protocol.TypeResponse)
+	select {
+	case <-paths:
+	case <-time.After(readTimeout):
+		t.Fatal("attached start never reached the daemon")
+	}
+
+	slots := func() int {
+		c.execAdmissionMu.Lock()
+		defer c.execAdmissionMu.Unlock()
+		return c.rawExecStarts
+	}
+	if got := slots(); got != 1 {
+		t.Fatalf("rawExecStarts = %d while the stream is open, want 1", got)
+	}
+	c.StartExec(context.Background(), protocol.ExecStartMessage{ExecID: "typed", ContainerID: "c1", Cmd: []string{"sh"}})
+	var end protocol.ExecEndMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeExecEnd), &end)
+	if end.Reason != "session limit reached" {
+		t.Fatalf("typed start with the cap used = %+v", end)
+	}
+
+	close(hold)
+	select {
+	case <-done:
+	case <-time.After(readTimeout):
+		t.Fatal("attached start did not finish after the stream ended")
+	}
+	if got := slots(); got != 0 {
+		t.Fatalf("rawExecStarts = %d after the stream ended, want 0", got)
+	}
+}
+
+// With the request cap full, dispatch refuses before handleRequestTo runs. A
+// refused raw exec start is still recorded once and never reaches the daemon;
+// a refused request that is not an exec start writes no exec_start record.
+func TestRefusedAtRequestCapAuditsRawExecStartOnce(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, method, path string
+		want               int
+	}{
+		{"exec start", http.MethodPost, "/v1.47/exec/abc/start?x=1", 1},
+		{"other request", http.MethodPost, "/containers/create", 0},
+	} {
+		for _, site := range []string{"inline", "streamed"} {
+			t.Run(tc.name+"/"+site, func(t *testing.T) {
+				t.Parallel()
+				c, ctrl := newTestClient(t)
+				logger, closeAudit, err := audit.New("", 20)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(closeAudit)
+				c.auditor = logger
+				dc, paths := realDockerDaemon(t)
+				c.dockerClient = dc
+				for i := 0; i < maxStreams; i++ {
+					c.streamSem <- struct{}{}
+				}
+				req := protocol.RequestMessage{RequestID: "cap", Method: tc.method, Path: tc.path}
+
+				if site == "inline" {
+					runReadPump(t, c)
+					sendEnvelope(t, ctrl, protocol.TypeRequest, req)
+				} else {
+					go c.dispatchStreamedBody(context.Background(), req, c.currentOutboundTarget(), 0)
+				}
+				var e protocol.ErrorMessage
+				decodeData(t, expectType(t, ctrl, protocol.TypeError), &e)
+				if e.RequestID != "cap" || e.Message != "agent busy: too many concurrent requests" {
+					t.Fatalf("error = %+v", e)
+				}
+
+				records := execRecords(logger)
+				if len(records) != tc.want {
+					t.Fatalf("exec records = %+v, want %d", records, tc.want)
+				}
+				if tc.want == 1 && (records[0].ExecID != "abc" || records[0].Container != "/v1.47/exec/abc/start") {
+					t.Fatalf("exec record = %+v", records[0])
+				}
+				select {
+				case got := <-paths:
+					t.Fatalf("daemon was reached with %q", got)
+				default:
+				}
+			})
+		}
 	}
 }

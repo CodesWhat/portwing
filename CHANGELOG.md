@@ -59,7 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same gap for an exec start sent as a plain request message instead of a
   typed `exec_start`. It now writes the same record and counts against the
   same 100 session cap as typed exec sessions, and is refused with an
-  `agent busy: exec session limit reached` error when the cap is full.
+  `agent busy: exec session limit reached` error when the cap is full. The
+  record carries the request path in `container`, as the standalone proxy's
+  does, and a start turned away by the concurrent request limit is recorded too.
 - Edge mode now honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` for the
   outbound WebSocket connection to the controller. The dial ignored them, so a
   host behind a corporate egress proxy could not connect. The Docker socket

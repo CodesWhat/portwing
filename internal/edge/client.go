@@ -880,6 +880,7 @@ func (c *Client) readPump(ctx context.Context) error {
 				}()
 			default:
 				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
+				c.auditRefusedRawExecStart(req.Method, req.Path)
 				_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 					Message:   "agent busy: too many concurrent requests",
 					RequestID: req.RequestID,
@@ -1243,6 +1244,7 @@ func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestM
 		c.handleRequestTo(ctx, req, target)
 	default:
 		slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
+		c.auditRefusedRawExecStart(req.Method, req.Path)
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   "agent busy: too many concurrent requests",
 			RequestID: req.RequestID,
@@ -1324,8 +1326,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		return
 	}
 
-	if execID, ok := rawExecStartID(req.Method, req.Path); ok {
-		c.auditor.ExecStart(c.cfg.DrydockURL, "", execID)
+	if c.auditRawExecStart(req.Method, req.Path) {
 		if !c.acquireRawExecSlot() {
 			slog.Warn("exec session limit reached, rejecting", "max", maxExecSessions, "request_id", applog.Sanitize(req.RequestID))
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{

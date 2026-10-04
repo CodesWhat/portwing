@@ -673,21 +673,40 @@ func (c *Client) releaseRawExecSlot() {
 	c.execAdmissionMu.Unlock()
 }
 
-// rawExecStartID reports whether a request message is an exec start sent as
-// plain HTTP rather than as a typed exec_start, and returns the exec ID parsed
-// from its path the way the standalone proxy does. The path may carry a query
-// and is classified percent-decoded, as the daemon routes it.
-func rawExecStartID(method, path string) (string, bool) {
+// rawExecStart reports whether a request message is an exec start sent as
+// plain HTTP rather than as a typed exec_start. It returns the exec ID and the
+// decoded path, both parsed the way the standalone proxy does. The path may
+// carry a query and is classified percent-decoded, as the daemon routes it.
+func rawExecStart(method, path string) (execID, routePath string, ok bool) {
 	if method != http.MethodPost {
-		return "", false
+		return "", "", false
 	}
 	pathOnly, _, _ := strings.Cut(path, "?")
 	if decoded, err := url.PathUnescape(pathOnly); err == nil {
 		pathOnly = decoded
 	}
 	if !docker.IsResourceRoute(pathOnly, "exec", "start") {
-		return "", false
+		return "", "", false
 	}
 	id := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(pathOnly), "/exec/"), "/start")
-	return id, true
+	return id, pathOnly, true
+}
+
+// auditRawExecStart writes the exec_start record for a raw exec start, with the
+// route path in the container field as the standalone proxy does, and reports
+// whether the request is one.
+func (c *Client) auditRawExecStart(method, path string) bool {
+	id, routePath, ok := rawExecStart(method, path)
+	if ok {
+		c.auditor.ExecStart(c.cfg.DrydockURL, routePath, id)
+	}
+	return ok
+}
+
+// auditRefusedRawExecStart records a raw exec start the dispatch sites turned
+// away at the request cap, which never reaches handleRequestTo. A request
+// admitted there is recorded by handleRequestTo instead, so none is recorded
+// twice.
+func (c *Client) auditRefusedRawExecStart(method, path string) {
+	c.auditRawExecStart(method, path)
 }
