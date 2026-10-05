@@ -601,6 +601,13 @@ components:
           description: HTTP path (api_request / auth_failure / rate_limited events only).
         outcome:
           type: string
+          enum: [allowed, denied, error]
+          description: >-
+            Result of the event. On `exec_start` it is the admission decision:
+            `allowed` when the exec took an exec session slot, `denied` when
+            the exec session limit (or, in edge mode, the request or
+            streamed-body cap) refused it. A daemon failure after admission is
+            recorded on the request's `api_request` event, not here.
           example: "allowed"
         status:
           type: integer

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`exec_start` audit records now say whether the exec was admitted.** A
+  start that took an exec slot is recorded `allowed`, as before. A start the
+  exec session limit turned away is recorded `denied`, and on the edge so is a
+  raw exec request refused by the request cap or the streamed-body cap, and a
+  typed `exec_start` with a missing or duplicate exec ID. Each attempt still
+  writes one record, at the decision and before anything reaches the daemon.
+  Field names are unchanged, so readers of `/_portwing/audit` and
+  `/_portwing/audit/export` only see `outcome` take a value it already takes on
+  other events. A failed typed exec start on the edge now also writes an
+  `api_request` record with outcome `error` and method `exec_start`, and a
+  standalone upgraded exec whose daemon dial or response fails records the 502
+  or the daemon's status on its `api_request` record instead of 200.
+
+### Fixed
+
+- A streamed-body exec start refused by the concurrent streamed-body limit now
+  gets an `exec_start` record, outcome `denied`. It used to leave none.
+- A request the edge handler rejects as an invalid path, such as
+  `%2Fexec/x/start`, no longer gets an `exec_start` record when a request cap
+  turns it away. The cap sites now apply the same path check the handler does.
+
 ## [v0.9.22] - 2026-10-04
 
 ### Added

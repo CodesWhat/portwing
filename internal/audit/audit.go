@@ -28,6 +28,10 @@
 //	"container": "<exec path or container ID>",
 //	"exec_id":   "<exec resource ID>"
 //
+// An exec_start record is written once per attempt at the admission decision.
+// Its outcome is "allowed" when the exec was admitted and "denied" when a
+// concurrency limit refused it.
+//
 // Enrollment events add:
 //
 //	"key_id": "<enrolled key ID>"
@@ -313,8 +317,20 @@ func (l *Logger) Enrollment(actor, keyID, outcome string) {
 	}
 }
 
-// ExecStart records the start of an interactive exec tunnel.
-func (l *Logger) ExecStart(actor, container, execID string) {
+// ExecOutcome maps an exec admission decision to the outcome an exec_start
+// record carries: OutcomeAllowed when a session slot was taken, OutcomeDenied
+// when the request was refused.
+func ExecOutcome(admitted bool) string {
+	if admitted {
+		return OutcomeAllowed
+	}
+	return OutcomeDenied
+}
+
+// ExecStart records an exec start attempt at the admission decision, before
+// anything reaches the Docker daemon. outcome is OutcomeAllowed when the exec
+// was admitted and OutcomeDenied when a limit refused it.
+func (l *Logger) ExecStart(actor, container, execID, outcome string) {
 	if l.log == nil && l.ring == nil {
 		return
 	}
@@ -324,7 +340,7 @@ func (l *Logger) ExecStart(actor, container, execID string) {
 			slog.String("actor", applog.Sanitize(actor)),
 			slog.String("container", applog.Sanitize(container)),
 			slog.String("exec_id", applog.Sanitize(execID)),
-			slog.String("outcome", OutcomeAllowed),
+			slog.String("outcome", outcome),
 		)
 	}
 	if l.ring != nil {
@@ -334,7 +350,7 @@ func (l *Logger) ExecStart(actor, container, execID string) {
 			Actor:     actor,
 			Container: container,
 			ExecID:    execID,
-			Outcome:   OutcomeAllowed,
+			Outcome:   outcome,
 		})
 	}
 }

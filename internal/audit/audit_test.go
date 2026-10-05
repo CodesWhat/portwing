@@ -52,7 +52,7 @@ func TestDisabledEmitsNothing(t *testing.T) {
 	l.AuthFailure("1.2.3.4", "GET", "/foo")
 	l.RateLimited("1.2.3.4", "GET", "/foo")
 	l.ComposeOp("1.2.3.4", "up", "mystack", OutcomeAllowed)
-	l.ExecStart("1.2.3.4", "/exec/abc/start", "abc")
+	l.ExecStart("1.2.3.4", "/exec/abc/start", "abc", OutcomeAllowed)
 }
 
 func TestAPIRequestAllowed(t *testing.T) {

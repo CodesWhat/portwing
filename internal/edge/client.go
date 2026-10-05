@@ -893,7 +893,6 @@ func (c *Client) readPump(ctx context.Context) error {
 				slog.Warn("invalid exec_start message", "error", err)
 				continue
 			}
-			c.auditor.ExecStart(c.cfg.DrydockURL, msg.ContainerID, msg.ExecID)
 			// Synchronous: StartExec only registers the session and spawns the
 			// Docker bring-up, so it returns immediately. Registering before the
 			// next message is dispatched is what keeps a following exec_input
@@ -1026,6 +1025,7 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 	if len(c.pendingBodies) >= maxPendingRequestBodies {
 		c.pendingBodiesMu.Unlock()
 		slog.Warn("concurrent streamed request body limit reached, rejecting", "max", maxPendingRequestBodies, "request_id", applog.Sanitize(req.RequestID))
+		c.auditRefusedRawExecStart(req.Method, req.Path)
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   "agent busy: too many concurrent streamed request bodies",
 			RequestID: req.RequestID,
@@ -1326,15 +1326,16 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		return
 	}
 
-	if c.auditRawExecStart(req.Method, req.Path) {
-		if !c.acquireRawExecSlot() {
-			slog.Warn("exec session limit reached, rejecting", "max", maxExecSessions, "request_id", applog.Sanitize(req.RequestID))
-			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
-				Message:   "agent busy: exec session limit reached",
-				RequestID: req.RequestID,
-			})
-			return
-		}
+	isExec, admitted := c.admitRawExecStart(req.Method, req.Path)
+	if !admitted {
+		slog.Warn("exec session limit reached, rejecting", "max", maxExecSessions, "request_id", applog.Sanitize(req.RequestID))
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+			Message:   "agent busy: exec session limit reached",
+			RequestID: req.RequestID,
+		})
+		return
+	}
+	if isExec {
 		defer c.releaseRawExecSlot()
 	}
 
