@@ -61,6 +61,13 @@ func realDockerDaemon(t *testing.T) (*docker.Client, <-chan string) {
 // cancelled), so a test can keep a stream in flight. A nil hold answers at once.
 func realDockerDaemonHolding(t *testing.T, hold <-chan struct{}) (*docker.Client, <-chan string) {
 	t.Helper()
+	return realDockerDaemonObserving(t, hold, nil)
+}
+
+// realDockerDaemonObserving is realDockerDaemonHolding that also calls onRequest,
+// when non-nil, on every non-version request before it answers.
+func realDockerDaemonObserving(t *testing.T, hold <-chan struct{}, onRequest func()) (*docker.Client, <-chan string) {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "lk")
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +83,9 @@ func realDockerDaemonHolding(t *testing.T, hold <-chan struct{}) (*docker.Client
 		if r.URL.Path == "/version" {
 			_, _ = w.Write([]byte(`{"ApiVersion":"1.44"}`))
 			return
+		}
+		if onRequest != nil {
+			onRequest()
 		}
 		paths <- r.URL.Path
 		w.WriteHeader(http.StatusOK)

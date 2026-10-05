@@ -58,6 +58,95 @@ func TestTypedExecStartAdmittedThenDaemonFailureRecorded(t *testing.T) {
 	}
 }
 
+// The exec_start record is in the ring, as the one allowed record, by the time
+// the bring-up first reaches the daemon.
+func TestTypedExecStartRecordedBeforeDaemonCreate(t *testing.T) {
+	t.Parallel()
+
+	c, logger, next := newAuditedTestClient(t)
+	seen := make(chan []audit.Record, 1)
+	c.dockerClient = &fakeDocker{
+		createExecErr: errors.New("boom"),
+		createHook: func() {
+			select {
+			case seen <- execRecords(logger):
+			default:
+			}
+		},
+	}
+
+	c.StartExec(context.Background(), protocol.ExecStartMessage{ExecID: "e1", ContainerID: "c1"})
+	next()
+
+	select {
+	case records := <-seen:
+		if len(records) != 1 || records[0].Outcome != audit.OutcomeAllowed {
+			t.Fatalf("exec_start records when the daemon was reached = %+v, want one allowed record", records)
+		}
+	case <-time.After(readTimeout):
+		t.Fatal("the daemon was never reached")
+	}
+}
+
+// The raw path records the allowed exec_start before the request is forwarded.
+func TestRawExecStartRecordedBeforeDaemonSeesRequest(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	logger, closeAudit, err := audit.New("", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeAudit)
+	c.auditor = logger
+	seen := make(chan []audit.Record, 1)
+	dc, _ := realDockerDaemonObserving(t, nil, func() {
+		select {
+		case seen <- execRecords(logger):
+		default:
+		}
+	})
+	c.dockerClient = dc
+
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "raw-order", Method: http.MethodPost, Path: "/exec/abc/start", Body: []byte(`{"Detach":true}`),
+	})
+	expectType(t, ctrl, protocol.TypeResponse)
+
+	select {
+	case records := <-seen:
+		if len(records) != 1 || records[0].Outcome != audit.OutcomeAllowed {
+			t.Fatalf("exec_start records when the daemon saw the request = %+v, want one allowed record", records)
+		}
+	case <-time.After(readTimeout):
+		t.Fatal("the daemon never saw the request")
+	}
+}
+
+// A typed exec_start delivered through the read pump is recorded exactly once,
+// by StartExec; the pump adds none of its own.
+func TestReadPumpTypedExecStartAuditedOnce(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newTestClient(t)
+	logger, closeAudit, err := audit.New("", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeAudit)
+	c.auditor = logger
+	c.dockerClient = &fakeDocker{createExecErr: errors.New("boom")}
+
+	runReadPump(t, c)
+	sendEnvelope(t, ctrl, protocol.TypeExecStart, protocol.ExecStartMessage{ExecID: "e1", ContainerID: "c1"})
+	expectType(t, ctrl, protocol.TypeExecEnd)
+
+	starts := execRecords(logger)
+	if len(starts) != 1 || starts[0].Outcome != audit.OutcomeAllowed || starts[0].ExecID != "e1" {
+		t.Fatalf("exec_start records = %+v, want exactly one allowed record", starts)
+	}
+}
+
 func TestTypedExecStartRefusedIsDenied(t *testing.T) {
 	t.Parallel()
 

@@ -28,9 +28,12 @@
 //	"container": "<exec path or container ID>",
 //	"exec_id":   "<exec resource ID>"
 //
-// An exec_start record is written once per attempt at the admission decision.
-// Its outcome is "allowed" when the exec was admitted and "denied" when a
-// concurrency limit refused it.
+// An exec_start record is written for each attempt that reaches the admission
+// decision, before anything is forwarded to the Docker daemon. Its outcome is
+// "allowed" when the exec was admitted and "denied" when it was refused: by an
+// exec session or request limit, or on the typed edge path by a missing or
+// duplicate exec ID. A streamed-body start dropped while its body was still
+// being reassembled never reaches the decision and writes no record.
 //
 // Enrollment events add:
 //

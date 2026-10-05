@@ -129,13 +129,13 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		}
 	}()
 
-	c.execAdmissionMu.Lock()
-	defer c.execAdmissionMu.Unlock()
+	decision := c.admitTypedExec(msg.ExecID, session)
+	// The record is written after the admission lock is released, so audit IO
+	// never runs under it, and before the bring-up is spawned.
+	c.auditTypedExecStart(msg, decision == execAdmitted)
 
-	// Check concurrent session limit.
-	if c.execSlotsFullLocked() {
+	if decision == execSlotsFull {
 		slog.Warn("exec session limit reached", "max", maxExecSessions)
-		c.auditTypedExecStart(msg, false)
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
 			ExecID: msg.ExecID,
@@ -144,8 +144,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		return
 	}
 
-	if _, loaded := c.execSessions.LoadOrStore(msg.ExecID, session); loaded {
-		c.auditTypedExecStart(msg, false)
+	if decision == execDuplicateID {
 		// Error is the only existing non-terminal rejection shape. Correlation is
 		// controller-dependent; exec_end would incorrectly close the live session.
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
@@ -156,10 +155,33 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		return
 	}
 	admitted = true
-	c.auditTypedExecStart(msg, true)
 
 	go session.inputWriter(sessionCtx)
 	go c.bringUpExec(sessionCtx, msg, session)
+}
+
+// typedExecAdmission is the result of admitting a typed exec session.
+type typedExecAdmission int
+
+const (
+	execAdmitted typedExecAdmission = iota
+	execSlotsFull
+	execDuplicateID
+)
+
+// admitTypedExec decides whether a typed exec session may start and, when it
+// may, registers it, all under execAdmissionMu so the cap shared with raw exec
+// starts holds. It does no IO.
+func (c *Client) admitTypedExec(execID string, session *ExecSession) typedExecAdmission {
+	c.execAdmissionMu.Lock()
+	defer c.execAdmissionMu.Unlock()
+	if c.execSlotsFullLocked() {
+		return execSlotsFull
+	}
+	if _, loaded := c.execSessions.LoadOrStore(execID, session); loaded {
+		return execDuplicateID
+	}
+	return execAdmitted
 }
 
 // auditTypedExecStart writes the exec_start record for a typed exec_start with

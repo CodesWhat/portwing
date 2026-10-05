@@ -13,14 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start that took an exec slot is recorded `allowed`, as before. A start the
   exec session limit turned away is recorded `denied`, and on the edge so is a
   raw exec request refused by the request cap or the streamed-body cap, and a
-  typed `exec_start` with a missing or duplicate exec ID. Each attempt still
-  writes one record, at the decision and before anything reaches the daemon.
-  Field names are unchanged, so readers of `/_portwing/audit` and
+  typed `exec_start` with a missing or duplicate exec ID. Each attempt that
+  reaches the admission decision writes one record, there and before anything
+  reaches the daemon; a streamed-body start dropped during reassembly never
+  gets that far and writes none. Field names are unchanged, so readers of `/_portwing/audit` and
   `/_portwing/audit/export` only see `outcome` take a value it already takes on
-  other events. A failed typed exec start on the edge now also writes an
-  `api_request` record with outcome `error` and method `exec_start`, and a
-  standalone upgraded exec whose daemon dial or response fails records the 502
-  or the daemon's status on its `api_request` record instead of 200.
+  other events. A typed exec start on the edge that fails, or is cancelled by
+  the controller's `exec_end` or a tunnel drop before it comes up, now also
+  writes an `api_request` record with outcome `error` and method `exec_start`.
+  A standalone upgraded exec whose daemon dial or response fails records the
+  502 or the daemon's status on its `api_request` record instead of 200, and
+  the request metrics count it under that status too.
 
 ### Fixed
 

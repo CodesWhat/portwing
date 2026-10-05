@@ -71,7 +71,7 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 | `auth_failure` | An invalid or missing token is presented |
 | `rate_limited` | A request is blocked by the rate limiter |
 | `compose_op` | A Docker Compose lifecycle operation runs |
-| `exec_start` | An exec start is attempted: an interactive tunnel, a detached `docker exec -d`, or an attached start sent without an upgrade. Written once per attempt, when the agent decides whether to admit it and before anything reaches Docker |
+| `exec_start` | An exec start is attempted: an interactive tunnel, a detached `docker exec -d`, or an attached start sent without an upgrade. Written for each attempt that reaches the admission decision, before anything reaches Docker. A streamed-body start dropped while its body is still being reassembled (missing or duplicate request ID, bad base64, a byte cap, the idle timeout, a cancel) never gets there and writes none |
 | `enrollment` | An Ed25519 key is enrolled via `/api/portwing/enroll` |
 
 ### Additional fields by event type
@@ -90,7 +90,9 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 | `container` | string | Exec path or container ID |
 | `exec_id` | string | Exec resource ID assigned by the agent |
 
-The `outcome` of an `exec_start` record says whether the exec was admitted. `allowed` means it took an exec session slot and was forwarded or started. `denied` means it was refused: the exec session limit was full or, in edge mode, a raw exec request hit the request cap or the streamed-body cap, or a typed `exec_start` had a missing or duplicate exec ID. If Docker then fails an admitted start, the `exec_start` record stays `allowed` and the failure is on the request's `api_request` record: its `status` in standalone mode (for example 502 when the daemon can't be reached), or in edge mode an `error` outcome, with `status` 0 on a failed forwarded request and the message type `exec_start` as `method` on a failed typed start.
+The `outcome` of an `exec_start` record says whether the exec was admitted. `allowed` means it took an exec session slot and was forwarded or started. `denied` means it was refused: the exec session limit was full or, in edge mode, a raw exec request hit the request cap or the streamed-body cap, or a typed `exec_start` had a missing or duplicate exec ID.
+
+If the start then fails, the `exec_start` record stays `allowed` and the failure is on a separate `api_request` record. In standalone mode it carries the status the client was sent, for example 502 when the daemon can't be reached or the daemon's own status when it refuses the upgrade. In edge mode a raw start whose request fails before the daemon answers is an `error` with `status` 0, and a daemon 4xx or 5xx reply is an `allowed` record carrying that `status`. A typed start that fails, or is cancelled by the controller's `exec_end` or a tunnel drop before it comes up, is an `error` record with `exec_start` as `method` and the container ID as `path`.
 
 **`enrollment`** — Key enrollment events add:
 
