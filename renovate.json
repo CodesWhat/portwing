@@ -1,7 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>CodesWhat/.github:renovate-config"],
-  "baseBranchPatterns": ["dev/v0.9"],
+  "extends": [
+    "local>CodesWhat/.github:renovate-config"
+  ],
+  "baseBranchPatterns": [
+    "dev/v0.9"
+  ],
   "lockFileMaintenance": {
     "enabled": false
   },
@@ -13,6 +17,26 @@
         "github.com/gorilla/websocket",
         "class-variance-authority",
         "clsx"
+      ],
+      "abandonmentThreshold": null
+    },
+    {
+      "description": "Hold the hosted-runner move from ubuntu-24.04 to 26.04 (decided 2026-10-05, re-check 2027-01-11). It touches about 30 runs-on entries and every harden-runner egress allow-list at once, and hosted runners have been killing CPU-heavy jobs since 2026-09-01, so a second variable would make failures harder to read. Do it as its own PR on a quiet week, then remove this rule.",
+      "matchDatasources": [
+        "github-runners"
+      ],
+      "matchPackageNames": [
+        "ubuntu"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "google/clusterfuzzlite has had no release since 2023-08-09 and is still the supported way to run ClusterFuzzLite in Actions (reviewed 2026-10-05). The cflite lane is green and the nightly Go fuzz lane covers the same targets, so suppress abandonment reporting rather than tracking it as a decaying dependency.",
+      "matchPackageNames": [
+        "google/clusterfuzzlite"
       ],
       "abandonmentThreshold": null
     }
