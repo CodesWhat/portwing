@@ -132,6 +132,21 @@ DOCKERFILE
 expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
 	"a commented-out pin must not count"
 
+# Nor is one that only appears in a trailing comment on a real instruction.
+cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
+FROM golang:1.27.1-alpine AS compose-builder
+RUN go build ./cmd # go get github.com/containerd/containerd/v2@v2.3.6
+DOCKERFILE
+expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
+	"a pin that only appears in a trailing comment must not count"
+
+# A real pin followed by a trailing comment still counts, and the comment's
+# own version is ignored.
+cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
+RUN go get github.com/containerd/containerd/v2@v2.3.6 # was v2.3.5
+DOCKERFILE
+expect_pass "a real pin with a trailing comment must still pass"
+
 cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
 RUN go get github.com/containerd/containerd/v2@v2.3.6
 RUN go get github.com/containerd/containerd/v2@v2.3.5

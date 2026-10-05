@@ -954,6 +954,13 @@ for expected_text in \
 	fi
 done
 
+# The check's own test runs nowhere unless something invokes it, so the
+# Release Contract job and its local hook must keep doing so.
+require_text ".github/workflows/ci-verify.yml" "run: bash scripts/compose-containerd-version-test.sh" \
+	"the Release Contract job must run the Compose containerd check test"
+require_text "lefthook.yml" "run: bash scripts/compose-containerd-version-test.sh" \
+	"the pre-push hooks must run the Compose containerd check test"
+
 # gosec runs with -no-fail on purpose (it has no severity cutoff and would
 # otherwise fail on LOW-severity heuristics like G104). That makes the explicit
 # severity-gate step the only thing standing between the required

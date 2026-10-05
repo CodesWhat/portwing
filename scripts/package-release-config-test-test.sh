@@ -217,6 +217,22 @@ expect_release_contract_failure \
 	"the package release contract must reject a grype-image job that stops verifying the embedded containerd version"
 restore_grype_workflow
 
+sed '/run: bash scripts\/compose-containerd-version-test.sh/d' \
+	"${fixture}/.github/workflows/ci-verify.yml" >"${fixture}/.github/workflows/ci-verify.yml.tmp"
+mv "${fixture}/.github/workflows/ci-verify.yml.tmp" "${fixture}/.github/workflows/ci-verify.yml"
+expect_release_contract_failure \
+	"FAIL: the Release Contract job must run the Compose containerd check test" \
+	"the package release contract must reject a Release Contract job that stops running the Compose containerd test"
+git -C "${fixture}" checkout -q -- .github/workflows/ci-verify.yml
+
+sed '/run: bash scripts\/compose-containerd-version-test.sh/d' \
+	"${fixture}/lefthook.yml" >"${fixture}/lefthook.yml.tmp"
+mv "${fixture}/lefthook.yml.tmp" "${fixture}/lefthook.yml"
+expect_release_contract_failure \
+	"FAIL: the pre-push hooks must run the Compose containerd check test" \
+	"the package release contract must reject a lefthook config that stops running the Compose containerd test"
+git -C "${fixture}" checkout -q -- lefthook.yml
+
 sed '/bash scripts\/package-release-config-test.sh/d' \
 	"${fixture}/scripts/ci/go-release-check.sh" >"${fixture}/scripts/ci/go-release-check.sh.tmp"
 mv "${fixture}/scripts/ci/go-release-check.sh.tmp" "${fixture}/scripts/ci/go-release-check.sh"

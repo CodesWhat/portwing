@@ -42,9 +42,13 @@ if ! command -v go >/dev/null 2>&1; then
 	exit 1
 fi
 
-# Active lines only, so a stale `# was ...@v2.3.5` comment is not a pin.
+# Active text only, so a stale `# was ...@v2.3.5` comment is not a pin, whether
+# it is a full-line comment or trails a real instruction (` #` after
+# whitespace, to end of line). Quoting is not parsed; the real pin lines carry
+# no `#`.
 pins="$(
 	grep -vE '^[[:space:]]*#' "${dockerfile}" |
+		sed -E 's/[[:space:]]#.*$//' |
 		grep -oE "${module//./\\.}@v[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.+-]*)?" |
 		sed "s|^${module}@||" | sort -u || true
 )"
