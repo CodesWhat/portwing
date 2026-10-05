@@ -929,6 +929,31 @@ if [ -z "$grype_deps_exclusion" ]; then
 	failures=$((failures + 1))
 fi
 
+# The ARMv7 image's Compose is built in a compose-builder stage with containerd
+# pinned, but the Dockerfile pin is only text. grype-image must read the module
+# version out of the extracted binary and compare it with the Dockerfile pin,
+# on the ARMv7 leg only (the amd64 image ships Wolfi's compose, no pin), with
+# the Dockerfile passed through env rather than interpolated into the script.
+require_text "scripts/ci/verify-compose-containerd.sh" "go version -m" \
+	"the Compose containerd check must read the module version from the binary's build info"
+grype_image_block="$(awk '/^  grype-image:/ { in_job = 1; next } in_job && /^  [^[:space:]]/ { in_job = 0 } in_job { print }' \
+	.github/workflows/security-grype.yml)"
+compose_check_step="$(awk '
+	/^      - name: / { in_step = ($0 ~ /Verify ARMv7 Compose embeds the pinned containerd/) }
+	in_step { print }
+' <<<"${grype_image_block}")"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+for expected_text in \
+	"if: matrix.platform == 'linux/arm/v7'" \
+	'COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}' \
+	'GOTOOLCHAIN: local' \
+	'run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}"'; do
+	if ! grep -Fq -- "${expected_text}" <<<"${compose_check_step}"; then
+		echo "FAIL: security-grype.yml grype-image must verify the ARMv7 Compose containerd version (step is missing: ${expected_text})" >&2
+		failures=$((failures + 1))
+	fi
+done
+
 # gosec runs with -no-fail on purpose (it has no severity cutoff and would
 # otherwise fail on LOW-severity heuristics like G104). That makes the explicit
 # severity-gate step the only thing standing between the required
