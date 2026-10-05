@@ -595,12 +595,27 @@ components:
           description: Authenticated principal (token label or key ID).
         method:
           type: string
-          description: HTTP method (api_request / auth_failure / rate_limited events only).
+          description: >-
+            HTTP method (api_request / auth_failure / rate_limited events). An
+            edge `api_request` for a failed or cancelled typed exec start
+            carries the message type `exec_start` instead.
         path:
           type: string
-          description: HTTP path (api_request / auth_failure / rate_limited events only).
+          description: >-
+            HTTP path (api_request / auth_failure / rate_limited events). An
+            edge `api_request` for a failed or cancelled typed exec start
+            carries the container ID instead.
         outcome:
           type: string
+          enum: [allowed, denied, error]
+          description: >-
+            Result of the event. On `exec_start` it is the admission decision:
+            `allowed` when the exec took an exec session slot, `denied` when
+            the exec session limit (or, in edge mode, the request or
+            streamed-body cap) refused it, or a typed exec had a missing or
+            duplicate exec ID. A failure after admission, including a start
+            cancelled before it comes up, is recorded on the request's
+            `api_request` event, not here.
           example: "allowed"
         status:
           type: integer

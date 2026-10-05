@@ -551,8 +551,7 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	// has been forwarded, which for a detached start is immediate and for an
 	// attached one is the life of the stream.
 	if r.Method == http.MethodPost && isExecStartPath(r.URL.Path) {
-		s.auditExecStart(r)
-		if !s.acquireExecSlot(w) {
+		if !s.acquireExecSlot(w, r) {
 			return
 		}
 		defer s.execSem.release()
@@ -640,14 +639,11 @@ func (s *Server) handleExecHijack(w http.ResponseWriter, r *http.Request) {
 // raw Unix socket connection. Bytes already buffered by net/http after the
 // request are relayed through clientBuf once the upgrade succeeds.
 func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
-	if isExecStartPath(r.URL.Path) {
-		s.auditExecStart(r)
-	}
-
 	// Bound concurrent exec/attach sessions (SPEC 7.3) before the body read and
 	// the hijack, so a rejected session costs nothing and can still be answered
-	// with a normal HTTP response.
-	if !s.acquireExecSlot(w) {
+	// with a normal HTTP response. An exec start is audited with the outcome of
+	// this decision.
+	if !s.acquireExecSlot(w, r) {
 		return
 	}
 	defer s.execSem.release()
@@ -702,7 +698,7 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	dockerConn, err = dialer("unix", s.dockerClient.GetSocketPath())
 	if err != nil {
 		// Best-effort 502 write; client may have already gone.
-		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		failHijack(w, clientConn)
 		return
 	}
 	if !s.trackHijackedConnection(dockerConn) {
@@ -716,7 +712,7 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	// derive Content-Length from the bounded body read above.
 	proxyReq, err := newDockerProxyRequest(r, bytes.NewReader(body))
 	if err != nil {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		failHijack(w, clientConn)
 		return
 	}
 	copyHeaders(proxyReq.Header, r.Header)
@@ -731,7 +727,7 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	proxyReq.Header.Set("Upgrade", upgrade)
 
 	if err := proxyReq.Write(dockerConn); err != nil {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		failHijack(w, clientConn)
 		return
 	}
 
@@ -739,11 +735,12 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	dockerBuf := bufio.NewReader(dockerConn)
 	resp, err := http.ReadResponse(dockerBuf, proxyReq)
 	if err != nil {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		failHijack(w, clientConn)
 		return
 	}
 
 	// Forward the response status to the client.
+	noteHijackStatus(w, resp.StatusCode)
 	if err := resp.Write(clientConn); err != nil {
 		return
 	}
@@ -780,16 +777,43 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 }
 
-// auditExecStart records an exec start for r, whose path is an exec start route.
-func (s *Server) auditExecStart(r *http.Request) {
+// failHijack answers a hijacked connection with a 502 and records it as the
+// request's status, so the api_request record for the exec reads 502.
+func failHijack(w http.ResponseWriter, clientConn net.Conn) {
+	noteHijackStatus(w, http.StatusBadGateway)
+	_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+}
+
+// noteHijackStatus sets the status the audit middleware records for a hijacked
+// request, whose status line is written straight to the connection and so never
+// passes through WriteHeader. A successful upgrade (101) keeps the recorded
+// default, as it always has.
+func noteHijackStatus(w http.ResponseWriter, code int) {
+	if code == http.StatusSwitchingProtocols {
+		return
+	}
+	if rec, ok := w.(*statusRecorder); ok {
+		rec.code = code
+	}
+}
+
+// auditExecStart records an exec start for r, whose path is an exec start route,
+// with the outcome of its admission decision.
+func (s *Server) auditExecStart(r *http.Request, admitted bool) {
 	execID := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(r.URL.Path), "/exec/"), "/start")
-	s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID)
+	s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID, audit.ExecOutcome(admitted))
 }
 
 // acquireExecSlot takes an exec session slot, or answers 503 and returns false
-// when the limit is reached. The caller releases s.execSem on true.
-func (s *Server) acquireExecSlot(w http.ResponseWriter) bool {
-	if !s.execSem.acquire() {
+// when the limit is reached. The caller releases s.execSem on true. A request
+// on an exec start route is audited once, with the admission result, before
+// the refusal is written or anything is forwarded.
+func (s *Server) acquireExecSlot(w http.ResponseWriter, r *http.Request) bool {
+	admitted := s.execSem.acquire()
+	if isExecStartPath(r.URL.Path) {
+		s.auditExecStart(r, admitted)
+	}
+	if !admitted {
 		slog.Warn("exec session limit reached, rejecting", "max", s.execSem.limit())
 		http.Error(w, "agent busy: exec session limit reached", http.StatusServiceUnavailable)
 		return false

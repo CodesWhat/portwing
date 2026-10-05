@@ -151,7 +151,7 @@ func TestExecStartRingOnly(t *testing.T) {
 	}
 	defer cleanup()
 
-	l.ExecStart("10.0.0.1", "/exec/abc/start", "exec-42")
+	l.ExecStart("10.0.0.1", "/exec/abc/start", "exec-42", OutcomeAllowed)
 
 	recs := l.Records(0)
 	if len(recs) != 1 {
@@ -292,7 +292,7 @@ func TestExecStartWithSinkAndRing(t *testing.T) {
 	}
 	defer cleanup()
 
-	l.ExecStart("172.16.0.1", "/exec/def/start", "exec-99")
+	l.ExecStart("172.16.0.1", "/exec/def/start", "exec-99", OutcomeAllowed)
 
 	recs := l.Records(0)
 	if len(recs) != 1 {
@@ -357,4 +357,43 @@ func TestStderrSinkEnrollment(t *testing.T) {
 		t.Fatal("stderr logger should be enabled")
 	}
 	_ = strings.Contains("", "") // no-op to avoid import elimination
+}
+
+func TestExecOutcomeMapsAdmission(t *testing.T) {
+	t.Parallel()
+	if got := ExecOutcome(true); got != OutcomeAllowed {
+		t.Errorf("ExecOutcome(true) = %q, want %q", got, OutcomeAllowed)
+	}
+	if got := ExecOutcome(false); got != OutcomeDenied {
+		t.Errorf("ExecOutcome(false) = %q, want %q", got, OutcomeDenied)
+	}
+}
+
+// A refused exec start carries the denied outcome in the slog line and the
+// export buffer, under the same field names an admitted one uses.
+func TestExecStartDeniedOutcome(t *testing.T) {
+	t.Parallel()
+
+	l, read := captureLogger(t)
+	l.ExecStart("10.0.0.1", "/exec/abc/start", "abc", OutcomeDenied)
+
+	m := decodeEvent(t, read())
+	if m["event"] != EventExecStart || m["outcome"] != OutcomeDenied || m["exec_id"] != "abc" || m["container"] != "/exec/abc/start" {
+		t.Errorf("slog record = %v", m)
+	}
+}
+
+func TestExecStartDeniedOutcomeBuffered(t *testing.T) {
+	t.Parallel()
+
+	l, cleanup, err := New("", 4)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer cleanup()
+	l.ExecStart("10.0.0.1", "/exec/abc/start", "abc", OutcomeDenied)
+	recs := l.Records(0)
+	if len(recs) != 1 || recs[0].Outcome != OutcomeDenied || recs[0].Event != EventExecStart {
+		t.Errorf("buffered records = %+v", recs)
+	}
 }
