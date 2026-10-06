@@ -21,11 +21,11 @@
     "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run knip && npm run build && npm run budget:web && npm run lighthouse"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "chrome-launcher": "1.2.1",
-    "knip": "6.38.0",
+    "@biomejs/biome": "2.5.15",
+    "chrome-launcher": "1.2.2",
+    "knip": "6.39.0",
     "lighthouse": "13.5.0",
-    "turbo": "2.11.5"
+    "turbo": "2.11.6"
   },
   "overrides": {
     "postcss": "^8.5.28",
@@ -33,7 +33,7 @@
       "sharp": "^0.35.4"
     }
   },
-  "packageManager": "npm@12.1.0",
+  "packageManager": "npm@12.2.0",
   "engines": {
     "node": ">=24.0.0"
   }
