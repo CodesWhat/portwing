@@ -67,11 +67,13 @@ func runAdmissionRace(t *testing.T, typed, raw int) {
 	var winners []*ExecSession
 	t.Cleanup(func() {
 		close(hold)
+		deadline := time.After(readTimeout)
 		for _, s := range winners {
 			select {
 			case <-s.done:
-			case <-time.After(readTimeout):
+			case <-deadline:
 				t.Error("held bring-up never finished")
+				return
 			}
 		}
 	})

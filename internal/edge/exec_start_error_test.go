@@ -53,6 +53,25 @@ func requireOneStartError(t *testing.T, logger *audit.Logger) {
 	}
 }
 
+// requireTornDownSilently asserts the session is closed and deregistered and
+// that no exec_end went out: a pong queued after bringUpExec returned has to be
+// the next frame the controller sees.
+func requireTornDownSilently(t *testing.T, c *Client, session *ExecSession, next func() protocol.Envelope) {
+	t.Helper()
+	if !session.isClosed() {
+		t.Fatal("session not closed")
+	}
+	if _, ok := c.execSessions.Load("e1"); ok {
+		t.Fatal("session still registered")
+	}
+	if err := c.sendTypedMessage(protocol.TypePong, struct{}{}); err != nil {
+		t.Fatal(err)
+	}
+	if env := next(); env.Type != protocol.TypePong {
+		t.Fatalf("next frame = %q, want the pong sentinel (no exec_end)", env.Type)
+	}
+}
+
 // resizeClosing closes the session from inside the initial resize, the last
 // daemon call before activate, so activate finds the session already closed.
 type resizeClosing struct {
@@ -74,7 +93,7 @@ func TestBringUpExecExitsWriteOneErrorRecord(t *testing.T) {
 
 	t.Run("cancelled before create", func(t *testing.T) {
 		t.Parallel()
-		c, logger, _ := newAuditedTestClient(t)
+		c, logger, next := newAuditedTestClient(t)
 		fd := &fakeDocker{}
 		c.dockerClient = fd
 		ctx, cancel := context.WithCancel(context.Background())
@@ -87,11 +106,12 @@ func TestBringUpExecExitsWriteOneErrorRecord(t *testing.T) {
 		if len(fd.createCalls) != 0 {
 			t.Fatalf("create calls = %d, want 0", len(fd.createCalls))
 		}
+		requireTornDownSilently(t, c, session, next)
 	})
 
 	t.Run("cancelled after create", func(t *testing.T) {
 		t.Parallel()
-		c, logger, _ := newAuditedTestClient(t)
+		c, logger, next := newAuditedTestClient(t)
 		ctx, cancel := context.WithCancel(context.Background())
 		fd := &fakeDocker{createExecID: "d1", createHook: cancel}
 		c.dockerClient = fd
@@ -103,6 +123,7 @@ func TestBringUpExecExitsWriteOneErrorRecord(t *testing.T) {
 		if len(fd.startCalls) != 0 {
 			t.Fatalf("start calls = %d, want 0", len(fd.startCalls))
 		}
+		requireTornDownSilently(t, c, session, next)
 	})
 
 	t.Run("create fails", func(t *testing.T) {
@@ -135,7 +156,7 @@ func TestBringUpExecExitsWriteOneErrorRecord(t *testing.T) {
 
 	t.Run("closed before activate", func(t *testing.T) {
 		t.Parallel()
-		c, logger, _ := newAuditedTestClient(t)
+		c, logger, next := newAuditedTestClient(t)
 		agentSide, daemonSide := net.Pipe()
 		t.Cleanup(func() { _ = daemonSide.Close() })
 		fd := &fakeDocker{createExecID: "d1", startConn: agentSide}
@@ -150,6 +171,7 @@ func TestBringUpExecExitsWriteOneErrorRecord(t *testing.T) {
 		if len(fd.startCalls) != 1 {
 			t.Fatalf("start calls = %d, want 1", len(fd.startCalls))
 		}
+		requireTornDownSilently(t, c, session, next)
 	})
 }
 
