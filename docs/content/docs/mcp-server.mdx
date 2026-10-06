@@ -60,6 +60,12 @@ docker run -e TOKEN=mysecrettoken -p 3000:3000 ghcr.io/codeswhat/portwing:latest
 
 ---
 
+## Browser origins
+
+Both revisions require a Streamable HTTP server to validate the `Origin` header to prevent DNS rebinding, and to answer 403 when it is present and invalid. Portwing does this for every route with one middleware that runs before authentication. A request with no `Origin` header, which is what MCP clients such as Claude Desktop, Claude Code and Cursor send, is unaffected. When authentication is off, a `Host` that is not an IP address, `localhost`, a single-label name or listed in `ALLOWED_HOSTS` is rejected with the same 403, because a rebound page's reads carry no `Origin`. A request with any `Origin` that is not listed in `ALLOWED_ORIGINS` (empty by default) gets a plain `403 forbidden origin`; both specifications make a JSON-RPC error body optional here, so the body is not JSON-RPC. See [configuration](/configuration).
+
+---
+
 ## Read-only tools, not a read-only credential
 
 <Callout type="info">

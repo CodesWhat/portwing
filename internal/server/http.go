@@ -226,7 +226,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 
 	// Missing authentication fails closed because the catch-all route proxies
 	// the full Docker API. Local development requires an explicit opt-in.
-	if verifier == nil && ed25519Cfg.Registry == nil {
+	if authDisabled(verifier, ed25519Cfg) {
 		if !cfg.AllowUnauthenticated {
 			return nil, fmt.Errorf("no authentication configured: set TOKEN, TOKEN_HASH, or AUTHORIZED_KEYS; for local development only, set ALLOW_UNAUTHENTICATED=true")
 		}
@@ -304,10 +304,32 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		s.enroller.ActorResolver = s.rateLimiter.clientIP
 	}
 
+	allowedOrigins, err := config.ParseOriginAllowlist(cfg.AllowedOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("parsing ALLOWED_ORIGINS: %w", err)
+	}
+	allowedHosts, err := config.ParseHostAllowlist(cfg.AllowedHosts)
+	if err != nil {
+		return nil, fmt.Errorf("parsing ALLOWED_HOSTS: %w", err)
+	}
+
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
-	handler := RecoveryMiddleware(http.Handler(mux))
+	// The guard wraps the whole mux so it runs before authentication and
+	// before any handler on every route, including exec/attach upgrades and
+	// the MCP endpoint. Only panic recovery sits outside it. The Host check
+	// applies only while authentication is off: with auth on, a rebinding page
+	// cannot present the credential, so auth is the control.
+	guard := audit.OriginGuard{
+		Allow:     allowedOrigins,
+		CheckHost: authDisabled(s.verifier, s.ed25519),
+		Hosts:     allowedHosts,
+		Auditor:   s.auditor,
+		Requests:  s.metrics,
+		Actor:     s.rateLimiter.clientIP,
+	}
+	handler := RecoveryMiddleware(guard.Wrap(mux))
 
 	s.httpServer = &http.Server{
 		Addr:    config.ListenAddress(cfg.BindAddress, cfg.Port),

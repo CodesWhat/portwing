@@ -1026,7 +1026,7 @@ func TestHealthServerReadyFieldRequiresBothDockerAndController(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	c.healthServer.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	c.healthServer.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/ready", nil))
 
 	var body protocol.HealthResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {

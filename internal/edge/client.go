@@ -2066,7 +2066,7 @@ func (c *Client) startHealthServer() {
 	})
 	c.healthServer = &http.Server{
 		Addr:              config.ListenAddress(c.cfg.BindAddress, c.cfg.Port),
-		Handler:           mux,
+		Handler:           c.originGuard().Wrap(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		// BaseContext runs once, right after the listener binds, which is
 		// the only hook stdlib gives us to learn the bound address without
@@ -2086,6 +2086,35 @@ func (c *Client) startHealthServer() {
 		}
 		close(done)
 	}()
+}
+
+// originGuard builds the Origin and Host checks for the operations listener.
+// The listener has no authentication, so the Host check is always on, and every
+// request is a same-origin-capable GET that a rebound page could read. config.Load
+// has already validated ALLOWED_ORIGINS and ALLOWED_HOSTS, so a parse failure
+// here can only come from a hand-built config; each falls back to its empty
+// list, which rejects every Origin and admits only the built-in hosts.
+//
+// No Auditor is set: nothing else writes the audit ring from this listener, and
+// a page can fire rejected GETs fast enough to evict real records from it. The
+// rejection is still counted in the request metrics and logged, sampled.
+func (c *Client) originGuard() audit.OriginGuard {
+	allow, err := config.ParseOriginAllowlist(c.cfg.AllowedOrigins)
+	if err != nil {
+		slog.Error("invalid ALLOWED_ORIGINS, allowing no origins", "error", err)
+		allow = &config.OriginAllowlist{}
+	}
+	hosts, err := config.ParseHostAllowlist(c.cfg.AllowedHosts)
+	if err != nil {
+		slog.Error("invalid ALLOWED_HOSTS, allowing only built-in hosts", "error", err)
+		hosts = &config.HostAllowlist{}
+	}
+	guard := audit.OriginGuard{Allow: allow, CheckHost: true, Hosts: hosts}
+	// A nil *Registry stored in the interface would not compare equal to nil.
+	if c.metrics != nil {
+		guard.Requests = c.metrics
+	}
+	return guard
 }
 
 // HealthAddr returns the address the health server bound, or nil if it
