@@ -19,6 +19,7 @@ Portwing's security design layers independent controls so that a failure in any 
 |-------|-----------|
 | **Socket filter** | [Sockguard](https://github.com/codeswhat/sockguard) sits between Portwing and the Docker daemon; only explicitly allowlisted Docker API operations pass through |
 | **Authentication** | Standard mode fails closed without credentials; every protected request is authenticated before it reaches the proxy — per-client Ed25519 signatures or a shared token |
+| **Browser origin** | Any request carrying an `Origin` header is rejected with 403 before authentication unless the origin is in `ALLOWED_ORIGINS` (empty by default), which stops DNS rebinding |
 | **Transport** | TLS 1.2+ with AEAD-only cipher suites; ECDHE forward secrecy |
 | **Container hardening** | `read_only`, `cap_drop: ALL`, `no-new-privileges`, non-root by default (UID 65532), secrets via mounted files |
 | **Input validation** | Root-confined symlink-resistant writes, path-traversal guard, env-var denylist, and service-name flag-injection filter on Compose requests |
@@ -354,6 +355,28 @@ is not allowed. `frame-ancestors 'none'`, `object-src 'none'`, and
 The build packages the exact rendered files and their matching route policy in
 `.vercel/output`, preventing local and remote builds from deploying stale
 script hashes.
+
+---
+
+## Control 15 — Browser Origin allowlist
+
+A web page can make a victim's browser talk to Portwing by DNS rebinding: the page's hostname is re-pointed at `127.0.0.1` or a LAN address, so the browser treats Portwing as the page's own origin and lets the page read the responses. With authentication on this is one more layer to get past. With `ALLOW_UNAUTHENTICATED=true` on loopback it is the whole attack. Both MCP revisions Portwing serves (2025-11-25 and 2026-07-28) also require servers to validate `Origin`.
+
+One middleware wraps the entire HTTP handler, so it runs before authentication and before any route handler. That covers `/api/v1/*`, the Docker proxy catch-all including exec and attach upgrades, `/_portwing/*` including `/_portwing/mcp`, audit, metrics and health. In edge mode it wraps the operations listener the same way.
+
+| Request | Result |
+|---------|--------|
+| No `Origin` header | Passes untouched. The Docker CLI, Drydock's agent client, curl and MCP clients send none |
+| `Origin` exactly matches an `ALLOWED_ORIGINS` entry | Passes to authentication as usual |
+| Any other `Origin`, including `null`, an unparseable value, or more than one `Origin` header | 403 `forbidden origin` |
+
+Matching is exact on the parsed origin, never by prefix or substring. Scheme and host compare case-insensitively, and the port compares exactly after the default is filled in (80 for `http`, 443 for `https`), so `https://good.example` and `https://good.example:443` are the same entry while `https://good.example:444` and `https://good.example.evil.test` are not.
+
+An `Origin` equal to the request `Host` is deliberately not allowed automatically. A rebinding page presents exactly that, and Portwing serves no browser pages of its own, so there is no legitimate same-origin caller to protect.
+
+Each rejection writes an `api_request` audit record with outcome `denied` and status 403, logs a WARN with the origin value escaped and cut to 128 bytes, and is counted in `portwing_http_requests_total` under status 403. No health or other route is exempt: the Docker `HEALTHCHECK` and `portwing healthcheck` send no `Origin`.
+
+Startup validates `ALLOWED_ORIGINS`. Each entry must be `http` or `https` with a host and no path, query, fragment or userinfo, and `*` is refused.
 
 ---
 

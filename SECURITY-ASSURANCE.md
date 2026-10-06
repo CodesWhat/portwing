@@ -97,6 +97,12 @@ secrets as files, and places Sockguard in front of the Docker socket. These
 controls reduce the impact of a process-level compromise without claiming that
 the raw Docker socket itself is safe.
 
+A browser `Origin` header that is not listed in `ALLOWED_ORIGINS` (empty by
+default) is rejected with 403 before authentication on every route, in both
+modes, which closes DNS rebinding against loopback and LAN binds. Requests with
+no `Origin` header are unaffected. Evidence: [`internal/config/origins.go`](internal/config/origins.go) and
+[`internal/audit/origin_guard.go`](internal/audit/origin_guard.go).
+
 Evidence: [`Dockerfile`](Dockerfile), [`SECURITY.md`](SECURITY.md),
 [`examples/docker-compose.with-sockguard.yml`](examples/docker-compose.with-sockguard.yml),
 and the public [security model](https://portwing.codeswhat.com/docs/security-model).

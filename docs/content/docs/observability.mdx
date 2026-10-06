@@ -47,6 +47,8 @@ scrape_configs:
 If you scrape multiple agents, give each a distinct `job_name` or add a `relabel_configs` block to attach a `host` label so time series from different agents stay identifiable in your dashboards.
 </Callout>
 
+Prometheus, the container healthcheck and `portwing healthcheck` send no `Origin` header, so [`ALLOWED_ORIGINS`](/configuration) does not affect them. A request to any of these routes that does carry an `Origin` is rejected with 403 unless it is allowlisted, in edge mode as well.
+
 Edge-mode scrape config on the same private container or pod network:
 
 ```yaml

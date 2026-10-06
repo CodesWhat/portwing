@@ -23,9 +23,14 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 | `TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification on the outbound Edge connection. **Testing only.** |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | — | Standard proxy variables. The Edge connection to the controller goes through the proxy they select, using an HTTP CONNECT tunnel, and hosts matched by `NO_PROXY` connect directly. Credentials can be given in the proxy URL (`http://user:pass@proxy:3128`). Loopback controllers are never proxied. The proxy URL must use `http://` or `socks5://`; an `https://` proxy URL is rejected with an error. |
 | `TRUSTED_PROXIES` | — | Comma-separated list of CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`) for reverse proxies whose `X-Forwarded-For` header Portwing will trust for real-IP resolution. When unset, forwarding headers are ignored entirely. |
+| `ALLOWED_ORIGINS` | — | Comma-separated list of exact browser origins (`scheme://host[:port]`, e.g. `https://ops.example.com,http://localhost:5173`) allowed to call the HTTP API. Empty by default: any request that carries an `Origin` header is rejected with 403 before authentication. Requests with no `Origin` header are unaffected. Entries must use `http` or `https`, name a host, and carry no path, query, fragment or userinfo; `*` and anything else is a startup error. Applies in standard and edge mode. |
 
 <Callout type="warn">
 `TRUSTED_PROXIES` affects rate-limiting and IP-based access controls. An over-broad CIDR (e.g. `0.0.0.0/0`) lets any client spoof its source IP, bypassing those controls. Set only the CIDRs of your actual proxy infrastructure.
+</Callout>
+
+<Callout type="info">
+`ALLOWED_ORIGINS` is a defence against DNS rebinding, not an access list for people. Neither the Docker CLI, Drydock's agent client, curl nor MCP clients send an `Origin` header, so none of them need an entry. Only a browser page that calls Portwing directly does. An `Origin` that matches the request `Host` is not allowed automatically: a page served from a rebound hostname presents exactly that, and Portwing serves no pages of its own.
 </Callout>
 
 ### Authentication variables

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ALLOWED_ORIGINS` allowlists the browser origins that may call the API.**
+  A comma-separated list of exact origins (`scheme://host[:port]`), empty by
+  default. Each entry must be `http` or `https` with a host and no path, query,
+  fragment or userinfo, and `*` or anything else stops startup with an error
+  naming the entry. Scheme and host match case-insensitively and the port
+  matches exactly once the default is filled in. It applies in standard mode
+  and to edge mode's operations listener.
+
 ### Changed
 
 - **`exec_start` audit records now say whether the exec was admitted.** A
@@ -32,6 +42,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A request the edge handler rejects as an invalid path, such as
   `%2Fexec/x/start`, no longer gets an `exec_start` record when a request cap
   turns it away. The cap sites now apply the same path check the handler does.
+
+### Security
+
+- **A request whose `Origin` header isn't allowlisted is now rejected with 403
+  before authentication, on every route.** This stops a web page from using DNS
+  rebinding to reach the Docker proxy, MCP and the operations routes, which
+  matters most with `ALLOW_UNAUTHENTICATED=true` on loopback. Both MCP
+  revisions require the check. A request with no `Origin` header, which is what
+  the Docker CLI, Drydock's agent client, curl and MCP clients send, is not
+  affected. An `Origin` that is `null`, unparseable or repeated is rejected too,
+  and one equal to the request `Host` is not allowed automatically. Edge mode's
+  unauthenticated operations listener (health, readiness, metrics and audit
+  export, loopback on port 3000 by default) gets the same check. Each
+  rejection is an `api_request` audit record with outcome `denied`, a WARN log
+  line, and a 403 in the request metrics.
 
 ## [v0.9.22] - 2026-10-04
 
