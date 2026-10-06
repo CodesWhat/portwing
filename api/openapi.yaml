@@ -39,8 +39,8 @@ info:
     When authentication is off (`ALLOW_UNAUTHENTICATED=true`), a request whose
     `Host` header is not an IP address, `localhost`, a single-label name or
     listed in `ALLOWED_HOSTS` is rejected with the same 403, to stop a
-    DNS-rebound page reading the API. With authentication on this check does
-    not apply.
+    DNS-rebound page reading the API. A request with no `Host` header is
+    accepted. With authentication on this check does not apply.
 
     ## Docker Engine API Proxy
 

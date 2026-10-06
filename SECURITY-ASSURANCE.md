@@ -104,7 +104,14 @@ and MCP calls; requests with no `Origin` header are unaffected. A rebound
 page's same-origin reads carry no `Origin`, so when authentication is off (and
 always on edge mode's operations listener) a `Host` that is not an IP address,
 `localhost`, a single-label name or listed in `ALLOWED_HOSTS` is rejected with
-403 too. With authentication on, auth is the control. Evidence: [`internal/config/origins.go`](internal/config/origins.go) and
+403 too; a request with no `Host` header is admitted, since a browser always
+sends one. With authentication on, auth is the control, except that the
+unauthenticated health routes (version, uptime, Docker state) stay readable by a
+rebound page. Residuals: single-label names pass, so an attacker who controls
+the victim's DNS search suffix or local name resolution (hostile DHCP, LLMNR,
+NBNS) can still rebind; and behind a reverse proxy that rewrites `Host` to the
+upstream address the Host check can't help, so the proxy must restrict its own
+server names (`X-Forwarded-Host` is not consulted). Evidence: [`internal/config/origins.go`](internal/config/origins.go) and
 [`internal/audit/origin_guard.go`](internal/audit/origin_guard.go).
 
 Evidence: [`Dockerfile`](Dockerfile), [`SECURITY.md`](SECURITY.md),

@@ -84,8 +84,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reached by a dotted hostname, such as `portwing.internal.example` for a
   Prometheus scrape of the edge listener, now needs that name in
   `ALLOWED_HOSTS`. The Docker healthcheck, `portwing healthcheck`, IP-address
-  targets and Compose service names are unaffected. The rejection body is the
-  same as the Origin check's.
+  targets and Compose service names are unaffected, and a request with no
+  `Host` header at all (an HTTP/1.0 health checker probing by IP) is accepted.
+  The rejection body is the same as the Origin check's. The check stops a
+  remote page that rebinds a public domain; it can't help against an attacker
+  who controls the victim's DNS search suffix or local name resolution
+  (single-label names pass), or behind a reverse proxy that rewrites `Host` to
+  the upstream address, and the unauthenticated health routes stay readable
+  with auth on.
 
 ## [v0.9.22] - 2026-10-04
 
