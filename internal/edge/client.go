@@ -2066,7 +2066,7 @@ func (c *Client) startHealthServer() {
 	})
 	c.healthServer = &http.Server{
 		Addr:              config.ListenAddress(c.cfg.BindAddress, c.cfg.Port),
-		Handler:           mux,
+		Handler:           c.originGuard().Wrap(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		// BaseContext runs once, right after the listener binds, which is
 		// the only hook stdlib gives us to learn the bound address without
@@ -2086,6 +2086,24 @@ func (c *Client) startHealthServer() {
 		}
 		close(done)
 	}()
+}
+
+// originGuard builds the Origin check for the operations listener. config.Load
+// has already validated ALLOWED_ORIGINS, so a parse failure here can only come
+// from a hand-built config; it falls back to the empty allowlist, which rejects
+// every request that carries an Origin header.
+func (c *Client) originGuard() audit.OriginGuard {
+	allow, err := config.ParseOriginAllowlist(c.cfg.AllowedOrigins)
+	if err != nil {
+		slog.Error("invalid ALLOWED_ORIGINS, allowing no origins", "error", err)
+		allow = &config.OriginAllowlist{}
+	}
+	guard := audit.OriginGuard{Allow: allow, Auditor: c.auditor}
+	// A nil *Registry stored in the interface would not compare equal to nil.
+	if c.metrics != nil {
+		guard.Requests = c.metrics
+	}
+	return guard
 }
 
 // HealthAddr returns the address the health server bound, or nil if it

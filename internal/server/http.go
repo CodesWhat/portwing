@@ -304,10 +304,24 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		s.enroller.ActorResolver = s.rateLimiter.clientIP
 	}
 
+	allowedOrigins, err := config.ParseOriginAllowlist(cfg.AllowedOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("parsing ALLOWED_ORIGINS: %w", err)
+	}
+
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
-	handler := RecoveryMiddleware(http.Handler(mux))
+	// The Origin guard wraps the whole mux so it runs before authentication
+	// and before any handler on every route, including exec/attach upgrades
+	// and the MCP endpoint. Only panic recovery sits outside it.
+	guard := audit.OriginGuard{
+		Allow:    allowedOrigins,
+		Auditor:  s.auditor,
+		Requests: s.metrics,
+		Actor:    s.rateLimiter.clientIP,
+	}
+	handler := RecoveryMiddleware(guard.Wrap(mux))
 
 	s.httpServer = &http.Server{
 		Addr:    config.ListenAddress(cfg.BindAddress, cfg.Port),

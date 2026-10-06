@@ -24,6 +24,10 @@ type Config struct {
 	TLSCert        string
 	TLSKey         string
 	TrustedProxies []string
+	// AllowedOrigins lists the browser Origin values the HTTP listeners accept
+	// (ALLOWED_ORIGINS). Empty by default: any request carrying an Origin
+	// header is rejected with 403, and requests without one are unaffected.
+	AllowedOrigins []string
 	// AllowUnauthenticated is an explicit development-only opt-in for standard
 	// mode. Non-loopback binds additionally require AllowUnauthenticatedRemote.
 	AllowUnauthenticated       bool
@@ -208,6 +212,7 @@ func Load() (*Config, error) {
 		TLSCert:                    tlsCert,
 		TLSKey:                     tlsKey,
 		TrustedProxies:             splitCSV(getEnv("TRUSTED_PROXIES", "")),
+		AllowedOrigins:             splitCSV(getEnv("ALLOWED_ORIGINS", "")),
 		AllowUnauthenticated:       getEnvBool("ALLOW_UNAUTHENTICATED", false),
 		AllowUnauthenticatedRemote: getEnvBool("ALLOW_UNAUTHENTICATED_REMOTE", false),
 
@@ -233,6 +238,10 @@ func Load() (*Config, error) {
 		EnrollmentToken: enrollmentToken,
 
 		PrivateKeyFile: getEnv("PRIVATE_KEY_FILE", ""),
+	}
+
+	if _, err := ParseOriginAllowlist(cfg.AllowedOrigins); err != nil {
+		return nil, fmt.Errorf("ALLOWED_ORIGINS: %w", err)
 	}
 
 	for _, setting := range []struct {
