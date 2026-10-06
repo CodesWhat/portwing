@@ -39,8 +39,10 @@ info:
     When authentication is off (`ALLOW_UNAUTHENTICATED=true`), a request whose
     `Host` header is not an IP address, `localhost`, a single-label name or
     listed in `ALLOWED_HOSTS` is rejected with the same 403, to stop a
-    DNS-rebound page reading the API. A request with no `Host` header is
-    accepted. With authentication on this check does not apply.
+    DNS-rebound page reading the API. A request with a missing or empty `Host`
+    header is accepted. With authentication on this check does not apply. Edge
+    mode's operations listener (health, metrics and audit export) never
+    authenticates, so it applies the check in every configuration.
 
     ## Docker Engine API Proxy
 
