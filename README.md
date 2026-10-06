@@ -596,7 +596,8 @@ the connection alive through proxies.
 | `TLS_CERT` | -- | Server TLS certificate (Standard mode) |
 | `TLS_KEY` | -- | Server TLS key (Standard mode) |
 | `TRUSTED_PROXIES` | -- | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` is trusted; unset means forwarding headers are ignored |
-| `ALLOWED_ORIGINS` | -- | Comma-separated exact browser origins (`scheme://host[:port]`) allowed to call the API; unset means any request carrying an `Origin` header gets 403 before authentication, and requests without one are unaffected |
+| `ALLOWED_ORIGINS` | -- | Comma-separated exact browser origins (`scheme://host[:port]`) Portwing accepts; unset means any request carrying an `Origin` header gets 403 before authentication, and requests without one are unaffected. It doesn't enable cross-origin fetch: Portwing sends no CORS headers |
+| `ALLOWED_HOSTS` | -- | Comma-separated hostnames accepted in the `Host` header while authentication is off and on edge mode's operations listener; IPs, `localhost` and single-label names are always accepted. A dotted hostname with no auth needs listing here |
 | `ALLOW_UNAUTHENTICATED` | `false` | Explicit local-development opt-in when no credential is configured; otherwise startup fails closed |
 | `ALLOW_UNAUTHENTICATED_REMOTE` | `false` | Additional dangerous opt-in required for unauthenticated non-loopback binds |
 | `ALLOW_INSECURE_EDGE_URL` | `false` | Dangerous opt-in to connect Edge mode to a plaintext `http://`/`ws://` `DRYDOCK_URL`; the controller's identity is otherwise verified by TLS alone, so this is for trusted local testing only |

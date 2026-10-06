@@ -97,10 +97,14 @@ secrets as files, and places Sockguard in front of the Docker socket. These
 controls reduce the impact of a process-level compromise without claiming that
 the raw Docker socket itself is safe.
 
-A browser `Origin` header that is not listed in `ALLOWED_ORIGINS` (empty by
-default) is rejected with 403 before authentication on every route, in both
-modes, which closes DNS rebinding against loopback and LAN binds. Requests with
-no `Origin` header are unaffected. Evidence: [`internal/config/origins.go`](internal/config/origins.go) and
+Two checks run before authentication against DNS rebinding. A browser `Origin`
+header that is not listed in `ALLOWED_ORIGINS` (empty by default) is rejected
+with 403 on every route in both modes, which stops cross-site writes, upgrades
+and MCP calls; requests with no `Origin` header are unaffected. A rebound
+page's same-origin reads carry no `Origin`, so when authentication is off (and
+always on edge mode's operations listener) a `Host` that is not an IP address,
+`localhost`, a single-label name or listed in `ALLOWED_HOSTS` is rejected with
+403 too. With authentication on, auth is the control. Evidence: [`internal/config/origins.go`](internal/config/origins.go) and
 [`internal/audit/origin_guard.go`](internal/audit/origin_guard.go).
 
 Evidence: [`Dockerfile`](Dockerfile), [`SECURITY.md`](SECURITY.md),

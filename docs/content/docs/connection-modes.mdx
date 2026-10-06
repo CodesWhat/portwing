@@ -39,7 +39,8 @@ The agent host must accept inbound TCP connections on `PORT`. Run Portwing behin
 | `TOKEN_HASH` | — | Argon2id hash of the token (preferred over `TOKEN`) |
 | `TLS_CERT` / `TLS_KEY` | — | PEM files to enable built-in TLS; both must be set together or startup fails |
 | `TRUSTED_PROXIES` | — | Comma-separated CIDRs for real-IP extraction |
-| `ALLOWED_ORIGINS` | — | Comma-separated browser origins allowed to call the API (empty: any request with an `Origin` header gets 403) |
+| `ALLOWED_ORIGINS` | — | Comma-separated browser origins Portwing accepts (empty: any request with an `Origin` header gets 403) |
+| `ALLOWED_HOSTS` | — | Comma-separated hostnames accepted in `Host` while auth is off and on the edge operations listener (IPs, `localhost` and single-label names always pass) |
 
 For Ed25519 key authentication (no shared secret on the wire), see [Authentication](/authentication).
 For the complete variable reference, see [Configuration](/configuration).

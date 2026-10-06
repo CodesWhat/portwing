@@ -49,6 +49,8 @@ If you scrape multiple agents, give each a distinct `job_name` or add a `relabel
 
 Prometheus, the container healthcheck and `portwing healthcheck` send no `Origin` header, so [`ALLOWED_ORIGINS`](/configuration) does not affect them. A request to any of these routes that does carry an `Origin` is rejected with 403 unless it is allowlisted, in edge mode as well.
 
+Edge mode's operations listener has no authentication, so it also checks the `Host` header: only an IP address, `localhost`, a single-label name (a Compose service name such as `portwing-edge`) or a name in [`ALLOWED_HOSTS`](/configuration) is accepted. Scraping it by a dotted DNS name, for example `portwing-edge.monitoring.example`, needs that name in `ALLOWED_HOSTS`, or a target given as an IP address. Kubernetes `dns_sd_configs` of type `A` resolve to IP addresses and need nothing.
+
 Edge-mode scrape config on the same private container or pod network:
 
 ```yaml

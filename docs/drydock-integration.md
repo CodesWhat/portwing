@@ -294,7 +294,8 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 | `DOCKER_SOCKET` | Docker socket path | n/a |
 | `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | n/a |
 | `TRUSTED_PROXIES` | CIDR list for X-Forwarded-For | n/a |
-| `ALLOWED_ORIGINS` | Browser origins allowed to call the API (Drydock's agent client sends no `Origin`, so it needs none) | n/a |
+| `ALLOWED_ORIGINS` | Browser origins Portwing accepts (Drydock's agent client sends no `Origin`, so it needs none) | n/a |
+| `ALLOWED_HOSTS` | Extra hostnames accepted in `Host` while auth is off and on the edge operations listener | n/a |
 
 [^agent-name]: In Edge Mode, the (sanitized) `hello.agentName` sent by Portwing is now honored by Drydock as the agent's display name, as of Drydock dev/v1.6. Sanitization lowercases the name, replaces runs of non-`[a-z0-9-]` characters with a single `-`, trims leading/trailing `-`, and truncates to 63 characters; an empty result falls back to `portwing-edge-<agentId>`.
 [^poll-interval]: In Edge Mode, a usable positive `pollInterval` from the current controller's `welcome` overrides the adapter interval. Without a usable override, Portwing uses the adapter interval, falling back to `DD_POLL_INTERVAL` when the adapter supplies none. An absent, zero, negative, malformed or out-of-range welcome interval keeps that fallback and does not close the connection. The previous connection's override is cleared on reconnect.

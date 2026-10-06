@@ -25,15 +25,22 @@ info:
     **Rate limiting:** 10 failed attempts per IP per rolling minute. Exceeding
     the threshold returns HTTP 429 until the window expires.
 
-    ## Browser Origin
+    ## Browser Origin and Host
 
     Every route, including health, metrics, audit and the MCP endpoint, rejects
     a request that carries an `Origin` header unless that origin is listed in
     `ALLOWED_ORIGINS` (empty by default). The check runs before authentication,
     so an unlisted origin gets HTTP 403 whether or not credentials were sent.
     A request with no `Origin` header, which is what the Docker CLI, Drydock's
-    agent client, curl and MCP clients send, is unaffected. An origin equal to
-    the request `Host` is not allowed automatically.
+    agent client, curl and most MCP clients send, is unaffected. An origin equal
+    to the request `Host` is not allowed automatically. The API sends no
+    `Access-Control-*` headers and does not answer `OPTIONS`.
+
+    When authentication is off (`ALLOW_UNAUTHENTICATED=true`), a request whose
+    `Host` header is not an IP address, `localhost`, a single-label name or
+    listed in `ALLOWED_HOSTS` is rejected with the same 403, to stop a
+    DNS-rebound page reading the API. With authentication on this check does
+    not apply.
 
     ## Docker Engine API Proxy
 
@@ -74,9 +81,12 @@ components:
     ForbiddenOrigin:
       description: >
         The request carried a browser `Origin` header that is not listed in
-        `ALLOWED_ORIGINS`, or the header was malformed, `null`, or repeated.
+        `ALLOWED_ORIGINS` (or it was malformed, `null`, or repeated), or the
+        server has authentication off and the `Host` header is not an IP
+        address, `localhost`, a single-label name or listed in `ALLOWED_HOSTS`.
         Checked before authentication on every route, so it is returned
-        instead of 401. Requests with no `Origin` header are never affected.
+        instead of 401. The body is the same for both causes. Requests with no
+        `Origin` header are never rejected by the Origin check.
       content:
         text/plain:
           schema:
