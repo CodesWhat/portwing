@@ -195,7 +195,7 @@ func (c *Client) auditTypedExecStart(msg protocol.ExecStartMessage, admitted boo
 func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage, session *ExecSession) {
 	defer recoverSession("bringUpExec", msg.ExecID)
 	if ctx.Err() != nil || session.isClosed() {
-		session.Close()
+		session.abortStart()
 		return
 	}
 
@@ -209,7 +209,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 		return
 	}
 	if ctx.Err() != nil || session.isClosed() {
-		session.Close()
+		session.abortStart()
 		return
 	}
 
@@ -237,6 +237,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	// Wire the connection. If the session was already torn down while we were
 	// bringing the exec up, activate closes the orphaned conn and we stop here.
 	if !session.activate(conn) {
+		session.auditStartError()
 		return
 	}
 
@@ -465,10 +466,25 @@ func (s *ExecSession) isClosed() bool {
 	return s.closed
 }
 
+// auditStartError records that an admitted typed exec did not come up, as the
+// api_request error record under the exec_start message type. Each bringUpExec
+// exit that gives up calls it once.
+func (s *ExecSession) auditStartError() {
+	s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
+}
+
+// abortStart records the failed start and tears the session down for a
+// bring-up that was cancelled or whose session was closed before it came up.
+// No exec_end is sent: whoever closed the session already owns that.
+func (s *ExecSession) abortStart() {
+	s.auditStartError()
+	s.Close()
+}
+
 // failStart tears the session down and reports a terminal exec_end. It closes
 // first so the session is deregistered before the controller sees the failure.
 func (s *ExecSession) failStart(reason string) {
-	s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
+	s.auditStartError()
 	s.Close()
 	// Best-effort error reply; connection loss will surface on the read pump.
 	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
