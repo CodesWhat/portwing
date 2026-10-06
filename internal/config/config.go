@@ -28,6 +28,10 @@ type Config struct {
 	// (ALLOWED_ORIGINS). Empty by default: any request carrying an Origin
 	// header is rejected with 403, and requests without one are unaffected.
 	AllowedOrigins []string
+	// AllowedHosts lists extra hostnames the HTTP listeners accept in the Host
+	// header while authentication is off (ALLOWED_HOSTS). IP literals,
+	// "localhost" and single-label names are always accepted.
+	AllowedHosts []string
 	// AllowUnauthenticated is an explicit development-only opt-in for standard
 	// mode. Non-loopback binds additionally require AllowUnauthenticatedRemote.
 	AllowUnauthenticated       bool
@@ -213,6 +217,7 @@ func Load() (*Config, error) {
 		TLSKey:                     tlsKey,
 		TrustedProxies:             splitCSV(getEnv("TRUSTED_PROXIES", "")),
 		AllowedOrigins:             splitCSV(getEnv("ALLOWED_ORIGINS", "")),
+		AllowedHosts:               splitCSV(getEnv("ALLOWED_HOSTS", "")),
 		AllowUnauthenticated:       getEnvBool("ALLOW_UNAUTHENTICATED", false),
 		AllowUnauthenticatedRemote: getEnvBool("ALLOW_UNAUTHENTICATED_REMOTE", false),
 
@@ -242,6 +247,9 @@ func Load() (*Config, error) {
 
 	if _, err := ParseOriginAllowlist(cfg.AllowedOrigins); err != nil {
 		return nil, fmt.Errorf("ALLOWED_ORIGINS: %w", err)
+	}
+	if _, err := ParseHostAllowlist(cfg.AllowedHosts); err != nil {
+		return nil, fmt.Errorf("ALLOWED_HOSTS: %w", err)
 	}
 
 	for _, setting := range []struct {

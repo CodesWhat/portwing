@@ -4,14 +4,28 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/codeswhat/portwing/internal/config"
 	applog "github.com/codeswhat/portwing/internal/log"
 )
 
-// maxLoggedOrigin bounds how much of a rejected Origin value reaches the log.
+// maxLoggedOrigin bounds how much of a rejected Origin or Host value reaches
+// the log.
 const maxLoggedOrigin = 128
+
+const (
+	// warnBurst is how many rejection WARN lines one guard writes per
+	// warnWindow. A page can fire rejected requests as fast as the browser
+	// allows, so the log line is sampled; the metric still counts every one.
+	warnBurst  = 5
+	warnWindow = 10 * time.Second
+
+	// rejectBody is the one body every guard rejection sends, whichever check
+	// fired, so a probe cannot tell the Host check from the Origin check.
+	rejectBody = "forbidden origin"
+)
 
 // RequestCounter is the request-metrics surface OriginGuard uses.
 // *metrics.Registry satisfies it without coupling this package to it.
@@ -19,37 +33,53 @@ type RequestCounter interface {
 	IncRequest(method string, code int)
 }
 
-// OriginGuard is the middleware that turns away a request whose Origin is not
-// allowed. Auditor, Metrics and Actor are optional.
+// OriginGuard is the admission middleware that runs before authentication. It
+// turns away a request whose Origin header is not allowlisted and, when
+// CheckHost is set, one whose Host header is not an acceptable name (see
+// config.HostAllowlist). Every field except Allow is optional.
 type OriginGuard struct {
-	Allow    *config.OriginAllowlist
+	Allow *config.OriginAllowlist
+	// CheckHost turns on the Host check. Set it only on a surface with no
+	// authentication of its own: with auth on, a rebinding page cannot present
+	// the credential, so auth is the control.
+	CheckHost bool
+	Hosts     *config.HostAllowlist
+	// Auditor receives a denied api_request record per rejection. Leave it nil
+	// on a listener whose records would evict the audit ring's real history.
 	Auditor  *Logger
 	Requests RequestCounter
-	// Actor names the caller in the audit record. It defaults to the peer
-	// address of the connection.
+	// Actor names the caller in the audit record and log. It defaults to the
+	// peer address of the connection.
 	Actor func(*http.Request) string
 }
 
 // Wrap returns next guarded by g. It runs before authentication and before any
 // handler, including WebSocket and hijack upgrades.
 func (g OriginGuard) Wrap(next http.Handler) http.Handler {
+	warn := &warnLimiter{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		ok, offending := g.Allow.Admits(r)
-		if ok {
-			next.ServeHTTP(w, r)
+		if g.CheckHost && !g.Hosts.Admits(r.Host) {
+			g.reject(w, r, "host", r.Host, warn)
 			return
 		}
-		g.reject(w, r, offending, start)
+		if ok, offending := g.Allow.Admits(r); !ok {
+			g.reject(w, r, "origin", offending, warn)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
-func (g OriginGuard) reject(w http.ResponseWriter, r *http.Request, offending string, start time.Time) {
+func (g OriginGuard) reject(w http.ResponseWriter, r *http.Request, kind, offending string, warn *warnLimiter) {
+	start := time.Now()
 	actor := g.actor(r)
-	slog.Warn("request rejected: origin not allowed",
-		"ip", applog.Sanitize(actor),
-		"origin", boundedOrigin(offending),
-		"method", applog.Sanitize(r.Method))
+	if emit, suppressed := warn.allow(start); emit {
+		slog.Warn("request rejected: "+kind+" not allowed",
+			"ip", applog.Sanitize(actor),
+			kind, boundedOrigin(offending),
+			"method", applog.Sanitize(r.Method),
+			"suppressed_since_last", suppressed)
+	}
 	if g.Auditor != nil {
 		g.Auditor.APIRequest(actor, r.Method, r.URL.Path, OutcomeDenied, http.StatusForbidden, elapsedMs(start))
 	}
@@ -78,10 +108,11 @@ func forbid(w http.ResponseWriter) {
 	// ErrNotSupported and has no drain to abort.
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now())
 	w.Header().Set("Connection", "close")
-	http.Error(w, "forbidden origin", http.StatusForbidden)
+	http.Error(w, rejectBody, http.StatusForbidden)
 }
 
-// boundedOrigin makes an attacker-supplied Origin safe and short enough to log.
+// boundedOrigin makes an attacker-supplied Origin or Host safe and short enough
+// to log.
 func boundedOrigin(value string) string {
 	if len(value) > maxLoggedOrigin {
 		value = value[:maxLoggedOrigin] + "..."
@@ -91,4 +122,34 @@ func boundedOrigin(value string) string {
 
 func elapsedMs(start time.Time) float64 {
 	return float64(time.Since(start).Nanoseconds()) / 1e6
+}
+
+// warnLimiter is a fixed-window sampler for the rejection WARN line: the first
+// warnBurst rejections in each warnWindow log, the rest are counted and
+// reported on the first line of the next window.
+type warnLimiter struct {
+	mu         sync.Mutex
+	windowEnd  time.Time
+	logged     int
+	suppressed int
+}
+
+// allow reports whether to log now and how many rejections were skipped since
+// the previous window's last line.
+func (l *warnLimiter) allow(now time.Time) (bool, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !now.Before(l.windowEnd) {
+		skipped := l.suppressed
+		l.windowEnd = now.Add(warnWindow)
+		l.logged = 1
+		l.suppressed = 0
+		return true, skipped
+	}
+	if l.logged < warnBurst {
+		l.logged++
+		return true, 0
+	}
+	l.suppressed++
+	return false, 0
 }

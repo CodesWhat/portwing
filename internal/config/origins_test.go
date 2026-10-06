@@ -23,6 +23,12 @@ func TestParseOriginAllowlist(t *testing.T) {
 		{"mixed case", []string{"HTTPS://Good.Example"}, 1},
 		{"explicit default port collapses with implicit", []string{"https://good.example", "https://good.example:443"}, 1},
 		{"two origins", []string{"https://a.example", "https://b.example"}, 2},
+		{"lowest port", []string{"http://good.example:1"}, 1},
+		{"highest port", []string{"http://good.example:65535"}, 1},
+		{"host spans a to z and 0 to 9", []string{"http://a0z9.example", "http://z.example", "http://a.example", "http://9.example", "http://0.example"}, 5},
+		{"hyphen and underscore", []string{"http://my-host_1.example"}, 1},
+		{"canonical ipv4", []string{"http://127.0.0.1"}, 1},
+		{"canonical ipv6", []string{"http://[::1]", "http://[2001:db8::1]:3000"}, 2},
 	}
 	for _, tc := range valid {
 		t.Run("valid/"+tc.name, func(t *testing.T) {
@@ -31,8 +37,8 @@ func TestParseOriginAllowlist(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseOriginAllowlist(%q): %v", tc.entries, err)
 			}
-			if got.Len() != tc.want {
-				t.Fatalf("Len = %d, want %d", got.Len(), tc.want)
+			if len(got.allowed) != tc.want {
+				t.Fatalf("Len = %d, want %d", len(got.allowed), tc.want)
 			}
 		})
 	}
@@ -60,6 +66,21 @@ func TestParseOriginAllowlist(t *testing.T) {
 		"https://good.example:-1",
 		"https://good .example",
 		"https://*.good.example",
+		"https://good`.example",
+		"https://good{.example",
+		"https://good/.example",
+		"https://good@.example",
+		"http://good.example:",
+		"http://127.1:3000",
+		"http://127.1.9",
+		"http://127.0.1",
+		"http://2130706433",
+		"http://0x7f.0.0.1",
+		"http://127.000.0.1",
+		"http://[0:0:0:0:0:0:0:1]:3000",
+		"http://[::FFFF:1.2.3.4]",
+		"http://[2001:DB8::1]",
+		"http://[::1",
 	}
 	for _, entry := range invalid {
 		t.Run("invalid/"+entry, func(t *testing.T) {

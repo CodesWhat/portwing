@@ -32,11 +32,18 @@ func (c *countingRequests) IncRequest(method string, code int) {
 	c.calls = append(c.calls, method+" "+http.StatusText(code))
 }
 
-func TestOriginGuardRejects(t *testing.T) {
+// captureLogs routes the default logger into a buffer. Tests that use it must
+// not run in parallel with each other.
+func captureLogs() (*strings.Builder, func()) {
 	prev := slog.Default()
-	var logs strings.Builder
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	logs := &strings.Builder{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	return logs, func() { slog.SetDefault(prev) }
+}
+
+func TestOriginGuardRejects(t *testing.T) {
+	logs, restore := captureLogs()
+	t.Cleanup(restore)
 
 	auditor, _, err := New("", 16)
 	if err != nil {
@@ -72,6 +79,11 @@ func TestOriginGuardRejects(t *testing.T) {
 	if got.Event != EventAPIRequest || got.Outcome != OutcomeDenied || got.Status != 403 ||
 		got.Actor != "192.0.2.10" || got.Method != "GET" || got.Path != "/api/v1/containers" {
 		t.Errorf("audit record = %+v", got)
+	}
+	// A rejection answers in microseconds: a duration in milliseconds that is
+	// negative or large means the unit conversion is wrong.
+	if got.DurationMs < 0 || got.DurationMs > 1000 {
+		t.Errorf("DurationMs = %v, want a small non-negative number of milliseconds", got.DurationMs)
 	}
 
 	if len(reg.calls) != 1 || reg.calls[0] != "GET Forbidden" {
@@ -129,6 +141,14 @@ func TestBoundedLoggedOrigin(t *testing.T) {
 
 	if got := boundedOrigin("https://a.test"); got != "https://a.test" {
 		t.Errorf("short = %s", got)
+	}
+	exact := strings.Repeat("x", maxLoggedOrigin)
+	if got := boundedOrigin(exact); got != exact {
+		t.Errorf("value of exactly %d bytes was altered: %q", maxLoggedOrigin, got)
+	}
+	over := strings.Repeat("x", maxLoggedOrigin+1)
+	if got := boundedOrigin(over); got != exact+"..." {
+		t.Errorf("value of %d bytes = %q, want the first %d bytes plus an ellipsis", len(over), got, maxLoggedOrigin)
 	}
 	got := boundedOrigin(strings.Repeat("x", maxLoggedOrigin+50))
 	if len(got) > maxLoggedOrigin+10 || !strings.Contains(got, "...") {

@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -58,7 +61,14 @@ func newOriginFixture(t *testing.T, mutate func(*config.Config)) *originFixture 
 func (f *originFixture) do(method, path, body string, header http.Header) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.RemoteAddr = "192.0.2.10:40000"
+	// A loopback Host by default, so a test that sets none isn't turned away by
+	// the Host check on an unauthenticated server. "Host" in header overrides it.
+	req.Host = "127.0.0.1:3000"
 	for k, vs := range header {
+		if k == "Host" {
+			req.Host = vs[0]
+			continue
+		}
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
@@ -122,11 +132,31 @@ func withOrigin(h http.Header, origins ...string) http.Header {
 	return out
 }
 
-// authModes covers the three admission modes: shared secret, and none at all.
-func authModes() map[string]func(*config.Config) {
-	return map[string]func(*config.Config){
-		"token":                 func(c *config.Config) { c.Token = "s3cret"; c.AllowUnauthenticated = false },
-		"allow_unauthenticated": func(c *config.Config) {},
+// tokenHashFixture is hashed once per test binary: Argon2id is deliberately slow.
+var tokenHashFixture = sync.OnceValues(func() (string, error) { return HashToken("s3cret") })
+
+// authModes covers every admission mode: shared secret, hashed secret, Ed25519
+// keys, and none at all.
+func authModes() map[string]func(*testing.T, *config.Config) {
+	return map[string]func(*testing.T, *config.Config){
+		"token": func(_ *testing.T, c *config.Config) { c.Token = "s3cret"; c.AllowUnauthenticated = false },
+		"token_hash": func(t *testing.T, c *config.Config) {
+			phc, err := tokenHashFixture()
+			if err != nil {
+				t.Fatalf("HashToken: %v", err)
+			}
+			c.TokenHash = phc
+			c.AllowUnauthenticated = false
+		},
+		"ed25519": func(t *testing.T, c *config.Config) {
+			pub, _, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatalf("GenerateKey: %v", err)
+			}
+			c.AuthorizedKeysFile = writeAuthorizedKeys(t, pub)
+			c.AllowUnauthenticated = false
+		},
+		"allow_unauthenticated": func(*testing.T, *config.Config) {},
 	}
 }
 
@@ -136,7 +166,7 @@ func TestOriginRejectedOnEveryRouteInEveryAuthMode(t *testing.T) {
 	for mode, mutate := range authModes() {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
-			f := newOriginFixture(t, mutate)
+			f := newOriginFixture(t, func(c *config.Config) { mutate(t, c) })
 			for _, rt := range originRoutes() {
 				t.Run(rt.name, func(t *testing.T) {
 					// No credentials are presented: a bad Origin must be 403, not 401.
@@ -255,18 +285,24 @@ func TestMalformedAndLookalikeOriginsRejected(t *testing.T) {
 	}
 }
 
-// A browser page served by Portwing does not exist, and a DNS-rebinding page
-// presents an Origin equal to its Host, so equality with Host is not a pass.
-func TestOriginEqualToHostIsNotAutoAllowed(t *testing.T) {
+// With auth on, the Host check does not apply, so this isolates the Origin
+// check: an Origin that equals the request Host is not allowed automatically.
+// Portwing serves no pages of its own, and a page on a rebound hostname
+// presents exactly this pair.
+func TestOriginEqualToRequestHostIsNotAutoAllowed(t *testing.T) {
 	t.Parallel()
 
-	f := newOriginFixture(t, nil)
-	req := httptest.NewRequest(http.MethodGet, "http://rebind.example:3000/v1.47/containers/json", nil)
-	req.Header.Set("Origin", "http://rebind.example:3000")
-	rec := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec, req)
+	f := newOriginFixture(t, func(c *config.Config) { c.Token = "s3cret"; c.AllowUnauthenticated = false })
+	rec := f.do(http.MethodGet, "/v1.47/containers/json", "", http.Header{
+		"Host":          {"rebind.example:3000"},
+		"Origin":        {"http://rebind.example:3000"},
+		"Authorization": {"Bearer s3cret"},
+	})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("Origin equal to Host = %d, want 403", rec.Code)
+	}
+	if got := f.daemon.Load(); got != 0 {
+		t.Errorf("daemon reached %d times, want 0", got)
 	}
 }
 

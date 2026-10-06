@@ -42,6 +42,11 @@ func TestUnauthenticatedRoutesRejectUnreadBodies(t *testing.T) {
 
 func assertUnreadBodyRejected(t *testing.T, baseURL, method, path, framing, prefix string, status int) {
 	t.Helper()
+	assertUnreadBodyRejectedOnHost(t, baseURL, "localhost", method, path, framing, prefix, status)
+}
+
+func assertUnreadBodyRejectedOnHost(t *testing.T, baseURL, host, method, path, framing, prefix string, status int) {
+	t.Helper()
 	c, err := net.DialTimeout("tcp", strings.TrimPrefix(baseURL, "http://"), time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +55,7 @@ func assertUnreadBodyRejected(t *testing.T, baseURL, method, path, framing, pref
 	if err := c.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fmt.Fprintf(c, "%s %s HTTP/1.1\r\nHost: localhost\r\n%s\r\n%s", method, path, framing, prefix); err != nil {
+	if _, err := fmt.Fprintf(c, "%s %s HTTP/1.1\r\nHost: %s\r\n%s\r\n%s", method, path, host, framing, prefix); err != nil {
 		t.Fatal(err)
 	}
 	reader := bufio.NewReader(c)

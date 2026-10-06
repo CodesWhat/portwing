@@ -79,7 +79,7 @@ func TestHealthServerSeparatesLivenessFromDisconnectedReadiness(t *testing.T) {
 	liveness := httptest.NewRecorder()
 	c.healthServer.Handler.ServeHTTP(
 		liveness,
-		httptest.NewRequest(http.MethodGet, "/health", nil),
+		httptest.NewRequest(http.MethodGet, "http://127.0.0.1/health", nil),
 	)
 	if liveness.Code != http.StatusOK {
 		t.Fatalf("liveness status = %d, want 200", liveness.Code)
@@ -96,7 +96,7 @@ func TestHealthServerSeparatesLivenessFromDisconnectedReadiness(t *testing.T) {
 	readiness := httptest.NewRecorder()
 	c.healthServer.Handler.ServeHTTP(
 		readiness,
-		httptest.NewRequest(http.MethodGet, "/ready", nil),
+		httptest.NewRequest(http.MethodGet, "http://127.0.0.1/ready", nil),
 	)
 	if readiness.Code != http.StatusServiceUnavailable {
 		t.Fatalf("readiness status = %d, want 503", readiness.Code)

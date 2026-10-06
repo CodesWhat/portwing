@@ -628,3 +628,43 @@ func TestLoadAllowedOriginsEmptyByDefault(t *testing.T) {
 		t.Fatalf("AllowedOrigins = %q, want empty by default", cfg.AllowedOrigins)
 	}
 }
+
+func TestLoadAllowedHosts(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    []string
+		wantErr string
+	}{
+		{name: "unset", value: "", want: nil},
+		{name: "single", value: "ops.example.com", want: []string{"ops.example.com"}},
+		{name: "list with spaces and empties", value: " a.example , B.example.,,", want: []string{"a.example", "B.example."}},
+		{name: "wildcard", value: "*", wantErr: "ALLOWED_HOSTS"},
+		{name: "wildcard prefix", value: "*.example.com", wantErr: "invalid host"},
+		{name: "scheme", value: "https://ops.example.com", wantErr: "bare hostname"},
+		{name: "port", value: "ops.example.com:3000", wantErr: "bare hostname"},
+		{name: "path", value: "ops.example.com/x", wantErr: "bare hostname"},
+		{name: "userinfo", value: "u@ops.example.com", wantErr: "bare hostname"},
+		{name: "bad character", value: "ops`.example.com", wantErr: "must be a DNS name"},
+		{name: "lone dot", value: ".", wantErr: "empty host"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TOKEN", "t")
+			t.Setenv("ALLOWED_HOSTS", tc.value)
+			cfg, err := Load()
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load error = %v, want it to contain %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if strings.Join(cfg.AllowedHosts, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("AllowedHosts = %q, want %q", cfg.AllowedHosts, tc.want)
+			}
+		})
+	}
+}

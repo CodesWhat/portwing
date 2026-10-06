@@ -5,18 +5,22 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
 )
 
 // Browser Origin validation for ALLOWED_ORIGINS. A request that carries no
-// Origin header (the Docker CLI, Drydock's agent client, curl, MCP clients) is
-// never touched. One that carries an Origin is admitted only when it is an
+// Origin header (the Docker CLI, Drydock's agent client, curl, most MCP clients)
+// is never touched. One that carries an Origin is admitted only when it is an
 // exact match for an entry in the operator's allowlist, which is empty by
-// default. The request Host is never consulted: a DNS-rebinding page presents
-// an Origin equal to its Host, so "same origin" is exactly the case that must
-// stay rejected.
+// default. The request Host is never consulted here: a page served from a
+// rebound hostname presents an Origin equal to its Host, so "same origin" is
+// exactly the case that must stay rejected. This check stops cross-site writes,
+// WebSocket upgrades and MCP calls; it cannot stop a rebound page's same-origin
+// GET and HEAD reads, which send no Origin. hosts.go covers those when
+// authentication is off.
 
 // headerOrigin is the canonical key net/http stores the header under. Indexing
 // the header map with it directly keeps the absent-header check allocation free.
@@ -27,8 +31,8 @@ type OriginAllowlist struct {
 	allowed map[string]struct{}
 }
 
-// ParseOriginAllowlist validates entries and returns the allowlist they describe. Each entry
-// must be an exact origin: scheme://host[:port] with an http or https scheme,
+// ParseOriginAllowlist validates entries and returns the allowlist they describe.
+// Each entry must be an exact origin: scheme://host[:port] with an http or https scheme,
 // a host, and no userinfo, path, query or fragment. Anything else, including
 // "*", is an error naming the offending entry.
 func ParseOriginAllowlist(entries []string) (*OriginAllowlist, error) {
@@ -41,14 +45,6 @@ func ParseOriginAllowlist(entries []string) (*OriginAllowlist, error) {
 		allowed[key] = struct{}{}
 	}
 	return &OriginAllowlist{allowed: allowed}, nil
-}
-
-// Len reports how many origins the list holds.
-func (a *OriginAllowlist) Len() int {
-	if a == nil {
-		return 0
-	}
-	return len(a.allowed)
 }
 
 func (a *OriginAllowlist) contains(key string) bool {
@@ -81,10 +77,18 @@ func canonical(raw string) (string, error) {
 	if u.Opaque != "" || u.User != nil || u.Path != "" || u.RawPath != "" {
 		return "", errors.New("must be scheme://host[:port] with no userinfo, path, query or fragment")
 	}
-	host := strings.ToLower(u.Hostname())
-	if host == "" {
+	if strings.HasSuffix(u.Host, ":") {
+		return "", errors.New("empty port: write the port or leave the colon off")
+	}
+	// The IP form is checked on the host as written: lowercasing first would
+	// hide an uppercase IPv6 literal a browser never sends.
+	if u.Hostname() == "" {
 		return "", errors.New("missing host")
 	}
+	if err := checkCanonicalIP(u.Hostname()); err != nil {
+		return "", err
+	}
+	host := strings.ToLower(u.Hostname())
 	if !validHost(host) {
 		return "", errors.New("host must be a DNS name or an IP address")
 	}
@@ -119,6 +123,39 @@ func hostByte(c byte) bool {
 		return true
 	}
 	return c == '-' || c == '.' || c == '_'
+}
+
+// checkCanonicalIP refuses an IP-looking host that is not in the form a browser
+// serialises: dotted-decimal IPv4 without shorthand ("127.1") and compressed,
+// lowercase IPv6. A browser never sends the other forms, so an entry written
+// that way could never match and would only read as if it did.
+func checkCanonicalIP(host string) error {
+	if !strings.Contains(host, ":") && !endsInNumber(host) {
+		return nil
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return errors.New("an IP address must be written in canonical form, as a browser sends it")
+	}
+	if addr.String() != host {
+		return fmt.Errorf("an IP address must be written in canonical form, as a browser sends it: use %s", addr.String())
+	}
+	return nil
+}
+
+// endsInNumber reports whether the last dot-separated label is all digits,
+// which is how a browser decides a host is an IPv4 address.
+func endsInNumber(host string) bool {
+	label := host[strings.LastIndexByte(host, '.')+1:]
+	if label == "" {
+		return false
+	}
+	for i := 0; i < len(label); i++ {
+		if label[i] < '0' || label[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizePort(scheme, port string) (string, error) {
