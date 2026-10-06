@@ -426,3 +426,8 @@ jobs:
       # network this job needs is the clone itself.
       - name: Verify the package release contract
         run: bash scripts/package-release-config-test.sh
+
+      # Drives the Compose containerd check against a fake `go` on PATH and
+      # canned build info, so it needs no toolchain and no network.
+      - name: Verify the Compose containerd check
+        run: bash scripts/compose-containerd-version-test.sh

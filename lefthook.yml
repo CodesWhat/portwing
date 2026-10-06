@@ -65,6 +65,14 @@ pre-push:
       priority: 1
       timeout: 30s
 
+    # The ARMv7 Compose containerd check's own test (fake go, canned build
+    # info). Mirrors the "Release Contract" job's second step in ci-verify.yml.
+    compose-containerd-check:
+      run: bash scripts/compose-containerd-version-test.sh
+      fail_text: "Compose containerd check test failed — see the FAIL lines above"
+      priority: 1
+      timeout: 30s
+
     # Full release dry-run — mirrors what release.yml runs in CI, minus
     # publish. Catches goreleaser config, build, archive, and dirty-tree
     # bugs locally before they surface in a tagged release.
