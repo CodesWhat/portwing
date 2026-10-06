@@ -1,10 +1,14 @@
 package server
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/auth"
@@ -132,9 +136,9 @@ func TestLookalikeAndMalformedHostsRejectedWhenAuthIsOff(t *testing.T) {
 		"user@localhost",
 		"localhost/path",
 		"attacker.example/localhost",
+		"attacker..",
 		"[::1",
 		":3000",
-		"",
 	}
 	for _, host := range hosts {
 		rec := f.do(http.MethodGet, "/v1.47/containers/json", "", http.Header{"Host": {host}})
@@ -149,6 +153,46 @@ func TestLookalikeAndMalformedHostsRejectedWhenAuthIsOff(t *testing.T) {
 
 // With authentication on the Host check does not apply: a rebinding page can
 // neither sign a request nor present the secret, so auth is the control.
+// HTTP/1.0 health checkers that probe by IP (HAProxy httpchk, Nagios
+// check_http) can omit Host. A browser never can, so admitting it costs nothing
+// against rebinding.
+func TestRequestWithNoHostHeaderIsAdmitted(t *testing.T) {
+	t.Parallel()
+
+	f := newOriginFixture(t, unauthenticated)
+	rec := f.do(http.MethodGet, "/v1.47/containers/json", "", http.Header{"Host": {""}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty Host = %d, want 200", rec.Code)
+	}
+
+	ts := httptest.NewServer(f.handler)
+	defer ts.Close()
+	assertRawHTTP10NoHost(t, ts.URL, "/health")
+}
+
+// assertRawHTTP10NoHost sends "GET path HTTP/1.0" with no Host header over a
+// real connection and wants a 200.
+func assertRawHTTP10NoHost(t *testing.T, baseURL, path string) {
+	t.Helper()
+	c, err := net.DialTimeout("tcp", strings.TrimPrefix(baseURL, "http://"), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := fmt.Fprintf(c, "GET %s HTTP/1.0\r\n\r\n", path); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(c), &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatalf("HTTP/1.0 request with no Host: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s HTTP/1.0 with no Host = %d, want 200", path, resp.StatusCode)
+	}
+}
+
 func TestHostCheckDoesNotApplyWhenAuthIsOn(t *testing.T) {
 	t.Parallel()
 

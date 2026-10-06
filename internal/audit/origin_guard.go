@@ -17,10 +17,13 @@ const maxLoggedOrigin = 128
 
 const (
 	// warnBurst is how many rejection WARN lines one guard writes per
-	// warnWindow. A page can fire rejected requests as fast as the browser
+	// window of warnWindowSeconds. A page can fire rejected requests as fast as the browser
 	// allows, so the log line is sampled; the metric still counts every one.
-	warnBurst  = 5
-	warnWindow = 10 * time.Second
+	warnBurst = 5
+	// warnWindowSeconds is multiplied by time.Second inside allow: an operator
+	// in a package-level constant sits outside every coverage block, so
+	// mutation testing scores it as not covered whatever the tests do.
+	warnWindowSeconds = 10
 
 	// rejectBody is the one body every guard rejection sends, whichever check
 	// fired, so a probe cannot tell the Host check from the Origin check.
@@ -125,7 +128,7 @@ func elapsedMs(start time.Time) float64 {
 }
 
 // warnLimiter is a fixed-window sampler for the rejection WARN line: the first
-// warnBurst rejections in each warnWindow log, the rest are counted and
+// warnBurst rejections in each window of warnWindowSeconds log, the rest are counted and
 // reported on the first line of the next window.
 type warnLimiter struct {
 	mu         sync.Mutex
@@ -141,7 +144,7 @@ func (l *warnLimiter) allow(now time.Time) (bool, int) {
 	defer l.mu.Unlock()
 	if !now.Before(l.windowEnd) {
 		skipped := l.suppressed
-		l.windowEnd = now.Add(warnWindow)
+		l.windowEnd = now.Add(warnWindowSeconds * time.Second)
 		l.logged = 1
 		l.suppressed = 0
 		return true, skipped

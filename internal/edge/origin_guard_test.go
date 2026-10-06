@@ -1,7 +1,10 @@
 package edge
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +20,7 @@ var operationsPaths = []string{"/health", "/ready", "/_portwing/health", "/metri
 
 // operationsListener starts the edge operations listener on a free port and
 // returns a request helper, the audit logger, and the metrics registry.
-func operationsListener(t *testing.T, mutate func(*config.Config)) (get func(path, host string, origins ...string) int, auditor *audit.Logger, reg *metrics.Registry) {
+func operationsListener(t *testing.T, mutate func(*config.Config)) (get func(path, host string, origins ...string) int, auditor *audit.Logger, reg *metrics.Registry, addr string) {
 	t.Helper()
 
 	auditor, _, err := audit.New("", 16)
@@ -67,7 +70,7 @@ func operationsListener(t *testing.T, mutate func(*config.Config)) (get func(pat
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	return get, auditor, reg
+	return get, auditor, reg, strings.TrimPrefix(base, "http://")
 }
 
 func requestCount(reg *metrics.Registry, code string) bool {
@@ -84,7 +87,7 @@ func requestCount(reg *metrics.Registry, code string) bool {
 func TestOperationsListenerRejectsDisallowedOriginWithoutAuditRecords(t *testing.T) {
 	t.Parallel()
 
-	get, auditor, reg := operationsListener(t, func(c *config.Config) {
+	get, auditor, reg, _ := operationsListener(t, func(c *config.Config) {
 		c.AllowedOrigins = []string{"https://good.example"}
 	})
 	for _, path := range operationsPaths {
@@ -114,7 +117,7 @@ func TestOperationsListenerRejectsDisallowedOriginWithoutAuditRecords(t *testing
 func TestOperationsListenerRejectsRebindingHost(t *testing.T) {
 	t.Parallel()
 
-	get, auditor, reg := operationsListener(t, func(c *config.Config) {
+	get, auditor, reg, _ := operationsListener(t, func(c *config.Config) {
 		c.AllowedHosts = []string{"ops.example.com"}
 	})
 	for _, host := range []string{
@@ -173,5 +176,30 @@ func TestOriginGuardFallsBackToBuiltInRules(t *testing.T) {
 		if rec.Code != tc.want {
 			t.Errorf("Host %q Origin %q = %d, want %d", tc.host, tc.origin, rec.Code, tc.want)
 		}
+	}
+}
+
+// HTTP/1.0 health checkers that probe by IP (HAProxy httpchk, Nagios
+// check_http) can omit Host. A browser never can, so the guard admits it.
+func TestOperationsListenerAdmitsHTTP10RequestWithNoHost(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, addr := operationsListener(t, nil)
+	c, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := fmt.Fprint(c, "GET /health HTTP/1.0\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(c), &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatalf("HTTP/1.0 request with no Host: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /health HTTP/1.0 with no Host = %d, want 200", resp.StatusCode)
 	}
 }

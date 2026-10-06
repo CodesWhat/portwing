@@ -13,8 +13,15 @@ import (
 // Host header: it is the attacker's own domain. A request is admitted only when
 // its Host is an IP literal, a single-label name (this covers "localhost" and
 // Compose service names such as "portwing"), or an entry in ALLOWED_HOSTS. A
-// rebinding attacker needs a dotted name they control, so none of those can be
-// theirs.
+// remote page with only public DNS needs a dotted name it controls, so none of
+// those can be its own.
+//
+// Residuals, none fixable here: single-label names pass, so an attacker who
+// controls the victim's DNS search suffix or local name resolution (hostile
+// DHCP, LLMNR, NBNS) can still rebind. A reverse proxy that rewrites Host to
+// the upstream address (nginx and Apache defaults) hides the browser's Host
+// from this check, and X-Forwarded-Host is not consulted; the proxy must
+// restrict its own server names. And with authentication on this check is off.
 
 // maxHostLabel is the longest single DNS label.
 const maxHostLabel = 63
@@ -59,7 +66,14 @@ func canonicalAllowedHost(entry string) (string, error) {
 }
 
 // Admits reports whether a request's Host header names an acceptable host.
+//
+// An empty Host is admitted. A browser always sends one, so a rebinding page
+// can't omit it, while HTTP/1.0 health checkers that probe by IP (HAProxy
+// httpchk, Nagios check_http) often do. A malformed value is still rejected.
 func (a *HostAllowlist) Admits(hostport string) bool {
+	if hostport == "" {
+		return true
+	}
 	host, ok := requestHost(hostport)
 	if !ok {
 		return false
@@ -82,7 +96,8 @@ func (a *HostAllowlist) contains(host string) bool {
 // requestHost reduces a Host header to its host: the port is removed, IPv6
 // brackets are stripped, and one trailing dot is dropped. Case is left as sent
 // so the common names need no allocation; callers compare case-insensitively. It
-// reports false for an empty or malformed value, which is never admitted.
+// reports false for an empty or malformed value; Admits treats an empty Host as
+// a separate, allowed case before it gets here.
 func requestHost(hostport string) (string, bool) {
 	if hostport == "" {
 		return "", false

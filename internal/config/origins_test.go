@@ -29,6 +29,7 @@ func TestParseOriginAllowlist(t *testing.T) {
 		{"hyphen and underscore", []string{"http://my-host_1.example"}, 1},
 		{"canonical ipv4", []string{"http://127.0.0.1"}, 1},
 		{"canonical ipv6", []string{"http://[::1]", "http://[2001:db8::1]:3000"}, 2},
+		{"ipv4-mapped ipv6 as a browser sends it", []string{"http://[::ffff:7f00:1]:3000", "http://[::ffff:0:1]", "http://[::ffff:ffff:ffff]"}, 3},
 	}
 	for _, tc := range valid {
 		t.Run("valid/"+tc.name, func(t *testing.T) {
@@ -79,6 +80,8 @@ func TestParseOriginAllowlist(t *testing.T) {
 		"http://127.000.0.1",
 		"http://[0:0:0:0:0:0:0:1]:3000",
 		"http://[::FFFF:1.2.3.4]",
+		"http://[::ffff:127.0.0.1]:3000",
+		"http://[::ffff:7F00:1]",
 		"http://[2001:DB8::1]",
 		"http://[::1",
 	}
@@ -184,5 +187,28 @@ func TestEmptyOriginAllowlistRejectsAnyOrigin(t *testing.T) {
 		if ok, _ := allow.Admits(newOriginReq()); !ok {
 			t.Fatal("empty allowlist rejected a request with no Origin")
 		}
+	}
+}
+
+func TestIPv4MappedOriginUsesTheBrowserForm(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseOriginAllowlist([]string{"http://[::ffff:127.0.0.1]:3000"})
+	if err == nil || !strings.Contains(err.Error(), "use ::ffff:7f00:1") {
+		t.Fatalf("error = %v, want a hint to write ::ffff:7f00:1", err)
+	}
+
+	allow, err := ParseOriginAllowlist([]string{"http://[::ffff:7f00:1]:3000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Origin", "http://[::ffff:7f00:1]:3000")
+	if ok, _ := allow.Admits(r); !ok {
+		t.Error("the browser form of an IPv4-mapped origin did not match its entry")
+	}
+	r.Header.Set("Origin", "http://[::ffff:127.0.0.1]:3000")
+	if ok, _ := allow.Admits(r); ok {
+		t.Error("the dotted form, which a browser never sends, matched")
 	}
 }

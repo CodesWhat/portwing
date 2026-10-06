@@ -33,7 +33,8 @@ func TestHostGuard(t *testing.T) {
 		want      int
 	}{
 		{"attacker host rejected", true, "rebind.attacker.example:3000", nil, http.StatusForbidden},
-		{"empty host rejected", true, "", nil, http.StatusForbidden},
+		{"empty host admitted", true, "", nil, http.StatusNoContent},
+		{"malformed host rejected", true, "[::1", nil, http.StatusForbidden},
 		{"ip literal passes", true, "127.0.0.1:3000", nil, http.StatusNoContent},
 		{"ipv6 literal passes", true, "[::1]:3000", nil, http.StatusNoContent},
 		{"localhost passes", true, "localhost:3000", nil, http.StatusNoContent},
@@ -117,6 +118,9 @@ func TestHostRejectionAuditsOnlyWhenAnAuditorIsSet(t *testing.T) {
 	}
 }
 
+// warnWindow is the sampling window as a duration.
+func warnWindow() time.Duration { return warnWindowSeconds * time.Second }
+
 func TestWarnLimiter(t *testing.T) {
 	t.Parallel()
 
@@ -135,16 +139,32 @@ func TestWarnLimiter(t *testing.T) {
 		}
 	}
 	// One nanosecond before the window closes is still the same window.
-	if emit, _ := l.allow(base.Add(warnWindow - time.Nanosecond)); emit {
+	if emit, _ := l.allow(base.Add(warnWindow() - time.Nanosecond)); emit {
 		t.Fatal("logged just before the window ended")
 	}
 	// The window ends exactly warnWindow after its first line.
-	emit, skipped := l.allow(base.Add(warnWindow))
+	emit, skipped := l.allow(base.Add(warnWindow()))
 	if !emit || skipped != 4 {
 		t.Fatalf("first line of the next window: emit=%v skipped=%d, want a log reporting 4 skipped", emit, skipped)
 	}
-	if emit, skipped := l.allow(base.Add(warnWindow + time.Second)); !emit || skipped != 0 {
+	if emit, skipped := l.allow(base.Add(warnWindow() + time.Second)); !emit || skipped != 0 {
 		t.Fatalf("second line of the next window: emit=%v skipped=%d", emit, skipped)
+	}
+
+	// The skipped count belongs to one window: fill the second window past its
+	// burst by two, and the third window reports 2, not 6.
+	second := base.Add(warnWindow())
+	for i := 0; i < warnBurst-2; i++ {
+		l.allow(second.Add(2 * time.Second))
+	}
+	l.allow(second.Add(3 * time.Second))
+	l.allow(second.Add(3 * time.Second))
+	third := second.Add(warnWindow())
+	if emit, skipped := l.allow(third); !emit || skipped != 2 {
+		t.Fatalf("first line of the third window: emit=%v skipped=%d, want a log reporting 2 skipped", emit, skipped)
+	}
+	if emit, skipped := l.allow(third.Add(warnWindow())); !emit || skipped != 0 {
+		t.Fatalf("a quiet window reported %d skipped, want 0", skipped)
 	}
 }
 

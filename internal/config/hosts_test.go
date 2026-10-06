@@ -106,6 +106,8 @@ func TestHostAdmits(t *testing.T) {
 		{"rebind.attacker.example:3000", false},
 		{"attacker.example", false},
 		{"attacker.example.", false},
+		{"attacker..", false},
+		{"localhost..", false},
 		{"localhost.attacker.example", false},
 		{"127.0.0.1.attacker.example", false},
 		{"127.0.0.1.attacker.example:3000", false},
@@ -117,7 +119,7 @@ func TestHostAdmits(t *testing.T) {
 		{"localhost/path", false},
 		{"localhost?x", false},
 		{"attacker.example/localhost", false},
-		{"", false},
+		{"", true}, // a browser always sends Host; HTTP/1.0 health checkers may not
 		{".", false},
 		{":3000", false},
 		{"[]:3000", false},

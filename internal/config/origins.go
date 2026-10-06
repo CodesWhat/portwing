@@ -137,10 +137,23 @@ func checkCanonicalIP(host string) error {
 	if err != nil {
 		return errors.New("an IP address must be written in canonical form, as a browser sends it")
 	}
-	if addr.String() != host {
-		return fmt.Errorf("an IP address must be written in canonical form, as a browser sends it: use %s", addr.String())
+	if form := browserForm(addr); form != host {
+		return fmt.Errorf("an IP address must be written in canonical form, as a browser sends it: use %s", form)
 	}
 	return nil
+}
+
+// browserForm is how a browser serialises an IP host. It is netip's form
+// except for an IPv4-mapped IPv6 address, which netip writes with a dotted tail
+// ("::ffff:127.0.0.1") and a browser writes as two hex groups ("::ffff:7f00:1").
+func browserForm(addr netip.Addr) string {
+	if !addr.Is4In6() {
+		return addr.String()
+	}
+	b := addr.As16()
+	high := uint16(b[12])<<8 | uint16(b[13])
+	low := uint16(b[14])<<8 | uint16(b[15])
+	return fmt.Sprintf("::ffff:%x:%x", high, low)
 }
 
 // endsInNumber reports whether the last dot-separated label is all digits,
