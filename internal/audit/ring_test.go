@@ -151,7 +151,7 @@ func TestLoggerBufferWithoutSink(t *testing.T) {
 
 	l.AuthFailure("1.2.3.4", "GET", "/secret")
 	l.RateLimited("1.2.3.4", "POST", "/api")
-	l.ExecStart("1.2.3.4", "/exec/abc/start", "abc123")
+	l.ExecStart("1.2.3.4", "/exec/abc/start", "abc123", OutcomeAllowed)
 
 	recs := l.Records(0)
 	if len(recs) != 3 {
@@ -297,7 +297,7 @@ func TestLoggerRetainsBoundedDisplayFields(t *testing.T) {
 	l.AuthFailure(oversized, oversized, oversized)
 	l.RateLimited(oversized, oversized, oversized)
 	l.ComposeOp("actor", oversized, oversized, OutcomeError)
-	l.ExecStart("actor", oversized, oversized)
+	l.ExecStart("actor", oversized, oversized, OutcomeAllowed)
 	l.Enrollment("actor", oversized, OutcomeAllowed)
 	for _, r := range l.Records(0) {
 		if len(r.Path) > 4096 || len(r.Method) > 64 || len(r.Actor) > 256 {

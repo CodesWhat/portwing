@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/docker"
 	applog "github.com/codeswhat/portwing/internal/log"
 	"github.com/codeswhat/portwing/internal/pool"
@@ -100,6 +101,7 @@ type ExecSession struct {
 func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	target := c.currentOutboundTarget()
 	if msg.ExecID == "" {
+		c.auditTypedExecStart(msg, false)
 		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
 			Reason: "exec ID is required",
 		})
@@ -127,11 +129,12 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		}
 	}()
 
-	c.execAdmissionMu.Lock()
-	defer c.execAdmissionMu.Unlock()
+	decision := c.admitTypedExec(msg.ExecID, session)
+	// The record is written after the admission lock is released, so audit IO
+	// never runs under it, and before the bring-up is spawned.
+	c.auditTypedExecStart(msg, decision == execAdmitted)
 
-	// Check concurrent session limit.
-	if c.execSlotsFullLocked() {
+	if decision == execSlotsFull {
 		slog.Warn("exec session limit reached", "max", maxExecSessions)
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeExecEnd, protocol.ExecEndMessage{
@@ -141,7 +144,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		return
 	}
 
-	if _, loaded := c.execSessions.LoadOrStore(msg.ExecID, session); loaded {
+	if decision == execDuplicateID {
 		// Error is the only existing non-terminal rejection shape. Correlation is
 		// controller-dependent; exec_end would incorrectly close the live session.
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
@@ -157,12 +160,42 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 	go c.bringUpExec(sessionCtx, msg, session)
 }
 
+// typedExecAdmission is the result of admitting a typed exec session.
+type typedExecAdmission int
+
+const (
+	execAdmitted typedExecAdmission = iota
+	execSlotsFull
+	execDuplicateID
+)
+
+// admitTypedExec decides whether a typed exec session may start and, when it
+// may, registers it, all under execAdmissionMu so the cap shared with raw exec
+// starts holds. It does no IO.
+func (c *Client) admitTypedExec(execID string, session *ExecSession) typedExecAdmission {
+	c.execAdmissionMu.Lock()
+	defer c.execAdmissionMu.Unlock()
+	if c.execSlotsFullLocked() {
+		return execSlotsFull
+	}
+	if _, loaded := c.execSessions.LoadOrStore(execID, session); loaded {
+		return execDuplicateID
+	}
+	return execAdmitted
+}
+
+// auditTypedExecStart writes the exec_start record for a typed exec_start with
+// the admission result, before the bring-up reaches the Docker daemon.
+func (c *Client) auditTypedExecStart(msg protocol.ExecStartMessage, admitted bool) {
+	c.auditor.ExecStart(c.cfg.DrydockURL, msg.ContainerID, msg.ExecID, audit.ExecOutcome(admitted))
+}
+
 // bringUpExec performs the Docker round-trips for an already-registered session
 // and, on success, wires the live connection and starts streaming.
 func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage, session *ExecSession) {
 	defer recoverSession("bringUpExec", msg.ExecID)
 	if ctx.Err() != nil || session.isClosed() {
-		session.Close()
+		session.abortStart()
 		return
 	}
 
@@ -176,7 +209,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 		return
 	}
 	if ctx.Err() != nil || session.isClosed() {
-		session.Close()
+		session.abortStart()
 		return
 	}
 
@@ -204,6 +237,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	// Wire the connection. If the session was already torn down while we were
 	// bringing the exec up, activate closes the orphaned conn and we stop here.
 	if !session.activate(conn) {
+		session.auditStartError()
 		return
 	}
 
@@ -432,9 +466,25 @@ func (s *ExecSession) isClosed() bool {
 	return s.closed
 }
 
+// auditStartError records that an admitted typed exec did not come up, as the
+// api_request error record under the exec_start message type. Each bringUpExec
+// exit that gives up calls it once.
+func (s *ExecSession) auditStartError() {
+	s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
+}
+
+// abortStart records the failed start and tears the session down for a
+// bring-up that was cancelled or whose session was closed before it came up.
+// No exec_end is sent: whoever closed the session already owns that.
+func (s *ExecSession) abortStart() {
+	s.auditStartError()
+	s.Close()
+}
+
 // failStart tears the session down and reports a terminal exec_end. It closes
 // first so the session is deregistered before the controller sees the failure.
 func (s *ExecSession) failStart(reason string) {
+	s.auditStartError()
 	s.Close()
 	// Best-effort error reply; connection loss will surface on the read pump.
 	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
@@ -692,21 +742,32 @@ func rawExecStart(method, path string) (execID, routePath string, ok bool) {
 	return id, pathOnly, true
 }
 
-// auditRawExecStart writes the exec_start record for a raw exec start, with the
-// route path in the container field as the standalone proxy does, and reports
-// whether the request is one.
-func (c *Client) auditRawExecStart(method, path string) bool {
+// admitRawExecStart takes a slot for a raw exec start and writes its exec_start
+// record with the admission result, before anything is forwarded to the daemon.
+// isExec is false for any other request, which needs no slot and is always
+// admitted. The caller releases the slot with releaseRawExecSlot when isExec and
+// admitted are both true.
+func (c *Client) admitRawExecStart(method, path string) (isExec, admitted bool) {
 	id, routePath, ok := rawExecStart(method, path)
-	if ok {
-		c.auditor.ExecStart(c.cfg.DrydockURL, routePath, id)
+	if !ok {
+		return false, true
 	}
-	return ok
+	admitted = c.acquireRawExecSlot()
+	c.auditor.ExecStart(c.cfg.DrydockURL, routePath, id, audit.ExecOutcome(admitted))
+	return true, admitted
 }
 
-// auditRefusedRawExecStart records a raw exec start the dispatch sites turned
-// away at the request cap, which never reaches handleRequestTo. A request
-// admitted there is recorded by handleRequestTo instead, so none is recorded
-// twice.
+// auditRefusedRawExecStart records, as denied, a raw exec start a cap turned
+// away before it reached handleRequestTo, which would otherwise record it. It
+// applies the path gate handleRequestTo applies, so a path the handler rejects
+// as invalid is not recorded as an exec start. A request admitted past the caps
+// is recorded by handleRequestTo instead, so none is recorded twice.
 func (c *Client) auditRefusedRawExecStart(method, path string) {
-	c.auditRawExecStart(method, path)
+	if docker.ValidateAPIPath(path) != nil {
+		return
+	}
+	id, routePath, ok := rawExecStart(method, path)
+	if ok {
+		c.auditor.ExecStart(c.cfg.DrydockURL, routePath, id, audit.OutcomeDenied)
+	}
 }

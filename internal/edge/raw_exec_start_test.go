@@ -61,6 +61,13 @@ func realDockerDaemon(t *testing.T) (*docker.Client, <-chan string) {
 // cancelled), so a test can keep a stream in flight. A nil hold answers at once.
 func realDockerDaemonHolding(t *testing.T, hold <-chan struct{}) (*docker.Client, <-chan string) {
 	t.Helper()
+	return realDockerDaemonObserving(t, hold, nil)
+}
+
+// realDockerDaemonObserving is realDockerDaemonHolding that also calls onRequest,
+// when non-nil, on every non-version request before it answers.
+func realDockerDaemonObserving(t *testing.T, hold <-chan struct{}, onRequest func()) (*docker.Client, <-chan string) {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "lk")
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +83,9 @@ func realDockerDaemonHolding(t *testing.T, hold <-chan struct{}) (*docker.Client
 		if r.URL.Path == "/version" {
 			_, _ = w.Write([]byte(`{"ApiVersion":"1.44"}`))
 			return
+		}
+		if onRequest != nil {
+			onRequest()
 		}
 		paths <- r.URL.Path
 		w.WriteHeader(http.StatusOK)
@@ -192,8 +202,9 @@ func TestRawExecStartRefusedWhenTypedSessionsFillCap(t *testing.T) {
 	if e.RequestID != "raw2" || e.Message != "agent busy: exec session limit reached" {
 		t.Fatalf("error = %+v", e)
 	}
-	if got := len(execRecords(logger)); got != 1 {
-		t.Fatalf("exec records = %d, want 1 (a start refused by the exec cap inside handleRequestTo is audited; one refused earlier by the stream cap is audited by the dispatch site)", got)
+	records := execRecords(logger)
+	if len(records) != 1 || records[0].Outcome != audit.OutcomeDenied {
+		t.Fatalf("exec records = %+v, want one denied record (a start refused by the exec cap inside handleRequestTo is audited there; one refused earlier by the stream cap is audited by the dispatch site)", records)
 	}
 }
 
@@ -262,6 +273,11 @@ func TestRawAttachedExecStartHoldsSlotUntilStreamEnds(t *testing.T) {
 
 	c, ctrl := newTestClient(t)
 	hold := make(chan struct{})
+	dc, paths := realDockerDaemonHolding(t, hold)
+	// Registered after the helper so it runs before the daemon's srv.Close
+	// (cleanups run last-in first-out). srv.Close waits on the handler parked
+	// on hold, so releasing hold first is what lets a failing assertion end the
+	// test instead of hanging to the test timeout.
 	t.Cleanup(func() {
 		select {
 		case <-hold:
@@ -269,7 +285,6 @@ func TestRawAttachedExecStartHoldsSlotUntilStreamEnds(t *testing.T) {
 			close(hold)
 		}
 	})
-	dc, paths := realDockerDaemonHolding(t, hold)
 	c.dockerClient = dc
 	for i := 0; i < maxExecSessions-1; i++ {
 		c.execSessions.Store("s-"+strconv.Itoa(i), &ExecSession{})
@@ -362,7 +377,7 @@ func TestRefusedAtRequestCapAuditsRawExecStartOnce(t *testing.T) {
 				if len(records) != tc.want {
 					t.Fatalf("exec records = %+v, want %d", records, tc.want)
 				}
-				if tc.want == 1 && (records[0].ExecID != "abc" || records[0].Container != "/v1.47/exec/abc/start") {
+				if tc.want == 1 && (records[0].ExecID != "abc" || records[0].Container != "/v1.47/exec/abc/start" || records[0].Outcome != audit.OutcomeDenied) {
 					t.Fatalf("exec record = %+v", records[0])
 				}
 				select {

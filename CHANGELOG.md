@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.23] - 2026-10-07
+
+### Added
+
+- **`ALLOWED_ORIGINS` lists the browser origins Portwing accepts.** A
+  comma-separated list of exact origins (`scheme://host[:port]`), empty by
+  default. Each entry must be `http` or `https` with a host and no path, query,
+  fragment or userinfo, and `*` or anything else stops startup with an error
+  naming the entry. IP hosts must be written the way a browser sends them
+  (`http://127.0.0.1:3000`, not `http://127.1:3000`). Scheme and host match
+  case-insensitively and the port matches exactly once the default is filled
+  in. It applies in standard mode and to edge mode's operations listener. It
+  doesn't turn on cross-origin fetch: Portwing sends no `Access-Control-*`
+  headers and doesn't answer `OPTIONS`, so an allowlisted origin is for a
+  same-origin reverse proxy or a WebSocket client.
+- **`ALLOWED_HOSTS` names the extra hostnames an unauthenticated Portwing
+  accepts in the `Host` header.** A comma-separated list of bare hostnames,
+  empty by default, matched case-insensitively with the request's port and one
+  trailing dot ignored. An entry with a scheme, port, path, userinfo or
+  wildcard stops startup. IP addresses, `localhost` and single-label names such
+  as a Compose service name are always accepted.
+
+### Changed
+
+- **`exec_start` audit records now say whether the exec was admitted.** A
+  start that took an exec slot is recorded `allowed`, as before. A start the
+  exec session limit turned away is recorded `denied`, and on the edge so is a
+  raw exec request refused by the request cap or the streamed-body cap, and a
+  typed `exec_start` with a missing or duplicate exec ID. Each attempt that
+  reaches the admission decision writes one record, there and before anything
+  reaches the daemon; a streamed-body start dropped during reassembly never
+  gets that far and writes none. Field names are unchanged, so readers of `/_portwing/audit` and
+  `/_portwing/audit/export` only see `outcome` take a value it already takes on
+  other events. A typed exec start on the edge that fails, or is cancelled by
+  the controller's `exec_end` or a tunnel drop before it comes up, now also
+  writes an `api_request` record with outcome `error` and method `exec_start`.
+  A standalone upgraded exec whose daemon dial or response fails records the
+  502 or the daemon's status on its `api_request` record instead of 200, and
+  the request metrics count it under that status too.
+
+### Fixed
+
+- A streamed-body exec start refused by the concurrent streamed-body limit now
+  gets an `exec_start` record, outcome `denied`. It used to leave none.
+- A request the edge handler rejects as an invalid path, such as
+  `%2Fexec/x/start`, no longer gets an `exec_start` record when a request cap
+  turns it away. The cap sites now apply the same path check the handler does.
+
+### Security
+
+- **A request whose `Origin` header isn't allowlisted is now rejected with 403
+  before authentication, on every route.** That covers writes, WebSocket
+  upgrades, MCP calls and any other cross-site request, including `null`, an
+  unparseable value, and a repeated header. Both MCP revisions require the
+  check. A request with no `Origin` header is not affected, which is what the
+  Docker CLI, Drydock's agent client, curl and most MCP clients send. Some
+  WebSocket libraries do set one (Python `websocket-client`, which docker-py
+  uses for `attach_socket(ws=True)`, and `golang.org/x/net/websocket`), and
+  they need their origin in `ALLOWED_ORIGINS`. An `Origin` equal to the request
+  `Host` is not allowed automatically. Edge mode's unauthenticated operations
+  listener (health, readiness, metrics and audit export, loopback on port 3000
+  by default) gets the same check. Each rejection is logged as a WARN, sampled
+  to five lines per ten seconds per listener, and counted as a 403 in the
+  request metrics. Standard mode also writes a `denied` `api_request` audit
+  record; the edge operations listener writes none, so a page firing rejected
+  requests can't push real records out of the audit ring.
+- **An unauthenticated Portwing now rejects a request whose `Host` header is
+  not an IP address, `localhost`, a single-label name, or listed in
+  `ALLOWED_HOSTS`.** After DNS rebinding a page's GET and HEAD requests are
+  same-origin and carry no `Origin`, so the Origin check alone couldn't stop a
+  rebound page reading the container list, logs, archives, audit records and
+  metrics. The `Host` header is the one thing that page can't change. It
+  applies when no `TOKEN`, `TOKEN_HASH` or `AUTHORIZED_KEYS` is set
+  (`ALLOW_UNAUTHENTICATED=true`) and always on edge mode's operations listener.
+  With authentication on it doesn't apply, because a rebinding page can't
+  present the credential. **Behaviour change:** an unauthenticated Portwing
+  reached by a dotted hostname, such as `portwing.internal.example` for a
+  Prometheus scrape of the edge listener, now needs that name in
+  `ALLOWED_HOSTS`. The Docker healthcheck, `portwing healthcheck`, IP-address
+  targets and Compose service names are unaffected, and a request with no
+  `Host` header at all (an HTTP/1.0 health checker probing by IP) is accepted.
+  The rejection body is the same as the Origin check's. The check stops a
+  remote page that rebinds a public domain; it can't help against an attacker
+  who controls the victim's DNS search suffix or local name resolution
+  (single-label names pass), or behind a reverse proxy that rewrites `Host` to
+  the upstream address, and the unauthenticated health routes stay readable
+  with auth on.
+
 ## [v0.9.22] - 2026-10-04
 
 ### Added

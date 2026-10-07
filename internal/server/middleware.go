@@ -421,6 +421,13 @@ func rejectUnadmitted(w http.ResponseWriter, message string, status int) {
 	http.Error(w, message, status)
 }
 
+// authDisabled is the one place the server decides authentication is off: no
+// token verifier and no Ed25519 key registry. NewServer's fail-closed check, the
+// auth middleware's pass-through, and the Host check all use it.
+func authDisabled(verifier tokenVerifier, ed Ed25519Config) bool {
+	return verifier == nil && ed.Registry == nil
+}
+
 // AuthMiddlewareWithEd25519 validates raw or Argon2id credentials and supports
 // an optional Ed25519 verification path. When a request carries X-Portwing-Signature,
 // it is verified via Ed25519;
@@ -442,7 +449,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		start := time.Now()
 
 		// No authentication configured - pass through.
-		if verifier == nil && ed.Registry == nil {
+		if authDisabled(verifier, ed) {
 			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
 			if reg != nil {
 				reg.IncInFlight()

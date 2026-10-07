@@ -97,6 +97,23 @@ secrets as files, and places Sockguard in front of the Docker socket. These
 controls reduce the impact of a process-level compromise without claiming that
 the raw Docker socket itself is safe.
 
+Two checks run before authentication against DNS rebinding. A browser `Origin`
+header that is not listed in `ALLOWED_ORIGINS` (empty by default) is rejected
+with 403 on every route in both modes, which stops cross-site writes, upgrades
+and MCP calls; requests with no `Origin` header are unaffected. A rebound
+page's same-origin reads carry no `Origin`, so when authentication is off (and
+always on edge mode's operations listener) a `Host` that is not an IP address,
+`localhost`, a single-label name or listed in `ALLOWED_HOSTS` is rejected with
+403 too; a request with no `Host` header is admitted, since a browser always
+sends one. With authentication on, auth is the control, except that the
+unauthenticated health routes (version, uptime, Docker state) stay readable by a
+rebound page. Residuals: single-label names pass, so an attacker who controls
+the victim's DNS search suffix or local name resolution (hostile DHCP, LLMNR,
+NBNS) can still rebind; and behind a reverse proxy that rewrites `Host` to the
+upstream address the Host check can't help, so the proxy must restrict its own
+server names (`X-Forwarded-Host` is not consulted). Evidence: [`internal/config/origins.go`](internal/config/origins.go) and
+[`internal/audit/origin_guard.go`](internal/audit/origin_guard.go).
+
 Evidence: [`Dockerfile`](Dockerfile), [`SECURITY.md`](SECURITY.md),
 [`examples/docker-compose.with-sockguard.yml`](examples/docker-compose.with-sockguard.yml),
 and the public [security model](https://portwing.codeswhat.com/docs/security-model).

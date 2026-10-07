@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Portwing Agent API
-  version: 0.9.22
+  version: 0.9.23
   description: |
     Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
@@ -24,6 +24,25 @@ info:
 
     **Rate limiting:** 10 failed attempts per IP per rolling minute. Exceeding
     the threshold returns HTTP 429 until the window expires.
+
+    ## Browser Origin and Host
+
+    Every route, including health, metrics, audit and the MCP endpoint, rejects
+    a request that carries an `Origin` header unless that origin is listed in
+    `ALLOWED_ORIGINS` (empty by default). The check runs before authentication,
+    so an unlisted origin gets HTTP 403 whether or not credentials were sent.
+    A request with no `Origin` header, which is what the Docker CLI, Drydock's
+    agent client, curl and most MCP clients send, is unaffected. An origin equal
+    to the request `Host` is not allowed automatically. The API sends no
+    `Access-Control-*` headers and does not answer `OPTIONS`.
+
+    When authentication is off (`ALLOW_UNAUTHENTICATED=true`), a request whose
+    `Host` header is not an IP address, `localhost`, a single-label name or
+    listed in `ALLOWED_HOSTS` is rejected with the same 403, to stop a
+    DNS-rebound page reading the API. A request with a missing or empty `Host`
+    header is accepted. With authentication on this check does not apply. Edge
+    mode's operations listener (health, metrics and audit export) never
+    authenticates, so it applies the check in every configuration.
 
     ## Docker Engine API Proxy
 
@@ -60,6 +79,21 @@ servers:
         default: "3000"
 
 components:
+  responses:
+    ForbiddenOrigin:
+      description: >
+        The request carried a browser `Origin` header that is not listed in
+        `ALLOWED_ORIGINS` (or it was malformed, `null`, or repeated), or the
+        server has authentication off and the `Host` header is not an IP
+        address, `localhost`, a single-label name or listed in `ALLOWED_HOSTS`.
+        Checked before authentication on every route, so it is returned
+        instead of 401. The body is the same for both causes. Requests with no
+        `Origin` header are never rejected by the Origin check.
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: forbidden origin
   securitySchemes:
     bearerToken:
       type: http
@@ -124,7 +158,7 @@ components:
         version:
           type: string
           description: Portwing agent version.
-          example: "0.9.22"
+          example: "0.9.23"
         uptimeSeconds:
           type: number
           minimum: 0
@@ -145,7 +179,7 @@ components:
         version:
           type: string
           description: Portwing agent version
-          example: "0.9.22"
+          example: "0.9.23"
         dockerVersion:
           type: string
           description: Docker Engine version string
@@ -519,7 +553,7 @@ components:
       properties:
         agentVersion:
           type: string
-          example: "0.9.22"
+          example: "0.9.23"
         protocolName:
           type: string
           example: "portwing"
@@ -595,12 +629,27 @@ components:
           description: Authenticated principal (token label or key ID).
         method:
           type: string
-          description: HTTP method (api_request / auth_failure / rate_limited events only).
+          description: >-
+            HTTP method (api_request / auth_failure / rate_limited events). An
+            edge `api_request` for a failed or cancelled typed exec start
+            carries the message type `exec_start` instead.
         path:
           type: string
-          description: HTTP path (api_request / auth_failure / rate_limited events only).
+          description: >-
+            HTTP path (api_request / auth_failure / rate_limited events). An
+            edge `api_request` for a failed or cancelled typed exec start
+            carries the container ID instead.
         outcome:
           type: string
+          enum: [allowed, denied, error]
+          description: >-
+            Result of the event. On `exec_start` it is the admission decision:
+            `allowed` when the exec took an exec session slot, `denied` when
+            the exec session limit (or, in edge mode, the request or
+            streamed-body cap) refused it, or a typed exec had a missing or
+            duplicate exec ID. A failure after admission, including a start
+            cancelled before it comes up, is recorded on the request's
+            `api_request` event, not here.
           example: "allowed"
         status:
           type: integer
@@ -690,6 +739,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /ready:
     get:
@@ -713,6 +764,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /_portwing/health:
     get:
@@ -741,6 +794,8 @@ paths:
               example:
                 status: unhealthy
                 docker: disconnected
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /_portwing/info:
     get:
@@ -764,6 +819,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded (10 failures/min/IP).
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /_portwing/metrics:
     get:
@@ -799,6 +856,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /metrics:
     get:
@@ -826,6 +885,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /_portwing/compose:
     post:
@@ -902,6 +963,8 @@ paths:
           description: Rate limit exceeded.
         "500":
           description: Internal server error.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /_portwing/audit:
     get:
@@ -934,6 +997,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /_portwing/audit/export:
     get:
@@ -1001,6 +1066,8 @@ paths:
           description: Missing or invalid token (Standard mode only).
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /_portwing/mcp:
     post:
@@ -1114,6 +1181,8 @@ paths:
           description: Method not allowed (POST required; GET has no SSE stream).
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/events:
     get:
@@ -1144,7 +1213,7 @@ paths:
 
         **Example stream:**
         ```
-        data: {"type":"dd:ack","data":{"version":"0.9.22","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+        data: {"type":"dd:ack","data":{"version":"0.9.23","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
 
         data: {"type":"dd:watcher-snapshot","data":{"watcher":{...WatcherComponent...},"containers":[{...Container...}]}}
 
@@ -1170,6 +1239,8 @@ paths:
           description: Rate limit exceeded.
         "500":
           description: Streaming not supported by server.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/containers:
     get:
@@ -1196,6 +1267,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/containers/{id}/logs:
     get:
@@ -1278,6 +1351,8 @@ paths:
           description: >
             Concurrent stream limit reached (follow mode only; see
             MAX_STREAM_SESSIONS).
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/containers/{id}:
     delete:
@@ -1310,6 +1385,8 @@ paths:
           description: Rate limit exceeded.
         "500":
           description: Error removing container.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/watchers:
     get:
@@ -1338,6 +1415,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/triggers:
     get:
@@ -1364,6 +1443,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/watchers/{type}/{name}:
     get:
@@ -1402,6 +1483,8 @@ paths:
           description: No watcher matches the given type/name.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
     post:
       operationId: postApiWatcherPoll
       summary: Trigger watcher poll
@@ -1436,6 +1519,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/watchers/{type}/{name}/container/{id}:
     post:
@@ -1475,6 +1560,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/triggers/{type}/{name}:
     post:
@@ -1508,6 +1595,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/triggers/{type}/{name}/batch:
     post:
@@ -1541,6 +1630,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/log/entries:
     get:
@@ -1567,6 +1658,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/v1/version:
     get:
@@ -1590,6 +1683,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/v1/containers:
     get:
@@ -1616,6 +1711,8 @@ paths:
           description: Missing or invalid token.
         "429":
           description: Rate limit exceeded.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/v1/containers/{id}/logs:
     get:
@@ -1686,6 +1783,8 @@ paths:
           description: >
             Concurrent stream limit reached (follow mode only; see
             MAX_STREAM_SESSIONS).
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/v1/events:
     get:
@@ -1734,6 +1833,8 @@ paths:
           description: Rate limit exceeded.
         "500":
           description: Streaming not supported by server.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /v1.44/{path}:
     x-docker-proxy: true
@@ -1775,6 +1876,8 @@ paths:
           description: Rate limit exceeded.
         "502":
           description: Docker daemon unreachable or returned an error.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
   /api/portwing/enroll:
     post:
@@ -1843,6 +1946,8 @@ paths:
           description: Rate limit exceeded.
         "500":
           description: Could not write to the authorized_keys file.
+        "403":
+          $ref: '#/components/responses/ForbiddenOrigin'
 
 tags:
   - name: Health

@@ -151,8 +151,9 @@ func TestDetachedExecStartRefusedWhenExecSlotsFull(t *testing.T) {
 	default:
 	}
 	// Same as the hijack path: the attempt is audited even when refused.
-	if got := len(execStartRecords(s)); got != 1 {
-		t.Fatalf("exec start records = %d, want 1", got)
+	records := execStartRecords(s)
+	if len(records) != 1 || records[0].Outcome != audit.OutcomeDenied || records[0].ExecID != "abc123" {
+		t.Fatalf("exec start records = %+v, want one denied record for abc123", records)
 	}
 }
 

@@ -47,6 +47,10 @@ scrape_configs:
 If you scrape multiple agents, give each a distinct `job_name` or add a `relabel_configs` block to attach a `host` label so time series from different agents stay identifiable in your dashboards.
 </Callout>
 
+Prometheus, the container healthcheck and `portwing healthcheck` send no `Origin` header, so [`ALLOWED_ORIGINS`](/configuration) does not affect them. A request to any of these routes that does carry an `Origin` is rejected with 403 unless it is allowlisted, in edge mode as well.
+
+Edge mode's operations listener has no authentication, so it also checks the `Host` header: only an IP address, `localhost`, a single-label name (a Compose service name such as `portwing-edge`) or a name in [`ALLOWED_HOSTS`](/configuration) is accepted. Scraping it by a dotted DNS name, for example `portwing-edge.monitoring.example`, needs that name in `ALLOWED_HOSTS`, or a target given as an IP address. Kubernetes `dns_sd_configs` of type `A` resolve to IP addresses and need nothing.
+
 Edge-mode scrape config on the same private container or pod network:
 
 ```yaml
@@ -139,7 +143,7 @@ that remains at capacity while the exporter error counter rises.
 ```text
 # HELP portwing_build_info Portwing agent build metadata.
 # TYPE portwing_build_info gauge
-portwing_build_info{version="0.9.22"} 1
+portwing_build_info{version="0.9.23"} 1
 # HELP portwing_uptime_seconds Seconds since the agent started.
 # TYPE portwing_uptime_seconds gauge
 portwing_uptime_seconds 3842.7
@@ -193,7 +197,7 @@ curl http://your-host:3000/health
 Returns HTTP 200 with the full operational shape:
 
 ```json
-{"status":"ok","live":true,"ready":false,"mode":"standard","version":"0.9.22","uptimeSeconds":3842.7,"docker":"unknown","controller":"not_applicable"}
+{"status":"ok","live":true,"ready":false,"mode":"standard","version":"0.9.23","uptimeSeconds":3842.7,"docker":"unknown","controller":"not_applicable"}
 ```
 
 ### GET /ready
@@ -209,13 +213,13 @@ curl http://your-host:3000/ready
 Standard-mode ready response:
 
 ```json
-{"status":"healthy","live":true,"ready":true,"mode":"standard","version":"0.9.22","uptimeSeconds":3842.7,"docker":"connected","controller":"not_applicable"}
+{"status":"healthy","live":true,"ready":true,"mode":"standard","version":"0.9.23","uptimeSeconds":3842.7,"docker":"connected","controller":"not_applicable"}
 ```
 
 Edge-mode not-ready response:
 
 ```json
-{"status":"unhealthy","live":true,"ready":false,"mode":"edge","version":"0.9.22","uptimeSeconds":42.1,"docker":"connected","controller":"disconnected"}
+{"status":"unhealthy","live":true,"ready":false,"mode":"edge","version":"0.9.23","uptimeSeconds":42.1,"docker":"connected","controller":"disconnected"}
 ```
 
 `GET /_portwing/health` remains as a compatibility alias for `/ready`.

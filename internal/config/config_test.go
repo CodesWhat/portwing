@@ -574,3 +574,97 @@ func TestLoadDurationRanges(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadAllowedOrigins(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    []string
+		wantErr string
+	}{
+		{name: "unset", value: "", want: nil},
+		{name: "single", value: "https://good.example", want: []string{"https://good.example"}},
+		{name: "list with spaces and empties", value: " https://a.example , http://localhost:3000,,", want: []string{"https://a.example", "http://localhost:3000"}},
+		{name: "wildcard", value: "*", wantErr: "ALLOWED_ORIGINS"},
+		{name: "wildcard in list", value: "https://a.example,*", wantErr: "invalid origin \"*\""},
+		{name: "no scheme", value: "good.example", wantErr: "scheme must be http or https"},
+		{name: "ftp scheme", value: "ftp://good.example", wantErr: "scheme must be http or https"},
+		{name: "trailing slash", value: "https://good.example/", wantErr: "no userinfo, path, query or fragment"},
+		{name: "path", value: "https://good.example/app", wantErr: "no userinfo, path, query or fragment"},
+		{name: "query", value: "https://good.example?x=1", wantErr: "no userinfo, path, query or fragment"},
+		{name: "fragment", value: "https://good.example#x", wantErr: "no userinfo, path, query or fragment"},
+		{name: "userinfo", value: "https://u" + ":p@good.example", wantErr: "no userinfo, path, query or fragment"},
+		{name: "bad port", value: "https://good.example:99999", wantErr: "port must be between 1 and 65535"},
+		{name: "null", value: "null", wantErr: "scheme must be http or https"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TOKEN", "t")
+			t.Setenv("ALLOWED_ORIGINS", tc.value)
+			cfg, err := Load()
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load error = %v, want it to contain %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if strings.Join(cfg.AllowedOrigins, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("AllowedOrigins = %q, want %q", cfg.AllowedOrigins, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadAllowedOriginsEmptyByDefault(t *testing.T) {
+	t.Setenv("TOKEN", "t")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.AllowedOrigins) != 0 {
+		t.Fatalf("AllowedOrigins = %q, want empty by default", cfg.AllowedOrigins)
+	}
+}
+
+func TestLoadAllowedHosts(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    []string
+		wantErr string
+	}{
+		{name: "unset", value: "", want: nil},
+		{name: "single", value: "ops.example.com", want: []string{"ops.example.com"}},
+		{name: "list with spaces and empties", value: " a.example , B.example.,,", want: []string{"a.example", "B.example."}},
+		{name: "wildcard", value: "*", wantErr: "ALLOWED_HOSTS"},
+		{name: "wildcard prefix", value: "*.example.com", wantErr: "invalid host"},
+		{name: "scheme", value: "https://ops.example.com", wantErr: "bare hostname"},
+		{name: "port", value: "ops.example.com:3000", wantErr: "bare hostname"},
+		{name: "path", value: "ops.example.com/x", wantErr: "bare hostname"},
+		{name: "userinfo", value: "u@ops.example.com", wantErr: "bare hostname"},
+		{name: "bad character", value: "ops`.example.com", wantErr: "must be a DNS name"},
+		{name: "lone dot", value: ".", wantErr: "empty host"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TOKEN", "t")
+			t.Setenv("ALLOWED_HOSTS", tc.value)
+			cfg, err := Load()
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load error = %v, want it to contain %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if strings.Join(cfg.AllowedHosts, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("AllowedHosts = %q, want %q", cfg.AllowedHosts, tc.want)
+			}
+		})
+	}
+}

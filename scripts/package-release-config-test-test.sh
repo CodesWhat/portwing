@@ -43,6 +43,7 @@ cp docs/content/docs/observability.mdx "${fixture}/docs/content/docs/"
 cp docs/content/docs/security-model.mdx "${fixture}/docs/content/docs/"
 mkdir -p "${fixture}/scripts/ci"
 cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/"
+cp scripts/ci/verify-compose-containerd.sh "${fixture}/scripts/ci/"
 restore_release_workflows
 restore_grype_workflow
 git -C "${fixture}" init -q
@@ -208,6 +209,30 @@ expect_release_contract_failure \
 	"the package release contract must reject an extra scan-action pinned outside the reviewed version"
 restore_grype_workflow
 
+sed '/verify-compose-containerd.sh \/tmp\/docker-compose/d' \
+	"${fixture}/.github/workflows/security-grype.yml" >"${fixture}/.github/workflows/security-grype.yml.tmp"
+mv "${fixture}/.github/workflows/security-grype.yml.tmp" "${fixture}/.github/workflows/security-grype.yml"
+expect_release_contract_failure \
+	"FAIL: security-grype.yml grype-image must verify the ARMv7 Compose containerd version" \
+	"the package release contract must reject a grype-image job that stops verifying the embedded containerd version"
+restore_grype_workflow
+
+sed '/run: bash scripts\/compose-containerd-version-test.sh/d' \
+	"${fixture}/.github/workflows/ci-verify.yml" >"${fixture}/.github/workflows/ci-verify.yml.tmp"
+mv "${fixture}/.github/workflows/ci-verify.yml.tmp" "${fixture}/.github/workflows/ci-verify.yml"
+expect_release_contract_failure \
+	"FAIL: the Release Contract job must run the Compose containerd check test" \
+	"the package release contract must reject a Release Contract job that stops running the Compose containerd test"
+git -C "${fixture}" checkout -q -- .github/workflows/ci-verify.yml
+
+sed '/run: bash scripts\/compose-containerd-version-test.sh/d' \
+	"${fixture}/lefthook.yml" >"${fixture}/lefthook.yml.tmp"
+mv "${fixture}/lefthook.yml.tmp" "${fixture}/lefthook.yml"
+expect_release_contract_failure \
+	"FAIL: the pre-push hooks must run the Compose containerd check test" \
+	"the package release contract must reject a lefthook config that stops running the Compose containerd test"
+git -C "${fixture}" checkout -q -- lefthook.yml
+
 sed '/bash scripts\/package-release-config-test.sh/d' \
 	"${fixture}/scripts/ci/go-release-check.sh" >"${fixture}/scripts/ci/go-release-check.sh.tmp"
 mv "${fixture}/scripts/ci/go-release-check.sh.tmp" "${fixture}/scripts/ci/go-release-check.sh"
@@ -221,6 +246,7 @@ if [ "${adapter_status}" -eq 0 ] || ! grep -Fq \
 	exit 1
 fi
 cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/"
+cp scripts/ci/verify-compose-containerd.sh "${fixture}/scripts/ci/"
 
 sed 's/workflow-file: ci-verify.yml/workflow-file: other.yml/' \
 	"${fixture}/.github/workflows/release.yml" >"${fixture}/.github/workflows/release.yml.tmp"
