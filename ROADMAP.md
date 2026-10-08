@@ -27,8 +27,9 @@ particular:
   `quality-fuzz-monthly.yml`, `quality-soak-weekly.yml`
   (`benchmarks/cmd/{mockdocker,loadgen}` + `scripts/soak.sh`), and
   `quality-bench-monthly.yml`.
-- **Reproducible base images.** `Dockerfile` and `Dockerfile.release` pin
-  every base image by digest, with Dependabot tracking the `docker` ecosystem.
+- **Reproducible base images.** `Dockerfile`, `Dockerfile.armv7`,
+  `Dockerfile.dev`, `Dockerfile.release`, and `.clusterfuzzlite/Dockerfile`
+  pin every base image by digest, and Renovate keeps the digests current.
 - **Controller-owned watcher/update execution.** Portwing marks the Docker
   watcher as `transport=docker-api`, `execution=controller`, and
   `events=portwing`; Drydock runs its native watcher and update trigger through
