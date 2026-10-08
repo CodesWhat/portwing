@@ -316,7 +316,7 @@ See the [Getting Started guide](https://portwing.codeswhat.com/docs/getting-star
 
 <h2 align="center" id="why-portwing">Why Portwing</h2>
 
-Controlling a remote Docker host usually means exposing the Docker socket, or running an agent that holds it with little in the way of authentication, audit, or containment. Portwing is a small static Go agent that sits in front of the daemon instead. It is a transparent Docker API proxy with per-client Ed25519 authentication, fail-closed startup, structured audit logging, and signed releases, and it pairs with sockguard so the agent never touches the raw Docker socket.
+Controlling a remote Docker host usually means exposing the Docker socket, or running an agent that mounts it directly. Portwing is a small static Go agent that sits in front of the daemon instead. It is a transparent Docker API proxy with per-client Ed25519 authentication, fail-closed startup, structured audit logging, and signed releases, and it pairs with sockguard so the agent never touches the raw Docker socket.
 
 It works for Drydock, which connects inbound to a standard-mode agent or accepts an outbound edge-mode tunnel from hosts behind NAT, and it runs standalone with a REST + SSE API when no controller is involved.
 
@@ -361,9 +361,9 @@ flowchart LR
 | 🤖 | **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol revisions 2026-07-28 and 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
 | 📦 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting. Portwing marks watcher execution as controller-owned so compatible Drydock runs native watcher/update calls through the Standard or Edge Docker proxy. |
 | 📈 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_portwing/metrics`. Zero external dependencies. |
-| 📜 | **Audit Logging** | Structured JSON of every API call, auth event, exec session, and Compose operation. Recent records are retained in memory by default; file/stdout/stderr persistence is opt-in. |
+| 📜 | **Audit Logging** | Structured JSON of every authenticated API call, auth event, exec session, and Compose operation. Recent records are retained in memory by default; file/stdout/stderr persistence is opt-in. |
 | 🖥️ | **Host Metrics** | CPU, memory, disk, network, and uptime collection. |
-| ⌨️ | **Interactive Exec** | Terminal sessions via WebSocket or HTTP hijack with 100 concurrent session cap. |
+| ⌨️ | **Interactive Exec** | Terminal sessions via WebSocket or HTTP hijack with a default cap of 100 concurrent sessions. |
 | 🗂️ | **Docker Compose** | Full lifecycle management with security hardening — path traversal protection, env var denylist, service name injection prevention. |
 | 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
 | ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA Build L2 provenance on every release. Verifiable without managing signing keys. |
@@ -378,7 +378,7 @@ flowchart LR
 <details>
 <summary><strong>How does Portwing compare to other remote Docker agents?</strong></summary>
 
-> ✅ = supported &nbsp; ❌ = not supported &nbsp; ⚠️ = partial / limited &nbsp; ? = not documented &nbsp; † = archived, no longer maintained
+> ✅ = supported &nbsp; ❌ = not supported &nbsp; ⚠️ = partial / limited &nbsp; ? = not documented or not evaluated &nbsp; † = archived, no longer maintained
 
 <h4 align="center">Remote Docker agents</h4>
 
@@ -399,17 +399,17 @@ flowchart LR
 <tr><td>Outbound edge connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Per-request signed HTTP authentication</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Optional mTLS for the agent link</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">?</td><td align="center">✅</td><td align="center">?</td></tr>
-<tr><td>Default-deny Docker socket filter</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">❌</td></tr>
+<tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">❌</td></tr>
 <tr><td>Agent-level structured audit log</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
 <tr><td>Prometheus scrape endpoint on the agent</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
-<tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
-<tr><td>Fleet UI, RBAC, GitOps, upgrade policies</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">?</td></tr>
+<tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
+<tr><td>Fleet UI and controller workflows</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">?</td></tr>
 <tr><td>License</td><td align="center">AGPL-3.0</td><td align="center">Zlib (agent) / proprietary Business features</td><td align="center">GPL-3.0</td><td align="center">BSD-3-Clause</td><td align="center">MIT</td></tr>
 </tbody>
 </table>
 
-> Portwing's edge mode and full v0.9 watcher/update behavior need Drydock `v1.6.0-rc.11+`. Portwing has no RBAC, GitOps or Swarm support by design; the fleet product features belong in Drydock.
+> Full v0.9 watcher/update behavior needs Drydock `v1.6.0-rc.11+`. The edge connection itself works with Drydock 1.6.x, or 1.5.x with `DD_EXPERIMENTAL_PORTWING=true`; see [COMPATIBILITY.md](COMPATIBILITY.md). Portwing has no RBAC, GitOps or Swarm support by design; the fleet product features belong in Drydock.
 
 <h4 align="center">Update tools</h4>
 
@@ -426,9 +426,8 @@ flowchart LR
 <tr><td>Remote Docker API proxy</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Authenticated remote access</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Structured audit log</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
-<tr><td>Default-deny Docker socket filter</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
-<tr><td>Prometheus metrics</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
-<tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Outbound edge / NAT tunnel</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Image update detection or auto-update</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Single lightweight Go binary</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
@@ -438,7 +437,7 @@ flowchart LR
 
 > Watchtower's upstream project is archived. Diun and Watchtower do update detection; Portwing is the access agent and leaves update decisions to Drydock.
 >
-> Compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which cites primary sources for each claim. Compared versions: Portainer 2.39, Komodo Periphery v2.3.2, Arcane Agent v2.10.1, Hawser v0.2.46. Reviewed 2026-08-29.
+> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.39.5, Komodo Periphery v2.3.2, Arcane Agent v2.10.1, Hawser v0.2.46. Reviewed 2026-08-29; Arcane re-checked 2026-09-02. The update-tools table follows the Diun and Watchtower comparison pages, which pin no version or review date.
 > Contributions welcome if any information is inaccurate.
 
 </details>
@@ -465,7 +464,9 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.8.x** ✅ | Operations & Distribution | Mode-aware `/health` and `/ready`, cursor-based NDJSON audit export, runnable Compose and Kubernetes observability examples, continuous edge logs, Homebrew cask and signed `deb`/`rpm` packages, published stability policy, edge mode production supported |
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks (v0.9.23) |
 | **v1.0.0** | Binding Stability | `STABILITY.md` guarantees become binding semver commitments, final re-verify of the competitive review against primary sources, decision on a versioned docs archive. Gated on verifiable items, not a date |
-| **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport, controller-assisted two-key rotation, BuildKit-aware Sockguard profile, SLSA Build L3 once an org-shared reusable release workflow exists |
+| **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport, controller-assisted two-key rotation, BuildKit-aware Sockguard profile |
+
+SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.
 
 </details>
 
