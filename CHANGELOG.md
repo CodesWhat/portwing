@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   daemon connection or writing the record used to stop the cleanup there, which
   left the session open on its exec slot and the controller without an
   `exec_end`.
+- A failed typed exec start whose `api_request` error record panics while it
+  is being written gets the record on the retry. The first attempt used to
+  count as written, so the retry wrote nothing and the session closed with no
+  error record. A write that completes still can't be followed by a second.
 - A live typed exec session whose read loop panics now ends the way one whose
   read fails does. The controller gets an `exec_end` with the reason
   `exec session failed: internal error`, unless its own `exec_end` or a tunnel

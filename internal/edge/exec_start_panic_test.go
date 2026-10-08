@@ -262,4 +262,91 @@ func TestBringUpExecPanicExitSurvivesItsOwnPanic(t *testing.T) {
 		requireClosedAndDeregistered(t, c, session)
 		requireExecEnd(t, next, "exec start failed: internal error")
 	})
+
+	// A sink that always panics takes two writes down: the failed create's own,
+	// which is what sends the bring-up to its panic exit, and that exit's retry.
+	t.Run("writing the record panics every time", func(t *testing.T) {
+		t.Parallel()
+		c, _, next := newAuditedTestClient(t)
+		c.auditor = nil
+		c.dockerClient = &fakeDocker{createExecErr: errors.New("boom")}
+		sessionCtx, session := registeredSession(t, c, context.Background(), msg)
+
+		c.bringUpExec(sessionCtx, msg, session)
+
+		requireClosedAndDeregistered(t, c, session)
+		requireExecEnd(t, next, "exec start failed: internal error")
+	})
+}
+
+// A record write that panicked doesn't count as written, so the next attempt
+// writes it. One that returned does, so nothing after it writes a second.
+func TestStartErrorRecordIsRetriedAfterItsWritePanics(t *testing.T) {
+	t.Parallel()
+
+	c, logger, _ := newAuditedTestClient(t)
+	_, session := registeredSession(t, c, context.Background(), protocol.ExecStartMessage{ExecID: "e1", ContainerID: "c1"})
+
+	// No auditor: the write dereferences nil before it records anything.
+	c.auditor = nil
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("the write with no auditor did not panic")
+			}
+		}()
+		session.auditStartError()
+	}()
+
+	c.auditor = logger
+	session.auditStartError()
+	requireOneStartError(t, logger)
+
+	session.auditStartError()
+	requireOneStartError(t, logger)
+}
+
+// closeHookConn runs a hook on each Close, numbered from one.
+type closeHookConn struct {
+	*fakeConn
+	closes  int
+	onClose func(n int)
+}
+
+func (c *closeHookConn) Close() error {
+	c.closes++
+	c.onClose(c.closes)
+	return c.fakeConn.Close()
+}
+
+// An exit whose record write panics still leaves the record owed, and the
+// panic exit that follows writes it. Here the sink panics on its first call
+// and records on its second: there is no auditor until the conn's second
+// close. Its first close is activate's, for a session closed under it, and
+// that exit's write is the one that panics. Its second is the panic exit's,
+// just ahead of the retry.
+func TestBringUpExecRetriesARecordWhoseWritePanicked(t *testing.T) {
+	t.Parallel()
+
+	msg := protocol.ExecStartMessage{ExecID: "e1", ContainerID: "c1", Cols: 80, Rows: 24}
+	c, logger, next := newAuditedTestClient(t)
+	c.auditor = nil
+	conn := &closeHookConn{fakeConn: &fakeConn{}}
+	conn.onClose = func(n int) {
+		if n == 2 {
+			c.auditor = logger
+		}
+	}
+	rc := &resizeClosing{fakeDocker: &fakeDocker{createExecID: "d1", startConn: conn}}
+	c.dockerClient = rc
+	sessionCtx, session := registeredSession(t, c, context.Background(), msg)
+	rc.session = session
+
+	c.bringUpExec(sessionCtx, msg, session)
+
+	requireOneStartError(t, logger)
+	requireTornDownSilently(t, c, session, next)
+	if conn.closes != 2 {
+		t.Fatalf("conn closed %d times, want 2 (activate's and the panic exit's)", conn.closes)
+	}
 }

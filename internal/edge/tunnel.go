@@ -89,8 +89,12 @@ type ExecSession struct {
 	once   sync.Once
 	cancel context.CancelFunc
 
-	// startErrOnce keeps a failed bring-up to one error record.
-	startErrOnce sync.Once
+	// startErrWritten keeps a failed bring-up to one error record. It is set
+	// once the write has returned, with startErrMu held across the write. A
+	// sync.Once would count a write that panicked as done, and the retry the
+	// panic exit makes would then write nothing.
+	startErrMu      sync.Mutex
+	startErrWritten bool
 
 	mu     sync.Mutex
 	closed bool
@@ -501,12 +505,17 @@ func (s *ExecSession) isClosed() bool {
 
 // auditStartError records that an admitted typed exec did not come up, as the
 // api_request error record under the exec_start message type. Each bringUpExec
-// exit that gives up calls it once. The Once is for the panic exit, which can
-// follow an exit that already wrote the record and then panicked.
+// exit that gives up calls it once, and the panic exit can follow one of them.
+// A write that returned is the record written, and no later call writes a
+// second. A write that panicked is not, so the next call tries it again.
 func (s *ExecSession) auditStartError() {
-	s.startErrOnce.Do(func() {
-		s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
-	})
+	s.startErrMu.Lock()
+	defer s.startErrMu.Unlock()
+	if s.startErrWritten {
+		return
+	}
+	s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
+	s.startErrWritten = true
 }
 
 // abortStart records the failed start and tears the session down for a
@@ -517,19 +526,25 @@ func (s *ExecSession) abortStart() {
 	s.Close()
 }
 
-// failStart tears the session down and reports a terminal exec_end. It closes
-// first so the session is deregistered before the controller sees the failure.
-// A bring-up whose context has ended or whose session is already closed gets
-// the record and no exec_end, as in abortStart: the controller's exec_end or a
-// tunnel drop landing mid round trip fails the round trip too, and whoever
-// ended the session owns the exec_end. The context is checked as well as the
-// closed flag because Close cancels it before it sets the flag.
+// failStart records the failed start, tears the session down and reports a
+// terminal exec_end.
 func (s *ExecSession) failStart(ctx context.Context, reason string) {
+	s.auditStartError()
+	s.endStart(ctx, reason)
+}
+
+// endStart is failStart after the record: it closes the session and sends the
+// exec_end, closing first so the session is deregistered before the controller
+// sees the failure. A bring-up whose context has ended or whose session is
+// already closed gets no exec_end, as in abortStart: the controller's exec_end
+// or a tunnel drop landing mid round trip fails the round trip too, and
+// whoever ended the session owns the exec_end. The context is checked as well
+// as the closed flag because Close cancels it before it sets the flag.
+func (s *ExecSession) endStart(ctx context.Context, reason string) {
 	if ctx.Err() != nil || s.isClosed() {
-		s.abortStart()
+		s.Close()
 		return
 	}
-	s.auditStartError()
 	s.Close()
 	// Best-effort error reply; connection loss will surface on the read pump.
 	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
@@ -544,11 +559,12 @@ func (s *ExecSession) failStart(ctx context.Context, reason string) {
 //
 // Its steps are deferred because each of them can panic in turn, and one that
 // does must not cost the session its close or the controller its exec_end.
-// The record goes first and on its own: failStart writes it ahead of both, so
-// a write that panicked in there would skip them. Once it has run here,
-// panicked or not, failStart's own write is a no-op.
+// That is why the record and the rest of failStart run apart here: a record
+// write that panics, again or for the first time, still leaves endStart to
+// run. The record is tried once. When an exit's own write is what panicked,
+// this is its retry.
 func (s *ExecSession) panicStart(ctx context.Context, unwired net.Conn) {
-	defer s.failStart(ctx, "exec start failed: internal error")
+	defer s.endStart(ctx, "exec start failed: internal error")
 	defer s.auditStartError()
 	if unwired != nil {
 		// Best effort: the conn is abandoned either way.
@@ -718,7 +734,7 @@ func (s *ExecSession) readLoop() {
 // session ending never writes one.
 //
 // A session the controller or a tunnel drop ended gets no exec_end, as in
-// failStart: whoever ended it owns that. The closed flag can't stand in for
+// endStart: whoever ended it owns that. The closed flag can't stand in for
 // that here the way it does during the bring-up, because once the session is
 // live the input writer closes it too and leaves the exec_end to this loop.
 func (s *ExecSession) panicEnd() {
