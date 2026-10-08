@@ -11,7 +11,7 @@ Structured audit log|No|Yes (JSON, built-in)|self
 Release artifact verification|Not evaluated|Cosign signatures + CycloneDX SBOM + SLSA provenance|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Yes (opt-in)|Yes|tie
-MCP server (AI-native, read-only)|No|Yes|self
+MCP server (AI-native, read-only)|Not documented|Yes|self
 Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|MIT|AGPL-3.0|tie

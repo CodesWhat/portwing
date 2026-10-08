@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Minus, X } from "lucide-react";
+import { ArrowRight, Check, CircleQuestionMark, Minus, X } from "lucide-react";
 import Link from "next/link";
 import { type CellValue, ComparisonCellIcon } from "@/components/comparison-cell-icon";
 import { SectionHeading } from "@/components/section-heading";
@@ -59,10 +59,10 @@ const featureRows: FeatureRow[] = [
   {
     label: "Read-only MCP server",
     portwing: "yes",
-    portainer: "no",
-    komodo: "no",
-    arcane: "no",
-    hawser: "no",
+    portainer: "undocumented",
+    komodo: "undocumented",
+    arcane: "undocumented",
+    hawser: "undocumented",
   },
 ];
 
@@ -162,8 +162,12 @@ export function CompareSection() {
             <span className="mx-3 inline-flex items-center gap-1.5">
               <Minus className="h-3 w-3 text-fuchsia-400" /> Partial
             </span>
-            <span className="inline-flex items-center gap-1.5">
+            <span className="mr-3 inline-flex items-center gap-1.5">
               <X className="h-3 w-3 text-neutral-400" /> No
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <CircleQuestionMark className="h-3 w-3 text-neutral-400 dark:text-neutral-500" /> Not
+              documented
             </span>
           </div>
         </div>

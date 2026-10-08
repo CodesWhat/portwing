@@ -12,7 +12,7 @@ Runtime image signature verification|Basic cosign support (newer builds)|No (con
 Published release evidence|Archived upstream project|Cosign signatures + CycloneDX SBOM + SLSA provenance|self
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Yes (opt-in, experimental)|Yes|tie
-MCP server (AI-native, read-only)|No|Yes|self
+MCP server (AI-native, read-only)|Not documented|Yes|self
 Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|Apache-2.0|AGPL-3.0|tie
