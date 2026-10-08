@@ -379,7 +379,9 @@ the desynchronization, rather than forwarding bytes it can no longer frame.
 
 If a session fails to start (for example, a sockguard exec-policy denial),
 the agent's failStart path sends `exec_end` immediately instead of
-`exec_ready`. Its `reason` field now carries the underlying Docker/sockguard
+`exec_ready`, unless the controller's own `exec_end` or a tunnel drop already
+ended the session, in which case it sends nothing back. The `reason` field
+of that `exec_end` carries the underlying Docker/sockguard
 error body — e.g. `not allowed by portwing preset` or `exec denied:
 privileged exec is not allowed` — rather than a bare status code. Drydock's
 edge agent adapter does not yet surface that reason to the user; today it
