@@ -111,7 +111,7 @@ const TOOLS: Tool[] = [
       leastPrivilege: "no",
       agentAudit: "no",
       transparentApi: "no",
-      metrics: "no",
+      metrics: "yes",
       mcpServer: "no",
     },
   },

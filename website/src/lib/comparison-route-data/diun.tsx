@@ -10,7 +10,7 @@ Auth for remote access|No (local only)|Yes (Ed25519 per-request signing)|self
 Structured audit log|No|Yes (JSON, built-in)|self
 Release artifact verification|Not evaluated|Cosign signatures + CycloneDX SBOM + SLSA provenance|self
 Default-deny socket filter|No|Yes (with sockguard)|self
-Prometheus metrics|Yes|Yes|tie
+Prometheus metrics|Yes (opt-in)|Yes|tie
 MCP server (AI-native, read-only)|No|Yes|self
 Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
