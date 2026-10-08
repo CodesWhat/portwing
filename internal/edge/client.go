@@ -1889,7 +1889,7 @@ func (c *Client) failConn(conn *websocket.Conn, reason string) {
 func (c *Client) closeAllExecSessions() {
 	c.execSessions.Range(func(_, v any) bool {
 		if s, ok := v.(*ExecSession); ok {
-			s.Close()
+			s.endByPeer()
 		}
 		return true
 	})

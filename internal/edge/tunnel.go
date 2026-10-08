@@ -89,11 +89,18 @@ type ExecSession struct {
 	once   sync.Once
 	cancel context.CancelFunc
 
-	// startErrOnce keeps a failed bring-up to one error record.
-	startErrOnce sync.Once
+	// startErrWritten keeps a failed bring-up to one error record. It is set
+	// once the write has returned, with startErrMu held across the write. A
+	// sync.Once would count a write that panicked as done, and the retry the
+	// panic exit makes would then write nothing.
+	startErrMu      sync.Mutex
+	startErrWritten bool
 
-	mu               sync.Mutex
-	closed           bool
+	mu     sync.Mutex
+	closed bool
+	// peerEnded records that the controller's exec_end or a tunnel drop is
+	// what closed the session, as opposed to the session's own goroutines.
+	peerEnded        bool
 	queuedInputBytes int
 }
 
@@ -353,7 +360,20 @@ func (s *ExecSession) releaseInputBytes(n int) {
 // live, then drains inbox in order, writing each chunk to the connection. Being
 // the only writer is what guarantees input ordering.
 func (s *ExecSession) inputWriter(ctx context.Context) {
+	// Deferred first so it runs last: a panic in the close below still stops
+	// here instead of taking the agent down.
 	defer recoverSession("inputWriter", s.execID)
+	// A writer that panics leaves stdin dead, so the session ends with it
+	// instead of sitting open on its exec slot. The close is also what tells
+	// the controller: it closes the conn under the read loop, whose exit sends
+	// the session's one exec_end, as when a write fails. Sending one from here
+	// as well would make it two.
+	defer func() {
+		if r := recover(); r != nil {
+			logSessionPanic("inputWriter", s.execID, r)
+			s.Close()
+		}
+	}()
 
 	select {
 	case <-s.connReady:
@@ -455,7 +475,7 @@ func (c *Client) EndExec(msg protocol.ExecEndMessage) {
 	}
 
 	session := val.(*ExecSession)
-	session.Close()
+	session.endByPeer()
 }
 
 // activate wires the live connection and unblocks inputWriter. It returns false
@@ -485,12 +505,17 @@ func (s *ExecSession) isClosed() bool {
 
 // auditStartError records that an admitted typed exec did not come up, as the
 // api_request error record under the exec_start message type. Each bringUpExec
-// exit that gives up calls it once. The Once is for the panic exit, which can
-// follow an exit that already wrote the record and then panicked.
+// exit that gives up calls it once, and the panic exit can follow one of them.
+// A write that returned is the record written, and no later call writes a
+// second. A write that panicked is not, so the next call tries it again.
 func (s *ExecSession) auditStartError() {
-	s.startErrOnce.Do(func() {
-		s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
-	})
+	s.startErrMu.Lock()
+	defer s.startErrMu.Unlock()
+	if s.startErrWritten {
+		return
+	}
+	s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
+	s.startErrWritten = true
 }
 
 // abortStart records the failed start and tears the session down for a
@@ -501,19 +526,25 @@ func (s *ExecSession) abortStart() {
 	s.Close()
 }
 
-// failStart tears the session down and reports a terminal exec_end. It closes
-// first so the session is deregistered before the controller sees the failure.
-// A bring-up whose context has ended or whose session is already closed gets
-// the record and no exec_end, as in abortStart: the controller's exec_end or a
-// tunnel drop landing mid round trip fails the round trip too, and whoever
-// ended the session owns the exec_end. The context is checked as well as the
-// closed flag because Close cancels it before it sets the flag.
+// failStart records the failed start, tears the session down and reports a
+// terminal exec_end.
 func (s *ExecSession) failStart(ctx context.Context, reason string) {
+	s.auditStartError()
+	s.endStart(ctx, reason)
+}
+
+// endStart is failStart after the record: it closes the session and sends the
+// exec_end, closing first so the session is deregistered before the controller
+// sees the failure. A bring-up whose context has ended or whose session is
+// already closed gets no exec_end, as in abortStart: the controller's exec_end
+// or a tunnel drop landing mid round trip fails the round trip too, and
+// whoever ended the session owns the exec_end. The context is checked as well
+// as the closed flag because Close cancels it before it sets the flag.
+func (s *ExecSession) endStart(ctx context.Context, reason string) {
 	if ctx.Err() != nil || s.isClosed() {
-		s.abortStart()
+		s.Close()
 		return
 	}
-	s.auditStartError()
 	s.Close()
 	// Best-effort error reply; connection loss will surface on the read pump.
 	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
@@ -525,12 +556,20 @@ func (s *ExecSession) failStart(ctx context.Context, reason string) {
 // panicStart is the bring-up's exit when it panicked: a failed start like the
 // others, plus the hijacked conn when the panic landed while only the bring-up
 // held it. The reason is fixed so the panic value stays in the agent's log.
+//
+// Its steps are deferred because each of them can panic in turn, and one that
+// does must not cost the session its close or the controller its exec_end.
+// That is why the record and the rest of failStart run apart here: a record
+// write that panics, again or for the first time, still leaves endStart to
+// run. The record is tried once. When an exit's own write is what panicked,
+// this is its retry.
 func (s *ExecSession) panicStart(ctx context.Context, unwired net.Conn) {
+	defer s.endStart(ctx, "exec start failed: internal error")
+	defer s.auditStartError()
 	if unwired != nil {
 		// Best effort: the conn is abandoned either way.
 		_ = unwired.Close()
 	}
-	s.failStart(ctx, "exec start failed: internal error")
 }
 
 // execFrameHeaderLen is the size of Docker's stream-multiplexing frame header
@@ -609,8 +648,17 @@ func (d *execDemuxer) decode(chunk []byte) ([]byte, error) {
 // readLoop reads output from the exec session's connection and sends it back
 // as exec_output messages. On error or EOF, it sends exec_end and cleans up.
 func (s *ExecSession) readLoop() {
-	defer s.Close()
+	// Deferred first so it runs last: a panic in the teardown below, the close
+	// included, still stops here instead of taking the agent down. The close
+	// comes next so it runs whether or not the panic exit's exec_end panics.
 	defer recoverSession("readLoop", s.execID)
+	defer s.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			logSessionPanic("readLoop", s.execID, r)
+			s.panicEnd()
+		}
+	}()
 
 	// Docker only writes a raw stream when the exec has a PTY. Without one it
 	// multiplexes stdout and stderr behind 8-byte frame headers, which used to
@@ -676,6 +724,43 @@ func (s *ExecSession) readLoop() {
 			return
 		}
 	}
+}
+
+// panicEnd sends the exec_end a read loop that panicked still owes. The read
+// loop is what tells the controller a live session is over, and a panic doesn't
+// change that: the exec_end goes out here and the loop's deferred close
+// follows, the same order as on its normal exit. The reason is fixed so the
+// panic value stays in the agent's log. No audit record is written, because a
+// session ending never writes one.
+//
+// A session the controller or a tunnel drop ended gets no exec_end, as in
+// endStart: whoever ended it owns that. The closed flag can't stand in for
+// that here the way it does during the bring-up, because once the session is
+// live the input writer closes it too and leaves the exec_end to this loop.
+func (s *ExecSession) panicEnd() {
+	if s.endedByPeer() {
+		return
+	}
+	// Best-effort; connection loss will surface on the read pump.
+	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
+		ExecID: s.execID,
+		Reason: "exec session failed: internal error",
+	})
+}
+
+// endByPeer closes the session for the controller's exec_end or a tunnel drop,
+// and records that it was one of those.
+func (s *ExecSession) endByPeer() {
+	s.mu.Lock()
+	s.peerEnded = true
+	s.mu.Unlock()
+	s.Close()
+}
+
+func (s *ExecSession) endedByPeer() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.peerEnded
 }
 
 // Close shuts down the exec session. It is safe to call multiple times and
