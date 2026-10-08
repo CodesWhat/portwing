@@ -104,9 +104,9 @@ calendar date:
 
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,
-polling/intermittent edge transport, controller-assisted two-key rotation, and
-a BuildKit-aware Sockguard profile. None should expand the base socket policy
-or add an unaudited self-update path merely for feature-table parity.
+polling/intermittent edge transport, and controller-assisted two-key rotation.
+None should expand the base socket policy or add an unaudited
+self-update path merely for feature-table parity.
 
 ## Non-goals
 
