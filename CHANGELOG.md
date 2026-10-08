@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.24] - 2026-10-08
+
 ### Fixed
 
 - A typed exec start on the edge whose bring-up panics is now handled as a
@@ -42,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A panic inside the Docker exec start after the daemon socket was dialled now
   closes that connection before it carries on to the caller. The connection
   used to stay open until the garbage collector got to it.
+- The website comparison data now sticks to primary sources. The Watchtower
+  and Diun rows both document Prometheus metrics, so that row is a tie. Where
+  a competitor's MCP or Portainer's Prometheus support isn't documented, the
+  matrix says "not documented" instead of "no". The image size is the measured
+  compressed size, and the BuildKit Sockguard profile is off the roadmap
+  because it already shipped.
+- The ROADMAP's Renovate claim is corrected, and the README follows the same
+  section layout as Drydock's, with the reference material linked from the
+  docs site.
 
 ## [v0.9.23] - 2026-10-07
 
