@@ -17,6 +17,8 @@ non-loopback address requires the separate
 `ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
 </Callout>
 
+The examples below publish port 3000 on host loopback only. For remote access, configure Portwing TLS before widening that bind, or keep the plaintext listener private behind a TLS-terminating reverse proxy.
+
 ---
 
 ## 1. Plaintext token
@@ -29,7 +31,7 @@ docker run -d --name portwing \
   --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
   ghcr.io/codeswhat/portwing:latest
 ```
 
@@ -53,7 +55,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
   -e TOKEN_FILE=/run/secrets/portwing-token \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
   ghcr.io/codeswhat/portwing:latest
 ```
 
@@ -78,7 +80,7 @@ docker run -d --name portwing \
   --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN_HASH="$HASH" \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
   ghcr.io/codeswhat/portwing:latest
 ```
 
@@ -148,7 +150,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
   ghcr.io/codeswhat/portwing:latest
 ```
 
