@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A typed exec start that fails after the controller's own `exec_end` already
+  ended it no longer sends an `exec_end` back. A start cancelled between the
+  two daemon calls already sent none.
+
 ## [v0.9.23] - 2026-10-07
 
 ### Added

@@ -205,7 +205,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	execID, err := c.dockerClient.CreateExec(ctx, msg.ContainerID, msg.Cmd, msg.User, tty)
 	if err != nil {
 		slog.Error("failed to create exec", "container", applog.Sanitize(msg.ContainerID), "error", applog.Sanitize(err.Error()))
-		session.failStart(fmt.Sprintf("create exec failed: %v", err))
+		session.failStart(ctx, fmt.Sprintf("create exec failed: %v", err))
 		return
 	}
 	if ctx.Err() != nil || session.isClosed() {
@@ -223,7 +223,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 	conn, err := c.dockerClient.StartExec(ctx, execID, tty)
 	if err != nil {
 		slog.Error("failed to start exec", "execID", applog.Sanitize(execID), "error", applog.Sanitize(err.Error()))
-		session.failStart(fmt.Sprintf("start exec failed: %v", err))
+		session.failStart(ctx, fmt.Sprintf("start exec failed: %v", err))
 		return
 	}
 
@@ -483,7 +483,16 @@ func (s *ExecSession) abortStart() {
 
 // failStart tears the session down and reports a terminal exec_end. It closes
 // first so the session is deregistered before the controller sees the failure.
-func (s *ExecSession) failStart(reason string) {
+// A bring-up whose context has ended or whose session is already closed gets
+// the record and no exec_end, as in abortStart: the controller's exec_end or a
+// tunnel drop landing mid round trip fails the round trip too, and whoever
+// ended the session owns the exec_end. The context is checked as well as the
+// closed flag because Close cancels it before it sets the flag.
+func (s *ExecSession) failStart(ctx context.Context, reason string) {
+	if ctx.Err() != nil || s.isClosed() {
+		s.abortStart()
+		return
+	}
 	s.auditStartError()
 	s.Close()
 	// Best-effort error reply; connection loss will surface on the read pump.
