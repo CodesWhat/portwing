@@ -32,12 +32,12 @@
 <hr>
 
 > [!WARNING]
-> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.23`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.24`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <!-- separate alerts: a blank-line-only gap between blockquotes trips markdownlint MD028 -->
 
 > [!NOTE]
-> **v0.9.23 is the current release.** It rejects requests carrying a foreign `Origin` header, and a foreign `Host` when authentication is off; `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` list the exceptions. `exec_start` audit records now say whether the exec was admitted. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.24 is the current release.** Exec sessions on the edge now end cleanly when one of their goroutines panics: a failed start gets an audit record, the session is closed, and the controller is told once. The comparison data and README were also corrected. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 <h2 align="center">Contents</h2>
 
@@ -160,7 +160,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.23
+    image: ghcr.io/codeswhat/portwing:0.9.24
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -215,7 +215,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.23
+    image: ghcr.io/codeswhat/portwing:0.9.24
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -255,10 +255,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.9.23_linux_amd64.deb
+sudo apt install ./portwing_0.9.24_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.9.23_linux_amd64.rpm
+sudo rpm --install ./portwing_0.9.24_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -281,7 +281,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:0.9.23
+  ghcr.io/codeswhat/portwing:0.9.24
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -462,7 +462,7 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.6.0** ✅ | Compatibility & Non-Root | Container image runs as non-root UID 65532, `COMPATIBILITY.md` cross-repo version matrix, edge container deletion, CI egress lockdown |
 | **v0.7.x** ✅ | Fail-Closed Standard Mode | Standard mode refuses to start without credentials, security hardening pass (PW-SEC-001 to 010), edge log and delete request correlation, edge reconnect classification of terminal hello rejections, dead `DOCKER_HOST` surface removed |
 | **v0.8.x** ✅ | Operations & Distribution | Mode-aware `/health` and `/ready`, cursor-based NDJSON audit export, runnable Compose and Kubernetes observability examples, continuous edge logs, Homebrew cask and signed `deb`/`rpm` packages, published stability policy, edge mode production supported |
-| **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks (v0.9.23) |
+| **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks |
 | **v1.0.0** | Binding Stability | `STABILITY.md` guarantees become binding semver commitments, final re-verify of the competitive review against primary sources, decision on a versioned docs archive. Gated on verifiable items, not a date |
 | **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport, controller-assisted two-key rotation |
 
