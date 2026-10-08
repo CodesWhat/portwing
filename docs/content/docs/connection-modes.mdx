@@ -23,7 +23,7 @@ Otherwise
 
 Portwing runs a plain HTTP server on `PORT` (default `3000`). The Drydock controller connects inbound and drives the session: it calls `GET /api/containers`, `GET /api/watchers`, and `GET /api/triggers` during the handshake, then holds a long-lived SSE stream on `GET /api/events` for real-time container events. All Docker Engine API paths are transparently proxied through the agent.
 
-Standard mode is active whenever `DRYDOCK_URL` is **not** set. The controller authenticates with the `X-Dd-Agent-Secret` shared secret, with optional mTLS. Built-in TLS (`TLS_CERT` / `TLS_KEY`) accepts TLS 1.2 and later with modern cipher suites.
+Standard mode is active whenever `DRYDOCK_URL` is **not** set. The controller authenticates with the `X-Dd-Agent-Secret` shared secret. Built-in TLS (`TLS_CERT` / `TLS_KEY`) accepts TLS 1.2 and later with modern cipher suites.
 
 ### Required networking
 

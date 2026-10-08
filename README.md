@@ -37,7 +37,7 @@
 <!-- separate alerts: a blank-line-only gap between blockquotes trips markdownlint MD028 -->
 
 > [!NOTE]
-> **v0.9.23 is the current release.** This patch rebuilds ARMv7's Compose with containerd 2.3.6 for GHSA-pg57-6jwg-q645. Agent behavior and configuration are unchanged. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.23 is the current release.** It rejects requests carrying a foreign `Origin` header, and a foreign `Host` when authentication is off; `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` list the exceptions. `exec_start` audit records now say whether the exec was admitted. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 <h2 align="center">Contents</h2>
 
