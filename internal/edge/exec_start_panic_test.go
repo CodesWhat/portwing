@@ -106,6 +106,7 @@ func TestBringUpExecPanicFailsTheStart(t *testing.T) {
 			if end.ExecID != "e1" || end.Reason != "exec start failed: internal error" {
 				t.Fatalf("exec_end = %+v, want e1 with the fixed internal-error reason", end)
 			}
+			requireNoFurtherFrame(t, c, next)
 		})
 	}
 }
@@ -125,6 +126,27 @@ func TestBringUpExecPanicAfterCloseSendsNoExecEnd(t *testing.T) {
 	}}
 	sessionCtx, registered := registeredSession(t, c, context.Background(), msg)
 	session = registered
+
+	c.bringUpExec(sessionCtx, msg, session)
+
+	requireOneStartError(t, logger)
+	requireTornDownSilently(t, c, session, next)
+}
+
+// A panic after a tunnel drop ended the bring-up's context, with nothing having
+// closed the session yet, writes the record and sends no exec_end either:
+// nobody is left to tell.
+func TestBringUpExecPanicAfterCancelSendsNoExecEnd(t *testing.T) {
+	t.Parallel()
+
+	msg := protocol.ExecStartMessage{ExecID: "e1", ContainerID: "c1"}
+	c, logger, next := newAuditedTestClient(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	c.dockerClient = &fakeDocker{createHook: func() {
+		cancel()
+		panic("boom after cancel")
+	}}
+	sessionCtx, session := registeredSession(t, c, ctx, msg)
 
 	c.bringUpExec(sessionCtx, msg, session)
 
@@ -247,6 +269,7 @@ func TestBringUpExecPanicExitSurvivesItsOwnPanic(t *testing.T) {
 		requireOneStartError(t, logger)
 		requireClosedAndDeregistered(t, c, session)
 		requireExecEnd(t, next, "exec start failed: internal error")
+		requireNoFurtherFrame(t, c, next)
 	})
 
 	t.Run("writing the record panics", func(t *testing.T) {
@@ -261,6 +284,7 @@ func TestBringUpExecPanicExitSurvivesItsOwnPanic(t *testing.T) {
 
 		requireClosedAndDeregistered(t, c, session)
 		requireExecEnd(t, next, "exec start failed: internal error")
+		requireNoFurtherFrame(t, c, next)
 	})
 
 	// A sink that always panics takes two writes down: the failed create's own,
@@ -276,6 +300,7 @@ func TestBringUpExecPanicExitSurvivesItsOwnPanic(t *testing.T) {
 
 		requireClosedAndDeregistered(t, c, session)
 		requireExecEnd(t, next, "exec start failed: internal error")
+		requireNoFurtherFrame(t, c, next)
 	})
 }
 
