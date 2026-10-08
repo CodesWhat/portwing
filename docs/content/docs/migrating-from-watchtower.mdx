@@ -29,7 +29,7 @@ Drydock + Portwing invert the model. Portwing runs on each host and exposes the 
 | Container exec / terminal | No | Yes (WebSocket) |
 | Container filtering | Label `com.centurylinklabs.watchtower.enable` | Label `dd.watch=true` |
 | Self-hosted server required | No | Yes (Drydock) |
-| Image size (compressed) | ~6 MB | ~45 MB (Portwing, ~10 MB binary) + Drydock server |
+| Image size (compressed) | ~6 MB (v1.7.1, linux/amd64) | ~45 MB (Portwing, ~10 MB binary) + Drydock server |
 
 <Callout type="warn">
 Portwing does **not** automatically pull and recreate containers on a schedule. That decision is made by the Drydock controller through its UI and notification pipeline — not by the agent. If you relied on Watchtower's fully autonomous update loop, you will need to configure update policies in Drydock.
