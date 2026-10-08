@@ -368,7 +368,7 @@ flowchart LR
 | 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
 | ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA Build L2 provenance on every release. Verifiable without managing signing keys. |
 | 🛡️ | **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
-| 🪶 | **Minimal Footprint** | Static Go binary, ~47 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
+| 🪶 | **Minimal Footprint** | Static Go binary (~10 MB). Compressed container image: ~45 MB amd64 and ~41 MB arm64 (Wolfi, Chainguard), ~33 MB arm/v7 (Alpine). CGO disabled, stripped, no external runtime dependencies. |
 | 🧩 | **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
 
 <hr>
