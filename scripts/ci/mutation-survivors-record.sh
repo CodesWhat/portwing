@@ -36,10 +36,10 @@
 # sha256 over the whitespace-trimmed source lines l-2..l+2 (5 lines, each
 # followed by \x1f, missing lines padded with an empty string), and `o` is
 # the 0-based ordinal among mutants sharing (f, m, a) within the same source,
-# ordered by (line, column). Measured on this repo's real churn (335
-# survivors across 11 commits): a bare file+type+line-hash anchor was
-# ambiguous 66 times, while the 5-line window plus ordinal resolved all but 3,
-# and those 3 were genuine code changes.
+# ordered by (line, column). A hash of the mutated line alone is ambiguous
+# wherever a file repeats that line, and a line number moves with every edit
+# above it. The 5-line window survives unrelated edits elsewhere in the file,
+# and the ordinal separates mutants whose windows are still identical.
 #
 # Every {f,m,s,l,c} field below is sourced from a downloaded artifact: a
 # report the gremlins/mutation-advisory jobs produced by running mutated Go
