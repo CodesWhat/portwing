@@ -36,7 +36,7 @@ func TestInputWriterPanicClosesTheSession(t *testing.T) {
 
 	// It returns only because the panic ended the session: nothing else
 	// closes done here.
-	session.inputWriter(context.Background())
+	runToEnd(t, func() { session.inputWriter(context.Background()) })
 
 	requireTornDownSilently(t, c, session, next)
 	requireNoAuditRecords(t, logger)
@@ -100,9 +100,9 @@ func TestInputWriterThenReadLoopPanicSendsOneExecEnd(t *testing.T) {
 	c, _, next := newAuditedTestClient(t)
 	session := liveSessionWithInput(t, c, "e1", nil)
 
-	session.inputWriter(context.Background())
+	runToEnd(t, func() { session.inputWriter(context.Background()) })
 	requireClosedAndDeregistered(t, c, session)
-	session.readLoop()
+	runToEnd(t, session.readLoop)
 
 	requireExecEnd(t, next, "exec session failed: internal error")
 	requireNoFurtherFrame(t, c, next)
@@ -146,7 +146,7 @@ func TestInputWriterTeardownPanicStaysContained(t *testing.T) {
 	c, _, _ := newAuditedTestClient(t)
 	session := liveSessionWithInput(t, c, "e1", &panickingConn{Conn: &panicCloseConn{fakeConn: &fakeConn{}}, at: "write"})
 
-	requireNoEscape(t, func() { session.inputWriter(context.Background()) })
+	runToEnd(t, func() { session.inputWriter(context.Background()) })
 
 	requireClosedAndDeregistered(t, c, session)
 }
@@ -164,7 +164,7 @@ func TestInputWriterPanicIsLogged(t *testing.T) {
 	c, _, _ := newAuditedTestClient(t)
 	session := liveSessionWithInput(t, c, "e1", &panickingConn{Conn: &fakeConn{}, at: "write"})
 
-	session.inputWriter(context.Background())
+	runToEnd(t, func() { session.inputWriter(context.Background()) })
 
 	out := logBuf.String()
 	for _, want := range []string{"recovered from panic", "where=inputWriter", "execID=e1", "boom in write"} {

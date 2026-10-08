@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -59,16 +60,26 @@ func requireNoAuditRecords(t *testing.T, logger *audit.Logger) {
 	}
 }
 
-// requireNoEscape runs f and fails the test if a panic gets out of it, which
-// in the agent would be the process going down.
-func requireNoEscape(t *testing.T, f func()) {
+// runToEnd runs one of a session's goroutine bodies on a goroutine of its own
+// and waits for it to return. It fails the test if a panic gets out of it,
+// which in the agent would be the process going down, or if it is still
+// running after readTimeout, so a loop that never ends fails its test instead
+// of hanging the suite.
+func runToEnd(t *testing.T, f func()) {
 	t.Helper()
-	defer func() {
-		if r := recover(); r != nil {
+	escaped := make(chan any, 1)
+	go func() {
+		defer func() { escaped <- recover() }()
+		f()
+	}()
+	select {
+	case r := <-escaped:
+		if r != nil {
 			t.Fatalf("panic escaped the session goroutine: %v", r)
 		}
-	}()
-	f()
+	case <-time.After(readTimeout):
+		t.Fatal("session goroutine did not return")
+	}
 }
 
 // A read loop that returns sends its one exec_end, closes the session and
@@ -80,7 +91,7 @@ func TestReadLoopReturnSendsOneExecEnd(t *testing.T) {
 	conn := &countingConn{fakeConn: &fakeConn{}}
 	session := newExecSession(c, "e1", conn)
 
-	session.readLoop()
+	runToEnd(t, session.readLoop)
 
 	requireClosedAndDeregistered(t, c, session)
 	requireExecEnd(t, next, "exited")
@@ -104,8 +115,8 @@ func TestReadLoopPanicEndsTheSession(t *testing.T) {
 		c, logger, next := newAuditedTestClient(t)
 		session := newExecSession(c, "e1", nil)
 
-		// Returning at all is the agent surviving the panic.
-		session.readLoop()
+		// Returning without a panic getting out is the agent surviving it.
+		runToEnd(t, session.readLoop)
 
 		requireClosedAndDeregistered(t, c, session)
 		requireExecEnd(t, next, "exec session failed: internal error")
@@ -119,7 +130,7 @@ func TestReadLoopPanicEndsTheSession(t *testing.T) {
 		conn := &countingConn{fakeConn: &fakeConn{}}
 		session := newExecSession(c, "e1", &panickingConn{Conn: conn, at: "read"})
 
-		session.readLoop()
+		runToEnd(t, session.readLoop)
 
 		requireClosedAndDeregistered(t, c, session)
 		requireExecEnd(t, next, "exec session failed: internal error")
@@ -150,7 +161,7 @@ func TestReadLoopPanicAfterPeerEndedSendsNoExecEnd(t *testing.T) {
 			conn := &countingConn{fakeConn: &fakeConn{}}
 			session := newExecSession(c, "e1", &panickingConn{Conn: conn, at: "read", before: func() { tc.end(c) }})
 
-			session.readLoop()
+			runToEnd(t, session.readLoop)
 
 			requireTornDownSilently(t, c, session, next)
 			requireNoAuditRecords(t, logger)
@@ -173,7 +184,7 @@ func TestReadLoopPanicAfterOwnCloseStillSendsExecEnd(t *testing.T) {
 	session := newExecSession(c, "e1", reads)
 	reads.before = session.Close
 
-	session.readLoop()
+	runToEnd(t, session.readLoop)
 
 	requireClosedAndDeregistered(t, c, session)
 	requireExecEnd(t, next, "exec session failed: internal error")
@@ -198,7 +209,7 @@ func TestReadLoopTeardownPanicStaysContained(t *testing.T) {
 		session := newExecSession(c, "e1", conn)
 		session.target = brokenTarget()
 
-		requireNoEscape(t, session.readLoop)
+		runToEnd(t, session.readLoop)
 
 		requireClosedAndDeregistered(t, c, session)
 		if got := conn.closes.Load(); got != 1 {
@@ -213,7 +224,7 @@ func TestReadLoopTeardownPanicStaysContained(t *testing.T) {
 		c, _, next := newAuditedTestClient(t)
 		session := newExecSession(c, "e1", &panickingConn{Conn: &panicCloseConn{fakeConn: &fakeConn{}}, at: "read"})
 
-		requireNoEscape(t, session.readLoop)
+		runToEnd(t, session.readLoop)
 
 		requireClosedAndDeregistered(t, c, session)
 		requireExecEnd(t, next, "exec session failed: internal error")
@@ -227,7 +238,7 @@ func TestReadLoopTeardownPanicStaysContained(t *testing.T) {
 		c, _, next := newAuditedTestClient(t)
 		session := newExecSession(c, "e1", &panicCloseConn{fakeConn: &fakeConn{}})
 
-		requireNoEscape(t, session.readLoop)
+		runToEnd(t, session.readLoop)
 
 		requireClosedAndDeregistered(t, c, session)
 		requireExecEnd(t, next, "exited")
@@ -248,7 +259,7 @@ func TestReadLoopPanicIsLogged(t *testing.T) {
 	c, _, _ := newAuditedTestClient(t)
 	session := newExecSession(c, "e1", &panickingConn{Conn: &fakeConn{}, at: "read"})
 
-	session.readLoop()
+	runToEnd(t, session.readLoop)
 
 	out := logBuf.String()
 	for _, want := range []string{"recovered from panic", "where=readLoop", "execID=e1", "boom in read"} {
