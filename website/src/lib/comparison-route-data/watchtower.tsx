@@ -11,8 +11,8 @@ Structured audit log|No|Yes (JSON, built-in)|self
 Runtime image signature verification|Basic cosign support (newer builds)|No (controller or admission-control responsibility)|competitor
 Published release evidence|Archived upstream project|Cosign signatures + CycloneDX SBOM + SLSA provenance|self
 Default-deny socket filter|No|Yes (with sockguard)|self
-Prometheus metrics|No|Yes|self
-MCP server (AI-native, read-only)|No|Yes|self
+Prometheus metrics|Yes (opt-in, experimental)|Yes|tie
+MCP server (AI-native, read-only)|Not documented|Yes|self
 Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
 License|Apache-2.0|AGPL-3.0|tie
@@ -22,7 +22,7 @@ key|Remote Auth (Ed25519)|Watchtower runs locally and has no remote access model
 shield|Default-Deny Socket Filter|Portwing pairs with sockguard to filter Docker API calls at the socket level. Even if Portwing is compromised, the sockguard allowlist constrains what can be called. Watchtower mounts the socket unfiltered.
 filetext|Structured Audit Log|Portwing logs every Docker API call it proxies as structured JSON for export to immutable storage. Watchtower has no audit trail.
 packagecheck|Maintained Signed Releases|Watchtower's upstream repository is archived. Portwing remains actively maintained and every release ships per-archive CycloneDX SBOMs, an image SBOM attestation, cosign image signatures, and SLSA build provenance. This verifies Portwing itself; it is not workload image-signature enforcement.
-activity|Prometheus Metrics|Portwing exposes agent health, request counts, and latency histograms. Watchtower has no metrics endpoint.
+activity|Prometheus Metrics|Both expose Prometheus metrics. Watchtower's is an opt-in, experimental /v1/metrics endpoint behind its HTTP API token. Portwing's covers agent health, request counts, and latency histograms.
 bot|MCP Server (AI-Native)|Portwing ships five read-only MCP tools for container and host inspection. Watchtower has no documented MCP support.
 `,
   highlightIconMap: {

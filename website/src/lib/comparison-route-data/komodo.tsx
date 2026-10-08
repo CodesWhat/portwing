@@ -12,7 +12,7 @@ Transparent Docker API|No (Komodo resource/command API)|Yes|self
 Structured audit|Full controller audit trail|Agent-level API/auth/Compose/exec audit with cursor export|tie
 Host metrics|Collected for dashboards and alerts|Prometheus scrape endpoint plus edge metrics|tie
 Docker socket policy|Documented deployment mounts the raw socket|Recommended Sockguard path-and-method policy|self
-Supply-chain evidence|Not published|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
+Supply-chain evidence|v2.3.2 release has binaries only; Periphery image carries a BuildKit SLSA v1 provenance attestation; no SBOM or cosign signature found|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
 Host shell, builds, automation, and Swarm|Yes|Host shell and Swarm are non-goals; Drydock owns fleet workflows|competitor
 MCP server (read-only)|Not documented|Yes|self
 License|GPL-3.0|AGPL-3.0|tie

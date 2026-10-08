@@ -368,7 +368,7 @@ flowchart LR
 | 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
 | ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA Build L2 provenance on every release. Verifiable without managing signing keys. |
 | 🛡️ | **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
-| 🪶 | **Minimal Footprint** | Static Go binary, ~47 MB Wolfi (Chainguard) container image. CGO disabled, stripped, no external runtime dependencies. |
+| 🪶 | **Minimal Footprint** | Static Go binary (~10 MB). Compressed container image: ~45 MB amd64 and ~41 MB arm64 (Wolfi, Chainguard), ~33 MB arm/v7 (Alpine). CGO disabled, stripped, no external runtime dependencies. |
 | 🧩 | **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
 
 <hr>
@@ -403,7 +403,7 @@ flowchart LR
 <tr><td>Agent-level structured audit log</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
 <tr><td>Prometheus scrape endpoint on the agent</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
-<tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
+<tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
 <tr><td>Fleet UI and controller workflows</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">?</td></tr>
 <tr><td>License</td><td align="center">AGPL-3.0</td><td align="center">Zlib (agent) / proprietary Business features</td><td align="center">GPL-3.0</td><td align="center">BSD-3-Clause</td><td align="center">MIT</td></tr>
 </tbody>
@@ -437,7 +437,7 @@ flowchart LR
 
 > Watchtower's upstream project is archived. Diun and Watchtower do update detection; Portwing is the access agent and leaves update decisions to Drydock.
 >
-> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.39.5, Komodo Periphery v2.3.2, Arcane Agent v2.10.1, Hawser v0.2.46. Reviewed 2026-08-29; Arcane re-checked 2026-09-02. The update-tools table follows the Diun and Watchtower comparison pages, which pin no version or review date.
+> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.39.5, Komodo Periphery v2.3.2, Arcane Agent v2.10.1, Hawser v0.2.46. Reviewed 2026-08-29; Arcane re-checked 2026-09-02. Portainer and Komodo release evidence checked 2026-10-08. The update-tools table follows the Diun and Watchtower comparison pages, which pin no version or review date.
 > Contributions welcome if any information is inaccurate.
 
 </details>
@@ -464,7 +464,7 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.8.x** ✅ | Operations & Distribution | Mode-aware `/health` and `/ready`, cursor-based NDJSON audit export, runnable Compose and Kubernetes observability examples, continuous edge logs, Homebrew cask and signed `deb`/`rpm` packages, published stability policy, edge mode production supported |
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks (v0.9.23) |
 | **v1.0.0** | Binding Stability | `STABILITY.md` guarantees become binding semver commitments, final re-verify of the competitive review against primary sources, decision on a versioned docs archive. Gated on verifiable items, not a date |
-| **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport, controller-assisted two-key rotation, BuildKit-aware Sockguard profile |
+| **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport, controller-assisted two-key rotation |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.
 

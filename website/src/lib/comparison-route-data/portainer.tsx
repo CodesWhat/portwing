@@ -10,7 +10,7 @@ Connection modes|Classic inbound; outbound Edge; Async Edge|Standard inbound; pe
 Agent authentication|Claim key exchange; optional shared secret; Edge key and optional Business mTLS|Ed25519 per-request HTTP signatures; signed edge hello; token fallback in standard mode|tie
 Docker socket policy|Documented agent mounts Docker socket and host paths|Recommended Sockguard path-and-method policy|self
 Structured audit|Controller activity log in Business Edition|Agent-level structured audit and cursor export in every build|self
-Supply-chain evidence|Not published|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
+Supply-chain evidence|2.39.5 release has checksums only; agent image carries BuildKit SPDX SBOM and SLSA v0.2 provenance attestations; no cosign signature found|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
 Fleet agent upgrades and policies|Yes|Not shipped; belongs in Drydock plus packaging|competitor
 Host file APIs and Swarm aggregation|Yes|Intentional non-goals|competitor
 Prometheus agent scrape endpoint|Not documented|Yes|self
