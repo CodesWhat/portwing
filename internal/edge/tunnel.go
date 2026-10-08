@@ -525,12 +525,19 @@ func (s *ExecSession) failStart(ctx context.Context, reason string) {
 // panicStart is the bring-up's exit when it panicked: a failed start like the
 // others, plus the hijacked conn when the panic landed while only the bring-up
 // held it. The reason is fixed so the panic value stays in the agent's log.
+//
+// Its steps are deferred because each of them can panic in turn, and one that
+// does must not cost the session its close or the controller its exec_end.
+// The record goes first and on its own: failStart writes it ahead of both, so
+// a write that panicked in there would skip them. Once it has run here,
+// panicked or not, failStart's own write is a no-op.
 func (s *ExecSession) panicStart(ctx context.Context, unwired net.Conn) {
+	defer s.failStart(ctx, "exec start failed: internal error")
+	defer s.auditStartError()
 	if unwired != nil {
 		// Best effort: the conn is abandoned either way.
 		_ = unwired.Close()
 	}
-	s.failStart(ctx, "exec start failed: internal error")
 }
 
 // execFrameHeaderLen is the size of Docker's stream-multiplexing frame header

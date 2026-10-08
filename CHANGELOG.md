@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A typed exec start that fails after the controller's own `exec_end` already
   ended it no longer sends an `exec_end` back. A start cancelled between the
   two daemon calls already sent none.
+- A typed exec start whose bring-up panics still ends as a failed start when
+  the cleanup for that panic panics too. A second panic while closing the
+  daemon connection or writing the record used to stop the cleanup there, which
+  left the session open on its exec slot and the controller without an
+  `exec_end`.
 
 ## [v0.9.23] - 2026-10-07
 

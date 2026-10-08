@@ -202,3 +202,64 @@ func TestBringUpExecPanicIsLogged(t *testing.T) {
 		}
 	}
 }
+
+// panicCloseConn is a conn whose Close panics, standing in for a bug under the
+// teardown of a conn the session or its bring-up holds.
+type panicCloseConn struct {
+	*fakeConn
+}
+
+func (*panicCloseConn) Close() error { panic("boom in close") }
+
+// requireExecEnd asserts the next frame is e1's exec_end with the given reason.
+func requireExecEnd(t *testing.T, next func() protocol.Envelope, reason string) {
+	t.Helper()
+	env := next()
+	if env.Type != protocol.TypeExecEnd {
+		t.Fatalf("frame = %q, want exec_end", env.Type)
+	}
+	var end protocol.ExecEndMessage
+	decodeData(t, env.Data, &end)
+	if end.ExecID != "e1" || end.Reason != reason {
+		t.Fatalf("exec_end = %+v, want e1 with reason %q", end, reason)
+	}
+}
+
+// The panic exit's own steps can panic too. Whichever one does, the start still
+// ends failed: the session closed and deregistered and the exec_end sent, with
+// the record written unless the record is what panicked.
+func TestBringUpExecPanicExitSurvivesItsOwnPanic(t *testing.T) {
+	t.Parallel()
+
+	msg := protocol.ExecStartMessage{ExecID: "e1", ContainerID: "c1", Cols: 80, Rows: 24}
+
+	t.Run("closing the unwired conn panics", func(t *testing.T) {
+		t.Parallel()
+		c, logger, next := newAuditedTestClient(t)
+		c.dockerClient = &panickingDocker{
+			fakeDocker: &fakeDocker{createExecID: "d1", startConn: &panicCloseConn{fakeConn: &fakeConn{}}},
+			at:         "resize",
+		}
+		sessionCtx, session := registeredSession(t, c, context.Background(), msg)
+
+		c.bringUpExec(sessionCtx, msg, session)
+
+		requireOneStartError(t, logger)
+		requireClosedAndDeregistered(t, c, session)
+		requireExecEnd(t, next, "exec start failed: internal error")
+	})
+
+	t.Run("writing the record panics", func(t *testing.T) {
+		t.Parallel()
+		c, _, next := newAuditedTestClient(t)
+		// No auditor at all, so the record write dereferences nil.
+		c.auditor = nil
+		c.dockerClient = &panickingDocker{fakeDocker: &fakeDocker{}, at: "create"}
+		sessionCtx, session := registeredSession(t, c, context.Background(), msg)
+
+		c.bringUpExec(sessionCtx, msg, session)
+
+		requireClosedAndDeregistered(t, c, session)
+		requireExecEnd(t, next, "exec start failed: internal error")
+	})
+}
