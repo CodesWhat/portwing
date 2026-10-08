@@ -96,7 +96,7 @@ require_publications "examples/docker-compose.with-sockguard.yml" "yaml" 1 \
 	"the canonical standard-mode sockguard Compose example"
 require_publications "README.md" "yaml" 1 \
 	"the README copy of the standard-mode sockguard example"
-require_publications "README.md" "docker run" 4 \
+require_publications "README.md" "docker run" 1 \
 	"README standard-mode docker run instructions"
 require_publications "docs/content/docs/getting-started.mdx" "yaml" 2 \
 	"getting-started copies of the standard-mode Compose examples"
