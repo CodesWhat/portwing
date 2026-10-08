@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its exec slot and has the read loop send the controller its `exec_end`. The
   panic used to be logged and nothing else, so the session stayed open with
   stdin dead.
+- A panic inside the Docker exec start after the daemon socket was dialled now
+  closes that connection before it carries on to the caller. The connection
+  used to stay open until the garbage collector got to it.
 
 ## [v0.9.23] - 2026-10-07
 
