@@ -89,6 +89,9 @@ type ExecSession struct {
 	once   sync.Once
 	cancel context.CancelFunc
 
+	// startErrOnce keeps a failed bring-up to one error record.
+	startErrOnce sync.Once
+
 	mu               sync.Mutex
 	closed           bool
 	queuedInputBytes int
@@ -193,7 +196,19 @@ func (c *Client) auditTypedExecStart(msg protocol.ExecStartMessage, admitted boo
 // bringUpExec performs the Docker round-trips for an already-registered session
 // and, on success, wires the live connection and starts streaming.
 func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage, session *ExecSession) {
+	// Deferred first so it runs last: a panic in the teardown below still
+	// stops here instead of taking the agent down.
 	defer recoverSession("bringUpExec", msg.ExecID)
+	// unwired is the hijacked conn while only this goroutine holds it, from
+	// StartExec returning it until activate hands it to the session. A panic
+	// in that window has to close it here because Close can't reach it yet.
+	var unwired net.Conn
+	defer func() {
+		if r := recover(); r != nil {
+			logSessionPanic("bringUpExec", msg.ExecID, r)
+			session.panicStart(ctx, unwired)
+		}
+	}()
 	if ctx.Err() != nil || session.isClosed() {
 		session.abortStart()
 		return
@@ -226,6 +241,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 		session.failStart(ctx, fmt.Sprintf("start exec failed: %v", err))
 		return
 	}
+	unwired = conn
 
 	// Resize terminal to requested dimensions.
 	if msg.Cols > 0 && msg.Rows > 0 {
@@ -240,6 +256,7 @@ func (c *Client) bringUpExec(ctx context.Context, msg protocol.ExecStartMessage,
 		session.auditStartError()
 		return
 	}
+	unwired = nil
 
 	// Announce readiness; best-effort — connection loss surfaces on the read pump.
 	_ = c.sendTypedMessageTo(session.target, protocol.TypeExecReady, protocol.ExecReadyMessage{
@@ -468,9 +485,12 @@ func (s *ExecSession) isClosed() bool {
 
 // auditStartError records that an admitted typed exec did not come up, as the
 // api_request error record under the exec_start message type. Each bringUpExec
-// exit that gives up calls it once.
+// exit that gives up calls it once. The Once is for the panic exit, which can
+// follow an exit that already wrote the record and then panicked.
 func (s *ExecSession) auditStartError() {
-	s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
+	s.startErrOnce.Do(func() {
+		s.client.auditor.APIRequest(s.client.cfg.DrydockURL, protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
+	})
 }
 
 // abortStart records the failed start and tears the session down for a
@@ -500,6 +520,17 @@ func (s *ExecSession) failStart(ctx context.Context, reason string) {
 		ExecID: s.execID,
 		Reason: reason,
 	})
+}
+
+// panicStart is the bring-up's exit when it panicked: a failed start like the
+// others, plus the hijacked conn when the panic landed while only the bring-up
+// held it. The reason is fixed so the panic value stays in the agent's log.
+func (s *ExecSession) panicStart(ctx context.Context, unwired net.Conn) {
+	if unwired != nil {
+		// Best effort: the conn is abandoned either way.
+		_ = unwired.Close()
+	}
+	s.failStart(ctx, "exec start failed: internal error")
 }
 
 // execFrameHeaderLen is the size of Docker's stream-multiplexing frame header
@@ -697,9 +728,17 @@ func (s *ExecSession) Close() {
 // entry of each per-session goroutine (bringUpExec, inputWriter, readLoop).
 func recoverSession(where, execID string) {
 	if r := recover(); r != nil {
-		slog.Error("recovered from panic in exec session goroutine",
-			"where", where, "execID", applog.Sanitize(execID), "panic", applog.Sanitize(fmt.Sprint(r)))
+		logSessionPanic(where, execID, r)
 	}
+}
+
+// logSessionPanic logs a panic recovered in a per-session goroutine. It is
+// separate from recoverSession because recover only works when the deferred
+// function itself calls it, so a caller that does more than log recovers on
+// its own and logs through here.
+func logSessionPanic(where, execID string, r any) {
+	slog.Error("recovered from panic in exec session goroutine",
+		"where", where, "execID", applog.Sanitize(execID), "panic", applog.Sanitize(fmt.Sprint(r)))
 }
 
 // execSlotsFullLocked reports whether typed exec sessions plus raw exec starts

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A typed exec start on the edge whose bring-up panics is now handled as a
+  failed start. It writes the same `api_request` record (outcome `error`,
+  method `exec_start`), closes the session along with any daemon connection it
+  had opened, and sends the controller an `exec_end`. The panic used to be
+  logged and nothing else, so there was no record and the session held its
+  exec slot until the controller ended it or the tunnel dropped.
 - A typed exec start that fails after the controller's own `exec_end` already
   ended it no longer sends an `exec_end` back. A start cancelled between the
   two daemon calls already sent none.
