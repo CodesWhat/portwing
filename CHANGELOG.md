@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   daemon connection or writing the record used to stop the cleanup there, which
   left the session open on its exec slot and the controller without an
   `exec_end`.
+- A live typed exec session whose read loop panics now ends the way one whose
+  read fails does. The controller gets an `exec_end` with the reason
+  `exec session failed: internal error`, unless its own `exec_end` or a tunnel
+  drop already ended the session, and the session is closed. It used to be
+  closed with nothing sent, so the controller kept a session the agent had
+  dropped. A panic while the read loop closes the session is contained too. It
+  used to take the agent down.
 
 ## [v0.9.23] - 2026-10-07
 

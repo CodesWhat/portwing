@@ -92,8 +92,11 @@ type ExecSession struct {
 	// startErrOnce keeps a failed bring-up to one error record.
 	startErrOnce sync.Once
 
-	mu               sync.Mutex
-	closed           bool
+	mu     sync.Mutex
+	closed bool
+	// peerEnded records that the controller's exec_end or a tunnel drop is
+	// what closed the session, as opposed to the session's own goroutines.
+	peerEnded        bool
 	queuedInputBytes int
 }
 
@@ -455,7 +458,7 @@ func (c *Client) EndExec(msg protocol.ExecEndMessage) {
 	}
 
 	session := val.(*ExecSession)
-	session.Close()
+	session.endByPeer()
 }
 
 // activate wires the live connection and unblocks inputWriter. It returns false
@@ -616,8 +619,17 @@ func (d *execDemuxer) decode(chunk []byte) ([]byte, error) {
 // readLoop reads output from the exec session's connection and sends it back
 // as exec_output messages. On error or EOF, it sends exec_end and cleans up.
 func (s *ExecSession) readLoop() {
-	defer s.Close()
+	// Deferred first so it runs last: a panic in the teardown below, the close
+	// included, still stops here instead of taking the agent down. The close
+	// comes next so it runs whether or not the panic exit's exec_end panics.
 	defer recoverSession("readLoop", s.execID)
+	defer s.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			logSessionPanic("readLoop", s.execID, r)
+			s.panicEnd()
+		}
+	}()
 
 	// Docker only writes a raw stream when the exec has a PTY. Without one it
 	// multiplexes stdout and stderr behind 8-byte frame headers, which used to
@@ -683,6 +695,43 @@ func (s *ExecSession) readLoop() {
 			return
 		}
 	}
+}
+
+// panicEnd sends the exec_end a read loop that panicked still owes. The read
+// loop is what tells the controller a live session is over, and a panic doesn't
+// change that: the exec_end goes out here and the loop's deferred close
+// follows, the same order as on its normal exit. The reason is fixed so the
+// panic value stays in the agent's log. No audit record is written, because a
+// session ending never writes one.
+//
+// A session the controller or a tunnel drop ended gets no exec_end, as in
+// failStart: whoever ended it owns that. The closed flag can't stand in for
+// that here the way it does during the bring-up, because once the session is
+// live the input writer closes it too and leaves the exec_end to this loop.
+func (s *ExecSession) panicEnd() {
+	if s.endedByPeer() {
+		return
+	}
+	// Best-effort; connection loss will surface on the read pump.
+	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
+		ExecID: s.execID,
+		Reason: "exec session failed: internal error",
+	})
+}
+
+// endByPeer closes the session for the controller's exec_end or a tunnel drop,
+// and records that it was one of those.
+func (s *ExecSession) endByPeer() {
+	s.mu.Lock()
+	s.peerEnded = true
+	s.mu.Unlock()
+	s.Close()
+}
+
+func (s *ExecSession) endedByPeer() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.peerEnded
 }
 
 // Close shuts down the exec session. It is safe to call multiple times and
