@@ -328,7 +328,7 @@ prefix_version="${release_version}0"
 readme_prefix_backup="${fixture}/README.md.prefix-version-backup"
 cp "${fixture}/README.md" "${readme_prefix_backup}"
 
-awk -v from="VERSION=${release_version}" -v to="VERSION=${prefix_version}" '
+awk -v from="portwing_${release_version}_" -v to="portwing_${prefix_version}_" '
 	!changed && index($0, from) {
 		sub(from, to)
 		changed = 1
