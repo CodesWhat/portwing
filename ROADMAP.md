@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is pre-`v1.0.0` software (currently `v0.9.23`). This roadmap describes
+> Portwing is pre-`v1.0.0` software (currently `v0.9.24`). This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
@@ -27,8 +27,9 @@ particular:
   `quality-fuzz-monthly.yml`, `quality-soak-weekly.yml`
   (`benchmarks/cmd/{mockdocker,loadgen}` + `scripts/soak.sh`), and
   `quality-bench-monthly.yml`.
-- **Reproducible base images.** `Dockerfile` and `Dockerfile.release` pin
-  every base image by digest, with Dependabot tracking the `docker` ecosystem.
+- **Reproducible base images.** `Dockerfile`, `Dockerfile.armv7`,
+  `Dockerfile.dev`, `Dockerfile.release`, and `.clusterfuzzlite/Dockerfile`
+  pin every base image by digest, and Renovate keeps the digests current.
 - **Controller-owned watcher/update execution.** Portwing marks the Docker
   watcher as `transport=docker-api`, `execution=controller`, and
   `events=portwing`; Drydock runs its native watcher and update trigger through
@@ -103,9 +104,9 @@ calendar date:
 
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,
-polling/intermittent edge transport, controller-assisted two-key rotation, and
-a BuildKit-aware Sockguard profile. None should expand the base socket policy
-or add an unaudited self-update path merely for feature-table parity.
+polling/intermittent edge transport, and controller-assisted two-key rotation.
+None should expand the base socket policy or add an unaudited
+self-update path merely for feature-table parity.
 
 ## Non-goals
 

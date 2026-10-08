@@ -36,10 +36,10 @@
 # sha256 over the whitespace-trimmed source lines l-2..l+2 (5 lines, each
 # followed by \x1f, missing lines padded with an empty string), and `o` is
 # the 0-based ordinal among mutants sharing (f, m, a) within the same source,
-# ordered by (line, column). See .planning/pw-2.5-survivor-payload-spec.md
-# for the measurement behind this choice: bare file+type+line collides 66 of
-# 335 times on this repo's real churn, and the 5-line window plus ordinal
-# resolves all but 3 genuine code changes.
+# ordered by (line, column). A hash of the mutated line alone is ambiguous
+# wherever a file repeats that line, and a line number moves with every edit
+# above it. The 5-line window survives unrelated edits elsewhere in the file,
+# and the ordinal separates mutants whose windows are still identical.
 #
 # Every {f,m,s,l,c} field below is sourced from a downloaded artifact: a
 # report the gremlins/mutation-advisory jobs produced by running mutated Go

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -539,6 +540,75 @@ func TestStartExec_CancelInterruptsUpgrade(t *testing.T) {
 		t.Fatal("StartExec did not close the raw Unix socket after cancellation")
 	}
 	<-serverDone
+}
+
+// errPanicContext is a context whose Err panics. StartExec only asks its
+// context for Err once the write or the response read has failed, so this
+// lands a panic inside StartExec after the dial, standing in for a bug there.
+type errPanicContext struct {
+	context.Context
+}
+
+func (errPanicContext) Err() error { panic("boom after dial") }
+
+// A panic inside StartExec after the dial closes the conn it dialled, then
+// carries on to the caller. Nothing else can close it: the caller only learns
+// of the conn when StartExec returns it, so it used to stay open until the
+// garbage collector ran its finalizer.
+func TestStartExec_PanicAfterDialClosesConn(t *testing.T) {
+	// Not parallel. Nothing else in the package runs beside it then, so no
+	// collection lands inside the wait below and closes the conn for StartExec.
+	dir := shortTempDir(t)
+	sockPath := filepath.Join(dir, "d.sock")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	peerClosed := make(chan struct{})
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 4096)
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if _, readErr := conn.Read(buf); readErr != nil {
+			return
+		}
+		// Not HTTP, so the response read fails and StartExec asks the context
+		// whether that was a cancellation.
+		_, _ = conn.Write([]byte("GARBAGE\r\n\r\n"))
+
+		// Nothing more is coming, so this read ends when the client closes its
+		// side, or at the deadline when it never does.
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if _, readErr := conn.Read(buf); errors.Is(readErr, io.EOF) {
+			close(peerClosed)
+		}
+	}()
+
+	c := &Client{socketPath: sockPath, apiVersion: "v1.44", dialTimeout: 5 * time.Second}
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_, _ = c.StartExec(errPanicContext{t.Context()}, "exec-panic", false)
+	}()
+	if recovered != "boom after dial" {
+		t.Fatalf("recovered = %v, want the panic passed on to the caller", recovered)
+	}
+
+	<-serverDone
+	select {
+	case <-peerClosed:
+	default:
+		t.Fatal("StartExec left the conn it dialled open after panicking")
+	}
 }
 
 // ---- closeConn ----

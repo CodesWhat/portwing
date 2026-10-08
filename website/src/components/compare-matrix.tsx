@@ -1,13 +1,13 @@
-import { ArrowUpRight, Check, Minus, X } from "lucide-react";
+import { ArrowUpRight, Check, CircleQuestionMark, Minus, X } from "lucide-react";
 import Link from "next/link";
-import { ComparisonCellIcon } from "@/components/comparison-cell-icon";
+import { type CellValue, ComparisonCellIcon } from "@/components/comparison-cell-icon";
 import { SITE_CONFIG } from "@/lib/site-config";
 
 // Full comparison matrix for /compare. Each competitor row links to its
 // dedicated deep-dive page. Cell values are derived from comparison-rows.ts
 // and the per-competitor data in lib/comparison-route-data/.
 
-type Cell = "yes" | "partial" | "no";
+type Cell = CellValue;
 
 const FEATURES = [
   { key: "remoteControl", label: "Remote control" },
@@ -55,8 +55,8 @@ const TOOLS: Tool[] = [
       leastPrivilege: "no",
       agentAudit: "partial",
       transparentApi: "yes",
-      metrics: "no",
-      mcpServer: "no",
+      metrics: "undocumented",
+      mcpServer: "undocumented",
     },
   },
   {
@@ -70,7 +70,7 @@ const TOOLS: Tool[] = [
       agentAudit: "partial",
       transparentApi: "no",
       metrics: "partial",
-      mcpServer: "no",
+      mcpServer: "undocumented",
     },
   },
   {
@@ -84,7 +84,7 @@ const TOOLS: Tool[] = [
       agentAudit: "partial",
       transparentApi: "no",
       metrics: "partial",
-      mcpServer: "no",
+      mcpServer: "undocumented",
     },
   },
   {
@@ -98,7 +98,7 @@ const TOOLS: Tool[] = [
       agentAudit: "partial",
       transparentApi: "yes",
       metrics: "partial",
-      mcpServer: "no",
+      mcpServer: "undocumented",
     },
   },
   {
@@ -111,8 +111,8 @@ const TOOLS: Tool[] = [
       leastPrivilege: "no",
       agentAudit: "no",
       transparentApi: "no",
-      metrics: "no",
-      mcpServer: "no",
+      metrics: "yes",
+      mcpServer: "undocumented",
     },
   },
   {
@@ -126,7 +126,7 @@ const TOOLS: Tool[] = [
       agentAudit: "no",
       transparentApi: "no",
       metrics: "yes",
-      mcpServer: "no",
+      mcpServer: "undocumented",
     },
   },
 ];
@@ -195,6 +195,10 @@ export function CompareMatrix() {
         </span>
         <span className="inline-flex items-center gap-1.5">
           <X className="h-3 w-3 text-neutral-300 dark:text-neutral-600" /> No
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <CircleQuestionMark className="h-3 w-3 text-neutral-400 dark:text-neutral-500" /> Not
+          documented
         </span>
         <span className="text-neutral-400 dark:text-neutral-600">
           · Click a tool for the full breakdown

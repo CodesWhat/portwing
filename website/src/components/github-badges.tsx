@@ -42,8 +42,8 @@ const distribution: Badge[] = [
   },
   {
     href: GHCR_PACKAGE_URL,
-    src: "https://img.shields.io/badge/image%20size-~10%20MB-informational?logo=docker&logoColor=white",
-    alt: "Image size ~10 MB",
+    src: "https://img.shields.io/badge/image%20size-~45%20MB%20compressed-informational?logo=docker&logoColor=white",
+    alt: "Compressed image size ~45 MB (amd64)",
   },
   {
     href: `${GITHUB_URL}/stargazers`,

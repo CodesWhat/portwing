@@ -284,7 +284,7 @@ func TestDelayedExecFailureCannotReachReplacementConnection(t *testing.T) {
 	c.connMu.Unlock()
 	oldState.closeAndDiscard(oldCh)
 
-	session.failStart("late old-generation failure")
+	session.failStart(context.Background(), "late old-generation failure")
 
 	if got := len(newCh); got != 0 {
 		t.Fatalf("replacement connection received %d delayed old-generation exec failures, want 0", got)

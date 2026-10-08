@@ -140,6 +140,37 @@ func TestBringUpExecExitsWriteOneErrorRecord(t *testing.T) {
 		requireOneStartError(t, logger)
 	})
 
+	// The controller's exec_end landing mid round trip closes the session and
+	// fails the round trip. It owns the exec_end, so the bring-up sends none.
+	t.Run("create fails after the session was closed", func(t *testing.T) {
+		t.Parallel()
+		c, logger, next := newAuditedTestClient(t)
+		var session *ExecSession
+		c.dockerClient = &fakeDocker{createExecErr: errors.New("boom"), createHook: func() { session.Close() }}
+		sessionCtx, registered := registeredSession(t, c, context.Background(), msg)
+		session = registered
+
+		c.bringUpExec(sessionCtx, msg, session)
+
+		requireOneStartError(t, logger)
+		requireTornDownSilently(t, c, session, next)
+	})
+
+	// A tunnel drop ends the bring-up's context before anything closes the
+	// session, and fails the round trip the same way. Nobody is left to tell.
+	t.Run("create fails after the context ended", func(t *testing.T) {
+		t.Parallel()
+		c, logger, next := newAuditedTestClient(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		c.dockerClient = &fakeDocker{createExecErr: errors.New("boom"), createHook: cancel}
+		sessionCtx, session := registeredSession(t, c, ctx, msg)
+
+		c.bringUpExec(sessionCtx, msg, session)
+
+		requireOneStartError(t, logger)
+		requireTornDownSilently(t, c, session, next)
+	})
+
 	t.Run("start fails", func(t *testing.T) {
 		t.Parallel()
 		c, logger, next := newAuditedTestClient(t)

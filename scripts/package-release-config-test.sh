@@ -688,11 +688,11 @@ require_file "docs/assets/star-history-dark.svg" \
 # grep for the img tag would be satisfied by any other occurrence in the README,
 # and naming hosts one at a time only ever catches the ones already known.
 star_section="$(awk '
-	/<a id="star-history"><\/a>/ { collecting = 1 }
+	/id="star-history"/ { collecting = 1 }
 	collecting { print; if ($0 == "---") exit }
 ' README.md)"
 if [ -z "${star_section}" ]; then
-	echo 'FAIL: the README must keep the star-history section (no <a id="star-history"></a> anchor found in README.md)' >&2
+	echo 'FAIL: the README must keep the star-history section (no id="star-history" heading found in README.md)' >&2
 	failures=$((failures + 1))
 fi
 # The whitespace before src is load-bearing: "src=" as a bare substring is also
@@ -825,7 +825,7 @@ fi
 require_text "README.md" "brew install --cask codeswhat/tap/portwing" "the repository landing page must advertise Homebrew installation"
 require_text "README.md" "/docs/installation" "the repository landing page must link the full package guide"
 # shellcheck disable=SC2016 # The documented shell command expands VERSION.
-require_text "README.md" 'release.yml@refs/tags/v${VERSION}' "public verification instructions must bind signatures to the selected tag"
+require_text "docs/content/docs/verification.mdx" 'release.yml@refs/tags/v${VERSION}' "public verification instructions must bind signatures to the selected tag"
 require_text "RELEASING.md" "HOMEBREW_TAP_TOKEN" "maintainer release docs must name the tap publishing credential"
 require_text "RELEASING.md" "verify-native-packages" "maintainer release docs must describe the native package gate"
 require_text "website/src/components/get-started.tsx" "codeswhat/tap/portwing" "the website must advertise the Homebrew cask"

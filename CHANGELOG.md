@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.24] - 2026-10-08
+
+### Fixed
+
+- A typed exec start on the edge whose bring-up panics is now handled as a
+  failed start. It writes the same `api_request` record (outcome `error`,
+  method `exec_start`), closes the session along with any daemon connection it
+  had opened, and sends the controller an `exec_end` unless the controller's
+  own `exec_end` or a tunnel drop already ended the session. The panic used to
+  be logged and nothing else, so there was no record and the session held its
+  exec slot until the controller ended it or the tunnel dropped.
+- A typed exec start that fails after the controller's own `exec_end` already
+  ended it no longer sends an `exec_end` back. A start cancelled between the
+  two daemon calls already sent none.
+- A typed exec start whose bring-up panics still ends as a failed start when
+  the cleanup for that panic panics too. A second panic while closing the
+  daemon connection or writing the record used to stop the cleanup there, which
+  left the session open on its exec slot and the controller without an
+  `exec_end`.
+- A failed typed exec start whose `api_request` error record panics while it
+  is being written gets the record on the retry. The first attempt used to
+  count as written, so the retry wrote nothing and the session closed with no
+  error record. A write that completes still can't be followed by a second.
+- A live typed exec session whose read loop panics now ends the way one whose
+  read fails does. The controller gets an `exec_end` with the reason
+  `exec session failed: internal error`, unless its own `exec_end` or a tunnel
+  drop already ended the session, and the session is closed. It used to be
+  closed with nothing sent, so the controller kept a session the agent had
+  dropped. A panic while the read loop closes the session is contained too. It
+  used to take the agent down.
+- A typed exec session whose input writer panics is now closed, which frees
+  its exec slot and has the read loop send the controller its `exec_end`. The
+  panic used to be logged and nothing else, so the session stayed open with
+  stdin dead.
+- A panic inside the Docker exec start after the daemon socket was dialled now
+  closes that connection before it carries on to the caller. The connection
+  used to stay open until the garbage collector got to it.
+- The website comparison data now sticks to primary sources. The Watchtower
+  and Diun rows both document Prometheus metrics, so that row is a tie. Where
+  a competitor's MCP or Portainer's Prometheus support isn't documented, the
+  matrix says "not documented" instead of "no". The image size is the measured
+  compressed size, and the BuildKit Sockguard profile is off the roadmap
+  because it already shipped.
+- The ROADMAP's Renovate claim is corrected, and the README follows the same
+  section layout as Drydock's, with the reference material linked from the
+  docs site.
+
 ## [v0.9.23] - 2026-10-07
 
 ### Added

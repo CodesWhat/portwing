@@ -627,6 +627,15 @@ func (c *Client) StartExec(ctx context.Context, execID string, tty bool) (net.Co
 	if err != nil {
 		return nil, fmt.Errorf("dial docker socket: %w", err)
 	}
+	// The caller only learns of conn when StartExec returns it, so a panic
+	// from here on would leave it open until the finalizer ran. Close it and
+	// panic again, so the caller's own recover still sees what happened.
+	defer func() {
+		if r := recover(); r != nil {
+			closeConn(conn, "exec start panic")
+			panic(r)
+		}
+	}()
 	cancelWatchDone := make(chan struct{})
 	stopCancelWatch := context.AfterFunc(ctx, func() {
 		defer close(cancelWatchDone)

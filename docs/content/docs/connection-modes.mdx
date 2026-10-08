@@ -23,7 +23,7 @@ Otherwise
 
 Portwing runs a plain HTTP server on `PORT` (default `3000`). The Drydock controller connects inbound and drives the session: it calls `GET /api/containers`, `GET /api/watchers`, and `GET /api/triggers` during the handshake, then holds a long-lived SSE stream on `GET /api/events` for real-time container events. All Docker Engine API paths are transparently proxied through the agent.
 
-Standard mode is active whenever `DRYDOCK_URL` is **not** set.
+Standard mode is active whenever `DRYDOCK_URL` is **not** set. The controller authenticates with the `X-Dd-Agent-Secret` shared secret. Built-in TLS (`TLS_CERT` / `TLS_KEY`) accepts TLS 1.2 and later with modern cipher suites.
 
 ### Required networking
 
@@ -95,6 +95,8 @@ Edge mode is active when **both** of the following are true:
 
 Setting `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is rejected at startup with a fatal error — the Drydock controller endpoint is Ed25519-only, so the agent enforces `PRIVATE_KEY_FILE` at startup rather than looping forever on a rejected hello. `TOKEN` and `AUTHORIZED_KEYS` are not accepted for edge mode.
 
+Edge mode's trust in the controller is TLS-only and one-directional. The signed hello lets the controller verify Portwing, but nothing verifies the controller's identity in return, so a plaintext `http://` or `ws://` `DRYDOCK_URL` would let an on-path attacker complete the handshake and drive dockerd. Portwing fails closed on a plaintext `DRYDOCK_URL` unless `ALLOW_INSECURE_EDGE_URL=true` is set, which is for trusted local testing only. Always use `https://` or `wss://` against a real controller.
+
 ### Key environment variables
 
 | Variable | Default | Purpose |
@@ -123,6 +125,9 @@ On each connection attempt the agent:
 3. Waits up to `WELCOME_TIMEOUT` seconds for the controller's `welcome` response.
 4. On success, sends component descriptors (`dd:component_sync`) before the
    initial container inventory (`dd:container_sync`), then sends host metrics.
+   The component descriptors declare watcher ownership as controller-owned, so
+   controller-owned Docker calls travel as correlated WebSocket `request` /
+   `response` messages.
 
 ### Reconnection and keepalive
 
