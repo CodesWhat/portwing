@@ -356,7 +356,20 @@ func (s *ExecSession) releaseInputBytes(n int) {
 // live, then drains inbox in order, writing each chunk to the connection. Being
 // the only writer is what guarantees input ordering.
 func (s *ExecSession) inputWriter(ctx context.Context) {
+	// Deferred first so it runs last: a panic in the close below still stops
+	// here instead of taking the agent down.
 	defer recoverSession("inputWriter", s.execID)
+	// A writer that panics leaves stdin dead, so the session ends with it
+	// instead of sitting open on its exec slot. The close is also what tells
+	// the controller: it closes the conn under the read loop, whose exit sends
+	// the session's one exec_end, as when a write fails. Sending one from here
+	// as well would make it two.
+	defer func() {
+		if r := recover(); r != nil {
+			logSessionPanic("inputWriter", s.execID, r)
+			s.Close()
+		}
+	}()
 
 	select {
 	case <-s.connReady:

@@ -391,7 +391,9 @@ exec error display.
 A live session can end on an agent fault too. If the agent's read loop panics,
 the agent closes the session and sends an `exec_end` whose reason is the fixed
 string `exec session failed: internal error`, unless the controller's own
-`exec_end` or a tunnel drop already ended the session.
+`exec_end` or a tunnel drop already ended the session. A panic in the agent's
+input writer closes the session as well, and the `exec_end` that follows is the
+read loop's, with a read error as its reason.
 
 Sockguard only includes the detailed reason in its `reason` field when the preset sets `deny_verbosity: verbose`. Under the default `minimal` verbosity the surfaced message is the generic `request denied by sockguard policy`.
 

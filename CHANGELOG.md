@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed with nothing sent, so the controller kept a session the agent had
   dropped. A panic while the read loop closes the session is contained too. It
   used to take the agent down.
+- A typed exec session whose input writer panics is now closed, which frees
+  its exec slot and has the read loop send the controller its `exec_end`. The
+  panic used to be logged and nothing else, so the session stayed open with
+  stdin dead.
 
 ## [v0.9.23] - 2026-10-07
 
