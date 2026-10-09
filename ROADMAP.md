@@ -88,15 +88,14 @@ calendar date:
 - **Completed for v0.9 — Edge audit export hardening.** Standard and Edge
   modes share one exporter implementation; public docs and Kubernetes examples
   explicitly isolate Edge Mode's unauthenticated operations listener.
-- **Docs stay current-only until v1.0.** `docs/content/docs/current/` holds the
-  one tree tracking the latest release, served at the unversioned `/docs/...`
-  URLs, with no per-version archive. That's deliberate through `v0.9.x`. The
-  `current/` directory is the first step toward drydock's
-  `content/docs/{current,v1.x}` split: an archived release would be added as a
-  sibling `vX.Y/` directory. The v1.0.0 release-cut PR is the trigger to
-  decide whether the semver guarantees in [STABILITY.md](STABILITY.md) need the
-  rest of a versioned docs archive (drydock's `archive-provenance.json` and
-  its release-docs-archive tests) before v1.0 ships.
+- **Versioned docs archive at v1.0.** `docs/content/docs/current/` holds the
+  tree tracking the latest release, served at the unversioned `/docs/...`
+  URLs. Through `v0.9.x` it is the only tree. At `v1.0.0` the `v0.9` docs are
+  archived from the final `v0.9.x` tag into a sibling `v0.9/` directory,
+  served at `/docs/v0.9/...` and verified against that tag's tree, so the
+  semver guarantees in [STABILITY.md](STABILITY.md) keep the docs they were
+  written against. Each later minor line archives the one before it the same
+  way.
 - **SLSA Build L2 is the ceiling for now.** Provenance attestation (see
   [RELEASING.md](RELEASING.md)) stays at Build L2 because GoReleaser, cosign,
   and attest all run inline inside `release.yml`. Build L3 needs an isolated,
