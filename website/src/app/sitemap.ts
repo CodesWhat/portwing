@@ -6,7 +6,7 @@ export const dynamic = "force-static";
 // Competitor compare page slugs — must match the routes under /compare/[slug].
 const COMPARE_SLUGS = ["portainer", "komodo", "arcane", "hawser", "watchtower", "diun"] as const;
 
-// Docs page slugs enumerated from docs/content/docs/*.mdx.
+// Docs page slugs enumerated from docs/content/docs/current/*.mdx.
 // index.mdx maps to /docs (listed separately below at priority 0.7).
 const DOCS_SLUGS = [
   "getting-started",

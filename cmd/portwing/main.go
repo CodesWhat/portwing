@@ -165,7 +165,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 // printUsage writes top-level CLI usage to w. Portwing is configured
 // entirely through environment variables rather than flags; see
-// docs/content/docs/configuration.mdx for the full reference.
+// docs/content/docs/current/configuration.mdx for the full reference.
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage: portwing [command]")
 	fmt.Fprintln(w)
