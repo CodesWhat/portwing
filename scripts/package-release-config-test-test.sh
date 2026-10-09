@@ -37,10 +37,10 @@ cp scripts/verify-scanner-exclusions.sh "${fixture}/scripts/"
 cp .grype.yaml Dockerfile.armv7 Dockerfile.release "${fixture}/"
 cp api/openapi.yaml "${fixture}/api/"
 cp examples/observability/docker-compose.yml "${fixture}/examples/observability/"
-cp docs/content/docs/api-reference.mdx "${fixture}/docs/content/docs/"
-cp docs/content/docs/standalone-mode.mdx "${fixture}/docs/content/docs/"
-cp docs/content/docs/observability.mdx "${fixture}/docs/content/docs/"
-cp docs/content/docs/security-model.mdx "${fixture}/docs/content/docs/"
+cp docs/content/docs/current/api-reference.mdx "${fixture}/docs/content/docs/current/"
+cp docs/content/docs/current/standalone-mode.mdx "${fixture}/docs/content/docs/current/"
+cp docs/content/docs/current/observability.mdx "${fixture}/docs/content/docs/current/"
+cp docs/content/docs/current/security-model.mdx "${fixture}/docs/content/docs/current/"
 mkdir -p "${fixture}/scripts/ci"
 cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/"
 cp scripts/ci/verify-compose-containerd.sh "${fixture}/scripts/ci/"
@@ -370,10 +370,19 @@ expect_stale_release_example_failure() {
 
 expect_stale_release_example_failure "api/openapi.yaml" $'        agentVersion:\n          example: "0.0.1"'
 expect_stale_release_example_failure "api/openapi.yaml" '        data: {"type":"dd:ack","data":{"version":"0.0.1"}}'
-expect_stale_release_example_failure "docs/content/docs/api-reference.mdx" '{"version":"0.0.1"}'
-expect_stale_release_example_failure "docs/content/docs/standalone-mode.mdx" '{"agentVersion":"0.0.1"}'
-expect_stale_release_example_failure "docs/content/docs/observability.mdx" 'portwing_build_info{version="0.0.1"} 1'
-expect_stale_release_example_failure "docs/content/docs/security-model.mdx" 'VERSION=0.0.1'
+expect_stale_release_example_failure "docs/content/docs/current/api-reference.mdx" '{"version":"0.0.1"}'
+expect_stale_release_example_failure "docs/content/docs/current/standalone-mode.mdx" '{"agentVersion":"0.0.1"}'
+expect_stale_release_example_failure "docs/content/docs/current/observability.mdx" 'portwing_build_info{version="0.0.1"} 1'
+expect_stale_release_example_failure "docs/content/docs/current/security-model.mdx" 'VERSION=0.0.1'
+
+docs_meta_backup="${fixture}/docs/content/docs/current/meta.json.title-backup"
+cp "${fixture}/docs/content/docs/current/meta.json" "${docs_meta_backup}"
+sed -i.bak 's/"title": "v[0-9.]*"/"title": "v0.0"/' "${fixture}/docs/content/docs/current/meta.json"
+rm -f "${fixture}/docs/content/docs/current/meta.json.bak"
+expect_release_contract_failure \
+	"FAIL: docs/content/docs/current/meta.json title must be v" \
+	"the package release contract must reject a docs version title that does not match the release minor"
+mv "${docs_meta_backup}" "${fixture}/docs/content/docs/current/meta.json"
 
 gitleaksignore_backup="${fixture}/.gitleaksignore.backup"
 cp "${fixture}/.gitleaksignore" "${gitleaksignore_backup}"
@@ -414,6 +423,27 @@ expect_release_contract_failure \
 	"FAIL: stale references to v${previous_version} remain outside the changelog" \
 	"the package release contract must reject the 'since v<previous>' phrase outside README.md"
 mv "${releasing_since_backup}" "${fixture}/RELEASING.md"
+
+# Docs archives (docs/content/docs/vX.Y/) are frozen copies of older releases
+# and name old versions on purpose, so the stale-version grep skips them. The
+# same literal in current/ is still a forgotten bump and must still fail. The
+# files are staged because git grep only searches tracked paths.
+archive_stale_dir="${fixture}/docs/content/docs/v0.0"
+mkdir -p "${archive_stale_dir}"
+printf 'Installed with VERSION=%s in this release.\n' "${previous_version}" >"${archive_stale_dir}/index.mdx"
+git -C "${fixture}" add docs/content/docs/v0.0
+if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
+	echo "FAIL: a previous-version literal inside docs/content/docs/vX.Y/ must not fail the stale-version check" >&2
+	exit 1
+fi
+current_stale_file="${fixture}/docs/content/docs/current/stale-probe.mdx"
+cp "${archive_stale_dir}/index.mdx" "${current_stale_file}"
+git -C "${fixture}" add docs/content/docs/current/stale-probe.mdx
+expect_release_contract_failure \
+	"FAIL: stale references to v${previous_version} remain outside the changelog" \
+	"the package release contract must still reject a previous-version literal in docs/content/docs/current/"
+git -C "${fixture}" rm -rfq --cached docs/content/docs/v0.0 docs/content/docs/current/stale-probe.mdx
+rm -rf "${archive_stale_dir}" "${current_stale_file}"
 
 # The CHANGELOG-vs-tag guard only sees tags the checkout actually has, so
 # exercising it needs a real tag in the fixture repo. It guards against

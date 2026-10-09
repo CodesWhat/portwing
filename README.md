@@ -32,12 +32,12 @@
 <hr>
 
 > [!WARNING]
-> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.24`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.25`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <!-- separate alerts: a blank-line-only gap between blockquotes trips markdownlint MD028 -->
 
 > [!NOTE]
-> **v0.9.24 is the current release.** Exec sessions on the edge now end cleanly when one of their goroutines panics: a failed start gets an audit record, the session is closed, and the controller is told once. The comparison data and README were also corrected. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.25 is the current release.** It is built with Go 1.27.2, which fixes 13 standard-library advisories; ten of them were reachable from Portwing's code in the previous release, so upgrading is recommended. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 <h2 align="center">Contents</h2>
 
@@ -160,7 +160,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.24
+    image: ghcr.io/codeswhat/portwing:0.9.25
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -215,7 +215,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.24
+    image: ghcr.io/codeswhat/portwing:0.9.25
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -255,10 +255,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.9.24_linux_amd64.deb
+sudo apt install ./portwing_0.9.25_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.9.24_linux_amd64.rpm
+sudo rpm --install ./portwing_0.9.25_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -281,7 +281,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:0.9.24
+  ghcr.io/codeswhat/portwing:0.9.25
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,

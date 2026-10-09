@@ -3,7 +3,8 @@
 #
 # Pre-push pipeline (piped = sequential, fail-fast):
 #   1. Clean-tree check (no stray artifacts before push)
-#   2. Package release contract (docs/config agreement, sub-second)
+#   2. Package release contract (docs/config agreement, sub-second) and the
+#      docs archive contract
 #   3. GoReleaser snapshot dry-run (full release pipeline, skip publish)
 #   4. Pinned golangci-lint through the isolated CI adapter
 #   5. Qlty full-repository check
@@ -62,6 +63,15 @@ pre-push:
     release-contract:
       run: bash scripts/package-release-config-test.sh
       fail_text: "Package release contract broken — see the FAIL lines above"
+      priority: 1
+      timeout: 30s
+
+    # The docs archive contract: archives under docs/content/docs/vX.Y/ must be
+    # byte copies of the docs at their recorded release tag. Git plumbing and
+    # jq only, and a no-op check list while zero archives exist.
+    docs-archive-contract:
+      run: bash scripts/docs-archive-config-test.sh
+      fail_text: "Docs archive contract broken — see the FAIL lines above"
       priority: 1
       timeout: 30s
 

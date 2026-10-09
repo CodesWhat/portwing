@@ -40,7 +40,7 @@ printf 'not a real binary\n' >"${binary}"
 
 write_dockerfile() {
 	cat >"${fixture}/Dockerfile" <<DOCKERFILE
-FROM golang:1.27.1-alpine AS compose-builder
+FROM golang:1.27.2-alpine AS compose-builder
 # was: go get github.com/containerd/containerd/v2@v2.3.5
 RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \\
     && go get ${1} \\
@@ -50,7 +50,7 @@ DOCKERFILE
 
 write_build_info() {
 	printf '%s\n' \
-		"${binary}: go1.27.1" \
+		"${binary}: go1.27.2" \
 		$'\tpath\tgithub.com/docker/compose/v5/cmd' \
 		$'\tmod\tgithub.com/docker/compose/v5\t(devel)\t' \
 		$'\tdep\tgithub.com/containerd/errdefs\tv1.0.0\th1:abc=' \
@@ -125,7 +125,7 @@ expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
 
 # A commented-out pin is not a pin.
 cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
-FROM golang:1.27.1-alpine AS compose-builder
+FROM golang:1.27.2-alpine AS compose-builder
 # RUN go get github.com/containerd/containerd/v2@v2.3.6
 RUN go build ./cmd
 DOCKERFILE
@@ -134,7 +134,7 @@ expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
 
 # Nor is one that only appears in a trailing comment on a real instruction.
 cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
-FROM golang:1.27.1-alpine AS compose-builder
+FROM golang:1.27.2-alpine AS compose-builder
 RUN go build ./cmd # go get github.com/containerd/containerd/v2@v2.3.6
 DOCKERFILE
 expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
