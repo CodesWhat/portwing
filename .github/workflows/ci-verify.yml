@@ -427,6 +427,12 @@ jobs:
       - name: Verify the package release contract
         run: bash scripts/package-release-config-test.sh
 
+      # Archives under docs/content/docs/vX.Y/ must still be byte copies of the
+      # docs at their recorded release tag. Needs the full-depth checkout above
+      # for the tags; with no archives it only checks the rules that need none.
+      - name: Verify the docs archive contract
+        run: bash scripts/docs-archive-config-test.sh
+
       # Drives the Compose containerd check against a fake `go` on PATH and
       # canned build info, so it needs no toolchain and no network.
       - name: Verify the Compose containerd check
