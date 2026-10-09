@@ -16,7 +16,7 @@ Host metrics|Forwarded to Dockhand every 30 seconds in edge mode|Prometheus scra
 Request audit|Debug request logging|Structured audit records with cursor export|self
 Supply-chain evidence|Checksummed release assets|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
 MCP server (read-only)|Not documented|Yes|self
-License|MIT|AGPL-3.0|tie
+License|MIT|MIT|tie
 `,
   highlightsTable: `
 network|The Closest Scope Match|Hawser and Portwing are both small Go agents, transparent Docker proxies, Compose runners, metrics collectors, and outbound WebSocket clients. Neither product should pretend the topology itself is unique.

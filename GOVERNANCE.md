@@ -55,5 +55,5 @@ If one maintainer becomes unavailable, the remaining organization owner can
 revoke stale access, update role assignments, merge approved work, and publish
 a release within one week.
 
-Project forking remains available under AGPL-3.0, but it is not the primary
+Project forking remains available under the MIT license, but it is not the primary
 continuity plan.

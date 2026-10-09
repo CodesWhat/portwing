@@ -15,7 +15,7 @@ Prometheus metrics|Yes (opt-in, experimental)|Yes|tie
 MCP server (AI-native, read-only)|Not documented|Yes|self
 Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
-License|Apache-2.0|AGPL-3.0|tie
+License|Apache-2.0|MIT|tie
 `,
   highlightsTable: `
 key|Remote Auth (Ed25519)|Watchtower runs locally and has no remote access model. Portwing exposes the Docker API over authenticated HTTP, using Ed25519 per-request signing so each client has its own revocable key pair.

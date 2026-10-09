@@ -405,7 +405,7 @@ flowchart LR
 <tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
 <tr><td>Fleet UI and controller workflows</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">?</td></tr>
-<tr><td>License</td><td align="center">AGPL-3.0</td><td align="center">Zlib (agent) / proprietary Business features</td><td align="center">GPL-3.0</td><td align="center">BSD-3-Clause</td><td align="center">MIT</td></tr>
+<tr><td>License</td><td align="center">MIT</td><td align="center">Zlib (agent) / proprietary Business features</td><td align="center">GPL-3.0</td><td align="center">BSD-3-Clause</td><td align="center">MIT</td></tr>
 </tbody>
 </table>
 
@@ -431,7 +431,7 @@ flowchart LR
 <tr><td>Outbound edge / NAT tunnel</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Image update detection or auto-update</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Single lightweight Go binary</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
-<tr><td>License</td><td align="center">AGPL-3.0</td><td align="center">MIT</td><td align="center">Apache-2.0</td></tr>
+<tr><td>License</td><td align="center">MIT</td><td align="center">MIT</td><td align="center">Apache-2.0</td></tr>
 </tbody>
 </table>
 
@@ -525,7 +525,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the full compatibility matrix acros
 
 ---
 
-**[AGPL-3.0 License](LICENSE)**
+**[MIT License](LICENSE)**
 
 <a href="https://github.com/CodesWhat">
   <picture>

@@ -14,7 +14,7 @@ Prometheus metrics|Yes (opt-in)|Yes|tie
 MCP server (AI-native, read-only)|Not documented|Yes|self
 Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
 Single lightweight Go binary|Yes|Yes (~10 MB)|tie
-License|MIT|AGPL-3.0|tie
+License|MIT|MIT|tie
 `,
   highlightsTable: `
 key|Remote Auth (Ed25519)|Diun has no remote access model — it runs locally and pushes notifications outward. Portwing exposes the Docker API over authenticated HTTP with Ed25519 per-request signing so each client gets a revocable key pair.

@@ -31,7 +31,7 @@ export const SITE_CONFIG = {
   /** Whether the logo inverts in dark mode (adds `dark:invert`). */
   logoInvertOnDark: true,
   /** License link shown in the footer. */
-  licenseUrl: "https://www.gnu.org/licenses/agpl-3.0.html",
+  licenseUrl: "https://opensource.org/licenses/MIT",
   /** Aurora background palette — violet matches the pigeon's slate palette. */
   aurora: "violet" as AuroraPalette,
 } as const;
