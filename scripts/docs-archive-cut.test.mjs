@@ -48,8 +48,9 @@ function commit(root, message, tag) {
 
 // History: a flat-layout tag, v0.7.0, v0.8.0 and v0.8.1 (whose docs differ from
 // the working tree), then HEAD documenting v0.9 with a v0.9.0 tag.
-function fixture() {
+function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "docs-archive-cut-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   git(root, "init", "-q", "-b", "main");
   write(root, `${DOCS}/meta.json`, JSON.stringify({ pages: ["current"] }));
   write(root, `${DOCS}/index.mdx`, "flat layout\n");
@@ -83,8 +84,8 @@ function readJson(root, rel) {
   return JSON.parse(fs.readFileSync(path.join(root, rel), "utf8"));
 }
 
-test("cuts the archive from the tag, not the working tree", () => {
-  const root = fixture();
+test("cuts the archive from the tag, not the working tree", (t) => {
+  const root = fixture(t);
   const result = cut(root, "v0.8.1");
   assert.equal(result.status, 0, result.out);
 
@@ -119,8 +120,8 @@ test("cuts the archive from the tag, not the working tree", () => {
   );
 });
 
-test("lists archives newest line first, current first of all", () => {
-  const root = fixture();
+test("lists archives newest line first, current first of all", (t) => {
+  const root = fixture(t);
   assert.equal(cut(root, "v0.7.0").status, 0);
   assert.equal(cut(root, "v0.8.1").status, 0);
   assert.deepEqual(readJson(root, `${DOCS}/meta.json`).pages, ["current", "v0.8", "v0.7"]);
@@ -130,8 +131,8 @@ test("lists archives newest line first, current first of all", () => {
   ]);
 });
 
-test("refuses without changing anything", () => {
-  const root = fixture();
+test("refuses without changing anything", (t) => {
+  const root = fixture(t);
   const before = snapshot(root);
   const cases = [
     [["0.8.1"], "not a release tag"],
@@ -152,8 +153,8 @@ test("refuses without changing anything", () => {
   }
 });
 
-test("refuses to overwrite an existing archive or provenance entry", () => {
-  const root = fixture();
+test("refuses to overwrite an existing archive or provenance entry", (t) => {
+  const root = fixture(t);
   assert.equal(cut(root, "v0.8.1").status, 0);
   const before = snapshot(root);
   const again = cut(root, "v0.8.1");
@@ -165,4 +166,52 @@ test("refuses to overwrite an existing archive or provenance entry", () => {
   assert.notEqual(orphan.status, 0);
   assert.ok(orphan.out.includes("already has an entry"), orphan.out);
   assert.notEqual(before, "");
+});
+
+test("an invalid root meta.json leaves no archive and no provenance change", (t) => {
+  const root = fixture(t);
+  write(root, "docs/content/archive-provenance.json", "{}\n");
+  fs.writeFileSync(path.join(root, DOCS, "meta.json"), "{ not json");
+  const before = snapshot(root);
+  const provenanceBefore = fs.readFileSync(
+    path.join(root, "docs/content/archive-provenance.json"),
+    "utf8",
+  );
+
+  const failed = cut(root, "v0.8.1");
+  assert.notEqual(failed.status, 0);
+  assert.ok(failed.out.includes("meta.json"), failed.out);
+  assert.equal(fs.existsSync(path.join(root, DOCS, "v0.8")), false);
+  assert.equal(
+    fs.readFileSync(path.join(root, "docs/content/archive-provenance.json"), "utf8"),
+    provenanceBefore,
+  );
+  assert.equal(snapshot(root), before);
+
+  // Fixing the file makes the retry succeed instead of hitting "immutable".
+  write(root, `${DOCS}/meta.json`, JSON.stringify({ pages: ["current"] }));
+  const retry = cut(root, "v0.8.1");
+  assert.equal(retry.status, 0, retry.out);
+});
+
+test("a write that fails midway undoes what the run created", (t) => {
+  const root = fixture(t);
+  // A directory where the provenance file must go makes the second write fail
+  // after the archive has already been copied.
+  fs.mkdirSync(path.join(root, "docs/content/archive-provenance.json"), { recursive: true });
+  const failed = cut(root, "v0.8.1");
+  assert.notEqual(failed.status, 0);
+  assert.equal(fs.existsSync(path.join(root, DOCS, "v0.8")), false);
+  assert.deepEqual(readJson(root, `${DOCS}/meta.json`), { pages: ["current"] });
+});
+
+test("the replacement tag is the numerically newest patch", (t) => {
+  const root = fixture(t);
+  for (const name of ["v0.8.9", "v0.8.10"]) {
+    git(root, "commit", "-q", "--allow-empty", "-m", name);
+    git(root, "tag", name);
+  }
+  const result = cut(root, "v0.8.1");
+  assert.notEqual(result.status, 0);
+  assert.ok(result.out.includes("cut from v0.8.10 instead"), result.out);
 });

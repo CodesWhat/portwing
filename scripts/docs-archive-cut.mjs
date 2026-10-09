@@ -46,7 +46,19 @@ function parseArgs(argv) {
 }
 
 function readJson(file) {
-  return JSON.parse(fs.readFileSync(file, "utf8"));
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    fail(`cannot read ${file} as JSON: ${error.message}`);
+  }
+}
+
+function readJsonObject(file, label) {
+  const value = readJson(file);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    fail(`${label} must be a JSON object`);
+  }
+  return value;
 }
 
 function writeJson(file, value) {
@@ -85,7 +97,10 @@ function cut({ root, tag }) {
     .filter((name) => TAG.test(name))
     .filter((name) => Number(TAG.exec(name)[3]) > Number(patch));
   if (laterPatches.length > 0) {
-    fail(`${tag} is not the last tag of ${line}; cut from ${laterPatches.sort().at(-1)} instead`);
+    const newest = laterPatches
+      .sort((a, b) => Number(TAG.exec(a)[3]) - Number(TAG.exec(b)[3]))
+      .at(-1);
+    fail(`${tag} is not the last tag of ${line}; cut from ${newest} instead`);
   }
 
   const docsRoot = path.join(root, DOCS_DIR);
@@ -93,7 +108,10 @@ function cut({ root, tag }) {
   if (fs.existsSync(archiveDir))
     fail(`${DOCS_DIR}/${line}/ already exists; archives are immutable`);
 
-  const currentMeta = readJson(path.join(docsRoot, "current", "meta.json"));
+  const currentMeta = readJsonObject(
+    path.join(docsRoot, "current", "meta.json"),
+    "current/meta.json",
+  );
   if (!LINE.test(currentMeta.title ?? "")) {
     fail(
       `${DOCS_DIR}/current/meta.json title must be a line like v0.9, found ${currentMeta.title}`,
@@ -104,8 +122,25 @@ function cut({ root, tag }) {
   }
 
   const provenancePath = path.join(root, PROVENANCE);
-  const provenance = fs.existsSync(provenancePath) ? readJson(provenancePath) : {};
+  const provenanceBefore = fs.existsSync(provenancePath)
+    ? fs.readFileSync(provenancePath, "utf8")
+    : undefined;
+  const provenance =
+    provenanceBefore === undefined ? {} : readJsonObject(provenancePath, PROVENANCE);
   if (provenance[line]) fail(`${PROVENANCE} already has an entry for ${line}`);
+
+  // Every input is read and validated before the first write, so a bad file
+  // cannot leave a half-done cut that the retry then refuses as immutable.
+  const rootMetaPath = path.join(docsRoot, "meta.json");
+  const rootMetaBefore = fs.readFileSync(rootMetaPath, "utf8");
+  const rootMeta = readJsonObject(rootMetaPath, `${DOCS_DIR}/meta.json`);
+  const archives = [
+    ...fs
+      .readdirSync(docsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && LINE.test(entry.name))
+      .map((entry) => entry.name),
+    line,
+  ].sort(byLineDescending);
 
   // `current/` only exists in tags cut after docs moved under it. Older tags
   // have a flat docs/content/docs, which is not byte-identical to any archive
@@ -146,29 +181,40 @@ function cut({ root, tag }) {
       ).trim();
       if (written !== entry.sha) fail(`${entry.rel} did not copy byte-for-byte`);
     }
-    fs.cpSync(staging, archiveDir, { recursive: true, errorOnExist: true, force: false });
+    // Writes start here. If any step fails, undo only what this run did.
+    let createdArchive = false;
+    try {
+      fs.cpSync(staging, archiveDir, { recursive: true, errorOnExist: true, force: false });
+      createdArchive = true;
+
+      provenance[line] = {
+        sourceTag: tag,
+        sourceCommit: commit,
+        sourcePath: SOURCE_PATH,
+        sourceTree,
+      };
+      const sortedProvenance = Object.fromEntries(
+        Object.keys(provenance)
+          .sort(byLineDescending)
+          .map((key) => [key, provenance[key]]),
+      );
+      fs.mkdirSync(path.dirname(provenancePath), { recursive: true });
+      writeJson(provenancePath, sortedProvenance);
+
+      // current first, then archives newest first. Other keys in meta.json stay.
+      writeJson(rootMetaPath, { ...rootMeta, pages: ["current", ...archives] });
+    } catch (error) {
+      if (createdArchive || fs.existsSync(archiveDir)) {
+        fs.rmSync(archiveDir, { recursive: true, force: true });
+      }
+      if (provenanceBefore === undefined) fs.rmSync(provenancePath, { force: true });
+      else fs.writeFileSync(provenancePath, provenanceBefore);
+      fs.writeFileSync(rootMetaPath, rootMetaBefore);
+      throw error;
+    }
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }
-
-  provenance[line] = { sourceTag: tag, sourceCommit: commit, sourcePath: SOURCE_PATH, sourceTree };
-  const sortedProvenance = Object.fromEntries(
-    Object.keys(provenance)
-      .sort(byLineDescending)
-      .map((key) => [key, provenance[key]]),
-  );
-  fs.mkdirSync(path.dirname(provenancePath), { recursive: true });
-  writeJson(provenancePath, sortedProvenance);
-
-  // current first, then archives newest first. Other keys in meta.json stay.
-  const rootMetaPath = path.join(docsRoot, "meta.json");
-  const rootMeta = readJson(rootMetaPath);
-  const archives = fs
-    .readdirSync(docsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && LINE.test(entry.name))
-    .map((entry) => entry.name)
-    .sort(byLineDescending);
-  writeJson(rootMetaPath, { ...rootMeta, pages: ["current", ...archives] });
 
   return { line, commit, sourceTree, files: entries.length };
 }

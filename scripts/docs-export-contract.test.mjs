@@ -3,14 +3,20 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 
 const SCRIPT = path.resolve(import.meta.dirname, "docs-export-contract.mjs");
 
 // The contract finds the repo root from its own location, so a copy placed in a
 // temp tree checks that tree instead of the real one.
+const made = [];
+after(() => {
+  for (const root of made) fs.rmSync(root, { recursive: true, force: true });
+});
+
 function tree({ content, out }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "docs-export-contract-test-"));
+  made.push(root);
   fs.mkdirSync(path.join(root, "scripts"));
   fs.copyFileSync(SCRIPT, path.join(root, "scripts", "docs-export-contract.mjs"));
   for (const file of content) touch(root, `docs/content/docs/${file}`);
