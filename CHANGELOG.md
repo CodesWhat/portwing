@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The example Compose and Kubernetes files now pin the release version of the
+  Portwing image instead of `latest`.
+
 ## [v0.9.25] - 2026-10-09
 
 ### Security
