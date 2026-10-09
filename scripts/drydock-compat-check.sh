@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # drydock-compat-check.sh — Drydock compatibility smoke test for Portwing
 #
 # Usage:

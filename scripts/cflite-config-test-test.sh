@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Self-tests for scripts/cflite-config-test.sh.
 #
 # Each case mutates a copy of a real file in exactly one way and asserts the

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Functional test for scripts/ci/quality-history-append.sh and
 # scripts/quality-history.sh, run against a throwaway bare repository.

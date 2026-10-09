@@ -58,7 +58,10 @@ function assertRootWebLane(source) {
 
 test("CI has one fail-closed root web lane", () => {
   assertRootWebLane(workflow);
-  assert.match(nodeAdapter, /^#!\/usr\/bin\/env bash\nset -euo pipefail\n/u);
+  assert.match(
+    nodeAdapter,
+    /^#!\/usr\/bin\/env bash\n# SPDX-License-Identifier: MIT\nset -euo pipefail\n/u,
+  );
   assert.match(nodeAdapter, /^npm ci$/mu);
   assert.match(nodeAdapter, /^npm run check:web$/mu);
 });

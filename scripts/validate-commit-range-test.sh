@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"

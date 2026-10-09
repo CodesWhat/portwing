@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # PW-2.5. Compare the two most recent `mutation-survivors` quality-history
 # records and report, per (package, source), which mutant identities were

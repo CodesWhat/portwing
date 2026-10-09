@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Walk a list of baseline candidates, newest first, and gate this run's

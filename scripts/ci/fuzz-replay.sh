@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Seed-replay tier (PW-7.37): runs a fuzz target's committed seed corpus plus

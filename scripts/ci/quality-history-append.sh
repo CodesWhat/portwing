@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Append one scheduled quality lane's headline numbers to the repository's
 # `quality-history` orphan branch.

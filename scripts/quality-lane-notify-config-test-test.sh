@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/portwing-quality-lane-notify.XXXXXX")"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Contract for .github/workflows/starchart.yml (PW-3.5).

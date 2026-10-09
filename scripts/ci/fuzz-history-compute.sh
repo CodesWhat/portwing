@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Compute quality-fuzz-nightly.yml's per-run quality-history records from the
 # downloaded per-target fuzz-score-*.json artifacts (Spec 2 — Fuzz score):

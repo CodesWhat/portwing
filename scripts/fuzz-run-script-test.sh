@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Exercises scripts/ci/fuzz-run.sh (PW-5.10) directly, against a fake `go` on

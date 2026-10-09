@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Read the quality-lane trend series that scripts/ci/quality-history-append.sh
 # writes to the `quality-history` orphan branch.

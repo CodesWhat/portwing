@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Behavioural test for the mutation lane's quality-history record step.
 #

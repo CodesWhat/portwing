@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # PW-2.5. Build the `mutation-survivors` quality-history record for one
 # mutation-testing run: a stable identity for every LIVED/NOT COVERED mutant

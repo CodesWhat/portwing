@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Exercises scripts/ci/fuzz-replay.sh directly, against a throwaway Go module

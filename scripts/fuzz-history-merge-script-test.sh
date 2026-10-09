@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Functional test for scripts/ci/fuzz-history-compute.sh, run the same way
 # quality-fuzz-nightly.yml's `history` job does: the compute script prints

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Enforce the per-package mutation floors that Gremlins itself cannot.
 #
