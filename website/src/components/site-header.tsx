@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import Image from "next/image";
 import Link from "next/link";
 import { GithubIcon } from "@/components/github-icon";

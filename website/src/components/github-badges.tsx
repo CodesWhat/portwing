@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { GHCR_PACKAGE_URL, GITHUB_URL, REPO_SLUG, SITE_CONFIG } from "@/lib/site-config";
 
 // Portwing quality + distribution badges.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { SVGProps } from "react";
 
 export function DiscordIcon(props: SVGProps<SVGSVGElement>) {

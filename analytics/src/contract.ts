@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { BeforeSendFn, CaptureResult } from "posthog-js";
 
 export const POSTHOG_PROXY_HOST = "https://e.codeswhat.com";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 export const faqItems: Array<{ question: string; answer: string }> = [
   {
     question: "What is Portwing and how does it relate to Drydock?",

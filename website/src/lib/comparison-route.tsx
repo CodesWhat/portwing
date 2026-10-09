@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { Check, type LucideIcon } from "lucide-react";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";

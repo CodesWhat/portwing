@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { LucideIcon } from "lucide-react";
 import { AlertTriangle, Check, Clock, Minus, Terminal, X } from "lucide-react";
 import { CtaButtons } from "@/components/cta-buttons";

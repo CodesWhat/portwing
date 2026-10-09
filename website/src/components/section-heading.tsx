@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { ReactNode } from "react";
 
 type Align = "left" | "right";

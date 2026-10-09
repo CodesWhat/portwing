@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { Terminal } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { SITE_CONFIG } from "@/lib/site-config";

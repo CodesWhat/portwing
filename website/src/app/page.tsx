@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { Metadata } from "next";
 import { CliDemo } from "@/components/cli-demo";
 import { CompareSection } from "@/components/compare-section";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { Activity, Bot, Gauge, KeyRound, Network, ShieldCheck } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 import { SITE_CONFIG } from "@/lib/site-config";

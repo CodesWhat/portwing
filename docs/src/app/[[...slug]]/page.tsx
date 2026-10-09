@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { Callout } from "fumadocs-ui/components/callout";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/page";

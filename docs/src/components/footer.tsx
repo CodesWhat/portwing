@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { CtaId } from "@codeswhat/public-analytics";
 import { ArrowUpRight, BookOpen } from "lucide-react";
 import Image from "next/image";

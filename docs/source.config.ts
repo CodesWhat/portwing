@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { defineConfig, defineDocs } from "fumadocs-mdx/config";
 import { remarkVersionedLinks } from "./src/lib/remark-versioned-links.ts";
 
