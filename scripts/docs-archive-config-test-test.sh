@@ -107,6 +107,16 @@ expect_failure "the previous release v0.8.1 is on v0.8 but current/ documents v0
 write_changelog v0.9.1 v0.9.0
 commit_all "same-line changelog"
 expect_pass "zero archives with the previous release on the current line must pass"
+
+# Today's shape: the line current/ left predates the current/ layout (its last
+# tag holds a flat docs tree), so it cannot be archived and must not be demanded.
+flat_tree="$(fx hash-object -w -t tree /dev/null)"
+flat_commit="$(fx commit-tree "${flat_tree}" -m "flat layout, before current/")"
+fx tag v0.7.0 "${flat_commit}"
+write_changelog v0.9.1 v0.7.0
+commit_all "previous line predates the current/ layout"
+expect_pass "a left-behind line whose last tag has no current/ cannot be archived and must pass"
+fx tag -d v0.7.0 >/dev/null
 fx reset -q --hard "${no_archive_commit}"
 
 # --- the valid archive -------------------------------------------------------
@@ -244,6 +254,40 @@ commit_all "archive removed after the line moved on"
 expect_failure "the previous release v0.8.1 is on v0.8 but current/ documents v0.9" \
 	"removing the archive of the line the changelog just left must fail"
 reset_to_valid
+
+# At v1.0.1 the previous *heading* is v1.0.0 on the current line, so only the
+# CHANGELOG walk to the newest older line (v0.9) can notice the v0.9 archive was
+# deleted. Build the valid state first so the failure can only come from the
+# deletion.
+write_file "${docs}/current/index.mdx" 'nine index, final'
+write_changelog v0.9.1 v0.9.0
+commit_all "v0.9.1 docs"
+fx tag v0.9.1
+v091_commit="$(fx rev-parse v0.9.1)"
+v091_tree="$(fx rev-parse "v0.9.1:${docs}/current")"
+mkdir -p "${fixture}/${docs}/v0.9"
+fx archive v0.9.1 "${docs}/current" | tar -x -C "${fixture}/${docs}/v0.9" --strip-components=4
+jq --arg c "${v091_commit}" --arg t "${v091_tree}" --arg p "${docs}/current" \
+	'. + {"v0.9":{"sourceTag":"v0.9.1","sourceCommit":$c,"sourcePath":$p,"sourceTree":$t}}' \
+	"${fixture}/${provenance}" >"${fixture}/p.tmp"
+mv "${fixture}/p.tmp" "${fixture}/${provenance}"
+write_file "${docs}/meta.json" '{"pages":["current","v0.9","v0.8"]}'
+write_file "${docs}/current/meta.json" '{"title":"v1.0","root":true}'
+write_file "${docs}/current/index.mdx" 'ten index'
+printf '# Changelog\n\n## [v1.0.1] - 2026-10-10\n\n- a\n\n## [v1.0.0] - 2026-10-09\n\n- b\n\n## [v0.9.1] - 2026-10-08\n\n- c\n' >"${fixture}/CHANGELOG.md"
+commit_all "v1.0 current with the v0.9 archive"
+expect_pass "v1.0.1 with the v0.9 archive present must pass"
+
+fx rm -rq "${docs}/v0.9"
+jq 'del(.["v0.9"])' "${fixture}/${provenance}" >"${fixture}/p.tmp"
+mv "${fixture}/p.tmp" "${fixture}/${provenance}"
+write_file "${docs}/meta.json" '{"pages":["current","v0.8"]}'
+commit_all "v0.9 archive removed at v1.0.1"
+expect_failure "the previous release v0.9.1 is on v0.9 but current/ documents v1.0" \
+	"deleting the archive of the line before the current one must fail even when the previous heading is on the current line"
+fx reset -q --hard "${valid_commit}"
+fx clean -fdq
+fx tag -d v0.9.1 >/dev/null
 
 # --- provenance file ---------------------------------------------------------
 fx rm -q "${provenance}"

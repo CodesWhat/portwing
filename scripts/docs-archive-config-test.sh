@@ -154,19 +154,53 @@ for name in ${provenance_lines}; do
 done
 
 # (f) Once the line has moved on, the line it left must already be archived.
-# Read from the CHANGELOG's two newest dated headings, the same pair the
-# package release contract treats as the current and previous release.
-previous_heading="$(grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md |
-	sed -n '2p' || true)"
-if [ -z "${previous_heading}" ]; then
+# "The line it left" is the newest line in the CHANGELOG that is numerically
+# older than current/'s, found by walking release headings (newest first) past
+# every patch release on current's own line. Looking only at the previous
+# heading would let v1.0.1 (previous release v1.0.0, same line) drop the v0.9
+# archive unnoticed.
+#
+# Floor: docs/content/docs/current/ did not exist before the docs archive work,
+# and the cut script refuses tags without it. A line whose last tag lacks that
+# path can never be archived, so the rule does not ask for one. Today
+# (current = v0.9) the line it left is v0.8, which predates that layout.
+line_key() {
+	local major="${1#v}"
+	major="${major%%.*}"
+	local minor="${1##*.}"
+	echo $((10#${major} * 100000 + 10#${minor}))
+}
+
+release_versions="$(grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md |
+	sed -E 's/^## \[(v[0-9]+\.[0-9]+\.[0-9]+)\].*/\1/' || true)"
+if [ -z "${release_versions}" ]; then
 	fail "could not read the previous release from CHANGELOG.md"
 elif [ -n "${current_line}" ]; then
-	previous_version="$(sed -E 's/^## \[(v[0-9]+\.[0-9]+\.[0-9]+)\].*/\1/' <<<"${previous_heading}")"
-	previous_line="${previous_version%.*}"
-	if [ "${previous_line}" != "${current_line}" ]; then
+	current_key="$(line_key "${current_line}")"
+	previous_version=""
+	previous_line=""
+	for version in ${release_versions}; do
+		if [ "$(line_key "${version%.*}")" -lt "${current_key}" ]; then
+			previous_version="${version}"
+			previous_line="${version%.*}"
+			break
+		fi
+	done
+	if [ -n "${previous_line}" ]; then
 		case " ${archive_dirs} " in
 		*" ${previous_line} "*) ;;
-		*) fail "the previous release ${previous_version} is on ${previous_line} but current/ documents ${current_line}; archive ${previous_line} from its last tag with npm run docs:archive" ;;
+		*)
+			previous_last_tag="$(git tag -l "${previous_line}.*" | grep -E "${tag_regex}" | sort -t. -k3,3n | tail -n 1 || true)"
+			if [ -z "${previous_last_tag}" ]; then
+				if [ "${shallow}" = "true" ]; then
+					echo "SKIP: shallow checkout lacks the ${previous_line} tags, so the archive-required check did not run here" >&2
+				else
+					fail "the previous release ${previous_version} is on ${previous_line} but no ${previous_line}.* tag exists to archive from"
+				fi
+			elif git rev-parse --verify --quiet "${previous_last_tag}:${docs_root}/current" >/dev/null; then
+				fail "the previous release ${previous_version} is on ${previous_line} but current/ documents ${current_line}; archive ${previous_line} from its last tag with npm run docs:archive"
+			fi
+			;;
 		esac
 	fi
 fi
