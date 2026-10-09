@@ -4,7 +4,7 @@
 # (Release images are built by GoReleaser via the unified Dockerfile.release.)
 
 # Stage 1: Build the binary from source.
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS builder
 RUN apk add --no-cache git
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -13,7 +13,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwing
 
 # Compose v5.5.1 with the containerd security patch, isolated from Portwing modules.
-FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS compose-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS compose-builder
 ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee621025f2 https://github.com/docker/compose/archive/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de.tar.gz /tmp/compose.tar.gz
 WORKDIR /compose
 RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \
