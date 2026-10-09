@@ -53,6 +53,50 @@ test("static output paths map to clean public routes", () => {
   assert.equal(routeForOutputPath("out/docs/security-model.html"), "/docs/security-model");
 });
 
+test("archived docs keep their dotted version segment in the public route", () => {
+  // An archive's index exports as docs/v1.0.html, a sibling of its docs/v1.0/ pages.
+  assert.equal(routeForOutputPath("out/docs/v1.0.html"), "/docs/v1.0");
+  assert.equal(
+    routeForOutputPath("out/docs/v1.0/authentication.html"),
+    "/docs/v1.0/authentication",
+  );
+});
+
+test("build output serves archived docs at their dotted routes with per-page CSP", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-bop-archive-"));
+  const source = path.join(root, "source");
+  const target = path.join(root, ".vercel", "output");
+  try {
+    fs.mkdirSync(path.join(source, "docs", "v1.0"), { recursive: true });
+    fs.writeFileSync(path.join(source, "docs", "v1.0.html"), "<script>archiveIndex()</script>");
+    fs.writeFileSync(
+      path.join(source, "docs", "v1.0", "auth.html"),
+      "<script>archiveAuth()</script>",
+    );
+
+    generateBuildOutput(source, target);
+
+    const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
+    assert.deepEqual(config.overrides["docs/v1.0.html"], { path: "docs/v1.0" });
+    assert.deepEqual(config.overrides["docs/v1.0/auth.html"], { path: "docs/v1.0/auth" });
+
+    const indexRoute = config.routes.find((route) => route.src === "^/docs/v1\\.0/?$");
+    const authRoute = config.routes.find((route) => route.src === "^/docs/v1\\.0/auth/?$");
+    assert.ok(indexRoute, "the archive index needs its own route");
+    assert.ok(authRoute, "an archive page needs its own route");
+    assert.match(indexRoute.headers["Content-Security-Policy"], /script-src[^;]*'sha256-/);
+    assert.notEqual(
+      indexRoute.headers["Content-Security-Policy"],
+      authRoute.headers["Content-Security-Policy"],
+    );
+    // The dot is escaped, so the route cannot match some other path with any character there.
+    assert.equal(new RegExp(indexRoute.src).test("/docs/v1x0"), false);
+    assert.equal(new RegExp(indexRoute.src).test("/docs/v1.0"), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CSP permits only image origins present in the rendered page", () => {
   const headers = headersForHTML(
     '<img src="https://pkg.go.dev/badge.svg"><a href="https://unrelated.example">link</a>',

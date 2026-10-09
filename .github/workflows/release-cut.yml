@@ -221,6 +221,11 @@ jobs:
       - name: Verify the package release contract against the tag
         run: bash scripts/package-release-config-test.sh
 
+      # A cut that moves current/ to a new line must already carry the archive
+      # of the line it leaves, built from that line's last tag.
+      - name: Verify the docs archive contract against the tag
+        run: bash scripts/docs-archive-config-test.sh
+
       - name: Create and push release tag
         env:
           RELEASE_TAG: ${{ steps.next.outputs.release_tag }}

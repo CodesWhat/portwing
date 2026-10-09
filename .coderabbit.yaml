@@ -89,6 +89,10 @@ reviews:
     - "!website/public/**"
     - "!docs/public/**"
     - "!CHANGELOG.md"
+    # Docs archives are frozen copies of older releases, held to their release
+    # tag by scripts/docs-archive-config-test.sh. Review the provenance file
+    # (docs/content/archive-provenance.json) and that contract, not the copy.
+    - "!docs/content/docs/v*/**"
 
   path_instructions:
     - path: "internal/auth/**"

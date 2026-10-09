@@ -14,6 +14,7 @@
     "format": "biome format --write .",
     "test:web": "node --test analytics/src/contract.test.ts scripts/*.test.mjs && npm --workspace website run test:headers",
     "knip": "knip",
+    "docs:archive": "node scripts/docs-archive-cut.mjs",
     "docs:export-contract": "node scripts/docs-export-contract.mjs",
     "budget:web": "node scripts/page-weight-budget.mjs",
     "lighthouse:marketing": "node scripts/lighthouse-budget.mjs lighthouse/marketing.cjs",
@@ -26,7 +27,11 @@
     "chrome-launcher": "1.2.2",
     "knip": "6.39.0",
     "lighthouse": "13.5.0",
-    "turbo": "2.11.6"
+    "remark-mdx": "3.1.1",
+    "remark-parse": "11.0.0",
+    "remark-stringify": "11.0.0",
+    "turbo": "2.11.6",
+    "unified": "11.0.5"
   },
   "overrides": {
     "postcss": "^8.5.28",

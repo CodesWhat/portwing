@@ -85,27 +85,91 @@ test("the analytics docs allowlist is exactly the current docs pages", () => {
   assert.deepEqual(listed, expected);
 });
 
-test("root-relative links resolve to a page in the same version dir", () => {
-  const dead = [];
+// Source of one page with fenced and inline code removed, so examples that
+// show a link do not count as one.
+function proseOf(file) {
+  return fs
+    .readFileSync(file, "utf8")
+    .replace(/```[\s\S]*?```/gu, "")
+    .replace(/`[^`\n]*`/gu, "");
+}
+
+function allPages() {
+  const pages = [];
   for (const dir of versionDirs()) {
-    const slugs = new Set(pageSlugs(dir));
-    // current serves at the docs root; an archived vX.Y serves under /vX.Y.
-    const prefix = dir === "current" ? "/" : `/${dir}/`;
-    for (const slug of slugs) {
+    for (const slug of pageSlugs(dir)) {
+      for (const extension of ["mdx", "md"]) {
+        const file = path.join(DOCS_ROOT, dir, `${slug}.${extension}`);
+        if (fs.existsSync(file)) pages.push({ label: `${dir}/${slug}`, file });
+      }
+    }
+  }
+  return pages;
+}
+
+test("root-relative links resolve to a page in the version they name or sit in", () => {
+  // Archived pages keep the unscoped links they had at their release tag;
+  // docs/src/lib/remark-versioned-links.ts rewrites them to /vX.Y/... at build.
+  // So an unversioned link is checked against its own dir's page set. A link
+  // that names another version on purpose (/v0.8/x inside v0.9/) is checked
+  // against that version's page set, and fails if that archive does not exist.
+  const dirs = new Set(versionDirs());
+  const sets = new Map();
+  const setFor = (dir) => {
+    if (!sets.has(dir)) sets.set(dir, new Set(pageSlugs(dir)));
+    return sets.get(dir);
+  };
+  const dead = [];
+  for (const dir of dirs) {
+    for (const slug of setFor(dir)) {
       const file = path.join(DOCS_ROOT, dir, `${slug}.mdx`);
       const source = (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "").replace(
         /```[\s\S]*?```/gu,
         "",
       );
       for (const match of source.matchAll(/\]\((\/[^)\s]*)\)/gu)) {
-        const [target] = match[1].split("#");
-        const relative = target.startsWith(prefix) ? target.slice(prefix.length) : null;
-        const resolved = relative === null ? null : relative.replace(/\/$/u, "") || "index";
-        if (resolved === null || !slugs.has(resolved)) {
+        const [target] = match[1].split(/[?#]/u);
+        let resolvedDir = dir;
+        let relative = target.slice(1);
+        const named = /^(v\d+\.\d+)(?:\/|$)/u.exec(relative);
+        if (named) {
+          resolvedDir = named[1];
+          relative = relative.slice(named[0].length);
+          if (!dirs.has(resolvedDir)) {
+            dead.push(
+              `${dir}/${slug}: ${match[1]} (no ${resolvedDir}/ archive exists to link into)`,
+            );
+            continue;
+          }
+        }
+        const resolved = relative.replace(/\/$/u, "") || "index";
+        if (!setFor(resolvedDir).has(resolved)) {
           dead.push(`${dir}/${slug}: ${match[1]}`);
         }
       }
     }
   }
   assert.deepEqual(dead, []);
+});
+
+test("no page uses a raw <a> with a root-relative href", () => {
+  // A native <a> gets no basePath from Next, so /authentication points at the
+  // site root, not /docs/authentication, and the archive link scoping skips
+  // native anchors. Use a markdown link: [text](/page).
+  const raw = /<a\b[^>]*\bhref\s*=\s*(?:\{\s*)?["'`]\//u;
+  const found = allPages()
+    .filter(({ file }) => raw.test(proseOf(file)))
+    .map(({ label }) => label);
+  assert.deepEqual(found, [], "use a markdown link instead of a raw <a href='/...'>");
+});
+
+test("no page links to /docs/... directly", () => {
+  // Next adds the /docs basePath to a root-relative link, so /docs/x becomes
+  // /docs/docs/x. Archive scoping also leaves /docs/... untouched. Write the
+  // target without the prefix: [text](/page).
+  const prefixed = /(?:\]\(|\bhref\s*=\s*(?:\{\s*)?["'`])\/docs(?=[/#?)"'`\s]|$)/u;
+  const found = allPages()
+    .filter(({ file }) => prefixed.test(proseOf(file)))
+    .map(({ label }) => label);
+  assert.deepEqual(found, [], "drop the /docs prefix from root-relative links");
 });

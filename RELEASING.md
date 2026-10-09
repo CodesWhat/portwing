@@ -43,7 +43,7 @@
 
 6. **No source version bump needed** — the binary's version is injected at build time via GoReleaser ldflags (`-X github.com/codeswhat/portwing/internal/protocol.AgentVersion={{.Version}}`). `AgentVersion` in `internal/protocol/version.go` must stay a `var`: `-X` silently does nothing to a `const`.
 
-7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → release contract (`scripts/package-release-config-test.sh`) → goreleaser snapshot → lint → Qlty → test (-race) → govulncheck → fuzz smoke → actionlint → zizmor → web (`npm run check:web`). The push is blocked if any step fails.
+7. **Lefthook pre-push** — runs automatically on `git push`. Sequence: clean-tree → release contract (`scripts/package-release-config-test.sh`) and docs archive contract (`scripts/docs-archive-config-test.sh`) → goreleaser snapshot → lint → Qlty → test (-race) → govulncheck → fuzz smoke → actionlint → zizmor → web (`npm run check:web`). The push is blocked if any step fails.
 
 ---
 
@@ -86,6 +86,36 @@ sit at "Expected" forever. So the order is:
 
 Read the effective ruleset back afterward rather than trusting the PATCH's
 200. The script prints it.
+
+## Cutting a docs archive
+
+Do this in the prep PR for a new minor or major line (v0.9 to v1.0, say),
+never for a patch. The old line's docs get frozen as `docs/content/docs/vX.Y/`
+and `current/` moves on to the new line. Layout and rules:
+`docs/content/README.md`.
+
+1. Make sure the old line is finished. The archive comes from its **last** tag,
+   so the final patch has to be tagged and fetched (`git fetch --tags`).
+2. Retitle `docs/content/docs/current/meta.json` to the new line. The cut
+   refuses to archive the line `current/` still names.
+3. Cut it from that tag:
+
+   ```sh
+   npm run docs:archive -- vX.Y.Z   # the old line's last tag
+   ```
+
+   This reads `docs/content/docs/current` from the tag with git (never your
+   working tree), writes `docs/content/docs/vX.Y/`, adds the entry to
+   `docs/content/archive-provenance.json`, and lists `vX.Y` in
+   `docs/content/docs/meta.json` after `current`.
+4. Run `bash scripts/docs-archive-config-test.sh` after committing the new
+   directory and the provenance entry together. The same contract runs in
+   `Release Contract`, `release-cut`, and pre-push; once the changelog's
+   previous release is on an older line than `current/`, it fails until that
+   line's archive exists.
+
+Never edit a file under an archived `vX.Y/`. A correction goes in `current/`;
+an archive that no longer matches its tag fails the contract.
 
 ## Cutting the tag
 
