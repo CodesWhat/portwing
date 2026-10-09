@@ -6,7 +6,7 @@ This directory is not part of the docs site. Fumadocs ingests everything under
 
 ## Versions
 
-```
+```text
 docs/content/docs/
   meta.json            lists the version roots: current first, then archives newest first
   current/             the live docs, served at /docs/<page>
