@@ -150,6 +150,9 @@ export function isChromeConnectionError(error) {
       /unable to connect to chrome/i.test(message) ||
       /failed to fetch browser websocket url/i.test(message) ||
       /chrome (has crashed|failed to launch|connection)/i.test(message) ||
+      // chrome-launcher's launch timeout: Chrome started and never wrote its
+      // DevTools port to chrome-err.log.
+      /waiting for dynamic debugging port/i.test(message) ||
       /(target|session) closed/i.test(message)
     ) {
       return true;
