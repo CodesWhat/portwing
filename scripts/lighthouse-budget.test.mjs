@@ -121,6 +121,9 @@ test("isChromeConnectionError matches Chrome/connection failures and not budget 
   assert.ok(isChromeConnectionError(new Error("read ECONNRESET")));
   assert.ok(isChromeConnectionError(new Error("socket hang up")));
   assert.ok(
+    isChromeConnectionError(new Error("waiting for dynamic debugging port in chrome-err.log")),
+  );
+  assert.ok(
     !isChromeConnectionError(new Error("marketing performance budget exceeded: 0.5 < 0.66")),
   );
   assert.ok(!isChromeConnectionError(new Error("Lighthouse runtime error: NO_FCP")));
