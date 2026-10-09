@@ -14,6 +14,7 @@
     "format": "biome format --write .",
     "test:web": "node --test analytics/src/contract.test.ts scripts/*.test.mjs && npm --workspace website run test:headers",
     "knip": "knip",
+    "docs:archive": "node scripts/docs-archive-cut.mjs",
     "docs:export-contract": "node scripts/docs-export-contract.mjs",
     "budget:web": "node scripts/page-weight-budget.mjs",
     "lighthouse:marketing": "node scripts/lighthouse-budget.mjs lighthouse/marketing.cjs",
