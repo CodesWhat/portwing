@@ -497,6 +497,17 @@ expect_release_contract_failure \
 git -C "${fixture}" tag -d v0.0.2 >/dev/null
 mv "${changelog_decoy_backup}" "${fixture}/CHANGELOG.md"
 
+# The MIT license text is pinned by hash and must carry the project copyright
+# line; a retired AGPL text or an edited copyright line must both fail.
+cp LICENSE "${fixture}/LICENSE"
+printf '\nGNU AFFERO GENERAL PUBLIC LICENSE\n' >>"${fixture}/LICENSE"
+expect_release_contract_failure "LICENSE must not carry the retired AGPL-3.0 text" "A LICENSE carrying the retired AGPL-3.0 text must fail"
+cp LICENSE "${fixture}/LICENSE"
+sed -i.bak 's/Copyright (c) 2026 CodesWhat/Copyright (c) 2026 Someone Else/' "${fixture}/LICENSE"
+expect_release_contract_failure "LICENSE must carry the project copyright line" "A LICENSE without the project copyright line must fail"
+cp LICENSE "${fixture}/LICENSE"
+rm -f "${fixture}/LICENSE.bak"
+
 for recipe in Dockerfile.armv7 Dockerfile.release; do
 	cp "${recipe}" "${fixture}/${recipe}"
 	sed -i.bak 's/--checksum=sha256:[0-9a-f]*/--checksum=sha256:short/' "${fixture}/${recipe}"

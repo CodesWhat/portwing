@@ -832,14 +832,14 @@ if cmp -s docs/assets/star-history.svg docs/assets/star-history-dark.svg; then
 fi
 
 require_file "docs/content/docs/current/installation.mdx" "the documentation site must include native installation guidance"
-require_file "NOTICE" "project identity and copyright must live outside the standard license text"
-require_first_line "LICENSE" "                    GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must begin with the canonical AGPL-3.0 text"
-require_sha256 "LICENSE" "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef" "LICENSE must match GitHub's canonical AGPL-3.0 template byte for byte"
-reject_text "LICENSE" "Portwing - Lightweight Remote Docker Agent" "LICENSE must not carry a project-specific preamble"
-reject_text "LICENSE" "Copyright (C) 2026 CodesWhat" "LICENSE must not carry a project-specific copyright preamble"
+require_file "NOTICE" "project identity must live outside the standard license text"
+require_first_line "LICENSE" "MIT License" "LICENSE must begin with the standard MIT text"
+require_text "LICENSE" "Copyright (c) 2026 CodesWhat" "LICENSE must carry the project copyright line"
+require_sha256 "LICENSE" "6b374071d23cf6dd8f5272eba9afdec6271b1cf39f36dd23315426e07a73cf9c" "LICENSE must match the standard MIT text with the project copyright line byte for byte"
+reject_text "LICENSE" "GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must not carry the retired AGPL-3.0 text"
 if [ -f "NOTICE" ]; then
 	require_text "NOTICE" "Portwing - Lightweight Remote Docker Agent" "NOTICE must preserve the project identity"
-	require_text "NOTICE" "Copyright (C) 2026 CodesWhat" "NOTICE must preserve the project copyright"
+	require_text "NOTICE" "Copyright (c) 2026 CodesWhat" "NOTICE must preserve the project copyright"
 fi
 if [ -f "docs/content/docs/current/installation.mdx" ]; then
 	require_text "docs/content/docs/current/installation.mdx" "brew install --cask codeswhat/tap/portwing" "Homebrew installation must be documented"
