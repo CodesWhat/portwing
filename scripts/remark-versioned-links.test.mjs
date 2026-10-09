@@ -92,6 +92,53 @@ test("links in an archived page are scoped to its version", () => {
   assert.match(out, /`\[inline\]\(\/authentication\)`/u);
 });
 
+test("native <a> elements and basePath-prefixed targets are left alone", () => {
+  const file = "/repo/docs/content/docs/v0.9/x.mdx";
+  const out = run(
+    ['<a href="/authentication">raw</a>', "", "[doc](/docs/authentication) [root](/docs)", ""].join(
+      "\n",
+    ),
+    file,
+  );
+  assert.match(out, /<a href="\/authentication">raw<\/a>/u);
+  assert.match(out, /\]\(\/docs\/authentication\)/u);
+  assert.match(out, /\]\(\/docs\)/u);
+  assert.equal(scopeLink("/docs", "v0.9"), "/docs");
+  assert.equal(scopeLink("/docs/authentication#x", "v0.9"), "/docs/authentication#x");
+  assert.equal(scopeLink("/docsify", "v0.9"), "/v0.9/docsify");
+});
+
+test("expression href attributes are scoped only when statically a string", () => {
+  const file = "/repo/docs/content/docs/v0.9/x.mdx";
+  const out = run(
+    [
+      '<Card href={"/authentication"} />',
+      "",
+      "<Card href={'/configuration'} />",
+      "",
+      "<Card href={`/security-model#a`} />",
+      "",
+      "<Card href={base + '/authentication'} />",
+      "",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: MDX source, not a JS template
+      "<Card href={`/${slug}`} />",
+      "",
+      "<Card href={link} />",
+      "",
+      '<Card href={"https://example.com/x"} />',
+      "",
+    ].join("\n"),
+    file,
+  );
+  assert.match(out, /href=\{"\/v0\.9\/authentication"\}/u);
+  assert.match(out, /href=\{"\/v0\.9\/configuration"\}/u);
+  assert.match(out, /href=\{`\/v0\.9\/security-model#a`\}/u);
+  assert.match(out, /href=\{base \+ '\/authentication'\}/u);
+  assert.match(out, /href=\{`\/\$\{slug\}`\}/u);
+  assert.match(out, /href=\{link\}/u);
+  assert.match(out, /href=\{"https:\/\/example\.com\/x"\}/u);
+});
+
 test("the plugin is a no-op for current/ and for paths with no version", () => {
   for (const file of [
     "/repo/docs/content/docs/current/authentication.mdx",
