@@ -4,9 +4,7 @@ import type { Root } from "fumadocs-core/page-tree";
 // directory per archived release. `current` is the live docs and must keep
 // serving at /docs/<page>, so its directory segment never reaches the URL.
 // Archived versions keep their segment: vX.Y/<page> serves at /docs/vX.Y/<page>.
-export const CURRENT_DIR = "current";
-
-export const VERSION_DIR_PATTERN = /^v\d+\.\d+$/;
+const CURRENT_DIR = "current";
 
 /**
  * Slugs for a content file path relative to content/docs, for the Fumadocs
