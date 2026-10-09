@@ -15,7 +15,7 @@ Release verification|Cosign-verifiable artifacts and images|Cosign + CycloneDX S
 Fleet UI, RBAC, GitOps, scans, and Swarm|Yes|Owned by Drydock; Swarm is an agent non-goal|competitor
 Prometheus agent scrape endpoint|Not documented|Yes|self
 MCP server (read-only)|Not documented|Yes|self
-License|BSD-3-Clause|AGPL-3.0|tie
+License|BSD-3-Clause|MIT|tie
 `,
   highlightsTable: `
 keyround|Arcane Signs Post-Quantum|Arcane v2.10.0 moved its signing surfaces, including edge mTLS, to ML-DSA-87 (FIPS 204). mTLS stays opt-in and the agent token still bootstraps enrollment, but a freshly generated edge CA is post-quantum. Portwing verifies Ed25519-signed requests in standard mode, falling back to bearer auth when a request carries no signature, and signs its edge hello with Ed25519. Both paths are classical, with no post-quantum option today.

@@ -15,7 +15,7 @@ Docker socket policy|Documented deployment mounts the raw socket|Recommended Soc
 Supply-chain evidence|v2.3.2 release has binaries only; Periphery image carries a BuildKit SLSA v1 provenance attestation; no SBOM or cosign signature found|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
 Host shell, builds, automation, and Swarm|Yes|Host shell and Swarm are non-goals; Drydock owns fleet workflows|competitor
 MCP server (read-only)|Not documented|Yes|self
-License|GPL-3.0|AGPL-3.0|tie
+License|GPL-3.0|MIT|tie
 `,
   highlightsTable: `
 keyround|Komodo v2 Closed the Auth Gap|Komodo v2 replaced the old passkey-only model with public-key handshakes, onboarding keys, and automatic Periphery key rotation. Portwing's remaining distinction is signature and replay verification on each standard-mode HTTP request.

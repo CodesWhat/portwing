@@ -261,8 +261,8 @@ export function ComparisonPage({
               {`Ready to try ${SITE_CONFIG.name}?`}
             </h2>
             <p className="mb-8 text-neutral-600 dark:text-neutral-400">
-              Security-first, AGPL-3.0, no SaaS required. Drop a secure foothold on any Docker host
-              in minutes.
+              Security-first, MIT-licensed, no SaaS required. Drop a secure foothold on any Docker
+              host in minutes.
             </p>
 
             <CtaButtons />

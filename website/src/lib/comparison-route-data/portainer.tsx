@@ -16,7 +16,7 @@ Host file APIs and Swarm aggregation|Yes|Intentional non-goals|competitor
 Prometheus agent scrape endpoint|Not documented|Yes|self
 MCP server (read-only)|Not documented|Yes|self
 Single lightweight binary|No (~300 MB node image)|Yes (~10 MB Go binary)|self
-License|Zlib agent; proprietary Business features|AGPL-3.0|tie
+License|Zlib agent; proprietary Business features|MIT|tie
 `,
   highlightsTable: `
 network|Portainer Leads Fleet Operations|Portainer's Edge and Async Edge products include mature fleet policies, edge stacks/jobs/configuration, and controller-managed agent updates. Portwing currently supports a persistent edge tunnel; Drydock owns future rollout policy.
@@ -57,8 +57,8 @@ bot|Prometheus and Read-Only MCP|Portwing exposes an agent Prometheus endpoint a
       <strong className="text-neutral-900 dark:text-neutral-200">
         signed requests, replay defense, Sockguard policy, agent-level audit, Prometheus, and MCP
       </strong>{" "}
-      — in the free AGPL-3.0 build, without requiring a Business-tier upgrade. Portwing v0.9.x is a
-      supported pre-v1 release; Portainer is production-mature. Reviewed August 29, 2026.
+      — in the free MIT-licensed build, without requiring a Business-tier upgrade. Portwing v0.9.x
+      is a supported pre-v1 release; Portainer is production-mature. Reviewed August 29, 2026.
     </p>
   ),
   migrationTitle: "Coming from Portainer Agent?",

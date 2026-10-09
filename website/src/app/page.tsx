@@ -103,7 +103,7 @@ export default function Home() {
           <div className="mx-auto max-w-6xl px-4">
             <div className="flex flex-col items-center gap-6 text-center">
               <Badge variant="secondary" className="font-mono text-xs">
-                v{SITE_CONFIG.version} &middot; Open Source &middot; AGPL-3.0
+                v{SITE_CONFIG.version} &middot; Open Source &middot; MIT
               </Badge>
 
               <h1 className="max-w-3xl text-6xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 sm:text-7xl lg:text-8xl">

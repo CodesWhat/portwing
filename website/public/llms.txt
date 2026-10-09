@@ -28,7 +28,7 @@ Portwing v0.9.25 is a supported pre-v1 release. Its HTTP API, environment variab
 
 ## License
 
-AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
+MIT — https://opensource.org/licenses/MIT
 
 ## Links
 

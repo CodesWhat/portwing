@@ -69,7 +69,7 @@ nfpms:
     homepage: https://portwing.codeswhat.com/
     maintainer: CodesWhat <security@codeswhat.com>
     description: Security-first remote Docker agent for Drydock and standalone API clients.
-    license: AGPL-3.0-only
+    license: MIT
     bindir: /usr/bin
     contents:
       - src: scripts/portwing.service
