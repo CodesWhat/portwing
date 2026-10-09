@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   standard-library advisories: GO-2026-6599, GO-2026-6600, GO-2026-6603,
   GO-2026-6604, GO-2026-6605, GO-2026-6607, GO-2026-6608, GO-2026-6609,
   GO-2026-6610, GO-2026-6611, GO-2026-6612, GO-2026-6613, and GO-2026-6617.
+  The lint script moves to golangci-lint v2.14.0, because v2.13.2 cannot read
+  the export data Go 1.27.2 writes.
 
 ## [v0.9.24] - 2026-10-08
 
