@@ -424,6 +424,27 @@ expect_release_contract_failure \
 	"the package release contract must reject the 'since v<previous>' phrase outside README.md"
 mv "${releasing_since_backup}" "${fixture}/RELEASING.md"
 
+# Docs archives (docs/content/docs/vX.Y/) are frozen copies of older releases
+# and name old versions on purpose, so the stale-version grep skips them. The
+# same literal in current/ is still a forgotten bump and must still fail. The
+# files are staged because git grep only searches tracked paths.
+archive_stale_dir="${fixture}/docs/content/docs/v0.0"
+mkdir -p "${archive_stale_dir}"
+printf 'Installed with VERSION=%s in this release.\n' "${previous_version}" >"${archive_stale_dir}/index.mdx"
+git -C "${fixture}" add docs/content/docs/v0.0
+if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
+	echo "FAIL: a previous-version literal inside docs/content/docs/vX.Y/ must not fail the stale-version check" >&2
+	exit 1
+fi
+current_stale_file="${fixture}/docs/content/docs/current/stale-probe.mdx"
+cp "${archive_stale_dir}/index.mdx" "${current_stale_file}"
+git -C "${fixture}" add docs/content/docs/current/stale-probe.mdx
+expect_release_contract_failure \
+	"FAIL: stale references to v${previous_version} remain outside the changelog" \
+	"the package release contract must still reject a previous-version literal in docs/content/docs/current/"
+git -C "${fixture}" rm -rfq --cached docs/content/docs/v0.0 docs/content/docs/current/stale-probe.mdx
+rm -rf "${archive_stale_dir}" "${current_stale_file}"
+
 # The CHANGELOG-vs-tag guard only sees tags the checkout actually has, so
 # exercising it needs a real tag in the fixture repo. It guards against
 # portwing#283: a prep PR renamed the v0.9.12 heading to v0.9.13 instead of

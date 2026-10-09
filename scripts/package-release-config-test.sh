@@ -419,9 +419,16 @@ require_current_release_examples "docs/content/docs/current/security-model.mdx" 
 # an rpm example, a doc's attestation command - still fails; a broader
 # file-wide exemption would let a stale version hide behind an unrelated
 # "since v<previous>" line anywhere in the repo.
+#
+# The other exemption is docs/content/docs/vX.Y/: an archive is a frozen copy of
+# the docs at an older release, so it names that release's versions on purpose,
+# and editing them would break its byte-for-byte tie to the tag. The archive
+# contract (docs-archive-config-test.sh) polices those files instead. current/
+# gets no such pass.
 stale_previous_version_matches="$(git grep -n -F -- "$previous_version" -- \
 	'*.md' '*.mdx' '*.ts' '*.tsx' '*.yaml' '*.yml' '*.txt' \
 	':(exclude)CHANGELOG.md' \
+	':(exclude)docs/content/docs/v[0-9]*' \
 	':(exclude)scripts/package-release-config-test.sh' || true)"
 if [ -n "${stale_previous_version_matches}" ]; then
 	stale_previous_version_matches="$(awk -v exempt="since v${previous_version}" '
