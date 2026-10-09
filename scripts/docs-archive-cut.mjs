@@ -131,9 +131,12 @@ function cut({ root, tag }) {
   }
 
   const provenancePath = path.join(root, PROVENANCE);
-  const provenanceBefore = fs.existsSync(provenancePath)
-    ? fs.readFileSync(provenancePath, "utf8")
-    : undefined;
+  let provenanceBefore;
+  try {
+    provenanceBefore = fs.readFileSync(provenancePath, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   const provenance =
     provenanceBefore === undefined ? {} : readJsonObject(provenancePath, PROVENANCE);
   if (provenance[line]) fail(`${PROVENANCE} already has an entry for ${line}`);
