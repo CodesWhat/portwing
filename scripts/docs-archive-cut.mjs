@@ -73,10 +73,19 @@ function byLineDescending(a, b) {
 }
 
 function cut({ root, tag }) {
+  // -C does not override GIT_DIR or GIT_INDEX_FILE. Run from a hook or a
+  // wrapper that exports them, git would read some other repository than root.
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+  );
   const git = (...args) =>
-    execFileSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 64 << 20 }).trim();
+    execFileSync("git", ["-C", root, ...args], {
+      encoding: "utf8",
+      env,
+      maxBuffer: 64 << 20,
+    }).trim();
   const gitBuffer = (...args) =>
-    execFileSync("git", ["-C", root, ...args], { maxBuffer: 64 << 20 });
+    execFileSync("git", ["-C", root, ...args], { env, maxBuffer: 64 << 20 });
 
   const match = TAG.exec(tag);
   if (!match) fail(`${tag} is not a release tag; expected vX.Y.Z`);
@@ -177,15 +186,13 @@ function cut({ root, tag }) {
       const written = execFileSync(
         "git",
         ["hash-object", "--no-filters", path.join(staging, entry.rel)],
-        { encoding: "utf8" },
+        { encoding: "utf8", env },
       ).trim();
       if (written !== entry.sha) fail(`${entry.rel} did not copy byte-for-byte`);
     }
     // Writes start here. If any step fails, undo only what this run did.
-    let createdArchive = false;
     try {
       fs.cpSync(staging, archiveDir, { recursive: true, errorOnExist: true, force: false });
-      createdArchive = true;
 
       provenance[line] = {
         sourceTag: tag,
@@ -204,9 +211,9 @@ function cut({ root, tag }) {
       // current first, then archives newest first. Other keys in meta.json stay.
       writeJson(rootMetaPath, { ...rootMeta, pages: ["current", ...archives] });
     } catch (error) {
-      if (createdArchive || fs.existsSync(archiveDir)) {
-        fs.rmSync(archiveDir, { recursive: true, force: true });
-      }
+      // The cut refused up front if this directory existed, so whatever is
+      // there now came from this run.
+      fs.rmSync(archiveDir, { recursive: true, force: true });
       if (provenanceBefore === undefined) fs.rmSync(provenancePath, { force: true });
       else fs.writeFileSync(provenancePath, provenanceBefore);
       fs.writeFileSync(rootMetaPath, rootMetaBefore);
