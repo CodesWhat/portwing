@@ -86,11 +86,13 @@ test("the analytics docs allowlist is exactly the current docs pages", () => {
 });
 
 test("root-relative links resolve to a page in the same version dir", () => {
+  // Archived pages keep the unscoped links they had at their release tag;
+  // docs/src/lib/remark-versioned-links.ts rewrites them to /vX.Y/... at build.
+  // So every dir, current or archived, is checked against its own page set.
   const dead = [];
   for (const dir of versionDirs()) {
     const slugs = new Set(pageSlugs(dir));
-    // current serves at the docs root; an archived vX.Y serves under /vX.Y.
-    const prefix = dir === "current" ? "/" : `/${dir}/`;
+    const prefix = "/";
     for (const slug of slugs) {
       const file = path.join(DOCS_ROOT, dir, `${slug}.mdx`);
       const source = (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "").replace(

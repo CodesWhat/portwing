@@ -6,6 +6,25 @@ import { getSlugs } from "fumadocs-core/source";
 // serving at /docs/<page>, so its directory segment never reaches the URL.
 // Archived versions keep their segment: vX.Y/<page> serves at /docs/vX.Y/<page>.
 const CURRENT_DIR = "current";
+const ARCHIVE_DIR = /^v\d+\.\d+$/u;
+const CONTENT_MARKER = "/content/docs/";
+
+/**
+ * The archived version a docs source path belongs to ("v0.9"), or undefined
+ * for `current/` and anything else. This is the one place that decides what
+ * counts as an archive: the link scoping plugin and the page renderer both ask
+ * here. Accepts the loader's page path (`v0.9/authentication.mdx`) or an
+ * absolute file path that contains `content/docs/`.
+ */
+export function archiveVersionOf(path: string): string | undefined {
+  const normalized = path.replaceAll("\\", "/");
+  const marker = normalized.lastIndexOf(CONTENT_MARKER);
+  const relative = marker === -1 ? normalized : normalized.slice(marker + CONTENT_MARKER.length);
+  const separator = relative.indexOf("/");
+  if (separator === -1) return undefined;
+  const dir = relative.slice(0, separator);
+  return ARCHIVE_DIR.test(dir) ? dir : undefined;
+}
 
 /**
  * For the Fumadocs loader's `slugs` option. A page under `current/` gets the
