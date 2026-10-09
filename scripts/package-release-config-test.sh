@@ -356,8 +356,17 @@ if [ -n "${stale_readme_examples}" ]; then
 fi
 require_text "website/src/lib/site-config.ts" "version: \"${release_version}\"" "website metadata must identify the current release"
 require_text "website/src/components/get-started.tsx" "portwing_${release_version}_linux_amd64.deb" "website package examples must use the current release"
-require_text "docs/content/docs/installation.mdx" "VERSION=${release_version}" "installation examples must use the current release"
-require_text "docs/content/docs/verification.mdx" "TAG=${release_version}" "verification examples must use the current release"
+require_text "docs/content/docs/current/installation.mdx" "VERSION=${release_version}" "installation examples must use the current release"
+require_text "docs/content/docs/current/verification.mdx" "TAG=${release_version}" "verification examples must use the current release"
+# The docs version switcher labels the live tree with the minor it documents.
+# A minor release that forgets to bump the title would publish v0.9 docs
+# under a v0.10 binary.
+docs_version_title="$(sed -nE 's/^[[:space:]]*"title":[[:space:]]*"([^"]*)".*/\1/p' docs/content/docs/current/meta.json | sed -n '1p')"
+expected_docs_version_title="v$(printf '%s' "${release_version}" | sed -E 's/^([0-9]+\.[0-9]+)\..*/\1/')"
+if [ "${release_version}" != "unresolved" ] && [ "${docs_version_title}" != "${expected_docs_version_title}" ]; then
+	echo "FAIL: docs/content/docs/current/meta.json title must be ${expected_docs_version_title} for release ${release_version} (found: ${docs_version_title:-none})" >&2
+	failures=$((failures + 1))
+fi
 require_text "website/public/llms.txt" "Portwing v${release_version} is" "agent discovery metadata must identify the current release"
 require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must identify the current release"
 require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`" "the compatibility matrix must identify the current release"
@@ -381,19 +390,19 @@ validate_current_release_example_values "api/openapi.yaml" \
 require_current_release_examples "api/openapi.yaml" \
 	'"type":"dd:ack".*"version":"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"OpenAPI Drydock handshake examples must identify the current release"
-require_current_release_examples "docs/content/docs/api-reference.mdx" \
+require_current_release_examples "docs/content/docs/current/api-reference.mdx" \
 	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"API reference response examples must identify the current release"
-require_current_release_examples "docs/content/docs/standalone-mode.mdx" \
+require_current_release_examples "docs/content/docs/current/standalone-mode.mdx" \
 	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"standalone-mode response examples must identify the current release"
-require_current_release_examples "docs/content/docs/observability.mdx" \
+require_current_release_examples "docs/content/docs/current/observability.mdx" \
 	'"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
 	"observability response examples must identify the current release"
-require_current_release_examples "docs/content/docs/observability.mdx" \
+require_current_release_examples "docs/content/docs/current/observability.mdx" \
 	'portwing_build_info\{version="[0-9]+\.[0-9]+\.[0-9]+"\}' \
 	"observability build metadata examples must identify the current release"
-require_current_release_examples "docs/content/docs/security-model.mdx" \
+require_current_release_examples "docs/content/docs/current/security-model.mdx" \
 	'^VERSION=[0-9]+\.[0-9]+\.[0-9]+$' \
 	"security verification examples must identify the current release"
 
@@ -802,7 +811,7 @@ if cmp -s docs/assets/star-history.svg docs/assets/star-history-dark.svg; then
 	failures=$((failures + 1))
 fi
 
-require_file "docs/content/docs/installation.mdx" "the documentation site must include native installation guidance"
+require_file "docs/content/docs/current/installation.mdx" "the documentation site must include native installation guidance"
 require_file "NOTICE" "project identity and copyright must live outside the standard license text"
 require_first_line "LICENSE" "                    GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must begin with the canonical AGPL-3.0 text"
 require_sha256 "LICENSE" "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef" "LICENSE must match GitHub's canonical AGPL-3.0 template byte for byte"
@@ -812,20 +821,20 @@ if [ -f "NOTICE" ]; then
 	require_text "NOTICE" "Portwing - Lightweight Remote Docker Agent" "NOTICE must preserve the project identity"
 	require_text "NOTICE" "Copyright (C) 2026 CodesWhat" "NOTICE must preserve the project copyright"
 fi
-if [ -f "docs/content/docs/installation.mdx" ]; then
-	require_text "docs/content/docs/installation.mdx" "brew install --cask codeswhat/tap/portwing" "Homebrew installation must be documented"
-	require_text "docs/content/docs/installation.mdx" "apt install" "deb installation must be documented"
-	require_text "docs/content/docs/installation.mdx" "rpm --install" "rpm installation must be documented"
-	require_text "docs/content/docs/installation.mdx" "Upgrade" "package upgrades must be documented"
-	require_text "docs/content/docs/installation.mdx" "Uninstall" "package removal must be documented"
-	require_text "docs/content/docs/installation.mdx" "portwing.service" "service expectations must be documented"
-	require_text "docs/content/docs/installation.mdx" "checksums.txt" "artifact verification must be linked to package installation"
+if [ -f "docs/content/docs/current/installation.mdx" ]; then
+	require_text "docs/content/docs/current/installation.mdx" "brew install --cask codeswhat/tap/portwing" "Homebrew installation must be documented"
+	require_text "docs/content/docs/current/installation.mdx" "apt install" "deb installation must be documented"
+	require_text "docs/content/docs/current/installation.mdx" "rpm --install" "rpm installation must be documented"
+	require_text "docs/content/docs/current/installation.mdx" "Upgrade" "package upgrades must be documented"
+	require_text "docs/content/docs/current/installation.mdx" "Uninstall" "package removal must be documented"
+	require_text "docs/content/docs/current/installation.mdx" "portwing.service" "service expectations must be documented"
+	require_text "docs/content/docs/current/installation.mdx" "checksums.txt" "artifact verification must be linked to package installation"
 fi
 
 require_text "README.md" "brew install --cask codeswhat/tap/portwing" "the repository landing page must advertise Homebrew installation"
 require_text "README.md" "/docs/installation" "the repository landing page must link the full package guide"
 # shellcheck disable=SC2016 # The documented shell command expands VERSION.
-require_text "docs/content/docs/verification.mdx" 'release.yml@refs/tags/v${VERSION}' "public verification instructions must bind signatures to the selected tag"
+require_text "docs/content/docs/current/verification.mdx" 'release.yml@refs/tags/v${VERSION}' "public verification instructions must bind signatures to the selected tag"
 require_text "RELEASING.md" "HOMEBREW_TAP_TOKEN" "maintainer release docs must name the tap publishing credential"
 require_text "RELEASING.md" "verify-native-packages" "maintainer release docs must describe the native package gate"
 require_text "website/src/components/get-started.tsx" "codeswhat/tap/portwing" "the website must advertise the Homebrew cask"

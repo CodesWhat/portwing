@@ -16,7 +16,7 @@ run-name: >-
 # that way, so the two lanes can never drift into testing different things.
 #
 # Why these pins. internal/docker/client.go falls back to API v1.44 when
-# version negotiation fails, and docs/content/docs/api-reference.mdx and
+# version negotiation fails, and docs/content/docs/current/api-reference.mdx and
 # standalone-mode.mdx both publish v1.44 as the floor. Docker Engine 25.0 is
 # the oldest release that serves API v1.44 (24.0 serves v1.43), so 25.0 is the
 # oldest Engine the documented contract covers and it anchors the bottom of

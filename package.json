@@ -14,11 +14,12 @@
     "format": "biome format --write .",
     "test:web": "node --test analytics/src/contract.test.ts scripts/*.test.mjs && npm --workspace website run test:headers",
     "knip": "knip",
+    "docs:export-contract": "node scripts/docs-export-contract.mjs",
     "budget:web": "node scripts/page-weight-budget.mjs",
     "lighthouse:marketing": "node scripts/lighthouse-budget.mjs lighthouse/marketing.cjs",
     "lighthouse:docs": "node scripts/lighthouse-budget.mjs lighthouse/docs.cjs",
     "lighthouse": "npm run lighthouse:marketing && npm run lighthouse:docs",
-    "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run knip && npm run build && npm run budget:web && npm run lighthouse"
+    "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run knip && npm run build && npm run docs:export-contract && npm run budget:web && npm run lighthouse"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

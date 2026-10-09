@@ -6,6 +6,7 @@ import { AnalyticsRuntime } from "@/components/analytics-runtime";
 import { Footer } from "@/components/footer";
 import { SiteBackground } from "@/components/site-background";
 import { SiteHeader } from "@/components/site-header";
+import { versionTabsOption } from "@/lib/docs-versions";
 import { BASE_URL, SITE_CONFIG } from "@/lib/site-config";
 import { source } from "@/lib/source";
 import "./globals.css";
@@ -73,6 +74,7 @@ export default function RootLayout({
                  */}
                 <DocsLayout
                   tree={source.pageTree}
+                  tabs={versionTabsOption(source.pageTree)}
                   nav={{ enabled: false }}
                   themeSwitch={{ enabled: false }}
                   searchToggle={{ enabled: false }}

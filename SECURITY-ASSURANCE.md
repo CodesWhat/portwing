@@ -153,7 +153,7 @@ Evidence: [`.github/workflows/ci-verify.yml`](.github/workflows/ci-verify.yml),
 [`.github/workflows/quality-fuzz-cflite-prune.yml`](.github/workflows/quality-fuzz-cflite-prune.yml),
 [`.github/workflows/release.yml`](.github/workflows/release.yml), the public
 [coverage report](https://qlty.sh/gh/CodesWhat/projects/portwing), and
-[`docs/content/docs/verification.mdx`](docs/content/docs/verification.mdx).
+[`docs/content/docs/current/verification.mdx`](docs/content/docs/current/verification.mdx).
 
 The scheduled lanes also record what they measured, not only whether they
 passed. The weekly RSS-growth soak and the monthly mutation matrix each append

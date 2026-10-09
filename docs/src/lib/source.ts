@@ -1,9 +1,12 @@
 import type { Page } from "fumadocs-core/source";
 import { loader } from "fumadocs-core/source";
 import { docs } from "../../.source/server";
+import { slugsForPath } from "./docs-versions";
 
 export const source = loader(docs.toFumadocsSource(), {
   baseUrl: "/",
+  // content/docs/current/ serves at the site root of /docs, so existing URLs stay put.
+  slugs: (file) => slugsForPath(file.path),
 });
 
 type DocsPageData = (typeof docs.docs)[number];

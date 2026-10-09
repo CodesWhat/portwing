@@ -92,6 +92,6 @@ both together when either changes.
 - Portwing: [`STABILITY.md`](STABILITY.md) — semantic-versioning, deprecation,
   and change-control guarantees for the HTTP, environment, MCP, and wire
   surfaces.
-- Portwing: [`docs/drydock-integration.md`](docs/drydock-integration.md) / [`docs/content/docs/drydock-integration.mdx`](docs/content/docs/drydock-integration.mdx) — full wire-protocol and REST/SSE contract detail.
+- Portwing: [`docs/drydock-integration.md`](docs/drydock-integration.md) / [`docs/content/docs/current/drydock-integration.mdx`](docs/content/docs/current/drydock-integration.mdx) — full wire-protocol and REST/SSE contract detail.
 - Drydock: see its README's ecosystem section.
 - sockguard: see its README's ecosystem section.
