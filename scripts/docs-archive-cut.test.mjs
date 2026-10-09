@@ -8,6 +8,13 @@ import test from "node:test";
 const SCRIPT = path.resolve(import.meta.dirname, "docs-archive-cut.mjs");
 const DOCS = "docs/content/docs";
 
+// A git hook exports GIT_DIR and GIT_INDEX_FILE, and lefthook runs this suite
+// from pre-push. With those inherited, every git call below would land in the
+// real repository instead of the fixture, so no GIT_* variable is passed on.
+const ENV = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+);
+
 function git(cwd, ...args) {
   return execFileSync(
     "git",
@@ -22,7 +29,7 @@ function git(cwd, ...args) {
       "tag.gpgsign=false",
       ...args,
     ],
-    { cwd, encoding: "utf8" },
+    { cwd, encoding: "utf8", env: ENV },
   ).trim();
 }
 
@@ -52,6 +59,11 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "docs-archive-cut-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   git(root, "init", "-q", "-b", "main");
+  // Never commit or tag unless git is really working inside the fixture.
+  assert.equal(
+    fs.realpathSync(git(root, "rev-parse", "--absolute-git-dir")),
+    path.join(fs.realpathSync(root), ".git"),
+  );
   write(root, `${DOCS}/meta.json`, JSON.stringify({ pages: ["current"] }));
   write(root, `${DOCS}/index.mdx`, "flat layout\n");
   commit(root, "flat docs", "v0.1.0");
@@ -72,7 +84,10 @@ function fixture(t) {
 }
 
 function cut(root, ...args) {
-  const result = spawnSync("node", [SCRIPT, "--root", root, ...args], { encoding: "utf8" });
+  const result = spawnSync("node", [SCRIPT, "--root", root, ...args], {
+    encoding: "utf8",
+    env: ENV,
+  });
   return { status: result.status, out: `${result.stdout}${result.stderr}` };
 }
 

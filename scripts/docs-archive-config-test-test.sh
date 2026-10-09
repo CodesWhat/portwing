@@ -9,6 +9,11 @@
 # fixture that was broken to begin with.
 set -euo pipefail
 
+# A git hook exports GIT_DIR and GIT_INDEX_FILE. Inherited here, they would
+# send every fixture commit and tag below into the real repository.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
+
 contract="$(pwd)/scripts/docs-archive-config-test.sh"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/portwing-docs-archive.XXXXXX")"
 trap 'rm -rf "${fixture}"' EXIT
