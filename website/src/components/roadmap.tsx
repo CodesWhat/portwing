@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { ChevronRight } from "lucide-react";
 import { type Milestone, roadmap } from "@/app/data/roadmap";
 import { SectionHeading } from "@/components/section-heading";

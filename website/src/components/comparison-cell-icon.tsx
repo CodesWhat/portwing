@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { Check, CircleQuestionMark, Minus, X } from "lucide-react";
 
 export type CellValue = "yes" | "partial" | "no" | "undocumented";

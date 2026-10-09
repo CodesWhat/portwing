@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  * Portwing site config — edit ONLY this file to reskin.
  * Product content (hero copy, feature lists, comparison data) lives in the

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 "use client";
 
 import { capturePageview, createWebVitalsReporter } from "@codeswhat/public-analytics";

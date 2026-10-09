@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { Metadata } from "next";
 import { CompareMatrix } from "@/components/compare-matrix";
 import { MarketingShell } from "@/components/marketing-shell";

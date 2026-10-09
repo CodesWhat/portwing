@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Ambient declarations for side-effect asset imports.
 //
 // TypeScript 6 enables `noUncheckedSideEffectImports` by default, which rejects

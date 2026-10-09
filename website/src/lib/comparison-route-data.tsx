@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { ComparisonRouteConfig } from "@/lib/comparison-route";
 import { highlightsFromPipeTable, rowsFromPipeTable } from "@/lib/comparison-route";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";

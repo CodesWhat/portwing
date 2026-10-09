@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { ArrowUpRight } from "lucide-react";
 import Image from "next/image";
 import { SectionHeading } from "@/components/section-heading";

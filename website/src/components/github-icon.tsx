@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { SVGProps } from "react";
 
 export function GithubIcon(props: SVGProps<SVGSVGElement>) {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { ArrowRight, Check, CircleQuestionMark, Minus, X } from "lucide-react";
 import Link from "next/link";
 import { type CellValue, ComparisonCellIcon } from "@/components/comparison-cell-icon";

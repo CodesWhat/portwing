@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { BookOpen } from "lucide-react";
 import { GithubIcon } from "@/components/github-icon";
 import { TrackedLink } from "@/components/tracked-link";

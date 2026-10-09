@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 "use client";
 
 import { type CtaId, captureCta } from "@codeswhat/public-analytics";

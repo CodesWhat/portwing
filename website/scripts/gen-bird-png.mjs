@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Renders public/portwing-bird-banner.png from the real CLI banner art at
 // internal/banner/portwing.ans — the SAME pixels `portwing` prints on a
 // truecolor terminal at startup. When the website is converted to the

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import posthog from "posthog-js/dist/module.slim";
 
 import {

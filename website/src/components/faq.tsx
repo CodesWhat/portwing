@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { faqItems } from "@/app/data/faq";
 import { SectionHeading } from "@/components/section-heading";
 

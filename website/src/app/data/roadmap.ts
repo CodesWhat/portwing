@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 export type Milestone = {
   version: string;
   title: string;

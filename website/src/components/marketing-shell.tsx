@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { ReactNode } from "react";
 import { Footer } from "@/components/footer";
 import { SiteBackground } from "@/components/site-background";
