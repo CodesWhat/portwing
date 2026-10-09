@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 TEST_TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/portwing-compat-test.XXXXXX")

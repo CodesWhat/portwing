@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Contract checks for the ClusterFuzzLite tier: the two workflows, the build
 # integration, and the corpus-branch wiring that ties them together.
 #

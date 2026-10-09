@@ -1,4 +1,5 @@
 #!/bin/bash -eu
+# SPDX-License-Identifier: MIT
 # ClusterFuzzLite build script for Portwing.
 #
 # Runs inside the image defined by .clusterfuzzlite/Dockerfile. base-builder

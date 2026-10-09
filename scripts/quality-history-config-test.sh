@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Contract for the quality-history recording jobs (PW-5.5).
 #

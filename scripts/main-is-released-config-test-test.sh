@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Self-test for scripts/main-is-released-config-test.sh. Each case breaks the
