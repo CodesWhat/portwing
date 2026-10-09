@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { Root } from "fumadocs-core/page-tree";
 import { getSlugs } from "fumadocs-core/source";
 

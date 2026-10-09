@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Self-tests for scripts/docs-archive-config-test.sh.
 #
 # Builds a throwaway repository whose history has two release lines, archives
