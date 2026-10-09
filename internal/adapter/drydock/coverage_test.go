@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package drydock
 
 // coverage_test.go adds targeted tests to raise coverage for functions that

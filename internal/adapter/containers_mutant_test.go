@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package adapter
 
 // containers_mutant_test.go adds tests that target Gremlins mutants surviving
