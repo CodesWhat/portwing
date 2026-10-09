@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Portwing is now licensed under the MIT License, starting with this release.
+  `LICENSE` is the standard MIT text and `NOTICE` carries the project
+  copyright. v0.9.24 and every earlier release stay under AGPL-3.0.
+
 ## [v0.9.24] - 2026-10-08
 
 ### Fixed
