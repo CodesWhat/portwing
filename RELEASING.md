@@ -39,6 +39,7 @@
 
    - Rename `## [Unreleased]` → `## [v<version>] - <YYYY-MM-DD>`
    - Add a fresh empty `## [Unreleased]` block above it
+   - Bump the pinned `ghcr.io/codeswhat/portwing:<version>` image in every file under `examples/` (the four Compose files, `observability/docker-compose.yml`, and both `kubernetes/` manifests); the release contract fails if any is stale or uses `latest`
    - `release-cut.yml` validates that a non-empty CHANGELOG entry exists for the computed tag before pushing it; the cut fails if this step is skipped
 
 6. **No source version bump needed** — the binary's version is injected at build time via GoReleaser ldflags (`-X github.com/codeswhat/portwing/internal/protocol.AgentVersion={{.Version}}`). `AgentVersion` in `internal/protocol/version.go` must stay a `var`: `-X` silently does nothing to a `const`.

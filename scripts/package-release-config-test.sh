@@ -371,7 +371,20 @@ require_text "website/public/llms.txt" "Portwing v${release_version} is" "agent 
 require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must identify the current release"
 require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`" "the compatibility matrix must identify the current release"
 require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
-require_text "examples/observability/docker-compose.yml" "ghcr.io/codeswhat/portwing:${release_version}" "the observability example must pin the current release"
+for example_file in \
+	examples/docker-compose.edge.yml \
+	examples/docker-compose.edge-with-exec.yml \
+	examples/docker-compose.standard.yml \
+	examples/docker-compose.with-sockguard.yml \
+	examples/kubernetes/edge.yaml \
+	examples/kubernetes/standard.yaml \
+	examples/observability/docker-compose.yml; do
+	require_text "${example_file}" "ghcr.io/codeswhat/portwing:${release_version}" "the example ${example_file} must pin the current release"
+	reject_text "${example_file}" "ghcr.io/codeswhat/portwing:latest" "the examples must not track the latest tag"
+	validate_current_release_example_values "${example_file}" \
+		"$(grep -E 'ghcr\.io/codeswhat/portwing:' "${example_file}" || true)" \
+		"the example ${example_file} must pin the current release"
+done
 require_exactly_one_active "examples/observability/docker-compose.yml" '^[[:space:]]+test:' \
 	'test: ["CMD", "/usr/bin/portwing", "healthcheck"]' \
 	"the observability example must use the shell-free Portwing healthcheck"
