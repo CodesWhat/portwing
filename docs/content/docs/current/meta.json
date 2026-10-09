@@ -1,5 +1,6 @@
 {
-  "title": "Portwing",
+  "title": "v0.9",
+  "root": true,
   "pages": [
     "index",
     "getting-started",
