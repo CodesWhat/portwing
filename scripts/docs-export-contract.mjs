@@ -14,7 +14,10 @@ const OUT = path.join(ROOT, "docs", "out");
 // Mirrors slugsForPath in docs/src/lib/docs-versions.ts, which the loader uses.
 // Kept separate on purpose: the contract should catch the loader drifting.
 function slugsFor(file) {
-  const segments = file.replace(/\.mdx?$/u, "").split(path.sep);
+  const segments = file
+    .replace(/\.mdx?$/u, "")
+    .split(path.sep)
+    .filter((segment) => !/^\(.+\)$/u.test(segment));
   if (segments.at(-1) === "index") segments.pop();
   return segments;
 }
@@ -26,22 +29,42 @@ function listFiles(dir) {
     .map((entry) => path.relative(dir, path.join(entry.parentPath, entry.name)));
 }
 
+// Pages Next emits for itself, not from content.
+const FRAMEWORK_PAGES = new Set(["404.html", "_not-found.html"]);
+// An archived release line exports under its own segment and is checked by its
+// own contract; this one only owns the unversioned pages.
+const ARCHIVE = /^v\d+\.\d+(?:\/|\.html$)/u;
+
 const problems = [];
 
 if (!fs.existsSync(OUT)) {
   problems.push(`${path.relative(ROOT, OUT)} is missing; run the docs build first`);
 } else {
   const pages = listFiles(CONTENT).filter((file) => /\.mdx?$/u.test(file));
+  const expected = new Map();
   for (const page of pages) {
     const slugs = slugsFor(page);
-    const html = slugs.length === 0 ? "index.html" : `${slugs.join("/")}.html`;
-    if (!fs.existsSync(path.join(OUT, html))) {
-      problems.push(`current/${page} must export as docs/out/${html}`);
+    expected.set(slugs.length === 0 ? "index.html" : `${slugs.join("/")}.html`, page);
+  }
+  if (!expected.has("index.html")) {
+    problems.push(`${CURRENT_DIR}/index.mdx is missing; /docs would have no landing page`);
+  }
+  const exported = new Set(
+    listFiles(OUT)
+      .map((file) => file.split(path.sep).join("/"))
+      .filter((file) => file.endsWith(".html") && !file.startsWith("_next/"))
+      .filter((file) => !FRAMEWORK_PAGES.has(file) && !ARCHIVE.test(file)),
+  );
+  for (const [html, page] of expected) {
+    if (!exported.has(html)) {
+      problems.push(`${CURRENT_DIR}/${page} must export as docs/out/${html}`);
     }
   }
-  for (const entry of fs.readdirSync(OUT, { recursive: true })) {
-    if (path.basename(String(entry)).startsWith(CURRENT_DIR)) {
-      problems.push(`docs/out/${entry} leaks the ${CURRENT_DIR} directory into the export`);
+  for (const html of exported) {
+    if (!expected.has(html)) {
+      problems.push(
+        `docs/out/${html} has no page in ${CURRENT_DIR}/; a directory leaked into the URL or a page went missing from the source`,
+      );
     }
   }
 }
