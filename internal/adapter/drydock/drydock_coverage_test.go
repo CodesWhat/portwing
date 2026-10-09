@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package drydock
 
 // drydock_coverage_test.go adds targeted tests for branches not covered by

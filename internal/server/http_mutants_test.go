@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // http_mutants_test.go adds tests that specifically target Gremlins mutants

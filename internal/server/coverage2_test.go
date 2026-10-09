@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // coverage2_test.go: additional tests to push internal/server coverage to ≥97%.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // coverage_test.go adds tests for functions in http.go, argon2.go, and

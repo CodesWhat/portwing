@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package auth implements Ed25519 per-client key authentication for Portwing.
 // It provides a key registry loaded from an authorized_keys file (Model B),
 // a nonce LRU for replay protection, and request verification helpers.

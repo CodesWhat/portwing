@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package protocol
 
 // HealthResponse is the wire contract shared by standard mode's /health,

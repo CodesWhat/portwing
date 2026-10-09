@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package config
 
 // config_mutant_test.go adds tests that target Gremlins mutants surviving in

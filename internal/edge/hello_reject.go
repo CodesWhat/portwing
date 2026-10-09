@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package edge
 
 // Terminal vs. transient classification for drydock controller hello

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // loadgen hammers a Portwing HTTP endpoint at a configurable concurrency for a
 // fixed duration and prints a single-line JSON summary (p50/p90/p99/max
 // latency, RPS, status/error counts). It keeps one http.Client per worker so we

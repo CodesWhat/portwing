@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // proxy_version_prefix_test.go pins how the Docker proxy treats odd API

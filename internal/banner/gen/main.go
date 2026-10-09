@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Command gen renders the portwing logo PNG into a truecolor half-block
 // ANSI art file (portwing.ans) that the banner package embeds.
 //

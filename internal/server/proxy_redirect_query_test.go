@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // proxy_redirect_query_test.go pins two ways the proxy could act on a request

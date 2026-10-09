@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // proxy_registry_headers_test.go pins header fidelity on the registry-bearing

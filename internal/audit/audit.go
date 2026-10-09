@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package audit provides structured JSON audit logging for security-relevant
 // events. It is intentionally separate from the operational log stream so audit
 // records can be routed to a dedicated sink (file, stdout, stderr) without

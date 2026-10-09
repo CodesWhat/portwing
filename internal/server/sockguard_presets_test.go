@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // sockguard_presets_test.go evaluates the shipped Sockguard presets offline

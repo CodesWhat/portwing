@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package drydock
 
 // adapter_mutant_test.go adds tests that target Gremlins mutants in adapter.go:

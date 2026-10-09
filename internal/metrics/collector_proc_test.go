@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package metrics — fixture-driven tests for /proc file parsers.
 // These tests inject a temp directory as the procRoot so every parse branch
 // runs on darwin and linux alike without touching the real /proc.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // mockdocker is a minimal Docker-API-shaped HTTP server that listens on a unix
 // socket. It exists so the Portwing soak benchmark has a stable Docker upstream
 // whose behavior doesn't drift between runs and needs no real daemon.
