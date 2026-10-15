@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.26] - 2026-10-15
+
+### Fixed
+
+- The ClusterFuzzLite build now waits for Go's coverage registration before
+  starting libFuzzer. The weekly batch could crash during startup before
+  executing any inputs because the two initializers raced.
+
 ### Changed
 
 - The example Compose and Kubernetes files now pin the release version of the
