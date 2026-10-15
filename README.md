@@ -37,7 +37,7 @@
 <!-- separate alerts: a blank-line-only gap between blockquotes trips markdownlint MD028 -->
 
 > [!NOTE]
-> **v0.9.26 is the current release.** The deployment examples now pin the release image, and the ClusterFuzzLite build waits for Go initialization before starting libFuzzer to prevent a startup crash in the weekly batch. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v0.9.26 is the current release.** The ARMv7 Docker and Compose clients now include the Go and HTTP/2 security fixes. The deployment examples pin the release image, and the ClusterFuzzLite build waits for Go initialization before starting libFuzzer to prevent a startup crash in the weekly batch. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
 
 <h2 align="center">Contents</h2>
 
