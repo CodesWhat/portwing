@@ -35,7 +35,7 @@ missing_heading_fixture="$(new_fixture)"
 unrelated_failure_fixture="$(new_fixture)"
 missing_builder_fixture="$(new_fixture)"
 
-sed -E 's/^## \[v([0-9]+\.[0-9]+\.[0-9]+)\] - ([0-9]{4}-[0-9]{2}-[0-9]{2})$/## [v\1] (\2)/' \
+sed -E 's/^## \[v([0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)\] - ([0-9]{4}-[0-9]{2}-[0-9]{2})$/## [v\1] (\3)/' \
 	"${missing_heading_fixture}/CHANGELOG.md" >"${missing_heading_fixture}/CHANGELOG.md.tmp"
 mv "${missing_heading_fixture}/CHANGELOG.md.tmp" "${missing_heading_fixture}/CHANGELOG.md"
 

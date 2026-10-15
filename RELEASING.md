@@ -129,6 +129,13 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
+For a release candidate, pass an explicit version such as `1.0.0-rc.1`.
+Use that exact version in the newest dated changelog heading and the current
+release references. The same checks run before the tag is pushed. GoReleaser
+marks it as a prerelease and leaves the stable container `latest` tag and
+Homebrew channel unchanged. Label its compatibility row `release candidate`
+instead of `latest release`.
+
 This requires the **`RELEASE_PAT`** secret (fine-grained PAT, Contents:
 read/write on this repo). Tags pushed with the default `GITHUB_TOKEN` do not
 trigger downstream workflows, so without the PAT the tag would never fire

@@ -5,9 +5,10 @@ set -euo pipefail
 fixture="$(mktemp -d)"
 trap 'rm -rf "${fixture}"' EXIT
 
+heading_pattern='^## \[v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$'
 release_version="$(
-	grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md |
-		sed -n '1{s/^## \[v\([0-9.]*\)\].*/\1/p;}' || true
+	grep -E "${heading_pattern}" CHANGELOG.md |
+		sed -n '1{s/^## \[v\([^]]*\)\].*/\1/p;}' || true
 )"
 if [ -z "${release_version}" ]; then
 	echo "FAIL: could not derive release version from CHANGELOG.md" >&2
@@ -15,8 +16,8 @@ if [ -z "${release_version}" ]; then
 fi
 
 previous_version="$(
-	grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$' CHANGELOG.md |
-		sed -n '2{s/^## \[v\([0-9.]*\)\].*/\1/p;}' || true
+	grep -E "${heading_pattern}" CHANGELOG.md |
+		sed -n '2{s/^## \[v\([^]]*\)\].*/\1/p;}' || true
 )"
 if [ -z "${previous_version}" ]; then
 	echo "FAIL: could not derive previous version from CHANGELOG.md" >&2
@@ -92,6 +93,13 @@ if [ "${shallow_status}" -ne 0 ] || ! grep -Fq "SKIP: shallow checkout carries n
 fi
 
 git -C "${fixture}" tag "v${release_version}"
+case "${release_version}" in
+*-rc.*)
+	stable_version="$(grep -E '^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - ' CHANGELOG.md |
+		sed -n '1{s/^## \[v\([0-9.]*\)\].*/\1/p;}' || true)"
+	git -C "${fixture}" tag "v${stable_version}"
+	;;
+esac
 
 # A healthcheck in a build stage cannot protect the final scratch image.
 for recipe in Dockerfile.armv7 Dockerfile.release; do
@@ -520,6 +528,62 @@ for recipe in Dockerfile.armv7 Dockerfile.release; do
 	sed -i.bak 's/containerd\/v2@v[0-9.]*/containerd\/v2@v2.3.4/' "${fixture}/${recipe}"
 	expect_release_contract_failure "Compose must build with patched containerd" "A vulnerable Compose dependency must fail"
 	cp "${recipe}" "${fixture}/${recipe}"
+done
+
+release_major="${release_version%%.*}"
+rc_version="$((10#${release_major} + 1)).0.0-rc.1"
+python3 - "${fixture}" "${release_version}" "${rc_version}" <<'PY'
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+root = Path(sys.argv[1])
+current, candidate = sys.argv[2:]
+paths = subprocess.check_output([
+    "git", "-C", str(root), "grep", "-l", "-F", "--", current, "--",
+    "*.md", "*.mdx", "*.ts", "*.tsx", "*.yaml", "*.yml", "*.txt",
+    ":(exclude)CHANGELOG.md", ":(exclude)scripts/**",
+    ":(exclude)docs/content/docs/v[0-9]*",
+], text=True).splitlines()
+for name in paths:
+    path = root / name
+    path.write_text(path.read_text().replace(current, candidate))
+meta_path = root / "docs/content/docs/current/meta.json"
+meta = json.loads(meta_path.read_text())
+meta["title"] = "v" + ".".join(candidate.split(".")[:2])
+meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+compatibility = root / "COMPATIBILITY.md"
+compatibility.write_text(compatibility.read_text().replace(
+    f"v{candidate} (latest release)", f"v{candidate} (release candidate)"))
+changelog = root / "CHANGELOG.md"
+entry = f"## [Unreleased]\n\n## [v{candidate}] - 2026-10-15\n\n- Release candidate."
+changelog.write_text(changelog.read_text().replace("## [Unreleased]", entry, 1))
+PY
+set +e
+rc_output="$(cd "${fixture}" && bash scripts/package-release-config-test.sh 2>&1)"
+rc_status=$?
+set -e
+if [ "${rc_status}" -ne 0 ]; then
+	echo "FAIL: consistent RC metadata must pass the package release contract" >&2
+	echo "${rc_output}" >&2
+	exit 1
+fi
+
+rc_example="${fixture}/examples/docker-compose.edge.yml"
+cp "${rc_example}" "${fixture}/rc-example"
+for stale_rc in "${rc_version%1}2" "${rc_version}.extra" "${rc_version%%-rc.*}"; do
+	python3 - "${rc_example}" "${rc_version}" "${stale_rc}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+path.write_text(path.read_text().replace(sys.argv[2], sys.argv[3]))
+PY
+	expect_release_contract_failure \
+		"active release examples must use ${rc_version}" \
+		"an RC release must reject mismatched image version ${stale_rc}"
+	cp "${fixture}/rc-example" "${rc_example}"
 done
 
 echo "Package release contract self-tests passed."
