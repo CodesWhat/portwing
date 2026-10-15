@@ -7,22 +7,22 @@ export const watchtowerComparisonRouteData = {
   slug: "watchtower",
   comparisonTable: `
 Auto-update containers|Yes (pull + restart on schedule)|No (Drydock handles updates; Portwing is the access agent)|competitor
-Remote Docker API proxy|No (local/scheduled, no remote protocol)|Yes (full Docker API proxy with auth)|self
-Auth for remote access|No (local only)|Yes (Ed25519 per-request signing)|self
-Structured audit log|No|Yes (JSON, built-in)|self
-Runtime image signature verification|Basic cosign support (newer builds)|No (controller or admission-control responsibility)|competitor
-Published release evidence|Archived upstream project|Cosign signatures + CycloneDX SBOM + SLSA provenance|self
+Remote Docker API proxy|No, an updater client for local or remote Docker|Yes (full Docker API proxy with auth)|self
+Provides an authenticated Docker management endpoint|No; remote Docker client connections support TLS|Yes, with Ed25519 signing or configured shared secret|self
+Management request audit|Updater logs; no management proxy|Structured request records and cursor export|tie
+Workload image signature enforcement|Not documented in upstream v1.7.1|Controller or admission-policy responsibility|tie
+Published release evidence|Not established by this review; upstream is archived|Cosign signatures + CycloneDX SBOM + SLSA provenance|tie
 Default-deny socket filter|No|Yes (with sockguard)|self
 Prometheus metrics|Yes (opt-in, experimental)|Yes|tie
-MCP server (AI-native, read-only)|Not documented|Yes|self
+Documented read-only MCP endpoint|Not documented|Yes|self
 Edge / NAT outbound tunnel|No|Yes (Drydock v1.6.0-rc.11+)|self
-Single lightweight Go binary|Yes|Yes (~10 MB)|tie
+Single lightweight Go binary|Yes|Yes|tie
 License|Apache-2.0|MIT|tie
 `,
   highlightsTable: `
-key|Remote Auth (Ed25519)|Watchtower runs locally and has no remote access model. Portwing exposes the Docker API over authenticated HTTP, using Ed25519 per-request signing so each client has its own revocable key pair.
-shield|Default-Deny Socket Filter|Portwing pairs with sockguard to filter Docker API calls at the socket level. Even if Portwing is compromised, the sockguard allowlist constrains what can be called. Watchtower mounts the socket unfiltered.
-filetext|Structured Audit Log|Portwing logs every Docker API call it proxies as structured JSON for export to immutable storage. Watchtower has no audit trail.
+key|Remote Auth (Ed25519)|Watchtower can update a local or remote Docker daemon, including over TLS. It is an updater client. Portwing exposes an authenticated management proxy, with request-bound Ed25519 signing and revocable client keys when that authentication path is configured.
+shield|Default-Deny Socket Filter|Portwing pairs with sockguard to filter Docker API calls at the socket level. Even if Portwing is compromised, the sockguard allowlist constrains what can be called. Watchtower can use a socket or a remote Docker endpoint; access restrictions depend on that deployment.
+filetext|Structured Audit Log|Portwing emits structured request audit records with cursor-based NDJSON export. Watchtower logs its update activity; that is a different surface from a management-proxy audit API.
 packagecheck|Maintained Signed Releases|Watchtower's upstream repository is archived. Portwing remains actively maintained and every release ships per-archive CycloneDX SBOMs, an image SBOM attestation, cosign image signatures, and SLSA build provenance. This verifies Portwing itself; it is not workload image-signature enforcement.
 activity|Prometheus Metrics|Both expose Prometheus metrics. Watchtower's is an opt-in, experimental /v1/metrics endpoint behind its HTTP API token. Portwing's covers agent health, request counts, and latency histograms.
 bot|MCP Server (AI-Native)|Portwing ships five read-only MCP tools for container and host inspection. Watchtower has no documented MCP support.
@@ -56,18 +56,18 @@ bot|MCP Server (AI-Native)|Portwing ships five read-only MCP tools for container
   heroDescription: (
     <p>
       Watchtower is an automated container updater — it polls registries and restarts containers
-      when new images are available. It is a local container updater, not a remote access agent — an
-      adjacent product, not a direct general-purpose agent peer — and its upstream repository is now
-      archived. Portwing is a{" "}
+      when new images are available. It can update local or remote Docker daemons. It is an updater
+      client rather than a general-purpose access agent, and its upstream repository is archived.
+      Portwing is a{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">remote access agent</strong> — it
       gives the Drydock controller a secure authenticated foothold on a Docker host. These tools
       solve different problems; Drydock can handle centralized update workflows with Portwing as the
-      agent on each host.
+      agent on each host. This comparison covers Watchtower v1.7.1, reviewed October 15, 2026.
     </p>
   ),
   migrationTitle: "Using Watchtower today?",
   migrationDescription:
-    "If you want centralized update management across multiple hosts, Drydock orchestrates image updates and Portwing gives it the agent foothold on each host. You can run both — Watchtower for local hosts where Drydock doesn't need remote access, and Portwing where you need the full remote management API.",
+    "For centralized update management, Drydock can own update decisions while Portwing provides access to each host. Decide which component executes updates on each host when migrating from Watchtower; the access agent itself does not schedule updates.",
   jsonLdName: "Watchtower vs Portwing — Docker Agent Comparison",
   jsonLdDescription:
     "Compare Watchtower (container auto-updater) and Portwing (remote Docker access agent). Different tools for different problems.",

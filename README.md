@@ -397,13 +397,13 @@ flowchart LR
 <tr><td>Transparent Docker API proxy</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">✅</td></tr>
 <tr><td>Inbound (controller-to-agent) connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Outbound edge connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
-<tr><td>Per-request signed HTTP authentication</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
+<tr><td>Request-bound, replay-resistant HTTP signing</td><td align="center">✅ (Ed25519 path)</td><td align="center">❌ (fixed-message signatures)</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Optional mTLS for the agent link</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">?</td><td align="center">✅</td><td align="center">?</td></tr>
-<tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">❌</td></tr>
+<tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td><td align="center">⚠️ (manager proxy)</td><td align="center">❌</td></tr>
 <tr><td>Agent-level structured audit log</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
-<tr><td>Prometheus scrape endpoint on the agent</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
+<tr><td>Prometheus scrape endpoint on the agent</td><td align="center">✅</td><td align="center">⚠️ (local Kubernetes Edge)</td><td align="center">?</td><td align="center">✅ (opt-in)</td><td align="center">?</td></tr>
 <tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
-<tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
+<tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">✅</td><td align="center">⚠️ (release attestation)</td></tr>
 <tr><td>Fleet UI and controller workflows</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">?</td></tr>
 <tr><td>License</td><td align="center">MIT</td><td align="center">Zlib (agent) / proprietary Business features</td><td align="center">GPL-3.0</td><td align="center">BSD-3-Clause</td><td align="center">MIT</td></tr>
 </tbody>
@@ -424,7 +424,7 @@ flowchart LR
 </thead>
 <tbody>
 <tr><td>Remote Docker API proxy</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
-<tr><td>Authenticated remote access</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>Provides an authenticated Docker management endpoint</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Structured audit log</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td></tr>
@@ -435,9 +435,9 @@ flowchart LR
 </tbody>
 </table>
 
-> Watchtower's upstream project is archived. Diun and Watchtower do update detection; Portwing is the access agent and leaves update decisions to Drydock.
+> Watchtower's upstream project is archived. Diun and Watchtower can connect to remote Docker endpoints, but do not expose a general-purpose management proxy. Portwing provides that access and leaves update decisions to Drydock.
 >
-> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.39.5, Komodo Periphery v2.3.2, Arcane Agent v2.10.1, Hawser v0.2.46. Reviewed 2026-08-29; Arcane re-checked 2026-09-02. Portainer and Komodo release evidence checked 2026-10-08. The update-tools table follows the Diun and Watchtower comparison pages, which pin no version or review date.
+> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.45.2, Komodo Periphery v2.3.3, Arcane Agent v2.16.1, Hawser v0.2.50, Diun v4.33.0 and Watchtower v1.7.1. Reviewed 2026-10-15. The canonical page records edition limits, source-inspection scope and artifact discovery limits. Portainer uses fixed-message signature headers; Arcane documents method/path filtering for its manager and agent Prometheus export. A GitHub release attestation is different from build provenance.
 > Contributions welcome if any information is inaccurate.
 
 </details>
