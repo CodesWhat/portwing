@@ -72,6 +72,13 @@ fi
 echo "build.sh: using ${shim_module}/testing@${shim_version} (from the image's generator)"
 go get "${shim_module}/testing@${shim_version}"
 
+# Go registers libFuzzer's coverage tables asynchronously. The engine must wait
+# before touching them (golang/go#82127). Wrap the image's initializer so its
+# existing signal-handler setup still runs after the wait. Compile without
+# coverage instrumentation: this bridge runs before the tables are ready.
+"${CC}" -c .clusterfuzzlite/initialize.c -o "${WORK}/cflite-initialize.o"
+export CXXFLAGS="${CXXFLAGS} ${WORK}/cflite-initialize.o -Wl,--wrap=LLVMFuzzerInitialize"
+
 # compile_native_go_fuzzer exits 0 and merely PRINTS "Could not find the
 # function" when it cannot locate `func <name>(f *testing.F)`. Left alone that
 # turns a renamed or deleted target into a silently shorter fuzzer list rather
