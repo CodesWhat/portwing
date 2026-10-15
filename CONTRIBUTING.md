@@ -20,7 +20,7 @@ Questions, ideas, or help? Use [GitHub Discussions](https://github.com/CodesWhat
    ```
 
 4. **Create a branch** from the active integration branch (currently
-   `dev/v0.9`). Portwing uses an integration-branch flow: bug fixes and
+   `dev/v1.0`). Portwing uses an integration-branch flow: bug fixes and
    features branch from and merge back into the current `dev/*` branch,
    which is promoted to `main` immediately before each release cut —
    `main` itself only ever advances by those promotions.
@@ -173,7 +173,7 @@ Multi-change commits: lead type on first line, bulleted sub-changes in body. Ref
 
 ## Pull request guidelines
 
-- Target the active integration branch (currently `dev/v0.9`) for all PRs,
+- Target the active integration branch (currently `dev/v1.0`) for all PRs,
   bug fixes and features alike. Never target `main` directly; it advances
   only through release promotions.
 - Keep PRs focused — one feature or fix per PR.

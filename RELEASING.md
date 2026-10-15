@@ -133,7 +133,10 @@ For a release candidate, pass an explicit version such as `1.0.0-rc.1`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag and
-Homebrew channel unchanged. Label its compatibility row `release candidate`
+Homebrew channel unchanged. The v1.0 candidate stage opts the scheduled
+main-release monitor into prerelease tags while retaining exact-tag and
+ancestry checks. Remove `allow-prerelease: true` from `main-is-released.yml`
+when preparing v1.0.0 GA. Label its compatibility row `release candidate`
 instead of `latest release`.
 
 This requires the **`RELEASE_PAT`** secret (fine-grained PAT, Contents:
@@ -188,7 +191,7 @@ branch:
 
 ```bash
 git fetch origin
-git push origin origin/main:dev/v0.9
+git push origin origin/main:dev/v1.0
 gh workflow run main-is-released.yml --ref main -f require_tree_parity=true
 ```
 

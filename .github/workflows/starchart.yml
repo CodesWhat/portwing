@@ -75,5 +75,5 @@ jobs:
       contents: write
     uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@11004e42d7d19e86eb3b7777c467ec9522b784e1  # main, 2026-08-21
     with:
-      branch: dev/v0.9
+      branch: dev/v1.0
       accent: "#7230d2"
