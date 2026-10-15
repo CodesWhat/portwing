@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.26] - 2026-10-15
+
+### Security
+
+- Update the ARMv7 Docker CLI to 29.9.1, built with Go 1.26.9, and rebuild
+  Compose with x/net 0.60.0. These versions include the Go and HTTP/2 security
+  fixes missing from the bundled clients in v0.9.25.
+
+### Fixed
+
+- The ClusterFuzzLite build now waits for Go's coverage registration before
+  starting libFuzzer. The weekly batch could crash during startup before
+  executing any inputs because the two initializers raced.
+
 ### Changed
 
 - The example Compose and Kubernetes files now pin the release version of the

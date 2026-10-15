@@ -28,6 +28,7 @@ bash scripts/fuzz-replay-script-test.sh
 bash scripts/fuzz-history-merge-script-test.sh
 bash scripts/cflite-config-test-test.sh
 bash scripts/cflite-config-test.sh
+bash scripts/cflite-initialize-test.sh
 bash scripts/codeql-trigger-config-test-test.sh
 bash scripts/codeql-trigger-config-test.sh
 bash scripts/quality-lane-notify-config-test-test.sh

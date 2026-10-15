@@ -329,6 +329,12 @@ assert_rejected \
 # --- build integration -------------------------------------------------------
 
 reset_fixtures
+sed -i.bak 's/-Wl,--wrap=LLVMFuzzerInitialize//' "${build_fixture}"
+assert_rejected \
+	"must wrap LLVMFuzzerInitialize to wait for Go coverage registration" \
+	"contract must reject linking without the Go startup barrier"
+
+reset_fixtures
 sed -i.bak 's|^FROM gcr.io/oss-fuzz-base/base-builder-go:v1@sha256:[0-9a-f]*$|FROM gcr.io/oss-fuzz-base/base-builder-go:v1|' "${dockerfile_fixture}"
 assert_rejected \
 	"builder image must be pinned by digest" \
