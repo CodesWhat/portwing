@@ -380,6 +380,13 @@ grep -Fq 'compile_native_go_fuzzer' "${build_script}" ||
 grep -Fq 'go get "${shim_module}/testing@${shim_version}"' "${build_script}" ||
 	fail "${build_script}: must add the go-118-fuzz-build testing shim at the generator's own version"
 
+grep -Fq -- '-Wl,--wrap=LLVMFuzzerInitialize' "${build_script}" ||
+	fail "${build_script}: must wrap LLVMFuzzerInitialize to wait for Go coverage registration"
+
+# shellcheck disable=SC2016 # Asserting the literal text of the file under test.
+grep -Fq '"${CC}" -c .clusterfuzzlite/initialize.c -o "${WORK}/cflite-initialize.o"' "${build_script}" ||
+	fail "${build_script}: must compile the startup bridge without coverage instrumentation"
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} ClusterFuzzLite contract check(s) failed" >&2
 	exit 1
