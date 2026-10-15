@@ -14,15 +14,15 @@
 # the build context (linux/amd64/portwing, linux/arm64/portwing,
 # linux/arm/v7/portwing).
 
-# Compose v5.5.1 with the containerd security patch, isolated from Portwing modules.
+# Compose v5.5.1 with patched containerd and x/net, isolated from Portwing modules.
 FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS compose-builder
 ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee621025f2 https://github.com/docker/compose/archive/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de.tar.gz /tmp/compose.tar.gz
 WORKDIR /compose
 RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \
-    && go get github.com/containerd/containerd/v2@v2.3.6 \
+    && go get github.com/containerd/containerd/v2@v2.3.6 golang.org/x/net@v0.60.0 \
     && go mod verify \
     && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -tags e2e \
-        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.2" \
+        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.3" \
         -o /docker-compose ./cmd
 
 # Wolfi rootfs — amd64 and arm64 share one recipe; buildx pulls the per-arch
@@ -57,7 +57,7 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && rm -rf /out/var/cache/apk/*
 
 # Static ARMv7 clients avoid Alpine's older bundled Go dependencies.
-ADD --checksum=sha256:e5fc27c730a503192c2bcd5462f9316a0626c6b62d7b8cff9fe41116f740b0aa https://download.docker.com/linux/static/stable/armhf/docker-29.8.0.tgz /tmp/docker.tgz
+ADD --checksum=sha256:b13646f48d2f8e7703b5fc86435088ceff6474e0a35ffb91656acddd70c2c519 https://download.docker.com/linux/static/stable/armhf/docker-29.9.1.tgz /tmp/docker.tgz
 COPY --from=compose-builder /docker-compose /out/usr/bin/docker-compose
 COPY --from=compose-builder /compose/LICENSE /out/usr/share/licenses/docker-compose/LICENSE
 RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker \
