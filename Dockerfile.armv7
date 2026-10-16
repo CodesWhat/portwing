@@ -39,6 +39,7 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
     && echo 'portwing:x:65532:' >>/out/etc/group \
     && install -d -o 65532 -g 65532 /out/home/portwing /out/data/stacks \
+    && install -d -m 0700 -o 65532 -g 65532 /out/data/credentials \
     && rm -rf /out/var/cache/apk/*
 
 # Static ARMv7 clients avoid Alpine's older bundled Go dependencies.

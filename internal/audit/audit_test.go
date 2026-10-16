@@ -130,6 +130,66 @@ func TestComposeOpEvent(t *testing.T) {
 	}
 }
 
+func TestKeyRotationEvent(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		sink bool
+		size int
+	}{
+		{name: "disabled"},
+		{name: "sink", sink: true},
+		{name: "buffer", size: 2},
+		{name: "sink and buffer", sink: true, size: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dest := ""
+			if tc.sink {
+				dest = filepath.Join(t.TempDir(), "rotation.log")
+			}
+			l, closeLog, err := New(dest, tc.size)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeLog()
+			l.KeyRotation("192.0.2.1", "commit", "public-key-id", OutcomeAllowed)
+			if tc.sink {
+				data, err := os.ReadFile(dest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				event := decodeEvent(t, string(data))
+				for field, want := range map[string]string{
+					"event": EventKeyRotation, "actor": "192.0.2.1", "operation": "commit",
+					"key_id": "public-key-id", "outcome": OutcomeAllowed,
+				} {
+					if event[field] != want {
+						t.Errorf("%s = %v, want %s", field, event[field], want)
+					}
+				}
+				if len(event) != 8 {
+					t.Errorf("unexpected audit fields: %v", event)
+				}
+			}
+			records := l.Records(0)
+			if tc.size == 0 {
+				if len(records) != 0 {
+					t.Fatalf("disabled buffer retained %d records", len(records))
+				}
+				return
+			}
+			if len(records) != 1 {
+				t.Fatalf("records = %d, want 1", len(records))
+			}
+			r := records[0]
+			if r.Event != EventKeyRotation || r.Actor != "192.0.2.1" || r.Operation != "commit" ||
+				r.KeyID != "public-key-id" || r.Outcome != OutcomeAllowed || r.Time.IsZero() {
+				t.Errorf("unexpected rotation record: %+v", r)
+			}
+		})
+	}
+}
+
 func TestFileSinkPermissions(t *testing.T) {
 	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "audit.log")

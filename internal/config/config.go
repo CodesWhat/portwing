@@ -82,6 +82,7 @@ type Config struct {
 
 	// Edge-mode private key for signed hello (PRIVATE_KEY_FILE)
 	PrivateKeyFile string
+	KeyRotationDir string
 }
 
 func Load() (*Config, error) {
@@ -138,6 +139,15 @@ func Load() (*Config, error) {
 	}
 
 	drydockURL := getEnv("DRYDOCK_URL", "")
+	keyRotationDir := getEnv("KEY_ROTATION_DIR", "")
+	if keyRotationDir != "" {
+		if drydockURL == "" && authorizedKeysFile == "" {
+			return nil, fmt.Errorf("KEY_ROTATION_DIR requires AUTHORIZED_KEYS in standard mode")
+		}
+		if drydockURL != "" && getEnv("PRIVATE_KEY_FILE", "") == "" {
+			return nil, fmt.Errorf("KEY_ROTATION_DIR requires PRIVATE_KEY_FILE in edge mode")
+		}
+	}
 	if drydockURL != "" && token == "" && tokenHash != "" && authorizedKeysFile == "" {
 		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone")
 	}
@@ -245,6 +255,7 @@ func Load() (*Config, error) {
 		EnrollmentToken: enrollmentToken,
 
 		PrivateKeyFile: getEnv("PRIVATE_KEY_FILE", ""),
+		KeyRotationDir: keyRotationDir,
 	}
 
 	if _, err := ParseOriginAllowlist(cfg.AllowedOrigins); err != nil {

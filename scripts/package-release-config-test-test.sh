@@ -36,7 +36,7 @@ restore_grype_workflow() {
 git archive HEAD | tar -x -C "${fixture}"
 cp scripts/package-release-config-test.sh "${fixture}/scripts/"
 cp scripts/verify-scanner-exclusions.sh "${fixture}/scripts/"
-cp .grype.yaml Dockerfile.armv7 Dockerfile.release "${fixture}/"
+cp .grype.yaml Dockerfile Dockerfile.dev Dockerfile.armv7 Dockerfile.release "${fixture}/"
 cp api/openapi.yaml "${fixture}/api/"
 cp examples/observability/docker-compose.yml "${fixture}/examples/observability/"
 cp docs/content/docs/current/api-reference.mdx "${fixture}/docs/content/docs/current/"
@@ -100,6 +100,14 @@ case "${release_version}" in
 	git -C "${fixture}" tag "v${stable_version}"
 	;;
 esac
+
+for recipe in Dockerfile Dockerfile.dev Dockerfile.armv7 Dockerfile.release; do
+	sed 's/install -d -m 0700 -o 65532 -g 65532/install -d -m 0755 -o 65532 -g 65532/g' "${recipe}" >"${fixture}/${recipe}"
+	expect_release_contract_failure \
+		"rotation storage must be private and owned by the runtime user" \
+		"shared credential directories in ${recipe} must fail the image contract"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
 
 # A healthcheck in a build stage cannot protect the final scratch image.
 for recipe in Dockerfile.armv7 Dockerfile.release; do

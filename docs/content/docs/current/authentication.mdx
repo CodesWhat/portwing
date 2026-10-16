@@ -203,6 +203,77 @@ bounded migration without retaining query-tampering exposure.
 
 Hot reload rebuilds the in-memory key map and logs each added and removed key ID. The nonce LRU is preserved across reload.
 
+### Controller-assisted rotation (development)
+
+This opt-in feature is in development. Portwing v1.0.0-rc.1 and published
+Drydock v1.6.x do not provide it. Use matching development builds on both sides.
+
+Set `KEY_ROTATION_DIR` to a persistent directory owned by Portwing with mode
+`0700`. Container images prepare `/data/credentials` for UID/GID `65532`;
+explicitly mount a named volume there and set the variable to that path. With a
+read-only root filesystem, the mounted directory must still be writable. For a
+bind mount, prepare ownership and permissions on the host first. No managed
+storage is enabled by default. Keep deployment bootstrap credentials mounted
+read-only and back up managed storage separately.
+
+In Standard mode, configure `AUTHORIZED_KEYS` as usual. The reserved,
+Ed25519-authenticated API is:
+
+| Method | Path | Signer and body |
+|---|---|---|
+| GET | `/_portwing/auth/rotation` | Current or pending signer; public key IDs only |
+| POST | `/_portwing/auth/rotation/prepare` | Current signer; `{ "public_key": "<base64 raw Ed25519 public key>" }` |
+| POST | `/_portwing/auth/rotation/commit` | Pending signer; `{}` |
+| POST | `/_portwing/auth/rotation/abort` | Current signer; `{}` |
+
+Use signature version 2 without query parameters. A bearer credential cannot
+manage keys. Each signer can replace only its own identity. Preparation retains
+both keys; only a request signed by the replacement can retire its predecessor.
+Drydock stages its replacement private key before preparation, proves it through
+a signed status request and then commits. Configure the controller agent's
+`DD_AGENT_<name>_ROTATIONDIR` to a private persistent directory to enable this.
+The original configured signing key remains unchanged.
+
+Portwing overlays managed keys on the operator-owned file without rewriting it.
+Reload and restart retain committed replacements. Removing the original root
+line and successfully reloading with `SIGHUP` revokes that root's managed
+descendants and durably forgets their rotation state. Re-adding the root starts
+from the bootstrap key. A failed reload reports an error and keeps the last
+good registry, so fix storage errors before relying on revocation. Keep the root
+line while using a managed replacement. Removing managed storage or disabling
+rotation reverts to deployment bootstrap authority; after a completed rotation,
+that can disconnect the peer and re-enable an old credential. Treat a reset as
+an operator recovery action, with coordinated trust changes at both ends.
+
+In Edge mode, the agent advertises `edge-key-rotation` only when managed storage
+is enabled. It generates its replacement locally and sends only the public key
+over its existing controller connection. Drydock stages that key for the exact
+agent name, asks the agent to reconnect, and retires the old key only after a
+fresh signed hello proves possession. Agent private keys never leave Portwing.
+Use one key per agent; rotation refuses keys already bound to multiple names.
+Reuse by an agent that has never connected cannot be detected, so unique keys
+remain an operator requirement. TLS still authenticates the controller.
+
+Drydock exposes `GET` and `POST /api/v1/agents/:name/key-rotation` through its
+existing session access policy. API keys are rejected, and recovery-assurance
+sessions cannot mutate credentials. POST accepts `{ "action": "rotate" }` or
+`{ "action": "abort" }`. Standard completion returns `200`. Edge activation
+returns `202` with `phase: "awaiting-reconnect"`; this is pending work, not proof
+of completion. Read status again after reconnect. These endpoints expose only
+public IDs, never PEM data. Ordinary Docker proxy requests cannot call this
+reserved management namespace.
+
+A failed proof leaves the old key active. Retrying reuses a staged replacement;
+abort cancels only an uncommitted replacement. If a Standard commit response is
+lost, Drydock reconciles using its durable pending credential, including before
+opening SSE after restart. Edge persists its trial signer before reconnecting;
+a lost welcome can retry that signer, while a terminal rejection restores the
+old signer and retains the staged key. Temporary transport or storage failures
+leave the operation unconfirmed and require checking status before retrying.
+Restart validates the durability of saved credentials before using them. Preserve both managed directories until
+the operation is resolved. Run only one controller writer per Standard managed
+credential directory.
+
 ### Key revocation
 
 Comment out or remove the key line from the authorized-keys file, then send `SIGHUP`. The key is removed from the in-memory map immediately and any subsequent request signed with that key is rejected with 401.

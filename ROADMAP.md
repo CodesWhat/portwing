@@ -60,11 +60,12 @@ calendar date:
   A real Drydock controller exercised enrollment, overlapping-key rotation,
   revocation, two SIGHUP reloads, and clock-skew rejection and recovery. The
   legacy-floor row passed alongside the current Standard and Edge rows.
-- **Candidate artifact verification before GA.** Run the hosted tri-tool
-  conformance matrix with the exact published candidate and current stable
-  Drydock and Sockguard artifacts. The historical acceptance above does not
-  establish a candidate result. Keep the current Standard, Edge and legacy
-  floor rows green and retain the workflow evidence.
+- **Completed for v1.0.0-rc.1: Candidate artifact verification.** The exact
+  published candidate passed Standard, Edge and legacy-floor rows with Drydock
+  [v1.6.0](https://github.com/CodesWhat/sockguard/actions/runs/38836428734) and
+  [v1.6.1](https://github.com/CodesWhat/sockguard/actions/runs/38837070094), both
+  with Sockguard v2.2.10. These runs do not verify subsequent development work.
+  Rerun the matrix against the exact next published candidate before GA.
 - **Completed for v0.8 — Edge-mode graduation.** Drydock 1.6 enables
   `/api/portwing/ws` by default, with `DD_EXPERIMENTAL_PORTWING=false` retained
   as an emergency disable. Drydock's `quality-portwing-fleet-soak.yml` runs the
@@ -94,14 +95,13 @@ calendar date:
 - **Completed for v0.9 — Edge audit export hardening.** Standard and Edge
   modes share one exporter implementation; public docs and Kubernetes examples
   explicitly isolate Edge Mode's unauthenticated operations listener.
-- **Versioned docs archive at the first v1.0 candidate.** `docs/content/docs/current/` holds the
-  tree tracking the latest release, served at the unversioned `/docs/...`
-  URLs. Through `v0.9.x` it is the only tree. At the first v1.0 candidate the `v0.9` docs are
-  archived from the final `v0.9.x` tag into a sibling `v0.9/` directory,
-  served at `/docs/v0.9/...` and verified against that tag's tree, so the
-  semver guarantees in [STABILITY.md](STABILITY.md) keep the docs they were
-  written against. Each later minor line archives the one before it the same
-  way.
+- **Completed for v1.0.0-rc.1: Versioned docs archive.** The `v0.9` docs
+  were frozen from the final v0.9 release tag and are served at `/docs/v0.9/...`,
+  with their source tree verified by the archive contract. The live
+  `docs/content/docs/current/` tree serves at the unversioned `/docs/...` URLs
+  and now includes explicitly labelled development features. Preserve frozen
+  archives when preparing later release lines. Archiving docs does not end
+  release support; v0.9 remains supported until v1.0.0 GA.
 - **SLSA Build L2 is the ceiling for now.** Provenance attestation (see
   [RELEASING.md](RELEASING.md)) stays at Build L2 because GoReleaser, cosign,
   and attest all run inline inside `release.yml`. Build L3 needs an isolated,
@@ -109,9 +109,29 @@ calendar date:
   for any CodesWhat repo. The trigger is that workflow landing — portwing's
   release job moves onto it then, not before.
 
+**Implemented on the development branches: controller-assisted two-key rotation.**
+Opt-in durable managed credentials, Standard replacement proof and Edge
+signed-hello handoff are verified with Drydock. The published v1.0 candidate does not include this work.
+
+**Release documentation alignment before the next candidate or GA:**
+
+- Reconcile the README's Post-v1 rotation entry and the Unreleased changelog
+  with this development implementation. Assign the first released Portwing
+  and Drydock versions supporting it before advertising released availability;
+  the existing wire compatibility level does not establish feature support.
+- Keep README, compatibility and release-readiness claims tied to the exact
+  published candidate and its evidence. Preserve the distinction between
+  manual overlapping-key rotation tested in the rc.1 matrix and the new
+  controller-assisted implementation.
+- Correct the contributor docs' blanket description of archives as
+  unsupported. Keep support notices aligned with [SECURITY.md](SECURITY.md):
+  v0.9 is supported during candidate evaluation and retires at v1.0.0 GA.
+  Do not edit the frozen v0.9 archive or invent a removal date for legacy
+  query-free HTTP signatures.
+
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,
-polling/intermittent edge transport, and controller-assisted two-key rotation.
+and polling/intermittent edge transport.
 None should expand the base socket policy or add an unaudited
 self-update path merely for feature-table parity.
 

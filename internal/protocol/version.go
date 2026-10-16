@@ -43,6 +43,9 @@ const (
 	// controller must not send request.bodyStream=true unless the agent's
 	// hello advertised this token.
 	CapRequestBodyStream = "edge-request-body-stream"
+
+	CapKeyRotation  = "edge-key-rotation"
+	KeyRotationPath = "/_portwing/auth/rotation"
 )
 
 // AgentVersion is the agent build version. It must be a var, not a const:

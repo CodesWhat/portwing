@@ -176,6 +176,17 @@ set.ignored = true
 match.rules = ["checkov:CKV_OPENAPI_4", "checkov:CKV_OPENAPI_5"]
 set.ignored = true
 
+# OpenAPI models X-Portwing-Signature as apiKey because custom signature
+# headers have no native security-scheme type. It is a body/target-bound
+# Ed25519 proof with timestamp and atomic nonce replay protection, not a secret
+# key sent over the wire. CKV_OPENAPI_20 mistakes that public proof for an API
+# credential when the managed routes name it. TLS remains recommended for
+# transport confidentiality; this exception applies only to this API document.
+[[triage]]
+match.rules = ["checkov:CKV_OPENAPI_20"]
+match.file_patterns = ["api/openapi.yaml"]
+set.ignored = true
+
 # OpenAPI array max-items: not all list endpoints have a bounded maximum;
 # pagination is implemented at the application layer.
 [[triage]]
