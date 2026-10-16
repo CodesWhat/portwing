@@ -5,7 +5,7 @@
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
 
-This direction covers at least the next twelve months, through August 2027.
+This direction covers work through August 2027.
 Items without a release assignment remain demand-driven rather than promised.
 
 ## Shipped — edge mode, hardening, and quality gates
@@ -113,21 +113,20 @@ calendar date:
 Opt-in durable managed credentials, Standard replacement proof and Edge
 signed-hello handoff are verified with Drydock. The published v1.0 candidate does not include this work.
 
-**Release documentation alignment before the next candidate or GA:**
+**Completed in development: release documentation alignment.** The README,
+Unreleased changelog and current operator docs identify managed rotation as
+unreleased, with matching development branches recorded in
+[COMPATIBILITY.md](COMPATIBILITY.md#development-only-controller-assisted-rotation).
+The matrix records the completed rc.1 evidence separately from the new
+implementation. Archive guidance follows [SECURITY.md](SECURITY.md): v0.9 is
+supported until v1.0.0 GA; frozen content does not imply unsupported software.
 
-- Reconcile the README's Post-v1 rotation entry and the Unreleased changelog
-  with this development implementation. Assign the first released Portwing
-  and Drydock versions supporting it before advertising released availability;
-  the existing wire compatibility level does not establish feature support.
-- Keep README, compatibility and release-readiness claims tied to the exact
-  published candidate and its evidence. Preserve the distinction between
-  manual overlapping-key rotation tested in the rc.1 matrix and the new
-  controller-assisted implementation.
-- Correct the contributor docs' blanket description of archives as
-  unsupported. Keep support notices aligned with [SECURITY.md](SECURITY.md):
-  v0.9 is supported during candidate evaluation and retires at v1.0.0 GA.
-  Do not edit the frozen v0.9 archive or invent a removal date for legacy
-  query-free HTTP signatures.
+**Before the next candidate or GA:** record the first supporting release tags
+for rotation on both sides when published, rerun conformance against the exact
+new artifacts and update release/support metadata together. The existing wire
+level does not establish additive feature support. Follow
+[RELEASING.md](RELEASING.md#release-documentation-and-compatibility).
+Legacy query-free HTTP signatures have no scheduled removal.
 
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,

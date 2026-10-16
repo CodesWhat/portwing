@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in controller-assisted Ed25519 key rotation with matching Drydock
+  development builds. Standard mode stages a successor, proves its private key
+  and then retires its predecessor. Edge mode generates the replacement on the
+  agent and proves it with a fresh signed hello before retiring the old key.
+- `KEY_ROTATION_DIR` enables private, durable managed credentials without
+  rewriting deployment-owned bootstrap files. Rotation supports restart
+  recovery, abort and retry; status and audit records expose public key IDs.
+  This feature is not included in v1.0.0-rc.1. See
+  [compatibility](COMPATIBILITY.md#development-only-controller-assisted-rotation)
+  for the development branches and released-version boundaries.
+
 ## [v1.0.0-rc.1] - 2026-10-16
 
 ### Changed
