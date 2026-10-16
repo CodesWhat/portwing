@@ -218,6 +218,14 @@ if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"${toolchain_version}"; then
 	toolchain_version="unresolved"
 fi
 
+for dockerfile in Dockerfile Dockerfile.release Dockerfile.armv7 Dockerfile.dev; do
+	credential_root="/out"
+	if [ "${dockerfile}" = "Dockerfile.dev" ]; then
+		credential_root=""
+	fi
+	require_text "${dockerfile}" "install -d -m 0700 -o 65532 -g 65532 ${credential_root}/data/credentials" "rotation storage must be private and owned by the runtime user"
+done
+
 builder_ref=""
 for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
 	# shellcheck disable=SC2016 # Match the literal Docker BUILDPLATFORM arg.

@@ -21,6 +21,7 @@ RUN apk add --no-cache --initdb --root /out \
     && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
     && echo 'portwing:x:65532:' >>/out/etc/group \
     && install -d -o 65532 -g 65532 /out/home/portwing /out/data/stacks \
+    && install -d -m 0700 -o 65532 -g 65532 /out/data/credentials \
     && rm -rf /out/var/cache/apk/*
 
 # Stage 3: Final image — Wolfi rootfs plus the binary. Runs as the dedicated
