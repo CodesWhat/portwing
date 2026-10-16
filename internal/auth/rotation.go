@@ -310,6 +310,7 @@ func WriteRotationState(path string, data []byte) error {
 }
 
 func syncRotationStateDirectory(path string) error {
+	// #nosec G304 -- the rotation directory is explicit operator configuration.
 	dir, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("opening rotation directory for sync: %w", err)
