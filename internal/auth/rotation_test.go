@@ -4,11 +4,14 @@ package auth
 
 import (
 	"crypto/ed25519"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -422,4 +425,200 @@ func TestRootPruningFailureDoesNotPublishPartialRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireRotationKey(t, f.registry, f.next, false)
+}
+
+func TestDirectorySyncFailureCannotReportRotationCompletion(t *testing.T) {
+	f := newRotationFixture(t)
+	old := KeyIDForPublicKey(f.old)
+	next := KeyIDForPublicKey(f.next)
+	if _, err := f.registry.PrepareRotation(old, f.next); err != nil {
+		t.Fatal(err)
+	}
+	realSync := syncRotationDirectory
+	syncRotationDirectory = func(*os.File) error { return errors.New("fixture directory sync failed") }
+	t.Cleanup(func() { syncRotationDirectory = realSync })
+	if _, err := f.registry.CommitRotation(next); err == nil {
+		t.Fatal("unsynced commit reported successful completion")
+	}
+	status, err := f.registry.RotationStatus(old)
+	if err != nil || status.CurrentKeyID != old || status.PendingKeyID != next {
+		t.Fatalf("unresolved write reported committed: %+v %v", status, err)
+	}
+	restored := NewKeyRegistry(f.path)
+	if err := restored.EnableRotation(f.dir); err == nil {
+		t.Fatal("startup accepted state without confirming directory durability")
+	}
+	syncRotationDirectory = realSync
+	if _, err := f.registry.CommitRotation(next); err != nil {
+		t.Fatal(err)
+	}
+	requireRotationKey(t, f.registry, f.old, false)
+}
+
+type failingRotationFile struct {
+	*os.File
+	stage string
+}
+
+func (f failingRotationFile) Write(data []byte) (int, error) {
+	if f.stage == "write" {
+		return 0, errors.New("fixture write failure")
+	}
+	return f.File.Write(data)
+}
+func (f failingRotationFile) Sync() error {
+	if f.stage == "sync" {
+		return errors.New("fixture file sync failure")
+	}
+	return f.File.Sync()
+}
+func (f failingRotationFile) Close() error {
+	err := f.File.Close()
+	if f.stage == "close" {
+		return errors.New("fixture close failure")
+	}
+	return err
+}
+
+func TestRotationWriteFailuresNeverReplaceDurableState(t *testing.T) {
+	originalCreate := createRotationStateFile
+	t.Cleanup(func() { createRotationStateFile = originalCreate })
+	for _, stage := range []string{"write", "sync", "close"} {
+		t.Run(stage, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "state.json")
+			if err := os.WriteFile(target, []byte("original"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			createRotationStateFile = func(dir, pattern string) (rotationStateFile, error) {
+				f, err := os.CreateTemp(dir, pattern)
+				return failingRotationFile{f, stage}, err
+			}
+			if err := WriteRotationState(target, []byte("replacement")); err == nil {
+				t.Fatal("write failure reported success")
+			}
+			data, err := os.ReadFile(target)
+			if err != nil || string(data) != "original" {
+				t.Fatalf("old state lost: %v", err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("temporary credentials leaked: %v", err)
+			}
+		})
+	}
+	if err := syncRotationStateDirectory(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing directory sync reported success")
+	}
+}
+
+func TestRotationRejectsUnsafeStorageAndAnotherRootsBootstrap(t *testing.T) {
+	if err := PrepareRotationDirectory(""); err == nil {
+		t.Fatal("accepted empty managed directory")
+	}
+	f := newRotationFixture(t)
+	if err := NewKeyRegistry(f.path).EnableRotation(""); err == nil {
+		t.Fatal("accepted empty registry directory")
+	}
+	path := filepath.Join(f.dir, "authorized-rotation.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"keys":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewKeyRegistry(f.path).EnableRotation(f.dir); err == nil {
+		t.Fatal("accepted exposed registry state")
+	}
+	replacement, _ := genPubKeyB64(t)
+	if _, err := f.registry.PrepareRotation(KeyIDForPublicKey(f.other), replacement); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.registry.CommitRotation(KeyIDForPublicKey(replacement)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.registry.PrepareRotation(KeyIDForPublicKey(f.old), f.other); !errors.Is(err, ErrRotationInvalid) {
+		t.Fatalf("reused another root's bootstrap: %v", err)
+	}
+}
+
+func TestRotationCannotPublishStateTooLargeToReload(t *testing.T) {
+	f := newRotationFixture(t)
+	state := rotationState{Version: 1, Keys: map[string]rotationKeys{}}
+	empty, _ := json.Marshal(state)
+	state.Keys[KeyIDForPublicKey(f.old)] = rotationKeys{Current: f.old}
+	one, _ := json.Marshal(state)
+	entrySize := len(one) - len(empty) + 1
+	count := (maxRotationStateBytes - len(empty) + 1) / entrySize
+	var roots strings.Builder
+	roots.WriteString(AuthorizedKeyLine(f.old, "target") + "\n")
+	state.Keys[KeyIDForPublicKey(f.other)] = rotationKeys{Current: f.other}
+	roots.WriteString(AuthorizedKeyLine(f.other, "independent") + "\n")
+	for i := 2; i < count; i++ {
+		pub := make(ed25519.PublicKey, 32)
+		binary.LittleEndian.PutUint64(pub, uint64(i+100))
+		state.Keys[KeyIDForPublicKey(pub)] = rotationKeys{Current: pub}
+		roots.WriteString(AuthorizedKeyLine(pub, "fleet") + "\n")
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingFieldSize := len(`,"pending":"`) + 44 + 1
+	if maxRotationStateBytes-len(data) >= pendingFieldSize {
+		pending := make(ed25519.PublicKey, 32)
+		binary.LittleEndian.PutUint64(pending, 1_000_000_000)
+		state.Keys[KeyIDForPublicKey(f.other)] = rotationKeys{Current: f.other, Pending: pending}
+		data, err = json.Marshal(state)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(data) > maxRotationStateBytes || maxRotationStateBytes-len(data) >= pendingFieldSize {
+		t.Fatalf("bad near-cap fixture size %d", len(data))
+	}
+	if err := os.WriteFile(f.path, []byte(roots.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(f.dir, "authorized-rotation.json")
+	if err := os.WriteFile(statePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewKeyRegistry(f.path)
+	if err := r.EnableRotation(f.dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.PrepareRotation(KeyIDForPublicKey(f.old), f.next); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized mutation: %v", err)
+	}
+	after, err := os.ReadFile(statePath)
+	if err != nil || string(after) != string(data) {
+		t.Fatalf("failed mutation changed durable state: %v", err)
+	}
+	requireRotationKey(t, r, f.old, true)
+	requireRotationKey(t, r, f.next, false)
+}
+
+func TestUnreadableManagedStateNeverBootstrapsEitherMode(t *testing.T) {
+	f := newRotationFixture(t)
+	if _, err := f.registry.PrepareRotation(KeyIDForPublicKey(f.old), f.next); err != nil {
+		t.Fatal(err)
+	}
+	file, dir, _ := edgeRotationFixture(t)
+	edge, err := NewEdgeKeyRotation(file, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := edge.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	realRead := readRotationState
+	readRotationState = func(io.Reader) ([]byte, error) { return nil, errors.New("fixture storage read failed") }
+	t.Cleanup(func() { readRotationState = realRead })
+	if err := NewKeyRegistry(f.path).EnableRotation(f.dir); err == nil {
+		t.Fatal("ignored unreadable authorization state")
+	}
+	if _, err := NewEdgeKeyRotation(file, dir); err == nil {
+		t.Fatal("ignored unreadable private state")
+	}
 }

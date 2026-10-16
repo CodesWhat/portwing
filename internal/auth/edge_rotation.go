@@ -60,7 +60,7 @@ func NewEdgeKeyRotation(bootstrap, dir string) (*EdgeKeyRotation, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, 65537))
+	data, err := readRotationState(io.LimitReader(f, 65537))
 	if err != nil {
 		return nil, fmt.Errorf("reading edge credentials: %w", err)
 	}
@@ -89,6 +89,9 @@ func NewEdgeKeyRotation(bootstrap, dir string) (*EdgeKeyRotation, error) {
 		}
 	} else if r.state.Trying {
 		return nil, fmt.Errorf("edge credential trial has no pending key")
+	}
+	if err := syncRotationStateDirectory(dir); err != nil {
+		return nil, err
 	}
 	return r, nil
 }
@@ -198,10 +201,7 @@ func (r *EdgeKeyRotation) Abort() (EdgeRotationStatus, error) {
 }
 
 func (r *EdgeKeyRotation) persist(state edgeCredentialState) error {
-	data, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("encoding edge credentials: %w", err)
-	}
+	data, _ := json.Marshal(state)
 	if err := WriteRotationState(r.path, data); err != nil {
 		return err
 	}

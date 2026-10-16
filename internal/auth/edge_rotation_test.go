@@ -5,6 +5,7 @@ package auth
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,5 +287,48 @@ func TestEdgeRotationFailedWritesPreserveMemoryAndDisk(t *testing.T) {
 	}
 	if changed, err := r.RejectTrial(); err != nil || changed {
 		t.Fatal("non-trial rejection must be a no-op")
+	}
+}
+
+func TestEdgeDirectorySyncFailureCannotActivateUndurableCredentials(t *testing.T) {
+	file, dir, _ := edgeRotationFixture(t)
+	r, err := NewEdgeKeyRotation(file, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := r.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realSync := syncRotationDirectory
+	syncRotationDirectory = func(*os.File) error { return errors.New("fixture directory sync failed") }
+	t.Cleanup(func() { syncRotationDirectory = realSync })
+	if _, err := r.Activate(prepared.PendingKeyID); err == nil {
+		t.Fatal("unsynced activation reported success")
+	}
+	if r.Status().ActivationPending {
+		t.Fatal("unsynced activation changed live signer")
+	}
+	if _, err := NewEdgeKeyRotation(file, dir); err == nil {
+		t.Fatal("restart accepted a signer before directory durability was confirmed")
+	}
+	syncRotationDirectory = realSync
+	restarted, err := NewEdgeKeyRotation(file, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if KeyIDForPublicKey(restarted.SigningKey().Public().(ed25519.PublicKey)) != prepared.PendingKeyID {
+		t.Fatal("restart did not reconcile the renamed trial")
+	}
+	syncRotationDirectory = func(*os.File) error { return errors.New("fixture directory sync failed") }
+	if _, err := restarted.Confirm(); err == nil {
+		t.Fatal("unsynced confirmation reported success")
+	}
+	if KeyIDForPublicKey(restarted.SigningKey().Public().(ed25519.PublicKey)) != prepared.PendingKeyID {
+		t.Fatal("unresolved confirmation lost the accepted private key")
+	}
+	syncRotationDirectory = realSync
+	if _, err := restarted.Confirm(); err != nil {
+		t.Fatal(err)
 	}
 }

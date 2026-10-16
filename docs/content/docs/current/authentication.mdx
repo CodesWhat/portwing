@@ -269,7 +269,8 @@ lost, Drydock reconciles using its durable pending credential, including before
 opening SSE after restart. Edge persists its trial signer before reconnecting;
 a lost welcome can retry that signer, while a terminal rejection restores the
 old signer and retains the staged key. Temporary transport or storage failures
-require checking status before retrying. Preserve both managed directories until
+leave the operation unconfirmed and require checking status before retrying.
+Restart validates the durability of saved credentials before using them. Preserve both managed directories until
 the operation is resolved. Run only one controller writer per Standard managed
 credential directory.
 

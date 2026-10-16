@@ -109,9 +109,9 @@ calendar date:
   for any CodesWhat repo. The trigger is that workflow landing — portwing's
   release job moves onto it then, not before.
 
-**In development: controller-assisted two-key rotation.** Opt-in durable managed
-credentials, Standard replacement proof and Edge signed-hello handoff are being
-verified with Drydock. The published v1.0 candidate does not include this work.
+**Implemented on the development branches: controller-assisted two-key rotation.**
+Opt-in durable managed credentials, Standard replacement proof and Edge
+signed-hello handoff are verified with Drydock. The published v1.0 candidate does not include this work.
 
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,

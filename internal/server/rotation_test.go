@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -166,5 +167,64 @@ func TestRotationReservedRoutesAndValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRotationHTTPAbortConflictAndFailedPersistence(t *testing.T) {
+	t.Parallel()
+	s, old := newRotationServer(t, true)
+	pub, next, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"public_key":%q}`, base64.StdEncoding.EncodeToString(pub))
+	if err := os.Rename(s.cfg.KeyRotationDir, s.cfg.KeyRotationDir+"-offline"); err != nil {
+		t.Fatal(err)
+	}
+	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/prepare", payload); response.Code != 500 {
+		t.Fatalf("failed persistence: %d", response.Code)
+	}
+	if err := os.Rename(s.cfg.KeyRotationDir+"-offline", s.cfg.KeyRotationDir); err != nil {
+		t.Fatal(err)
+	}
+	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/prepare", payload); response.Code != 200 {
+		t.Fatalf("prepare retry: %d", response.Code)
+	}
+	other, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflicting := fmt.Sprintf(`{"public_key":%q}`, base64.StdEncoding.EncodeToString(other))
+	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/prepare", conflicting); response.Code != 409 {
+		t.Fatalf("conflicting pending key: %d", response.Code)
+	}
+	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/abort", payload); response.Code != 400 {
+		t.Fatalf("abort with replacement: %d", response.Code)
+	}
+	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/abort", "{}"); response.Code != 200 {
+		t.Fatalf("abort: %d", response.Code)
+	}
+	if response := rotationRequest(t, s, next, "GET", "/_portwing/auth/rotation", ""); response.Code != 401 {
+		t.Fatalf("aborted key remained active: %d", response.Code)
+	}
+}
+
+func TestRotationServerRejectsUnusableManagedConfiguration(t *testing.T) {
+	t.Parallel()
+	client, stop := newStubDockerClient(t)
+	defer stop()
+	cfg := minimalConfig()
+	cfg.KeyRotationDir = filepath.Join(t.TempDir(), "managed")
+	if _, err := NewServer(cfg, client, &stubServerAdapter{}); err == nil {
+		t.Fatal("accepted rotation without operator keys")
+	}
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.AuthorizedKeysFile = writeAuthorizedKeys(t, pub)
+	cfg.KeyRotationDir = cfg.AuthorizedKeysFile
+	if _, err := NewServer(cfg, client, &stubServerAdapter{}); err == nil {
+		t.Fatal("accepted file as rotation directory")
 	}
 }

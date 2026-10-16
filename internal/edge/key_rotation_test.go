@@ -7,16 +7,19 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/codeswhat/portwing/internal/auth"
+	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/protocol"
 )
 
@@ -193,5 +196,106 @@ func TestEdgeRotationWriteFailureIsReportedAndPreservesCurrentSigner(t *testing.
 	}
 	if c.keyRotation.Status().CurrentKeyID != hello.PubKeyID || c.keyRotation.Status().PendingKeyID != "" {
 		t.Fatal("failed write changed identity")
+	}
+}
+
+func TestEdgeRotationHandshakeProofAndRecovery(t *testing.T) {
+	for _, scenario := range []string{"welcome", "lost-welcome", "reject", "reject-write-fails", "confirm-write-fails"} {
+		t.Run(scenario, func(t *testing.T) {
+			pem, _, err := auth.GenerateKeyPair("bootstrap")
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(t.TempDir(), "bootstrap.pem")
+			if err := os.WriteFile(file, pem, 0o400); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(t.TempDir(), "managed")
+			cfg := &config.Config{PrivateKeyFile: file, KeyRotationDir: dir, HeartbeatInterval: 30, WelcomeTimeout: 3, DDPollInterval: 300, SkipDFCollection: true}
+			c := newWireClient(t, cfg)
+			if err := c.initKeyRotation(); err != nil {
+				t.Fatal(err)
+			}
+			old := c.keyRotation.Status().CurrentKeyID
+			pending, err := c.keyRotation.Prepare()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.keyRotation.Activate(pending.PendingKeyID); err != nil {
+				t.Fatal(err)
+			}
+			cfg.DrydockURL = newControllerServer(t, func(ctrl *websocket.Conn) {
+				var hello protocol.HelloMessage
+				decodeData(t, expectType(t, ctrl, protocol.TypeHello), &hello)
+				if hello.PubKeyID != pending.PendingKeyID {
+					t.Errorf("trial did not prove replacement: %s", hello.PubKeyID)
+				}
+				if scenario == "lost-welcome" {
+					return
+				}
+				if strings.HasSuffix(scenario, "write-fails") {
+					if err := os.Rename(dir, dir+"-offline"); err != nil {
+						t.Error(err)
+						return
+					}
+				}
+				if strings.HasPrefix(scenario, "reject") {
+					if err := ctrl.WriteJSON(protocol.Envelope{Type: protocol.TypeError, Data: json.RawMessage(`{"code":"unknown-key","message":"replacement rejected"}`)}); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{})
+				_ = ctrl.SetReadDeadline(time.Now().Add(3 * time.Second))
+				_, _, _ = ctrl.ReadMessage()
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			established, err := c.connect(ctx)
+			status := c.keyRotation.Status()
+			switch scenario {
+			case "welcome":
+				if !established || status.CurrentKeyID != pending.PendingKeyID || status.PendingKeyID != "" {
+					t.Fatalf("welcome failed to confirm: %+v %v", status, err)
+				}
+			case "confirm-write-fails":
+				if !established || !status.ActivationPending || status.PendingKeyID != pending.PendingKeyID {
+					t.Fatalf("failed confirmation lost durable candidate: %+v %v", status, err)
+				}
+			case "reject":
+				if established || err == nil || errors.Is(err, errFatal) || status.ActivationPending || status.CurrentKeyID != old {
+					t.Fatalf("terminal trial did not safely restore predecessor: %+v %v", status, err)
+				}
+			default:
+				if established || err == nil || !status.ActivationPending || status.PendingKeyID != pending.PendingKeyID {
+					t.Fatalf("interrupted proof lost durable trial: %+v %v", status, err)
+				}
+			}
+		})
+	}
+}
+
+func TestEdgeInvalidManagedStorageFailsBeforeConnectionOrServing(t *testing.T) {
+	c, ctrl := newTestClient(t)
+	c.dockerClient = &fakeDocker{}
+	c.adapter = &fakeAdapter{}
+	c.cfg.PrivateKeyFile = filepath.Join(t.TempDir(), "absent.pem")
+	c.cfg.KeyRotationDir = filepath.Join(t.TempDir(), "managed")
+	if _, err := c.connect(context.Background()); err == nil {
+		t.Fatal("connected with invalid credentials")
+	}
+	if err := c.Run(context.Background()); err == nil {
+		t.Fatal("started with invalid credentials")
+	}
+	if err := c.sendHello(context.Background()); err == nil {
+		t.Fatal("sent hello with invalid credentials")
+	}
+	hello := newHello()
+	if err := c.signHello(context.Background(), &hello); err == nil {
+		t.Fatal("signed hello with invalid credentials")
+	}
+	response := edgeRotationRequest(t, c, ctrl, "GET", "/_portwing/auth/rotation/edge", "")
+	if response.StatusCode != 500 {
+		t.Fatalf("invalid storage response: %d", response.StatusCode)
 	}
 }

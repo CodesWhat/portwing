@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -20,6 +19,20 @@ var (
 	ErrRotationConflict  = errors.New("a different replacement key is already pending")
 	ErrRotationInvalid   = errors.New("invalid replacement key")
 )
+
+type rotationStateFile interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+	Name() string
+}
+
+var createRotationStateFile = func(dir, pattern string) (rotationStateFile, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
+var syncRotationDirectory = (*os.File).Sync
+var readRotationState = io.ReadAll
 
 const maxRotationStateBytes = 1024 * 1024
 
@@ -55,7 +68,7 @@ func (r *KeyRegistry) EnableRotation(dir string) error {
 	f, err := openCredentialFile(store.path, "rotation state")
 	if err == nil {
 		defer f.Close()
-		data, readErr := io.ReadAll(io.LimitReader(f, maxRotationStateBytes+1))
+		data, readErr := readRotationState(io.LimitReader(f, maxRotationStateBytes+1))
 		if readErr != nil {
 			return fmt.Errorf("reading rotation state: %w", readErr)
 		}
@@ -68,6 +81,9 @@ func (r *KeyRegistry) EnableRotation(dir string) error {
 		}
 		if state.Version != 1 || state.Keys == nil {
 			return fmt.Errorf("unsupported rotation state")
+		}
+		if err := syncRotationStateDirectory(dir); err != nil {
+			return err
 		}
 		store.keys = state.Keys
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -92,10 +108,7 @@ func (r *KeyRegistry) pruneRotationRoots(roots map[string]*AuthorizedKey) error 
 	if len(retained) == len(r.rotation.keys) {
 		return nil
 	}
-	data, err := json.Marshal(rotationState{Version: 1, Keys: retained})
-	if err != nil {
-		return fmt.Errorf("encoding pruned rotation state: %w", err)
-	}
+	data, _ := json.Marshal(rotationState{Version: 1, Keys: retained})
 	if err := WriteRotationState(r.rotation.path, data); err != nil {
 		return fmt.Errorf("persisting removed rotation roots: %w", err)
 	}
@@ -130,9 +143,6 @@ func (r *KeyRegistry) RotationStatus(caller string) (RotationStatus, error) {
 func (r *KeyRegistry) rotationForCaller(caller string) (string, rotationKeys, error) {
 	if r.rotation == nil {
 		return "", rotationKeys{}, ErrRotationDisabled
-	}
-	if _, ok := r.keys[caller]; !ok {
-		return "", rotationKeys{}, ErrRotationForbidden
 	}
 	for root, bootstrap := range r.roots {
 		keys, ok := r.rotation.keys[root]
@@ -195,10 +205,7 @@ func (r *KeyRegistry) CommitRotation(caller string) (RotationStatus, error) {
 		return RotationStatus{}, err
 	}
 	if len(keys.Pending) == 0 {
-		if caller == KeyIDForPublicKey(keys.Current) {
-			return rotationStatus(root, keys), nil
-		}
-		return RotationStatus{}, ErrRotationForbidden
+		return rotationStatus(root, keys), nil
 	}
 	if caller != KeyIDForPublicKey(keys.Pending) {
 		return RotationStatus{}, ErrRotationForbidden
@@ -234,10 +241,7 @@ func (r *KeyRegistry) persistRotation(root string, keys rotationKeys) (RotationS
 	if err != nil {
 		return RotationStatus{}, err
 	}
-	data, err := json.Marshal(rotationState{Version: 1, Keys: updated})
-	if err != nil {
-		return RotationStatus{}, fmt.Errorf("encoding rotation state: %w", err)
-	}
+	data, _ := json.Marshal(rotationState{Version: 1, Keys: updated})
 	if len(data) > maxRotationStateBytes {
 		return RotationStatus{}, fmt.Errorf("rotation state exceeds %d bytes", maxRotationStateBytes)
 	}
@@ -283,7 +287,7 @@ func overlayRotationKeys(roots map[string]*AuthorizedKey, rotations map[string]r
 }
 
 func WriteRotationState(path string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".rotation-")
+	f, err := createRotationStateFile(filepath.Dir(path), ".rotation-")
 	if err != nil {
 		return fmt.Errorf("creating rotation state: %w", err)
 	}
@@ -302,11 +306,17 @@ func WriteRotationState(path string, data []byte) error {
 	if err := os.Rename(f.Name(), path); err != nil {
 		return fmt.Errorf("replacing rotation state: %w", err)
 	}
-	if dir, err := os.Open(filepath.Dir(path)); err == nil {
-		if err := dir.Sync(); err != nil {
-			slog.Warn("rotation state replaced but directory sync failed", "error", err)
-		}
-		_ = dir.Close()
+	return syncRotationStateDirectory(filepath.Dir(path))
+}
+
+func syncRotationStateDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("opening rotation directory for sync: %w", err)
+	}
+	defer dir.Close()
+	if err := syncRotationDirectory(dir); err != nil {
+		return fmt.Errorf("syncing rotation directory: %w", err)
 	}
 	return nil
 }
