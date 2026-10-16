@@ -68,6 +68,10 @@ func (r *KeyRegistry) Load() error {
 			r.mu.Unlock()
 			return err
 		}
+		if err := r.pruneRotationRoots(roots); err != nil {
+			r.mu.Unlock()
+			return err
+		}
 	}
 	old := r.keys
 	r.roots = roots

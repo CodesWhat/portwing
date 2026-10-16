@@ -82,6 +82,27 @@ func (r *KeyRegistry) EnableRotation(dir string) error {
 	return nil
 }
 
+func (r *KeyRegistry) pruneRotationRoots(roots map[string]*AuthorizedKey) error {
+	retained := make(map[string]rotationKeys, len(r.rotation.keys))
+	for root, keys := range r.rotation.keys {
+		if roots[root] != nil {
+			retained[root] = keys
+		}
+	}
+	if len(retained) == len(r.rotation.keys) {
+		return nil
+	}
+	data, err := json.Marshal(rotationState{Version: 1, Keys: retained})
+	if err != nil {
+		return fmt.Errorf("encoding pruned rotation state: %w", err)
+	}
+	if err := WriteRotationState(r.rotation.path, data); err != nil {
+		return fmt.Errorf("persisting removed rotation roots: %w", err)
+	}
+	r.rotation.keys = retained
+	return nil
+}
+
 func PrepareRotationDirectory(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("rotation directory must not be empty")

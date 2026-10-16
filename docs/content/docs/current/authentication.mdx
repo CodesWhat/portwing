@@ -236,7 +236,10 @@ The original configured signing key remains unchanged.
 
 Portwing overlays managed keys on the operator-owned file without rewriting it.
 Reload and restart retain committed replacements. Removing the original root
-line and sending `SIGHUP` revokes that root's managed descendants. Keep the root
+line and successfully reloading with `SIGHUP` revokes that root's managed
+descendants and durably forgets their rotation state. Re-adding the root starts
+from the bootstrap key. A failed reload reports an error and keeps the last
+good registry, so fix storage errors before relying on revocation. Keep the root
 line while using a managed replacement. Removing managed storage or disabling
 rotation reverts to deployment bootstrap authority; after a completed rotation,
 that can disconnect the peer and re-enable an old credential. Treat a reset as

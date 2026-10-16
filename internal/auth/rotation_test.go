@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -344,4 +345,81 @@ func TestRotationStateRenameFailureLeavesOriginal(t *testing.T) {
 	if err != nil || len(entries) != 1 || entries[0].Name() != "occupied" {
 		t.Fatalf("temporary credentials leaked: %v", err)
 	}
+}
+
+func TestRemovedRotationRootCannotRestoreManagedDescendants(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		for _, restartOnRemoval := range []bool{false, true} {
+			t.Run(fmt.Sprintf("committed=%v/restart=%v", committed, restartOnRemoval), func(t *testing.T) {
+				f := newRotationFixture(t)
+				old := KeyIDForPublicKey(f.old)
+				if _, err := f.registry.PrepareRotation(old, f.next); err != nil {
+					t.Fatal(err)
+				}
+				if committed {
+					if _, err := f.registry.CommitRotation(KeyIDForPublicKey(f.next)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				independent, _ := genPubKeyB64(t)
+				if _, err := f.registry.PrepareRotation(KeyIDForPublicKey(f.other), independent); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(f.path, []byte(AuthorizedKeyLine(f.other, "independent")+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				r := f.registry
+				if restartOnRemoval {
+					r = NewKeyRegistry(f.path)
+					if err := r.EnableRotation(f.dir); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := r.Load(); err != nil {
+					t.Fatal(err)
+				}
+				requireRotationKey(t, r, f.next, false)
+				if err := os.WriteFile(f.path, []byte(AuthorizedKeyLine(f.old, "fresh-bootstrap")+"\n"+AuthorizedKeyLine(f.other, "independent")+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				r = NewKeyRegistry(f.path)
+				if err := r.EnableRotation(f.dir); err != nil {
+					t.Fatal(err)
+				}
+				if err := r.Load(); err != nil {
+					t.Fatal(err)
+				}
+				requireRotationKey(t, r, f.old, true)
+				requireRotationKey(t, r, f.next, false)
+				requireRotationKey(t, r, independent, true)
+			})
+		}
+	}
+}
+
+func TestRootPruningFailureDoesNotPublishPartialRegistry(t *testing.T) {
+	f := newRotationFixture(t)
+	if _, err := f.registry.PrepareRotation(KeyIDForPublicKey(f.old), f.next); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.path, []byte(AuthorizedKeyLine(f.other, "independent")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(f.dir, f.dir+"-offline"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.registry.Load(); err == nil {
+		t.Fatal("reload must report failed durable pruning")
+	}
+	requireRotationKey(t, f.registry, f.next, true)
+	if len(f.registry.rotation.keys) != 1 {
+		t.Fatal("failed reload changed durable state snapshot")
+	}
+	if err := os.Rename(f.dir+"-offline", f.dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.registry.Load(); err != nil {
+		t.Fatal(err)
+	}
+	requireRotationKey(t, f.registry, f.next, false)
 }
