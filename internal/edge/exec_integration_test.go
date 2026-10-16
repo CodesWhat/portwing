@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //go:build integration
 
 package edge

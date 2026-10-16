@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { Check, type LucideIcon } from "lucide-react";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
@@ -146,7 +148,7 @@ export function createComparisonRoute(config: ComparisonRouteConfig) {
   };
   const selfBadge = config.selfBadge ?? {
     icon: Check,
-    label: `${SITE_CONFIG.name} — Supported pre-v1`,
+    label: `${SITE_CONFIG.name}: Release candidate`,
     className: selfBadgeClassName,
   };
 

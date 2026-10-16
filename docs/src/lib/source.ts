@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { Page } from "fumadocs-core/source";
 import { loader } from "fumadocs-core/source";
 import { docs } from "../../.source/server";

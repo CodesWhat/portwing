@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // proxy_daemon_prefix_test.go pins that requests the Docker daemon routes like

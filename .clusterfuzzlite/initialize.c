@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include <stdint.h>
 
 extern uintptr_t _cgo_wait_runtime_init_done(void);

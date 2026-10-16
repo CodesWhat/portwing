@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Docs archive contract. Run from the repository root.
 #
 # An archive (docs/content/docs/vX.Y/) is a frozen copy of docs/content/docs/

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package banner renders the portwing startup banner: a truecolor
 // half-block render of the logo, generated from portwing.png by the gen
 // command and embedded here as portwing.ans.

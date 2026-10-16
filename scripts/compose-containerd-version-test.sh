@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Exercises scripts/ci/verify-compose-containerd.sh against a fake `go` on

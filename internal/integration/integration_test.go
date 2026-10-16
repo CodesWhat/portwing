@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //go:build integration
 
 // Package integration runs the Portwing server against the runner's real

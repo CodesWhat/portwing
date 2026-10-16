@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata, Viewport } from "next";

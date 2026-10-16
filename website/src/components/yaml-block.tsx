@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { ReactNode } from "react";
 
 // Portwing violet palette — violet keys, fuchsia/indigo values, muted comments.

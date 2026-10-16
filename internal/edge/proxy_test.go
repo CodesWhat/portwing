@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package edge
 
 // Tests for the controller dial's proxy support. http.ProxyFromEnvironment

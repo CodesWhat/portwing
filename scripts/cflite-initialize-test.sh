@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Check the C/Go startup ordering without needing an OSS-Fuzz image.
 set -euo pipefail
 

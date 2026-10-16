@@ -1,0 +1,257 @@
+---
+title: Audit Logging
+description: Structured JSON audit trail for every security-relevant event in Portwing, with guidance for immutable export.
+---
+
+Portwing writes a structured JSON audit log — one event per line — that records every security-relevant action: authentication attempts, key enrollments, Compose operations, exec tunnel starts, and rate-limit blocks. The audit stream is intentionally separate from the operational log so records can be routed to a dedicated sink without mingling with debug noise.
+
+<Callout type="warn">
+  The file/stdout sink schema and the pull-export schema are stable from
+  v0.8.0. New optional fields may be added in a minor release; existing field
+  names, meanings, and event identifiers follow the deprecation process in the
+  [Stability Policy](/stability-policy).
+</Callout>
+
+## Enabling audit logging
+
+Set the `AUDIT_LOG` environment variable when starting the container. The
+persistent file/stdout/stderr sink is **disabled by default**, but the in-memory
+audit ring remains enabled with its default `AUDIT_BUFFER_SIZE=256`. Set
+`AUDIT_BUFFER_SIZE=0` if you also want to disable in-memory retention and pull
+export.
+
+```bash
+# Append to a dedicated file (opened append-only, mode 0600)
+docker run -e AUDIT_LOG=/var/log/portwing-audit.log \
+  ghcr.io/codeswhat/portwing:latest
+
+# Write to stdout — useful when a log aggregator already captures container stdout
+docker run -e AUDIT_LOG=stdout \
+  ghcr.io/codeswhat/portwing:latest
+
+# Write to stderr
+docker run -e AUDIT_LOG=stderr \
+  ghcr.io/codeswhat/portwing:latest
+```
+
+<Callout type="info">
+  File sinks are opened with mode `0600` (owner read/write only). On Linux you can bind-mount a host directory and use a tool like `logrotate` or forward with `filebeat`/`fluentd` without any additional configuration on Portwing's side.
+</Callout>
+
+See [Configuration](/configuration) for the full environment variable reference.
+
+## Output format
+
+Every audit record is a JSON object on a single line terminated by a newline (`\n`). The `time` field uses RFC 3339 with nanosecond precision, always in UTC. Records are flushed synchronously — no buffering is introduced between an event occurring and it being written.
+
+The `msg` field is always an empty string; all semantic content lives in the named fields described below.
+
+## Stable sink schema
+
+### Core fields (all events)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `time` | string | RFC 3339 nanosecond timestamp in UTC |
+| `level` | string | Always `"INFO"` for audit records |
+| `msg` | string | Always `""` — use `event` for the record type |
+| `event` | string | Event type identifier — see the table below |
+| `actor` | string | Client IP address or edge peer URL |
+| `method` | string | HTTP method or message type; only present on `api_request`, `auth_failure`, and `rate_limited` events |
+| `path` | string | HTTP path or message path; only present on `api_request`, `auth_failure`, and `rate_limited` events |
+| `outcome` | string | One of `allowed`, `denied`, or `error` |
+| `status` | integer | HTTP status code; omitted when not applicable |
+| `duration_ms` | float | Request duration in milliseconds; omitted when not measured |
+
+### Event types
+
+| `event` value | Triggered when |
+|---------------|----------------|
+| `api_request` | Any authenticated HTTP API call completes |
+| `auth_failure` | An invalid or missing token is presented |
+| `rate_limited` | A request is blocked by the rate limiter |
+| `compose_op` | A Docker Compose lifecycle operation runs |
+| `exec_start` | An exec start is attempted: an interactive tunnel, a detached `docker exec -d`, or an attached start sent without an upgrade. Written for each attempt that reaches the admission decision, before anything reaches Docker. A streamed-body start dropped while its body is still being reassembled (missing or duplicate request ID, bad base64, a byte cap, the idle timeout, a cancel) never gets there and writes none |
+| `enrollment` | An Ed25519 key is enrolled via `/api/portwing/enroll` |
+
+### Additional fields by event type
+
+**`compose_op`** — Compose lifecycle events add:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `operation` | string | Compose subcommand: `up`, `down`, `pull`, etc. |
+| `stack` | string | Stack name as provided by the caller |
+
+**`exec_start`** — Exec tunnel events add:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `container` | string | Exec path or container ID |
+| `exec_id` | string | Exec resource ID assigned by the agent |
+
+The `outcome` of an `exec_start` record says whether the exec was admitted. `allowed` means it took an exec session slot and was forwarded or started. `denied` means it was refused: the exec session limit was full or, in edge mode, a raw exec request hit the request cap or the streamed-body cap, or a typed `exec_start` had a missing or duplicate exec ID.
+
+If the start then fails, the `exec_start` record stays `allowed` and the failure is on a separate `api_request` record. In standalone mode it carries the status the client was sent, for example 502 when the daemon can't be reached or the daemon's own status when it refuses the upgrade. In edge mode a raw start whose request fails before the daemon answers is an `error` with `status` 0, and a daemon 4xx or 5xx reply is an `allowed` record carrying that `status`. A typed start that fails, or is cancelled by the controller's `exec_end` or a tunnel drop before it comes up, is an `error` record with `exec_start` as `method` and the container ID as `path`. An `error` record after an `allowed` `exec_start` means the start did not complete from Portwing's side, not that the command didn't run: if the daemon had already accepted the start, the process may still run.
+
+**`enrollment`** — Key enrollment events add:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key_id` | string | The fingerprint or identifier of the enrolled Ed25519 public key |
+
+**`api_request`** stream completion:
+
+For Edge Docker response streams, `api_request` is written when the Docker body
+ends. A clean EOF records `allowed`; a truncated body or read failure records
+`error`, retaining the original HTTP status. `duration_ms` includes the time
+spent reading the stream. An active stream has no completion record yet.
+
+## Sample events
+
+Authenticated API request (success):
+
+```json
+{"time":"2026-01-15T10:23:45.123456789Z","level":"INFO","msg":"","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_portwing/compose","outcome":"allowed","status":200,"duration_ms":3.14}
+```
+
+Authentication failure:
+
+```json
+{"time":"2026-01-15T10:23:50.001000000Z","level":"INFO","msg":"","event":"auth_failure","actor":"203.0.113.9","method":"GET","path":"/_portwing/info","outcome":"denied"}
+```
+
+Rate-limited request:
+
+```json
+{"time":"2026-01-15T10:23:51.500000000Z","level":"INFO","msg":"","event":"rate_limited","actor":"203.0.113.9","method":"POST","path":"/_portwing/exec","outcome":"denied"}
+```
+
+Docker Compose operation:
+
+```json
+{"time":"2026-01-15T10:23:45.200000000Z","level":"INFO","msg":"","event":"compose_op","actor":"203.0.113.42","operation":"up","stack":"nginx-stack","outcome":"allowed"}
+```
+
+Exec tunnel opened:
+
+```json
+{"time":"2026-01-15T10:24:01.500000000Z","level":"INFO","msg":"","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
+```
+
+Ed25519 key enrolled:
+
+```json
+{"time":"2026-01-15T10:20:00.000000000Z","level":"INFO","msg":"","event":"enrollment","actor":"203.0.113.42","key_id":"3a7f9c1d2e4b5a6f","outcome":"allowed"}
+```
+
+## Shipping the log
+
+Because audit records are plain newline-delimited JSON, they slot into any log pipeline that accepts structured text:
+
+- **Stdout/stderr sinks** — pass `AUDIT_LOG=stdout` and let your container runtime (Docker, Kubernetes) collect the stream. Point `fluentd`, `Fluent Bit`, or the AWS/GCP/Azure log drivers at it as normal.
+- **File sink** — bind-mount a host directory, write to a named file, and consume with `filebeat`, `promtail`, `vector`, or any sidecar that tails files.
+- **Immutable storage** — for tamper-evidence, ship records to an append-only destination (S3 Object Lock, AWS CloudTrail Lake, or a WORM-capable SIEM) immediately; Portwing itself does not provide on-disk integrity protection beyond the `0600` file mode.
+
+<Callout type="info">
+  The operational log (controlled by the `LOG_LEVEL` environment variable) is always written to stdout via `slog`. Setting `AUDIT_LOG=stdout` merges both streams into stdout, which is fine for log aggregators that parse JSON lines — each record's `event` field distinguishes audit entries from operational ones.
+</Callout>
+
+## Auth and key-enrollment events as first-class records
+
+`auth_failure` and `enrollment` events are emitted before any business logic runs, making them reliable indicators of credential probing and key-management activity regardless of request outcome. Every failed token presentation produces an `auth_failure` record with the actor IP, method, and path — no successful request is required to trigger logging.
+
+This means audit coverage begins at the perimeter: you can alert on `auth_failure` spikes or unexpected `enrollment` events without parsing application logs. See [Authentication](/authentication) for how Ed25519 keys are verified and [Security Model](/security-model) for the broader threat model these events are designed to surface.
+
+## In-memory ring buffer and pull endpoint
+
+Portwing maintains an in-memory ring buffer of the most recent audit records for pull-based retrieval. The buffer size is controlled by `AUDIT_BUFFER_SIZE` (default `256`). It is independent of `AUDIT_LOG` — records are added to the ring buffer regardless of whether a file or stream sink is configured.
+
+### GET /_portwing/audit
+
+Auth required. Returns the most recent records from the ring buffer, newest first.
+
+| Query param | Default | Description |
+|-------------|---------|-------------|
+| `limit` | `AUDIT_BUFFER_SIZE` | Maximum number of records to return. |
+
+Response shape:
+
+```json
+{
+  "records": [
+    {"cursor":42,"ts":"2026-01-15T10:24:01.500000000Z","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"},
+    {"cursor":41,"ts":"2026-01-15T10:23:50.001000000Z","event":"auth_failure","actor":"203.0.113.9","method":"GET","path":"/_portwing/info","outcome":"denied"}
+  ],
+  "count": 2
+}
+```
+
+The ring-buffer schema is also stable, but intentionally differs from the sink
+schema: it uses `ts`, adds a monotonic `cursor`, and omits the sink-only
+`level` and `msg` fields. Cursors start at `1` for each agent process.
+
+Set `AUDIT_BUFFER_SIZE=0` to disable the in-memory buffer entirely. This does not affect the file or stream sink configured via `AUDIT_LOG`.
+
+### GET /_portwing/audit/export
+
+This endpoint is designed for polling exporters and returns
+`application/x-ndjson` in oldest-first order. Each line is one ring-buffer
+record using the stable export schema. Standard mode requires authentication.
+Edge mode exposes this route on its local operations listener without inbound
+authentication.
+
+<Callout type="warn">
+  The Edge operations listener is a private-operations trust boundary. Anyone
+  who can reach it can export retained audit data, including client addresses,
+  request paths, stack names, and container identifiers. Keep it on a dedicated
+  container/pod network and restrict it to your exporter or Prometheus pod. Do
+  not publish it through an ingress, `NodePort`, `LoadBalancer`, host port, or a
+  cluster-wide Service without an authenticating proxy in front.
+</Callout>
+
+For the first poll, omit `cursor`:
+
+```bash
+curl -sS -D audit-headers.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  https://portwing.example.com/_portwing/audit/export
+```
+
+After consuming the entire response, persist `X-Portwing-Next-Cursor` and send
+it as the next request's `cursor`. `limit` bounds the number of records returned;
+zero or omission returns every retained match.
+
+```bash
+curl -sS -D audit-headers.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  "https://portwing.example.com/_portwing/audit/export?cursor=42&limit=500"
+```
+
+For Edge mode, make the same request from the private operations network and
+omit the Authorization header:
+
+```bash
+curl -sS -D audit-headers.txt \
+  "http://portwing-edge:3000/_portwing/audit/export?cursor=42&limit=500"
+```
+
+| Response header | Meaning |
+|-----------------|---------|
+| `X-Portwing-Oldest-Cursor` | Oldest record still retained in memory |
+| `X-Portwing-Latest-Cursor` | Newest cursor assigned by this process |
+| `X-Portwing-Next-Cursor` | Cursor to persist after consuming this response |
+| `X-Portwing-Record-Count` | Number of NDJSON records in the response |
+
+A `409 Conflict` means the supplied cursor is outside the current buffer
+generation: retained records were overwritten, or the agent restarted and
+cursor numbering began again. The response's `X-Portwing-Next-Cursor` gives the
+safe reset point, but the exporter should surface the gap before resuming so
+data loss is never silent.
+
+<Callout type="info">
+  The ready-to-run [Compose and Kubernetes examples](https://github.com/CodesWhat/portwing/tree/main/examples)
+  pair the file sink with a pinned Fluent Bit sidecar. Its stdout output works
+  with the cluster/runtime collector immediately; replace the output block
+  with your HTTP, OpenTelemetry, Kafka, object-storage, or SIEM destination.
+</Callout>

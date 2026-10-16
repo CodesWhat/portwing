@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Score one fuzz target's corpus: the statement coverage of its package
 # achieved by replaying the committed seed corpus plus the cached (GOCACHE)

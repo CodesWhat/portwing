@@ -4,7 +4,7 @@
 
 Portwing sits between the Drydock controller and the Docker Engine on each remote host. The controller connects inbound to Portwing over HTTP/SSE (standard mode), or Portwing dials outbound over a WebSocket tunnel when the host is behind NAT or a firewall (edge mode). All authentication is Ed25519 per-client signed requests (no shared secret on the wire) or Argon2id-hashed tokens. The audit log records every security-relevant action as structured JSON.
 
-Portwing v0.9.26 is a supported pre-v1 release. Its HTTP API, environment variables, MCP tool surface, and stable portwing/1.0 wire protocol follow the compatibility guarantees in STABILITY.md; operators should pin versions and review the changelog when upgrading. Full controller-owned watcher/update feature compatibility requires Drydock v1.6.0-rc.11+ while DrydockCompat remains 1.4.0.
+Portwing v1.0.0-rc.1 is a release candidate for evaluation. The 0.9 line remains the stable release channel. STABILITY.md describes the v1 guarantees for the HTTP API, environment variables, MCP tool surface, and stable portwing/1.0 wire protocol; the new v1 guarantees become binding at GA. Operators should pin versions and review the changelog when upgrading. Full controller-owned watcher/update feature compatibility requires Drydock v1.6.0-rc.11+ while DrydockCompat remains 1.4.0.
 
 ## Key capabilities
 
@@ -28,7 +28,7 @@ Portwing v0.9.26 is a supported pre-v1 release. Its HTTP API, environment variab
 
 ## License
 
-AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
+MIT — https://opensource.org/licenses/MIT
 
 ## Links
 

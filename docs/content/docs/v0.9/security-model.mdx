@@ -1,0 +1,430 @@
+---
+title: Security Model
+description: Portwing's layered defenses — from socket-level filtering and cryptographic auth to hardened runtime and structured audit logging.
+---
+
+<Callout type="info">
+Portwing v0.9.x is a supported pre-v1 release. The controls documented here are implemented and tested, and public interfaces follow the published [stability policy](https://github.com/CodesWhat/portwing/blob/main/STABILITY.md). This page describes the product's security model; it is not a compliance certification or substitute for your own threat model.
+</Callout>
+
+The Docker socket is root-equivalent on the host that runs it. Anything that can write to `/var/run/docker.sock` can create a privileged container, mount the host filesystem, and escape to the underlying machine. Portwing is a privileged agent: an **authenticated** caller has full Docker API access. The controls described here prevent *unauthenticated or improperly authorized* access and certain classes of injection attacks; they do not limit what an authenticated caller can do with the Docker API. Treat the Portwing token as a root-equivalent credential.
+
+---
+
+## Defense in depth
+
+Portwing's security design layers independent controls so that a failure in any single layer does not immediately compromise the host:
+
+| Layer | Mechanism |
+|-------|-----------|
+| **Socket filter** | [Sockguard](https://github.com/codeswhat/sockguard) sits between Portwing and the Docker daemon; only explicitly allowlisted Docker API operations pass through |
+| **Authentication** | Standard mode fails closed without credentials; every protected request is authenticated before it reaches the proxy — per-client Ed25519 signatures or a shared token |
+| **Browser origin and host** | A request carrying an `Origin` header is rejected with 403 before authentication unless the origin is in `ALLOWED_ORIGINS` (empty by default). With authentication off, a request whose `Host` is not an IP, `localhost`, a single-label name or in `ALLOWED_HOSTS` is rejected too. Together they stop a remote page that rebinds a public domain; the residuals are listed under Control 15 |
+| **Transport** | TLS 1.2+ with AEAD-only cipher suites; ECDHE forward secrecy |
+| **Container hardening** | `read_only`, `cap_drop: ALL`, `no-new-privileges`, non-root by default (UID 65532), secrets via mounted files |
+| **Input validation** | Root-confined symlink-resistant writes, path-traversal guard, env-var denylist, and service-name flag-injection filter on Compose requests |
+| **Resource limits** | Bounded WebSocket frames, response bodies, exec sessions, enrollment bodies, and Argon2 concurrency, plus an IP rate limiter to resist DoS |
+| **Audit trail** | Structured JSON audit log for every auth event, Compose operation, and exec session |
+| **Supply chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA provenance on every release |
+
+---
+
+## Control 1 — Proxy-first architecture
+
+Every byte that would reach the Docker socket passes through Portwing's HTTP server, which applies authentication before forwarding. There is no path by which an unauthenticated caller can reach the Docker daemon directly.
+
+The catch-all mux entry is registered last and is wrapped with the same auth middleware as every named route:
+
+```go
+mux.Handle("/", auth(s.handleDockerProxy))
+```
+
+A missing or misconfigured auth middleware causes a build-time or startup-time failure rather than a silent security gap — there is no per-path allowlist to misconfigure by omission.
+
+Standard mode refuses to start when no raw token, Argon2id token hash, or
+authorized-keys registry is configured. Local unauthenticated development is
+an explicit opt-in (`ALLOW_UNAUTHENTICATED=true`), and a non-loopback bind
+requires the separate `ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
+
+This architecture structurally prevents the class of Docker AuthZ plugin bypass vulnerabilities (e.g. unauthenticated Docker socket exposure, request smuggling / header injection into the daemon) where authentication is delegated to a plugin that can be bypassed by crafted requests. Portwing does not use Docker's AuthZ plugin mechanism at all.
+
+---
+
+## Control 2 — Sockguard socket filter
+
+<Callout type="info">
+Sockguard is the recommended pairing for production deployments. It provides a second independent enforcement point so that even a fully compromised Portwing process is limited to the operations the operator explicitly allows.
+</Callout>
+
+[Sockguard](https://github.com/codeswhat/sockguard) is a separate container that mounts the real `/var/run/docker.sock` read-only, applies an allowlist policy from `sockguard.yaml`, and exposes a filtered Unix socket on a shared named volume. Portwing points `DOCKER_SOCKET` at the filtered socket and never touches the raw socket directly.
+
+The hardened compose file (`examples/docker-compose.with-sockguard.yml`) demonstrates the two-container layout:
+
+```yaml
+services:
+  sockguard:
+    image: ghcr.io/codeswhat/sockguard:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./sockguard.yaml:/etc/sockguard/sockguard.yaml:ro
+      - sockguard-socket:/var/run/sockguard
+    environment:
+      - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
+
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
+    restart: unless-stopped
+    depends_on:
+      - sockguard
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    ports:
+      - "3000:3000"
+    volumes:
+      - sockguard-socket:/var/run/sockguard:ro
+      - portwing-stacks:/data/stacks
+    environment:
+      - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
+      - TOKEN_FILE=/run/secrets/portwing_token
+    secrets:
+      - portwing_token
+
+secrets:
+  portwing_token:
+    file: ./portwing_token.txt
+
+volumes:
+  sockguard-socket:
+  portwing-stacks:
+```
+
+---
+
+## Control 3 — Hardened container runtime
+
+Both containers in the hardened stack run with the same security options:
+
+| Option | Effect |
+|--------|--------|
+| `read_only: true` | The container filesystem is read-only; writes to unexpected paths fail at the kernel level |
+| `cap_drop: ALL` | All Linux capabilities are dropped; the process cannot perform privileged syscalls |
+| `no-new-privileges: true` | The process cannot regain capabilities via setuid binaries or `execve` |
+| Non-root user | The image runs as the dedicated `portwing` user (UID 65532) by default; the Docker socket's group is granted narrowly via `group_add` / `supplementalGroups` |
+| Secrets via files | `TOKEN_FILE` / `TOKEN_HASH_FILE` / `PRIVATE_KEY_FILE` are mounted as Docker secrets; plaintext tokens never appear in environment variable dumps or `docker inspect` output |
+| `/tmp` via tmpfs | A writable tmpfs is mounted at `/tmp` so scratch space is available without a writable layer |
+
+---
+
+## Control 4 — Per-client Ed25519 authentication
+
+<Callout type="info">
+Ed25519 key auth is the recommended option for production. Per-request signatures with nonce replay protection remain strong even when TLS terminates at a load balancer the operator does not fully trust.
+</Callout>
+
+When `AUTHORIZED_KEYS` is configured, each client has a distinct Ed25519 keypair. Signature version 2 requests carry `X-Portwing-Key-ID`, `X-Portwing-Timestamp`, `X-Portwing-Nonce`, `X-Portwing-Signature`, and `X-Portwing-Signature-Version: 2`. The agent signs `METHOD\nREQUEST-TARGET\nbody-sha256-hex\ntimestamp\nnonce`, where the request target contains the escaped path and exact raw query string. Unversioned signatures remain accepted only for query-free requests.
+
+Replay protection uses two complementary mechanisms:
+
+1. **Timestamp window** — requests with a timestamp skew greater than `MAX_CLOCK_SKEW_SECONDS` (default 60 s) are rejected with `X-Portwing-Reason: timestamp-skew`.
+2. **Nonce LRU** — an in-memory cache (capacity `NONCE_LRU_SIZE`, default 10,000) tracks nonces within the timestamp window. Repeated nonces return `X-Portwing-Reason: replay`.
+
+Authorized-keys and private-key paths must resolve to regular files. On Unix,
+world-readable and group/world-writable credential files are refused; mode
+`0640` is supported for group-readable secret mounts. The permission check is
+made on the opened descriptor to prevent a path-swap race. Hot reload on
+`SIGHUP` adds or removes keys without restarting; the nonce LRU is preserved.
+
+See [Authentication](/authentication) for the full setup guide, header format, key rotation, and migration path from token auth.
+
+---
+
+## Control 5 — Argon2id token hashing
+
+When a shared-secret token is necessary, `TOKEN_HASH` stores an Argon2id hash rather than the plaintext. Three credential sources are evaluated in order:
+
+| Mechanism | Environment variable | Description |
+|-----------|----------------------|-------------|
+| Plaintext | `TOKEN` / `DD_AGENT_SECRET` | Token value directly; read from env |
+| Plaintext file | `TOKEN_FILE` / `DD_AGENT_SECRET_FILE` | Path to a file containing the token |
+| Hash | `TOKEN_HASH` / `TOKEN_HASH_FILE` | Argon2id PHC string |
+
+The `portwing hash-token` subcommand generates a hash using OWASP-recommended parameters (m=19456 KiB, t=2, p=1). The token is read from stdin so it never appears in shell history or process listings:
+
+```bash
+printf '%s' "$TOKEN" | portwing hash-token
+# $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+```
+
+At runtime Portwing compares the incoming token against the stored hash using Argon2id verification, still wrapped with `crypto/subtle` for the final byte comparison to prevent timing leakage. Cold verification is capped at two concurrent derivations across the agent; excess cold requests receive HTTP 429 before allocating Argon2 memory. A successful verification caches only a fixed-size SHA-256 digest. A compromised environment variable dump or configuration file reveals only the hash.
+
+---
+
+## Control 6 — Timing-safe token comparison
+
+Raw token verifiers retain a fixed-size SHA-256 digest rather than the raw
+configured token. Each presented value is hashed and compared to that digest
+with `crypto/subtle.ConstantTimeCompare`, so comparison length is independent
+of the submitted token length.
+
+This applies to all accepted credential headers: `Authorization: Bearer`, `X-Portwing-Token`, and `X-Dd-Agent-Secret`.
+
+---
+
+## Control 7 — TLS 1.2+ AEAD-only
+
+`TLS_CERT` and `TLS_KEY` must be configured together; setting only one is a
+startup error. When configured, Portwing presents TLS with:
+
+| Setting | Value |
+|---------|-------|
+| Minimum version | TLS 1.2 |
+| Cipher suites (TLS 1.2) | ECDHE-ECDSA-AES256-GCM-SHA384, ECDHE-RSA-AES256-GCM-SHA384, ECDHE-ECDSA-AES128-GCM-SHA256, ECDHE-RSA-AES128-GCM-SHA256, ECDHE-ECDSA-CHACHA20-POLY1305, ECDHE-RSA-CHACHA20-POLY1305 |
+| Curves | X25519, P-256 |
+
+All TLS 1.2 suites are AEAD modes; CBC and RC4 suites are excluded. TLS 1.3 cipher suites are managed by Go's TLS stack, which selects only AEAD suites by design.
+
+<Callout type="info">
+In production, run Portwing in standard mode behind a TLS reverse proxy. This keeps the TLS termination responsibility with a well-maintained proxy (nginx, Caddy, Traefik) and simplifies certificate management.
+</Callout>
+
+---
+
+## Control 8 — Compose input guards
+
+Three independent validation steps protect the Compose code path:
+
+**Root-confined file writes.** Compose upload paths are checked lexically, then
+opened through Go's directory-scoped `os.Root` API. Each directory component
+and destination is inspected without following symlinks; the rooted open keeps
+the write beneath `STACKS_DIR` even if a path is swapped concurrently.
+
+```go
+if !strings.HasPrefix(resolved, absBase+string(filepath.Separator)) && resolved != absBase {
+    return "", fmt.Errorf("path %q escapes stacks directory", path)
+}
+```
+
+A caller supplying `../../etc/passwd`, a symlinked directory, or a symlinked
+destination receives a validation error; no uploaded data is written outside
+the stacks directory.
+
+**Env-var denylist.** Environment variables passed in `ComposeRequest.EnvVars` must match `^[a-zA-Z_][a-zA-Z0-9_]*$` and must not be in the denylist:
+
+`LD_PRELOAD`, `LD_LIBRARY_PATH`, `PATH`, `DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`, `DOCKER_CONTEXT`, `HOME`, `SHELL`, `BASH_ENV`, `ENV`, `CDPATH`, `IFS`
+
+The denylist covers dynamic linker hijacking (`LD_*`), shell init-file injection (`BASH_ENV`, `ENV`), and Docker socket redirection (`DOCKER_HOST`, `DOCKER_CONTEXT`).
+
+**Service-name flag-injection filter.** Service names in `ComposeRequest.Services` are rejected if they start with `-`. Docker Compose passes service names as positional arguments; a name like `--privileged` would be interpreted as a flag, potentially escalating privileges or altering Compose behaviour.
+
+These controls structurally prevent the class of root RCE via compose inputs demonstrated in Coolify (CVE-2025-64419 and CVE-2025-66209 through CVE-2025-66213).
+
+---
+
+## Control 9 — Rate limiting
+
+Failed authentication attempts are tracked per remote IP in a sliding one-minute window:
+
+| Parameter | Value |
+|-----------|-------|
+| Failure threshold | 10 within 60 seconds |
+| Response | HTTP 429 until the window expires |
+| IP table cap | 10,000 entries (new entries beyond the cap are dropped to prevent map exhaustion — fail-open for tracking, not for auth) |
+| Cleanup interval | Every 5 minutes (background goroutine) |
+| Per-IP in-flight auth cap | 2 credential verifications |
+| Agent-wide cold Argon2 cap | 2 derivations; excess requests return HTTP 429 before allocation |
+
+Malformed and oversized enrollment bodies use a separate per-IP abuse window,
+while bad enrollment credentials use the authentication-failure window.
+
+---
+
+## Control 10 — Resource caps
+
+| Resource | Limit | Purpose |
+|----------|-------|---------|
+| WebSocket read | 16 MB | Prevent memory exhaustion from large WebSocket frames |
+| HTTP response body read | 100 MB | Bound buffered Docker API responses |
+| Legacy edge log response | 100 MB | Bound a buffered `dd:container_log_response` for older controllers |
+| Edge log-stream frame | 256 KiB | Skip an oversized Docker log frame before it enters the controller queue |
+| Concurrent edge log streams | 128 | Bound Docker readers and per-stream goroutines independently of message handlers |
+| Edge outbound queue | 256 frames | Evict and reconnect a stalled controller instead of growing memory without limit |
+| Legacy edge follow-log window | ~7s | Bound a non-streaming `follow=true` request so it can't hold a message-handler slot indefinitely |
+| Exec request body | 10 MB | Limit exec payload size |
+| Compose logs tail | 500 lines | Clamp the `logs` operation's `--tail`, which is otherwise unbounded |
+| Compose combined output | 10 MB | Bound buffered stdout+stderr from a compose subprocess |
+| Ed25519 signed-request body | 1 MB | Bound body buffering before signature verification |
+| Ed25519 auth body read | 10 s deadline | Stop a slow-trickled body from holding a handler slot before authentication |
+| Enrollment request body | 64 KiB | Bound unauthenticated JSON parsing |
+| Cold Argon2id derivations | 2 | Bound memory-hard verification across the agent |
+| Concurrent exec sessions | 100 (edge: fixed; standard: `MAX_EXEC_SESSIONS`, non-positive disables) | Prevent unbounded goroutine growth |
+| Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Shared by every proxied streaming Docker request (including `/containers/{id}/logs` with or without `follow`), the adapter `/api/events` SSE route, and follow-mode adapter log reads; non-follow adapter log reads are a single bounded read and take no slot. | Prevent unbounded goroutine growth |
+| Rate-limiter IP table | 10,000 entries | Prevent rate-limiter map exhaustion |
+
+---
+
+## Control 11 — Panic recovery
+
+The outermost HTTP handler is wrapped with `RecoveryMiddleware`, which uses `defer/recover` to catch any panics in downstream handlers. On recovery it logs the full stack trace at ERROR level and returns HTTP 500. This prevents a single malformed request from crashing the agent process and taking the Docker proxy offline.
+
+---
+
+## Control 12 — Structured audit log and external tamper evidence
+
+Set `AUDIT_LOG` to `stdout`, `stderr`, or a file path to enable structured JSON audit logging. Every security-relevant event produces a JSON line:
+
+| `event` | Triggered when |
+|---------|----------------|
+| `api_request` | Any authenticated API call completes |
+| `auth_failure` | An invalid credential is presented |
+| `rate_limited` | An IP is blocked by the rate limiter |
+| `compose_op` | A Docker Compose operation runs |
+| `exec_start` | An interactive exec tunnel opens |
+
+Example lines:
+
+```json
+{"time":"2026-01-15T10:23:45.123Z","level":"INFO","event":"api_request","actor":"203.0.113.42","method":"POST","path":"/_portwing/compose","outcome":"allowed","status":200,"duration_ms":3.14}
+{"time":"2026-01-15T10:23:45.200Z","level":"INFO","event":"compose_op","actor":"203.0.113.42","operation":"up","stack":"nginx-stack","outcome":"allowed"}
+{"time":"2026-01-15T10:24:01.500Z","level":"INFO","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
+```
+
+The persistent audit sink is disabled by default (`AUDIT_LOG` unset), while the
+in-memory ring retains 256 recent records by default for the audit APIs. Set
+`AUDIT_BUFFER_SIZE=0` to disable that retention. Configured log files are opened
+in append-only mode at `0600`.
+
+The local file is not cryptographically tamper-evident: a principal that can rewrite the host filesystem can truncate, replace, or delete it. For tamper evidence, ship records immediately to append-only or WORM storage under separate credentials and monitor delivery gaps.
+
+See [Audit Logging](/audit-logging) for the full schema and aggregator integration notes.
+
+---
+
+## Control 13 — Signed and verifiable releases
+
+Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0 -trimpath -s -w`) and attested with:
+
+- **Cosign keyless signatures** — both the checksums file and the container image are signed via GitHub Actions OIDC. No operator-managed signing keys are required.
+- **CycloneDX SBOMs** — every archive has a sibling named `<archive>.cyclonedx.json`; the image carries a separate Buildx OCI SBOM attestation covering its OS packages.
+- **SLSA provenance** — for public releases, GitHub build provenance covers every asset listed in `checksums.txt`, including archives, packages, and per-archive SBOMs, plus the container manifest.
+
+Verify a release before running it:
+
+```bash
+VERSION=0.9.26
+
+# Verify the checksums file
+cosign verify-blob \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --bundle "checksums.txt.bundle" \
+  "checksums.txt"
+
+# Verify the container image
+cosign verify \
+  --certificate-identity "https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "ghcr.io/codeswhat/portwing:${VERSION}"
+```
+
+See [Verification](/verification) for SBOM inspection and SLSA provenance verification.
+
+---
+
+## Control 14 — Static-site browser policy
+
+The marketing and documentation exports generate a Vercel Build Output API
+header policy from the final HTML during each build. Every route receives
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, a strict referrer
+policy, and a restrictive permissions policy. Each HTML route also receives a
+Content Security Policy whose `script-src` contains only `self` plus SHA-256
+hashes of that route's generated inline scripts; arbitrary inline JavaScript
+is not allowed. `frame-ancestors 'none'`, `object-src 'none'`, and
+`base-uri 'self'` further reduce browser-side injection and framing exposure.
+
+The build packages the exact rendered files and their matching route policy in
+`.vercel/output`, preventing local and remote builds from deploying stale
+script hashes.
+
+---
+
+## Control 15 — Browser Origin and Host checks
+
+A web page can make a victim's browser talk to Portwing by DNS rebinding: the page's hostname is re-pointed at `127.0.0.1` or a LAN address, so the browser treats Portwing as the page's own origin. Two things follow. The page's writes, WebSocket upgrades and MCP calls are cross-site as far as the attacker can arrange, and browsers send an `Origin` header with them. Its GET and HEAD reads are same-origin, carry no `Origin`, and read straight through. With authentication on, the page can't present the secret or sign a request, so auth is the control. With `ALLOW_UNAUTHENTICATED=true`, and on edge mode's always-unauthenticated operations listener, it is not. Both MCP revisions Portwing serves (2025-11-25 and 2026-07-28) also require servers to validate `Origin`.
+
+One middleware wraps the entire HTTP handler, so both checks run before authentication and before any route handler. That covers `/api/v1/*`, the Docker proxy catch-all including exec and attach upgrades, `/_portwing/*` including `/_portwing/mcp`, audit, metrics and health. In edge mode it wraps the operations listener the same way.
+
+**Origin check** (always on):
+
+| Request | Result |
+|---------|--------|
+| No `Origin` header | Passes. The Docker CLI, Drydock's agent client, curl and most MCP clients send none |
+| `Origin` exactly matches an `ALLOWED_ORIGINS` entry | Passes to authentication as usual |
+| Any other `Origin`, including `null`, an unparseable value, or more than one `Origin` header | 403 `forbidden origin` |
+
+Some WebSocket libraries do set an `Origin` (Python `websocket-client`, which docker-py uses for `attach_socket(ws=True)`, and `golang.org/x/net/websocket`). A client like that needs its origin in `ALLOWED_ORIGINS`. Portwing sends no `Access-Control-*` headers and doesn't answer `OPTIONS`, so an allowlisted origin does not enable cross-origin `fetch` from a page; it helps a same-origin reverse proxy and WebSocket clients.
+
+Matching is exact on the parsed origin, never by prefix or substring. Scheme and host compare case-insensitively, and the port compares exactly after the default is filled in (80 for `http`, 443 for `https`), so `https://good.example` and `https://good.example:443` are the same entry while `https://good.example:444` and `https://good.example.evil.test` are not. An `Origin` equal to the request `Host` is deliberately not allowed automatically: a rebinding page presents exactly that, and Portwing serves no browser pages of its own.
+
+**Host check** (only when authentication is off, and always on edge mode's operations listener): the page can't change the `Host` header, which is the attacker's own domain. The request's `Host`, with the port removed, is admitted only if it is:
+
+- an IP address, IPv4 or IPv6;
+- `localhost`, or any other single-label name (no dot), which covers Compose and Kubernetes service names such as `portwing`;
+- a hostname listed in `ALLOWED_HOSTS`, compared case-insensitively with one trailing dot ignored.
+
+A remote page with only public DNS needs a dotted domain it controls, so none of those can be its own. A malformed `Host` is rejected. A request with no `Host` header is admitted: a browser always sends one, so a rebinding page can't omit it, while HTTP/1.0 health checkers that probe by IP (HAProxy `httpchk`, Nagios `check_http`) often do. `ALLOWED_HOSTS` entries are bare hostnames: a scheme, port, path, userinfo or wildcard stops startup, and the request's port is never compared. An unauthenticated Portwing reached by a dotted name needs that name listed.
+
+**What this does not cover**, stated plainly:
+
+- Single-label names pass. An attacker who controls the victim's DNS search suffix or local name resolution (a hostile DHCP server, LLMNR, NBNS) can still rebind to a name that passes. A remote page with only public DNS can't. That attacker is outside the threat model above.
+- Behind a reverse proxy that rewrites `Host` to the upstream address (the nginx and Apache defaults), Portwing sees an IP address or a single-label name and the Host check can't help. The proxy has to restrict its own server names. `X-Forwarded-Host` is not consulted.
+- With authentication on, the Host check is off because a rebinding page can't present the secret, but `/health`, `/ready` and `/_portwing/health` answer without credentials by design. They expose the version, uptime and Docker connection state, and a rebound page can read them.
+
+Every rejection is a 403 with the same body, so a probe can't tell the checks apart. It is logged as a WARN with the value escaped and cut to 128 bytes, sampled to five lines per ten seconds, and counted in `portwing_http_requests_total` under status 403. Standard mode also writes an `api_request` audit record with outcome `denied`. The edge operations listener writes none, so rejected requests can't evict real records from the audit ring. No route is exempt: the Docker `HEALTHCHECK` and `portwing healthcheck` use `localhost` and send no `Origin`.
+
+Startup validates both settings. `ALLOWED_ORIGINS` entries must be `http` or `https` with a host and no path, query, fragment or userinfo, IP hosts written the way a browser sends them, and `*` is refused.
+
+---
+
+## CVE mapping
+
+The table below maps publicly known vulnerability classes to the Portwing controls that structurally prevent them. "Structurally prevents" means the architecture makes exploitation impossible regardless of token or config values — not merely that a patch has been applied.
+
+| CVE / Advisory | Vulnerability class | Portwing control | Why it cannot apply |
+|----------------|---------------------|-----------------|----------------------|
+| CVE-2024-41110 | Docker AuthZ plugin bypass via zero-length `Content-Length` body (CVSS 9.9) | Control 1 — proxy-first | Portwing does not use Docker's AuthZ plugin mechanism; authentication is at the Portwing HTTP layer before the request reaches Docker |
+| Docker AuthZ plugin bypass via oversized body | Oversized request body silently dropped before the AuthZ plugin sees it while the daemon still executes the request (incomplete fix for the zero-length-body class above) | Control 1 — proxy-first | Same as CVE-2024-41110; the body-stripping behaviour in Docker's plugin dispatch path is irrelevant because Portwing's auth decision is enforced upstream of it |
+| Unauthenticated Docker socket exposure | Proxy forwards to remote agent before verifying the original request is authenticated | Control 1 — proxy-first | Portwing's auth middleware wraps the handler, not the other way around; it cannot be bypassed by ordering |
+| Registry-credential exfiltration / request smuggling | Plugin API paths absent from the proxy authorization map, allowing unauthorized users to call privileged endpoints | Control 1 — proxy-first | Portwing's catch-all handler authenticates all paths; there is no per-path allowlist to misconfigure by omission |
+| CVE-2025-64419 / CVE-2025-66209–66213 | Coolify: command injection via docker-compose.yaml content allowing root RCE (CVSS up to 10.0) | Control 8 — Compose input guards | Path-traversal protection, env-var key/denylist validation, and service-name flag-injection filter cover this attack surface |
+
+<Callout type="warn">
+Portwing is a privileged agent: an authenticated caller has full Docker API access. The controls above prevent unauthenticated or improperly authorized access and certain classes of injection attacks. They do not restrict what a legitimately authenticated caller can do with the Docker API. Treat the Portwing token or private key as root-equivalent.
+</Callout>
+
+---
+
+## Container env vars are not redacted on `/api/containers`
+
+`GET /api/containers` and the container inventory synced to Drydock over the edge WebSocket (`dd:container_sync` / `dd:container_added` / `_updated`) include each container's environment variables as plaintext key/value pairs (`RuntimeDetails.Env` in `internal/adapter/containers.go`). This is deliberate: Portwing does not redact or filter env values on this surface, and leaves that responsibility to Drydock (or another downstream consumer) if redaction before display or storage is required.
+
+This is distinct from the MCP `inspect_container` tool, which reports only an env-var *count* and never the values — see the [README](https://github.com/codeswhat/portwing#mcp--ai-assistant-integration). Any authenticated caller of `/api/containers`, and any system that receives the edge sync, sees full env var values. This is most relevant to standalone or no-Sockguard deployments, where the caller/consumer trust boundary is wider than "operator only."
+
+---
+
+## Related pages
+
+- [Authentication](/authentication) — token, Argon2id hash, and Ed25519 key setup
+- [Verification](/verification) — cosign, SBOM, and SLSA provenance
+- [Audit Logging](/audit-logging) — structured JSON audit trail
+- [Sockguard](https://github.com/codeswhat/sockguard) — socket-level Docker API filter

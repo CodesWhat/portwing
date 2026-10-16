@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // compose_failure_surface_test.go pins what the HTTP compose endpoint tells

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { LucideIcon } from "lucide-react";
 import { AlertTriangle, Check, Clock, Minus, Terminal, X } from "lucide-react";
 import { CtaButtons } from "@/components/cta-buttons";
@@ -71,7 +73,7 @@ function PortwingQuickStart() {
             {"  "}-e TOKEN_HASH=&quot;$PORTWING_TOKEN_HASH&quot; \{"\n"}
             {"  "}-p 3000:3000 \{"\n"}
             {"  "}
-            {SITE_CONFIG.dockerImage}:latest
+            {SITE_CONFIG.dockerImage}:{SITE_CONFIG.version}
           </code>
         </pre>
       </CardContent>
@@ -193,15 +195,15 @@ export function ComparisonPage({
           </div>
         </section>
 
-        {/* Key Differentiators */}
+        {/* Comparison details */}
         <section className="px-4 py-16">
           <div className="mx-auto max-w-5xl">
             <div className="mb-12 text-center">
               <h2 className="mb-4 text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl dark:text-neutral-50">
-                Key Differentiators
+                Comparison Details
               </h2>
               <p className="mx-auto max-w-2xl text-neutral-600 dark:text-neutral-400">
-                {`Where Portwing goes beyond what ${competitorName} documents.`}
+                Authentication, socket policy, telemetry, release evidence, and controller scope.
               </p>
             </div>
 
@@ -261,8 +263,8 @@ export function ComparisonPage({
               {`Ready to try ${SITE_CONFIG.name}?`}
             </h2>
             <p className="mb-8 text-neutral-600 dark:text-neutral-400">
-              Security-first, AGPL-3.0, no SaaS required. Drop a secure foothold on any Docker host
-              in minutes.
+              Security-first, MIT-licensed, no SaaS required. Drop a secure foothold on any Docker
+              host in minutes.
             </p>
 
             <CtaButtons />

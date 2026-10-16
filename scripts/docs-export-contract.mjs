@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // After `next build` in docs/, the static export is what ships at /docs. Moving
 // the content under content/docs/current/ must not leak that directory into
 // the output, every current page must still land at its unversioned URL, and

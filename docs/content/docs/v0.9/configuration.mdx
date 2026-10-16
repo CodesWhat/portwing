@@ -1,0 +1,130 @@
+---
+title: Configuration
+description: Complete environment-variable reference for Portwing, grouped by category.
+---
+
+All configuration is done through environment variables — no config file is required. Variables with no default must be set explicitly; unmarked defaults are applied automatically at startup.
+
+For auth-method selection and key-enrollment flows, see [Authentication](/authentication). For mode-specific setup (Standard vs. Edge), see [Connection Modes](/connection-modes).
+
+---
+
+## Connection
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3000` | TCP port the HTTP server listens on. |
+| `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | IP address the HTTP/operations listener binds to. Edge mode defaults to loopback because its operations routes have no inbound authentication, and it refuses a non-loopback address unless `ALLOW_UNAUTHENTICATED_REMOTE=true` is set; use a broader address only on an isolated monitoring network. |
+| `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Portwing operates in Edge mode and connects outbound to Drydock. A plaintext `http://`/`ws://` scheme is rejected at startup unless `ALLOW_INSECURE_EDGE_URL=true`. |
+| `ALLOW_INSECURE_EDGE_URL` | `false` | Dangerous opt-in to connect Edge mode to a plaintext `http://`/`ws://` `DRYDOCK_URL`. The controller's identity is otherwise verified by TLS alone, so this is for trusted local testing only. |
+| `TLS_CERT` | — | Path to server TLS certificate (Standard mode). Must be set together with `TLS_KEY`; partial configuration is a startup error. |
+| `TLS_KEY` | — | Path to server TLS private key (Standard mode). Must be set together with `TLS_CERT`; partial configuration is a startup error. |
+| `CA_CERT` | — | Path to a custom CA certificate used when verifying the Drydock server in Edge mode. |
+| `TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification on the outbound Edge connection. **Testing only.** |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | — | Standard proxy variables. The Edge connection to the controller goes through the proxy they select, using an HTTP CONNECT tunnel, and hosts matched by `NO_PROXY` connect directly. Credentials can be given in the proxy URL (`http://user:pass@proxy:3128`). Loopback controllers are never proxied. The proxy URL must use `http://` or `socks5://`; an `https://` proxy URL is rejected with an error. |
+| `TRUSTED_PROXIES` | — | Comma-separated list of CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`) for reverse proxies whose `X-Forwarded-For` header Portwing will trust for real-IP resolution. When unset, forwarding headers are ignored entirely. |
+| `ALLOWED_ORIGINS` | — | Comma-separated list of exact browser origins (`scheme://host[:port]`, e.g. `https://ops.example.com,http://localhost:5173`) Portwing accepts. Empty by default: any request that carries an `Origin` header is rejected with 403 before authentication. Requests with no `Origin` header are unaffected. Entries must use `http` or `https`, name a host, and carry no path, query, fragment or userinfo; IP hosts must be in canonical form; `*` and anything else is a startup error. Applies in standard mode and to edge mode's operations listener. |
+| `ALLOWED_HOSTS` | — | Comma-separated hostnames (e.g. `portwing.internal.example`) accepted in the `Host` header while authentication is off, and always on edge mode's operations listener. IP addresses, `localhost` and single-label names such as `portwing` are always accepted. Compared case-insensitively; the request's port and one trailing dot are ignored. Entries must be bare hostnames: a scheme, port, path, userinfo or wildcard is a startup error. In standard mode it has no effect when authentication is on. Edge mode's operations listener is checked whatever `TOKEN` is set to, because that listener never authenticates. |
+
+<Callout type="warn">
+`TRUSTED_PROXIES` affects rate-limiting and IP-based access controls. An over-broad CIDR (e.g. `0.0.0.0/0`) lets any client spoof its source IP, bypassing those controls. Set only the CIDRs of your actual proxy infrastructure.
+</Callout>
+
+<Callout type="info">
+`ALLOWED_ORIGINS` and `ALLOWED_HOSTS` defend against DNS rebinding; they are not access lists for people. The `Origin` check covers a page's writes, WebSocket upgrades and MCP calls. The `Host` check covers its same-origin reads, which carry no `Origin`, and applies only when authentication is off (with auth on, a rebinding page can't present the secret, though `/health`, `/ready` and `/_portwing/health` stay readable without credentials). It does not help against an attacker who controls the victim's name resolution (single-label names pass) or behind a reverse proxy that rewrites `Host` to the upstream address; see the security model. Neither the Docker CLI, Drydock's agent client, curl nor most MCP clients send an `Origin`, so they need no entry. Some WebSocket libraries do (Python `websocket-client`, as used by docker-py `attach_socket(ws=True)`, and `golang.org/x/net/websocket`); list their origin. Portwing sends no `Access-Control-*` headers and doesn't answer `OPTIONS`, so an allowlisted origin doesn't enable cross-origin `fetch` from a page; it helps a same-origin reverse proxy and WebSocket clients. An `Origin` that matches the request `Host` is not allowed automatically: a page on a rebound hostname presents exactly that.
+</Callout>
+
+### Authentication variables
+
+The following variables govern how Portwing authenticates incoming requests. `TOKEN` and `TOKEN_HASH` are mutually exclusive — setting both causes startup to fail.
+
+| Variable | Default | Description |
+|---|---|---|
+| `TOKEN` | — | Plaintext shared-secret token. Acceptable for local dev; prefer `TOKEN_HASH` in production. |
+| `TOKEN_FILE` | — | Path to a file whose trimmed contents are used as the token. Overrides `TOKEN`. |
+| `TOKEN_HASH` | — | Argon2id hash of the token (generate with `portwing hash-token`). Preferred over plaintext. |
+| `TOKEN_HASH_FILE` | — | Path to a file containing the Argon2id hash. Overrides `TOKEN_HASH`. |
+| `AUTHORIZED_KEYS` | — | Path to an Ed25519 `authorized_keys` file for per-client asymmetric authentication (Model B). `AUTHORIZED_KEYS_FILE` is an alias for this variable. |
+| `AUTHORIZED_KEYS_FILE` | — | Alias for `AUTHORIZED_KEYS`. |
+| `MAX_CLOCK_SKEW_SECONDS` | `60` | Maximum tolerated clock difference (seconds) between client and agent when validating Ed25519 request timestamps. Range: `1..4611686018` seconds. |
+| `NONCE_LRU_SIZE` | `10000` | Capacity of the in-memory nonce cache used for replay protection. |
+| `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on first use. |
+| `ENROLLMENT_TOKEN_FILE` | — | Path to a file containing the enrollment token. |
+| `PRIVATE_KEY_FILE` | — | Path to an Ed25519 private key (PEM PKCS#8) used to sign the agent's Edge-mode hello message. |
+| `ALLOW_UNAUTHENTICATED` | `false` | Explicit development-only opt-in to start Standard mode without a credential. Safe by default only on a loopback `BIND_ADDRESS`. |
+| `ALLOW_UNAUTHENTICATED_REMOTE` | `false` | Additional dangerous opt-in required when an unauthenticated listener binds a non-loopback address. |
+
+<Callout type="warn">
+`TOKEN` stores the secret in plaintext in the process environment. Use `TOKEN_HASH` (Argon2id) for any environment accessible to more than one person, or where secret scanning tools may read process state.
+</Callout>
+
+<Callout type="warn">
+Standard mode fails closed when none of `TOKEN`, `TOKEN_HASH`, or
+`AUTHORIZED_KEYS` is configured. `ALLOW_UNAUTHENTICATED=true` is intended for
+local development only. Portwing requires the additional
+`ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement before it will expose an
+unauthenticated listener on a non-loopback address.
+</Callout>
+
+---
+
+## Docker
+
+| Variable | Default | Description |
+|---|---|---|
+| `DOCKER_SOCKET` | Auto-detect | Path to the Docker Unix socket. Portwing checks `/var/run/docker.sock`, `~/.docker/run/docker.sock`, `~/.orbstack/run/docker.sock`, and `/run/docker.sock` in that order; falls back to `/var/run/docker.sock` if none exist. |
+| `STACKS_DIR` | `/data/stacks` | Directory where Compose stack files are stored and managed. |
+
+Portwing talks to the Docker daemon over the Unix socket only — there is no `DOCKER_HOST` TCP transport.
+
+---
+
+## Agent Identity
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_ID` | UUID v4 (generated) | Stable unique identifier for this agent instance. Set explicitly to preserve identity across restarts. |
+| `AGENT_NAME` | System hostname | Human-readable label shown in Drydock and audit logs. Falls back to `portwing` if the hostname cannot be read. |
+
+---
+
+## Operational
+
+Duration settings require integer seconds. Empty values use the defaults;
+malformed or out-of-range values stop startup and name the setting. The upper
+bound also cannot exceed the platform's integer maximum (`2147483647` on
+32-bit builds).
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOG_LEVEL` | `info` | Log verbosity. Accepted values: `debug`, `info`, `warn`, `error`. |
+| `HEARTBEAT_INTERVAL` | `30` | Seconds between WebSocket ping frames in Edge mode. The read deadline is `max(2 * HEARTBEAT_INTERVAL, 60)` seconds. Range: `1..4611686018` seconds. |
+| `WELCOME_TIMEOUT` | `30` | Seconds to wait for the Drydock welcome message after the WebSocket handshake in Edge mode. Range: `1..4611686018` seconds. |
+| `REQUEST_TIMEOUT` | `30` | Timeout in seconds for individual Docker API calls; `0` disables the timeout. Range: `0..4611686018` seconds. |
+| `RECONNECT_DELAY` | `1` | Initial reconnect backoff delay in seconds; `0` retries immediately (doubles on each failure, capped at `MAX_RECONNECT_DELAY`, with ±25% jitter). Range: `0..4611686018` seconds. |
+| `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff delay in seconds. Range: `0..4611686018` seconds. |
+| `SKIP_DF_COLLECTION` | `false` | Set to `true` (or `1`/`yes`) to disable disk-usage metric collection. Useful when the host filesystem is inaccessible or collection is slow. |
+| `MAX_STREAM_SESSIONS` | `100` | Standard mode only: maximum concurrent streaming Docker proxy responses. A non-positive value disables the bound. Edge mode enforces the same 100-session limit, but it is fixed and not configurable. |
+| `MAX_EXEC_SESSIONS` | `100` | Standard mode only: maximum concurrent hijacked exec/attach sessions. A non-positive value disables the bound. Edge mode enforces the same 100-session limit, but it is fixed and not configurable. |
+| `AUDIT_LOG` | — | Optional persistent audit destination: `stdout`, `stderr`, or an absolute file path. When unset, only the sink is disabled; `AUDIT_BUFFER_SIZE` still controls in-memory retention. |
+| `AUDIT_BUFFER_SIZE` | `256` | Number of audit records retained in the in-memory ring buffer for pull-based retrieval at `GET /_portwing/audit`. Set to `0` to disable the buffer. Independent of `AUDIT_LOG`. Retained display fields are copied and capped at 4096 bytes for `path`, `stack`, and `container`; 64 bytes for `method`; and 256 bytes for `actor`, `operation`, `exec_id`, and `key_id`. Oversized fields end with `[truncated]` within that cap, preserving UTF-8 character boundaries. These limits apply only to in-memory audit retention, not incoming requests or the persistent audit sink. |
+
+---
+
+## Adapter
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADAPTER` | `drydock` | Wire protocol adapter. `drydock` enables the Drydock-compatible SSE/REST surface; `generic` exposes a standalone REST+SSE API without Drydock-specific extensions. |
+
+---
+
+## Drydock Compatibility
+
+These variables mirror Drydock agent configuration names for deployments managed by a Drydock controller.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DD_AGENT_SECRET` | — | Drydock agent secret token. Read before `TOKEN` is applied; `TOKEN` takes precedence if both are set. |
+| `DD_AGENT_SECRET_FILE` | — | File containing the Drydock agent secret token. |
+| `DD_POLL_INTERVAL` | `300` | Container inventory refresh interval in seconds (Drydock-compatible polling mode). Range: `1..4611686018` seconds. |

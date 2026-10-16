@@ -1,0 +1,211 @@
+---
+title: Connection Modes
+description: How Portwing connects to the Drydock controller — inbound Standard mode and outbound Edge mode for NAT/firewall-constrained hosts.
+---
+
+Portwing supports two connection modes. The active mode is determined at startup from your environment variables — no flag required.
+
+## Mode Detection
+
+```text
+DRYDOCK_URL set + PRIVATE_KEY_FILE set
+    → Edge Mode   (agent dials outbound WebSocket to controller)
+
+Otherwise
+    → Standard Mode   (agent runs an HTTP server; controller connects inbound)
+```
+
+---
+
+## Standard Mode
+
+**Status: fully implemented and production-ready.**
+
+Portwing runs a plain HTTP server on `PORT` (default `3000`). The Drydock controller connects inbound and drives the session: it calls `GET /api/containers`, `GET /api/watchers`, and `GET /api/triggers` during the handshake, then holds a long-lived SSE stream on `GET /api/events` for real-time container events. All Docker Engine API paths are transparently proxied through the agent.
+
+Standard mode is active whenever `DRYDOCK_URL` is **not** set. The controller authenticates with the `X-Dd-Agent-Secret` shared secret. Built-in TLS (`TLS_CERT` / `TLS_KEY`) accepts TLS 1.2 and later with modern cipher suites.
+
+### Required networking
+
+The agent host must accept inbound TCP connections on `PORT`. Run Portwing behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik) — do not expose it on plain HTTP to the internet.
+
+### Key environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `3000` | Listening port |
+| `BIND_ADDRESS` | `0.0.0.0` | Listening address |
+| `TOKEN` | — | Shared secret; controller sends it as `X-Dd-Agent-Secret` |
+| `TOKEN_HASH` | — | Argon2id hash of the token (preferred over `TOKEN`) |
+| `TLS_CERT` / `TLS_KEY` | — | PEM files to enable built-in TLS; both must be set together or startup fails |
+| `TRUSTED_PROXIES` | — | Comma-separated CIDRs for real-IP extraction |
+| `ALLOWED_ORIGINS` | — | Comma-separated browser origins Portwing accepts (empty: any request with an `Origin` header gets 403) |
+| `ALLOWED_HOSTS` | — | Comma-separated hostnames accepted in `Host` while auth is off and on the edge operations listener (IPs, `localhost` and single-label names always pass) |
+
+For Ed25519 key authentication (no shared secret on the wire), see [Authentication](/authentication).
+For the complete variable reference, see [Configuration](/configuration).
+
+### Compose snippet
+
+```yaml
+services:
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # The image runs as non-root UID 65532; grant the Docker socket's group:
+    #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock}"
+    ports:
+      - "3000:3000"
+    environment:
+      TOKEN_HASH: "${PORTWING_TOKEN_HASH}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+See [Getting Started](/getting-started) for the full Sockguard variant and TLS examples.
+
+---
+
+## Edge Mode
+
+**Status: production supported with stable `portwing/1.0`; full v0.9 feature compatibility requires Drydock `v1.6.0-rc.11+`.**
+
+<Callout type="info">
+  Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers Edge mode with
+  real Portwing processes, multi-agent reconnect load, concurrent exec, continuous logs,
+  and controller backpressure. Portwing's separate `quality-soak-weekly.yml` covers the
+  Standard/generic HTTP path and SSE churn under an RSS-growth budget. Drydock `v1.6.0-rc.11+`
+  implements Portwing v0.9.0's controller-owned watcher/update contract; an
+  older controller may connect at the wire level without that behavior. The endpoint is
+  **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock —
+  token-only (`TOKEN` / `TOKEN_HASH`) connections are rejected.
+</Callout>
+
+In Edge mode the agent initiates an outbound WebSocket connection to the Drydock controller at `DRYDOCK_URL + /api/portwing/ws`. No inbound **control** port needs to be published on the agent host, making it suitable for hosts behind NAT, firewalls, and dynamic IP addresses. A local operations listener still serves health, readiness, metrics, and audit export; keep it private.
+
+Edge mode is active when **both** of the following are true:
+
+1. `DRYDOCK_URL` is set.
+2. `PRIVATE_KEY_FILE` is set.
+
+Setting `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is rejected at startup with a fatal error — the Drydock controller endpoint is Ed25519-only, so the agent enforces `PRIVATE_KEY_FILE` at startup rather than looping forever on a rejected hello. `TOKEN` and `AUTHORIZED_KEYS` are not accepted for edge mode.
+
+Edge mode's trust in the controller is TLS-only and one-directional. The signed hello lets the controller verify Portwing, but nothing verifies the controller's identity in return, so a plaintext `http://` or `ws://` `DRYDOCK_URL` would let an on-path attacker complete the handshake and drive dockerd. Portwing fails closed on a plaintext `DRYDOCK_URL` unless `ALLOW_INSECURE_EDGE_URL=true` is set, which is for trusted local testing only. Always use `https://` or `wss://` against a real controller.
+
+### Key environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DRYDOCK_URL` | — | Controller base URL, e.g. `https://drydock.example.com`. Plaintext `http://`/`ws://` schemes are rejected at startup unless `ALLOW_INSECURE_EDGE_URL=true` |
+| `ALLOW_INSECURE_EDGE_URL` | `false` | Opt-in to a plaintext controller URL. Trusted local testing only — without TLS the controller's identity is unverified |
+| `PRIVATE_KEY_FILE` | — | **Required.** Ed25519 private key (PEM PKCS#8); the hello message is signed with this key |
+| `TOKEN` | — | Not accepted for edge mode — startup fails if set with `DRYDOCK_URL` and no `PRIVATE_KEY_FILE` |
+| `AUTHORIZED_KEYS` | — | Not accepted for edge mode |
+| `AGENT_NAME` | hostname | Human-readable label sent in the hello message |
+| `AGENT_ID` | random UUID | Stable identity across reconnects (persist this) |
+| `RECONNECT_DELAY` | `1` | Initial reconnect delay in seconds |
+| `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect delay in seconds |
+| `HEARTBEAT_INTERVAL` | `30` | Ping interval in seconds |
+| `WELCOME_TIMEOUT` | `30` | Seconds to wait for the controller welcome message |
+| `TLS_SKIP_VERIFY` | `false` | Skip controller TLS verification (testing only) |
+| `CA_CERT` | — | Path to a PEM CA bundle for self-signed controller certs |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | — | Standard proxy variables for the outbound controller connection. Hosts matched by `NO_PROXY` connect directly. The proxy URL must be `http://` or `socks5://` |
+
+### Handshake sequence
+
+On each connection attempt the agent:
+
+1. Opens a WebSocket to `DRYDOCK_URL/api/portwing/ws` and identifies itself with the `portwing/1.0` protocol string carried in its `hello` message — an application-level identifier, not a negotiated `Sec-WebSocket-Protocol` sub-protocol header.
+2. Sends a `hello` message containing its agent ID, name, capabilities, Docker version, and an Ed25519 signature created with `PRIVATE_KEY_FILE` (see [Authentication](/authentication)). Edge mode requires this key; token-hash authentication is rejected by the controller.
+3. Waits up to `WELCOME_TIMEOUT` seconds for the controller's `welcome` response.
+4. On success, sends component descriptors (`dd:component_sync`) before the
+   initial container inventory (`dd:container_sync`), then sends host metrics.
+   The component descriptors declare watcher ownership as controller-owned, so
+   controller-owned Docker calls travel as correlated WebSocket `request` /
+   `response` messages.
+
+### Reconnection and keepalive
+
+The agent retries automatically on any connection failure using exponential backoff with ±25% jitter:
+
+```text
+Attempt 1: wait ~1s
+Attempt 2: wait ~2s
+Attempt N: wait min(2^N, MAX_RECONNECT_DELAY)s  (+/- 25% jitter)
+On success: backoff resets to RECONNECT_DELAY
+```
+
+Not every connection failure feeds this loop, though. A hello rejection is
+classified before the agent reconnects: terminal codes (`ed25519-required`,
+`unknown-key`, `bad-signature`, `protocol-mismatch`, `no-auth`,
+`invalid-agent-name`, `parse-error`, `expected-hello`, `agent-name-claimed`)
+make the agent log a fatal error and exit instead of retrying forever;
+timing/capacity codes (`timestamp-skew`, `replay`, `rate-limited`,
+`registry-full`, `agent-already-connected`, …) and any unrecognized code are
+still retried with backoff as above. Because a terminal rejection ends the
+process rather than looping, operators should alert on that fatal log line —
+or on the container restart count under a restart policy — since it usually
+points to a configuration problem (a stale or unregistered key, a name
+collision) rather than a transient network blip.
+
+During an established connection the agent sends a `ping` message every `HEARTBEAT_INTERVAL` seconds and expects a `pong` in return. The read deadline is set to `max(2 × HEARTBEAT_INTERVAL, 60s)`. A missing pong triggers an immediate close and reconnect cycle.
+
+An HTTP operations listener remains running on `BIND_ADDRESS:PORT` throughout,
+so Docker HEALTHCHECK directives and private monitoring continue to work even
+when the WebSocket is down. It serves `/health`, `/ready`,
+`/_portwing/health`, `/metrics`, and `/_portwing/audit/export`. The metrics and
+audit-export routes have no inbound authentication in Edge mode, so Edge mode
+defaults `BIND_ADDRESS` to `127.0.0.1`. Treat the entire listener as a
+private-operations trust boundary: set a broader bind explicitly only for a
+dedicated container/pod monitoring network, and never publish it through an
+ingress, public service, or host port without an authenticating proxy.
+
+On `SIGINT` or `SIGTERM` the agent closes all active exec sessions and sends a WebSocket close frame (code 1000, reason `shutdown`) before exiting.
+
+### Compose snippet
+
+```yaml
+services:
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # The image runs as non-root UID 65532; grant the Docker socket's group:
+    #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock}"
+    environment:
+      DRYDOCK_URL: "https://drydock.example.com"
+      AGENT_NAME: "my-host"
+      PRIVATE_KEY_FILE: "/run/secrets/portwing_key"
+    secrets:
+      - portwing_key
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+secrets:
+  portwing_key:
+    file: ./portwing_ed25519
+```
+
+---
+
+## Choosing a Mode
+
+| | Standard Mode | Edge Mode |
+|---|---|---|
+| Inbound port required | Yes | No |
+| Works behind NAT / firewall | No | Yes |
+| Agent-side implementation | Complete | Complete |
+| Controller-side support | Complete | Drydock `v1.6.0-rc.11+` |
+| Full v0.9 feature compatibility | Drydock `v1.6.0-rc.11+` | Drydock `v1.6.0-rc.11+` |
+| Recommended for production | Yes | Yes (Drydock `v1.6.0-rc.11+`) |
+
+Use Standard mode when the controller can reach the host directly. Use Edge mode when the host cannot accept an inbound connection; both modes are production supported.

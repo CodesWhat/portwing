@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { archiveVersionOf } from "./docs-versions.ts";
 
 // An archived page is a byte copy of the current docs, so it still says

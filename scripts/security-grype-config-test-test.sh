@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Self-test for scripts/security-grype-config-test.sh.
 #
 # A contract test that never rejects anything is worse than no contract test:

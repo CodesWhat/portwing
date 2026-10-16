@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /** Canonical class strings shared across chrome components (site-header, footer). */
 
 export const navLinkCn =

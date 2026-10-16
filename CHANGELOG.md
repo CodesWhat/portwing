@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.0-rc.1] - 2026-10-16
+
+### Changed
+
+- Portwing is now licensed under the MIT License, starting with this release.
+  `LICENSE` is the standard MIT text and `NOTICE` carries the project
+  copyright. v0.9.26 and every earlier release stay under AGPL-3.0.
+- Refresh the competitive review against current primary sources, including
+  authentication, socket filtering, telemetry, and release evidence.
+- Archive the final v0.9 documentation from its release tag and label the live
+  documentation as v1.0.
+- Accept explicit RC versions in the release workflow and metadata checks.
+  Candidate homepage and current-docs install examples pin the RC image.
+  The stable image and Homebrew channels stay on the stable release.
+- Validate complete active image references in deployment examples, so a
+  commented correct image cannot hide an untagged or suffixed active image.
+
 ## [v0.9.26] - 2026-10-15
 
 ### Security

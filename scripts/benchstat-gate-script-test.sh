@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # shellcheck disable=SC2016  # expected markdown rows are literal and contain backticks
 set -euo pipefail
 

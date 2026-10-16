@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Self-test for scripts/ci/mutation-survivors-record.sh (PW-2.5).
 #

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  * Portwing site config — edit ONLY this file to reskin.
  * Product content (hero copy, feature lists, comparison data) lives in the
@@ -14,7 +16,7 @@ export const SITE_CONFIG = {
   /** Brand name shown in the header, footer, and metadata. */
   name: "Portwing",
   /** Current release version shown in the hero badge. */
-  version: "0.9.26",
+  version: "1.0.0-rc.1",
   /** Short product tagline used in page titles and OG metadata. */
   tagline: "Security-first remote Docker agent",
   /**
@@ -45,7 +47,7 @@ export const SITE_CONFIG = {
   /** GHCR image path used in quick-start snippets. */
   dockerImage: "ghcr.io/codeswhat/portwing",
   /** License link shown in the footer. */
-  licenseUrl: "https://www.gnu.org/licenses/agpl-3.0.html",
+  licenseUrl: "https://opensource.org/licenses/MIT",
   /** Aurora background palette — violet matches the pigeon's slate palette. */
   aurora: "violet" as AuroraPalette,
 } as const;

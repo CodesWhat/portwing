@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 module.exports = {
   site: "docs",
   outputRoot: "docs/out",

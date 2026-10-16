@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { MetadataRoute } from "next";
 import { BASE_URL } from "@/lib/site-config";
 

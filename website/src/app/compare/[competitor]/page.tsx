@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { notFound } from "next/navigation";
 import { createComparisonRoute } from "@/lib/comparison-route";
 import {
