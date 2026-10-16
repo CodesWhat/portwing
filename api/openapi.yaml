@@ -94,6 +94,24 @@ components:
           schema:
             type: string
             example: forbidden origin
+    ManagedRotationStatus:
+      description: Public IDs of the current and optional pending signer. No private material.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [root_key_id, current_key_id]
+            additionalProperties: false
+            properties:
+              root_key_id:
+                type: string
+                pattern: '^[0-9a-f]{16}$'
+              current_key_id:
+                type: string
+                pattern: '^[0-9a-f]{16}$'
+              pending_key_id:
+                type: string
+                pattern: '^[0-9a-f]{16}$'
   securitySchemes:
     bearerToken:
       type: http
@@ -796,6 +814,153 @@ paths:
                 docker: disconnected
         "403":
           $ref: '#/components/responses/ForbiddenOrigin'
+
+  /_portwing/auth/rotation:
+    get:
+      operationId: statusManagedKeyRotation
+      summary: Status managed Ed25519 rotation
+      description: >
+        Development feature, absent from published v1.0.0-rc.1. Requires
+        KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
+        version 2 with no query parameters. Bearer credentials cannot manage
+        keys. Read the verified signer's own managed identity. Current and pending signers can read status.
+      tags: [Auth]
+      security:
+        - ed25519Signature: []
+      responses:
+        "200":
+          $ref: '#/components/responses/ManagedRotationStatus'
+        "400":
+          description: Invalid body, query parameters, signature version or replacement key.
+        "401":
+          description: Authentication failed. X-Portwing-Reason identifies Ed25519 failures.
+        "403":
+          description: Origin denied, non-Ed25519 identity or signer cannot perform this action.
+        "404":
+          description: Managed rotation is disabled.
+        "409":
+          description: A different replacement is pending.
+        "429":
+          description: Authentication failure rate limit exceeded.
+        "500":
+          description: Managed state could not be persisted. Check status before retrying.
+
+  /_portwing/auth/rotation/prepare:
+    post:
+      operationId: prepareManagedKeyRotation
+      summary: Prepare managed Ed25519 rotation
+      description: >
+        Development feature, absent from published v1.0.0-rc.1. Requires
+        KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
+        version 2 with no query parameters. Bearer credentials cannot manage
+        keys. The current signer stages a raw 32-byte Ed25519 successor. Both keys remain accepted until replacement proof commits.
+      tags: [Auth]
+      security:
+        - ed25519Signature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [public_key]
+              properties:
+                public_key:
+                  type: string
+                  contentEncoding: base64
+                  description: Raw 32-byte Ed25519 public key in standard base64.
+      responses:
+        "200":
+          $ref: '#/components/responses/ManagedRotationStatus'
+        "400":
+          description: Invalid body, query parameters, signature version or replacement key.
+        "401":
+          description: Authentication failed. X-Portwing-Reason identifies Ed25519 failures.
+        "403":
+          description: Origin denied, non-Ed25519 identity or signer cannot perform this action.
+        "404":
+          description: Managed rotation is disabled.
+        "409":
+          description: A different replacement is pending.
+        "429":
+          description: Authentication failure rate limit exceeded.
+        "500":
+          description: Managed state could not be persisted. Check status before retrying.
+
+  /_portwing/auth/rotation/commit:
+    post:
+      operationId: commitManagedKeyRotation
+      summary: Commit managed Ed25519 rotation
+      description: >
+        Development feature, absent from published v1.0.0-rc.1. Requires
+        KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
+        version 2 with no query parameters. Bearer credentials cannot manage
+        keys. Only the pending signer can retire its predecessor. Repeating a successful commit with the current signer is idempotent.
+      tags: [Auth]
+      security:
+        - ed25519Signature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          $ref: '#/components/responses/ManagedRotationStatus'
+        "400":
+          description: Invalid body, query parameters, signature version or replacement key.
+        "401":
+          description: Authentication failed. X-Portwing-Reason identifies Ed25519 failures.
+        "403":
+          description: Origin denied, non-Ed25519 identity or signer cannot perform this action.
+        "404":
+          description: Managed rotation is disabled.
+        "409":
+          description: A different replacement is pending.
+        "429":
+          description: Authentication failure rate limit exceeded.
+        "500":
+          description: Managed state could not be persisted. Check status before retrying.
+
+  /_portwing/auth/rotation/abort:
+    post:
+      operationId: abortManagedKeyRotation
+      summary: Abort managed Ed25519 rotation
+      description: >
+        Development feature, absent from published v1.0.0-rc.1. Requires
+        KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
+        version 2 with no query parameters. Bearer credentials cannot manage
+        keys. Only the current signer can cancel its uncommitted successor. The current key stays active.
+      tags: [Auth]
+      security:
+        - ed25519Signature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          $ref: '#/components/responses/ManagedRotationStatus'
+        "400":
+          description: Invalid body, query parameters, signature version or replacement key.
+        "401":
+          description: Authentication failed. X-Portwing-Reason identifies Ed25519 failures.
+        "403":
+          description: Origin denied, non-Ed25519 identity or signer cannot perform this action.
+        "404":
+          description: Managed rotation is disabled.
+        "409":
+          description: A different replacement is pending.
+        "429":
+          description: Authentication failure rate limit exceeded.
+        "500":
+          description: Managed state could not be persisted. Check status before retrying.
 
   /_portwing/info:
     get:
