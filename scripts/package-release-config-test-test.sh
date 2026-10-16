@@ -134,6 +134,31 @@ expect_release_contract_failure \
 	"a wget healthcheck override must not survive in the observability example"
 cp "${observability_example}" "${fixture}/${observability_example}"
 
+# Every example that runs the Portwing image must pin the current release:
+# `latest` silently moves, and a wrong version is a forgotten bump.
+for example_file in \
+	examples/docker-compose.edge.yml \
+	examples/docker-compose.edge-with-exec.yml \
+	examples/docker-compose.standard.yml \
+	examples/docker-compose.with-sockguard.yml \
+	examples/kubernetes/edge.yaml \
+	examples/kubernetes/standard.yaml \
+	examples/observability/docker-compose.yml; do
+	mkdir -p "$(dirname "${fixture}/${example_file}")"
+	cp "${example_file}" "${fixture}/${example_file}"
+	sed -i.bak "s#ghcr.io/codeswhat/portwing:${release_version}#ghcr.io/codeswhat/portwing:latest#" "${fixture}/${example_file}"
+	rm -f "${fixture}/${example_file}.bak"
+	expect_release_contract_failure \
+		"the example ${example_file} must pin the current release" \
+		"an example set back to latest must fail: ${example_file}"
+	sed -i.bak "s#ghcr.io/codeswhat/portwing:latest#ghcr.io/codeswhat/portwing:0.0.1#" "${fixture}/${example_file}"
+	rm -f "${fixture}/${example_file}.bak"
+	expect_release_contract_failure \
+		"active release examples must use ${release_version}" \
+		"an example pinned to a wrong version must fail: ${example_file}"
+	cp "${example_file}" "${fixture}/${example_file}"
+done
+
 if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
 	echo "FAIL: complete package release fixture must pass" >&2
 	exit 1
