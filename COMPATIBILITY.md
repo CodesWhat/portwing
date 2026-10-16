@@ -17,7 +17,12 @@ DrydockCompat bumps.
 
 | Portwing version | Drydock wire connection | Full feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|---|
-| v0.9.26 (latest release) / `main` | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v1.0.0-rc.1 (release candidate) / `main` | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+
+The candidate keeps the existing wire and feature contract. Its published-artifact
+Standard/Edge conformance run must pass before GA; the version row does not
+claim a completed candidate run. The 0.9 line remains the stable release channel
+during candidate evaluation.
 
 ## Wire compatibility versus feature compatibility
 

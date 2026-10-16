@@ -1,0 +1,306 @@
+---
+title: Getting Started
+description: Deploy Portwing as a hardened remote Docker agent using the recommended sockguard two-layer configuration, or a simpler standard-mode setup.
+---
+
+Portwing is a security-first remote Docker agent. The Drydock controller connects **inbound** to each Portwing agent over HTTP (it initiates; Portwing serves). All compose files ship with hardened defaults — `read_only`, `cap_drop: ALL`, `no-new-privileges`, and Docker secrets instead of inline tokens.
+
+<Callout type="warn">
+The plaintext examples publish port 3000 only on host loopback. For remote access, either configure Portwing TLS before widening that bind, or keep the plaintext listener private behind a TLS-terminating reverse proxy.
+</Callout>
+
+## Recommended deployment (hardened with sockguard)
+
+The strongest posture combines three controls:
+
+- **Sockguard** — a socket-level request filter so Portwing never touches the raw Docker socket directly. Even a fully compromised agent is constrained to the explicit API allowlist in `sockguard.yaml`.
+- **Secrets-mounted token** — the token is read from a Docker secret at `/run/secrets/portwing_token`, never exposed in environment variables or `docker inspect` output.
+- **Hardened container runtime** — both containers run `read_only`, drop all capabilities, and set `no-new-privileges`.
+
+For the strongest auth posture, upgrade to Ed25519 per-request keys after the initial setup — see [Authentication](/authentication).
+
+### Step 1 — generate a token and download the example files
+
+```bash
+openssl rand -hex 32 > portwing_token.txt
+sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.with-sockguard.yml
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/sockguard.yaml
+```
+
+### Step 2 — start the hardened stack
+
+```bash
+docker compose -f docker-compose.with-sockguard.yml up -d
+```
+
+This starts sockguard and Portwing as two separate containers sharing a filtered socket via a named volume. Sockguard writes a filtered Unix socket into that volume; Portwing talks to that filtered socket via `DOCKER_SOCKET` rather than mounting `/var/run/docker.sock` directly.
+
+```yaml filename="docker-compose.with-sockguard.yml"
+# Portwing + sockguard — two-layer defense.
+#
+# Sockguard sits between Portwing and the host's Docker socket and writes a
+# filtered unix socket into a shared named volume. Portwing talks to that
+# filtered socket instead of mounting /var/run/docker.sock directly, so even
+# a fully compromised agent is constrained to the explicit API allowlist in
+# sockguard.yaml.
+#
+# The bundled sockguard.yaml tracks sockguard's own portwing.yaml preset:
+# container lifecycle, image pull/inspect/remove, events, and narrow network/
+# volume reads. Check upstream for the current version:
+# https://github.com/CodesWhat/sockguard/blob/main/app/configs/portwing.yaml
+# Exec is denied by this preset — swap in sockguard's
+# portwing-with-exec.yaml to opt into interactive exec sessions. Compose stack
+# deploys through Portwing need broader rules (network create, volume create,
+# build) — extend sockguard.yaml deliberately if you use stacks, rather than
+# bypassing the filter.
+#
+# Generate a token first and make it readable by the container user:
+#   openssl rand -hex 32 > portwing_token.txt
+#   sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+#
+# Both images run as UID 65532. Sockguard needs the numeric group ID of the
+# host Docker socket to open it:
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+# Portwing itself needs no group_add here — it talks only to sockguard's
+# filtered socket, which sockguard creates 0600 under the same UID.
+# This plaintext example publishes only on host loopback. For remote access,
+# configure Portwing TLS before changing this bind, or keep the plaintext
+# listener private behind a TLS-terminating reverse proxy.
+
+services:
+  sockguard:
+    image: ghcr.io/codeswhat/sockguard:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./sockguard.yaml:/etc/sockguard/sockguard.yaml:ro
+      - sockguard-socket:/var/run/sockguard
+    environment:
+      - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
+
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
+    restart: unless-stopped
+    depends_on:
+      - sockguard
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - sockguard-socket:/var/run/sockguard:ro
+      - portwing-stacks:/data/stacks
+    environment:
+      - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
+      - TOKEN_FILE=/run/secrets/portwing_token
+    secrets:
+      - portwing_token
+
+secrets:
+  portwing_token:
+    file: ./portwing_token.txt
+
+volumes:
+  sockguard-socket:
+  portwing-stacks:
+```
+
+<Callout type="info">
+If you manage Docker Compose stacks through Portwing, the bundled `sockguard.yaml` tracks sockguard's `portwing.yaml` preset (container lifecycle, image ops, events, narrow network/volume reads) — check [upstream](https://github.com/CodesWhat/sockguard/blob/main/app/configs/portwing.yaml) for the current version. Compose deploys require additional rules — extend `sockguard.yaml` deliberately (network create, volume create, build) rather than bypassing the filter. That preset also denies exec: `POST /containers/*/exec` matches no allow rule and returns 403. For interactive exec, swap in sockguard's `portwing-with-exec.yaml`, shipped here as [`examples/sockguard-with-exec.yaml`](https://github.com/CodesWhat/portwing/blob/main/examples/sockguard-with-exec.yaml); for Drydock's edge exec feature use [`examples/docker-compose.edge-with-exec.yml`](https://github.com/CodesWhat/portwing/blob/main/examples/docker-compose.edge-with-exec.yml), which pairs edge mode with that preset.
+</Callout>
+
+---
+
+## Standard mode (no sockguard)
+
+If you want a simpler setup — Drydock or another client connects inbound to port 3000 and Portwing talks to the raw Docker socket directly — use the standard compose file. It keeps all the runtime hardening but drops the sockguard layer.
+
+```bash
+openssl rand -hex 32 > portwing_token.txt
+sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.standard.yml
+docker compose -f docker-compose.standard.yml up -d
+```
+
+```yaml filename="docker-compose.standard.yml"
+# Portwing — standard mode (inbound HTTP on :3000), hardened defaults.
+#
+# The image runs as the non-root `portwing` user (UID 65532). Before starting,
+# generate a token and make it readable by that user, and export the numeric
+# group ID of your Docker socket so the agent can reach it:
+#   openssl rand -hex 32 > portwing_token.txt
+#   sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+#
+# The image ships a built-in HEALTHCHECK against /health (process liveness only;
+# it does not probe Docker connectivity).
+# See SECURITY.md ("container runtime identity") for why group_add is needed.
+# This plaintext example publishes only on host loopback. For remote access,
+# configure Portwing TLS before changing this bind, or keep the plaintext
+# listener private behind a TLS-terminating reverse proxy.
+
+services:
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portwing-stacks:/data/stacks
+    environment:
+      - TOKEN_FILE=/run/secrets/portwing_token
+      # Stronger at-rest posture: replace TOKEN_FILE with an Argon2id hash
+      # (no plaintext credential anywhere on the agent host):
+      #   portwing hash-token  →  TOKEN_HASH=$argon2id$...
+    secrets:
+      - portwing_token
+
+secrets:
+  portwing_token:
+    file: ./portwing_token.txt
+
+volumes:
+  portwing-stacks:
+```
+
+---
+
+## Edge mode
+
+Edge mode lets Portwing dial **out** to your Drydock controller over a WebSocket tunnel instead of listening for inbound connections. This is useful for hosts behind NAT or a firewall where you cannot publish an inbound port.
+
+<Callout type="info">
+**Production supported; use Drydock `v1.6.0-rc.11+` with Portwing v0.9.0.** Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers the stable `portwing/1.0` path with real Portwing processes, multi-agent reconnect load, concurrent exec, continuous logs, and controller backpressure. Portwing's separate `quality-soak-weekly.yml` covers the Standard/generic HTTP path and SSE churn under an RSS-growth budget. Drydock `v1.6.0-rc.11+` implements the complete controller-owned watcher/update contract; older controllers may remain wire-compatible without that behavior. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
+</Callout>
+
+```bash
+portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+# Register the printed public key with your Drydock controller, then:
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.edge.yml
+# Edit DRYDOCK_URL and AGENT_NAME, then:
+docker compose -f docker-compose.edge.yml up -d
+```
+
+```yaml filename="docker-compose.edge.yml"
+# Portwing — edge mode: outbound WebSocket tunnel to Drydock.
+# No inbound ports are published; the agent dials out, so it works
+# behind NAT and firewalls. The built-in HEALTHCHECK still works because the
+# local operations listener remains active. That listener also exposes metrics
+# and retained audit records without inbound auth in Edge mode; this example
+# deliberately publishes no port, so keep it that way unless an authenticating
+# proxy and trusted network are in front.
+#
+# Edge mode against Drydock v1.6.0-rc.11+ is Ed25519-only: the controller's
+# /api/portwing/ws endpoint rejects token-based hellos. Generate a
+# keypair and register its public key with Drydock before starting:
+#
+#   portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+#   sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+#
+# keygen prints the PKCS#8 private key (used below as PRIVATE_KEY_FILE)
+# plus an authorized_keys line. Register that public key with your
+# Drydock controller (POST /api/v1/portwing/keys) so it trusts this agent.
+#
+# The chown/chmod matters twice over: the agent refuses to load a
+# world-readable key file, and the non-root container user (UID 65532) must
+# be able to read the bind-mounted secret. Also export the numeric group ID
+# of your Docker socket so the agent can reach it:
+#   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+
+services:
+  portwing:
+    image: ghcr.io/codeswhat/portwing:latest
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    user: "65532:65532"  # image default; explicit so it survives image overrides
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock (see header)}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portwing-stacks:/data/stacks
+    environment:
+      - DRYDOCK_URL=https://drydock.example.com
+      - PRIVATE_KEY_FILE=/run/secrets/portwing_key
+      - AGENT_NAME=edge-host-01
+    secrets:
+      - portwing_key
+
+secrets:
+  portwing_key:
+    file: ./portwing_ed25519.pem
+
+volumes:
+  portwing-stacks:
+```
+
+Set `DRYDOCK_URL` to your Drydock instance, `AGENT_NAME` to a unique identifier for the host, and `PRIVATE_KEY_FILE` to the agent's Ed25519 key (register its public key with Drydock). No control port needs to be published on the agent side. Use Drydock `v1.6.0-rc.11+` for the complete v0.9 watcher/update feature path. See [Connection Modes](/connection-modes) for a full comparison of standard vs. edge mode and the private operations-listener boundary.
+
+---
+
+## Evaluation only (not for production)
+
+If you just want to try Portwing locally without setting up compose files, you can run it with a single `docker run`. Tokens passed via environment variable are visible in `docker inspect` and process listings.
+
+<Callout type="warn">
+**Do not use this in production.** The `TOKEN` environment variable is visible to anyone with access to `docker inspect` or the host process list. Use the hardened deployment above for any real workload.
+</Callout>
+
+```bash
+docker run -d \
+  --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -p 127.0.0.1:3000:3000 \
+  -e TOKEN=$(openssl rand -hex 24) \
+  ghcr.io/codeswhat/portwing:latest
+```
+
+Without `TOKEN`, `TOKEN_HASH`, or `AUTHORIZED_KEYS`, Standard mode refuses to
+start. Local unauthenticated evaluation requires `ALLOW_UNAUTHENTICATED=true`
+on a loopback bind; non-loopback exposure additionally requires the separate
+`ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
+
+The image runs as the non-root `portwing` user (UID 65532); `--group-add` grants it the Docker socket's group so it can reach the daemon.
+
+---
+
+## Next steps
+
+- **Stronger auth** — upgrade from a shared token to Ed25519 per-request signatures (zero shared secrets, per-client identity, replay protection). Generate a keypair with `portwing keygen` and mount an `authorized_keys` file. See [Authentication](/authentication).
+- **Connection modes** — understand the difference between standard (inbound) and edge (outbound) modes, and when to use each. See [Connection Modes](/connection-modes).
+- **All environment variables** — `DOCKER_SOCKET`, `TOKEN_HASH`, `AUTHORIZED_KEYS`, `AUDIT_LOG`, `ADAPTER`, and more. See [Configuration](/configuration).

@@ -148,7 +148,7 @@ export function createComparisonRoute(config: ComparisonRouteConfig) {
   };
   const selfBadge = config.selfBadge ?? {
     icon: Check,
-    label: `${SITE_CONFIG.name} — Supported pre-v1`,
+    label: `${SITE_CONFIG.name}: Release candidate`,
     className: selfBadgeClassName,
   };
 

@@ -166,6 +166,19 @@ for example_file in \
 		"active release examples must use ${release_version}" \
 		"an example pinned to a wrong version must fail: ${example_file}"
 	cp "${example_file}" "${fixture}/${example_file}"
+	for image_suffix in "" ":${release_version}-debug"; do
+		python3 - "${fixture}/${example_file}" "${release_version}" "${image_suffix}" <<'PY_CASE'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+expected = "ghcr.io/codeswhat/portwing:" + sys.argv[2]
+s = p.read_text().replace(expected, "ghcr.io/codeswhat/portwing" + sys.argv[3])
+p.write_text("# " + expected + "\n" + s)
+PY_CASE
+		expect_release_contract_failure \
+			"active Portwing images must use ghcr.io/codeswhat/portwing:${release_version}" \
+			"a commented correct image must not hide an untagged or suffixed active image: ${example_file}"
+		cp "${example_file}" "${fixture}/${example_file}"
+	done
 done
 
 if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then

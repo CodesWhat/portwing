@@ -1,1 +1,8 @@
-{}
+{
+  "v0.9": {
+    "sourceTag": "v0.9.26",
+    "sourceCommit": "7a0ad7997560c525fbb47ad7989d2d4d81a1a0b7",
+    "sourcePath": "docs/content/docs/current",
+    "sourceTree": "6388e1a716221e969bff56e90b2e4f29f53c5af0"
+  }
+}

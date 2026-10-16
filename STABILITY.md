@@ -1,8 +1,9 @@
 # Compatibility and Stability Policy
 
 This document defines the compatibility promises Portwing intends to make at
-`v1.0.0`. Portwing `v0.9.x` publishes this policy as a release candidate so
-integrators can review it before the guarantees become binding.
+`v1.0.0` GA. Portwing v1.0 release candidates publish this policy for final
+integration review. The new v1 guarantees are not binding until GA; existing
+compatibility commitments continue during evaluation.
 
 The version matrix in [COMPATIBILITY.md](COMPATIBILITY.md) remains the
 authoritative record of which Portwing, Drydock, and sockguard releases are

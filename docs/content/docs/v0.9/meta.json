@@ -1,0 +1,23 @@
+{
+  "title": "v0.9",
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "installation",
+    "connection-modes",
+    "authentication",
+    "configuration",
+    "stability-policy",
+    "security-model",
+    "drydock-integration",
+    "standalone-mode",
+    "mcp-server",
+    "observability",
+    "audit-logging",
+    "api-reference",
+    "verification",
+    "competitive-landscape",
+    "migrating-from-watchtower"
+  ]
+}

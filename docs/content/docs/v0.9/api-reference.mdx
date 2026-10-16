@@ -1,0 +1,599 @@
+---
+title: API Reference
+description: Complete HTTP API reference for the Portwing agent, grouped by function with authentication requirements and curl examples.
+---
+
+<Callout type="info">
+The OpenAPI 3.1 specification at [`api/openapi.yaml`](https://github.com/CodesWhat/portwing/blob/main/api/openapi.yaml) in the repository is the authoritative source of truth. This page is derived from that spec. If anything conflicts, the spec wins.
+</Callout>
+
+Portwing exposes an HTTP API on port `3000` by default (configurable via `PORT`). All requests are served over plain HTTP or TLS 1.2+ depending on whether `TLS_CERT` / `TLS_KEY` are configured. See [Authentication](/authentication) for token and Ed25519 key setup, and [Connection Modes](/connection-modes) for how Standard mode and Edge mode differ.
+
+---
+
+## Authentication
+
+Protected endpoints require the agent token in one of these headers (checked in order):
+
+| Header | Notes |
+|--------|-------|
+| `Authorization: Bearer <token>` | Standard, preferred |
+| `X-Portwing-Token` | Alternative header |
+| `X-Dd-Agent-Secret` | Drydock agent secret header |
+
+Alternatively, per-request Ed25519 signatures are accepted when the
+`X-Portwing-Signature` header is present. Current clients send
+`X-Portwing-Signature-Version: 2` and sign the escaped path plus exact raw
+query string. See [Authentication](/authentication) for the full signing
+protocol.
+
+**Rate limiting:** 10 failed auth attempts per IP per rolling minute. Exceeding the limit returns HTTP `429` until the window resets.
+
+---
+
+## Health and Info
+
+No authentication is required for the health endpoints. Use them for Docker `HEALTHCHECK` instructions and load-balancer probes.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | None | Process liveness. Always HTTP 200 while the agent is running; does not probe dependencies. |
+| `GET` | `/ready` | None | Readiness. Requires Docker in standard mode and Docker plus the controller in edge mode. |
+| `GET` | `/_portwing/health` | None | Compatibility alias for `/ready`. |
+| `GET` | `/_portwing/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. |
+
+### Response shapes
+
+**`GET /health`**
+
+```json
+{
+  "status": "ok",
+  "live": true,
+  "ready": false,
+  "mode": "standard",
+  "version": "0.9.26",
+  "uptimeSeconds": 3842.7,
+  "docker": "unknown",
+  "controller": "not_applicable"
+}
+```
+
+**`GET /ready` and `GET /_portwing/health`**
+
+```json
+{
+  "status": "healthy",
+  "live": true,
+  "ready": true,
+  "mode": "standard",
+  "version": "0.9.26",
+  "uptimeSeconds": 3842.7,
+  "docker": "connected",
+  "controller": "not_applicable"
+}
+```
+
+Returns HTTP `503` with `"ready":false` when Docker is unreachable or, in
+edge mode, when the controller WebSocket is disconnected.
+
+**`GET /_portwing/info`**
+
+```json
+{
+  "version": "0.9.26",
+  "dockerVersion": "27.0.3",
+  "mode": "standard",
+  "uptime": "2h34m56.789s",
+  "hostname": "my-server",
+  "agentId": "550e8400-e29b-41d4-a716-446655440000",
+  "agentName": "my-server",
+  "capabilities": ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:logs"]
+}
+```
+
+Unsupported legacy `dd:watch` and `dd:trigger` capabilities are absent. The
+watcher descriptor declares controller ownership and the trigger list remains
+empty; their reserved wire message types are not feature advertisements.
+
+### curl example
+
+```bash
+# Quick liveness probe
+curl -s http://localhost:3000/health
+
+# Docker connectivity check
+curl -s http://localhost:3000/ready | jq .
+
+# Agent metadata
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/_portwing/info | jq .
+```
+
+---
+
+## Metrics
+
+Prometheus-format host and agent metrics. See [Observability](/observability) for scrape configuration guidance.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/_portwing/metrics` | Required | Agent metrics only, prefixed `portwing_`. Preferred for targeted scraping. |
+| `GET` | `/metrics` | Required | Alias for `/_portwing/metrics`. Provided for compatibility with default Prometheus scrape configs. |
+
+Both endpoints return `text/plain` in Prometheus exposition format 0.0.4.
+Standard mode requires auth. Edge mode exposes `/metrics` on its limited local
+operations listener without auth, so keep that listener on a private network.
+
+### curl example
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/_portwing/metrics
+```
+
+Sample output:
+
+```text
+# HELP portwing_host_cpu_usage_percent Host CPU usage percentage.
+# TYPE portwing_host_cpu_usage_percent gauge
+portwing_host_cpu_usage_percent 23.5
+# HELP portwing_host_memory_used_bytes Host memory used in bytes.
+# TYPE portwing_host_memory_used_bytes gauge
+portwing_host_memory_used_bytes 4294967296
+```
+
+---
+
+## Audit export
+
+Standard mode exposes both a human/operator JSON view and a polling-friendly
+NDJSON export; both require authentication. Edge mode exposes only the NDJSON
+export on its local operations listener, without inbound authentication.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/_portwing/audit` | Required | Recent ring-buffer records, newest first, wrapped in `{records,count}`. |
+| `GET` | `/_portwing/audit/export` | Standard: required; Edge: none | Cursor-based NDJSON records, oldest first. |
+
+<Callout type="warn">
+  Treat the Edge operations listener as a private-operations trust boundary.
+  Anyone who can reach it can read retained audit records, which can contain
+  client addresses, request paths, stack names, and container identifiers. Do
+  not expose it through a public Service, ingress, host port, or shared network.
+</Callout>
+
+For initial export, omit `cursor`. After consuming the response, persist
+`X-Portwing-Next-Cursor` and pass it on the next poll:
+
+```bash
+curl -sS -D headers.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  "https://localhost:3000/_portwing/audit/export?cursor=42&limit=500"
+```
+
+The response also includes `X-Portwing-Oldest-Cursor`,
+`X-Portwing-Latest-Cursor`, and `X-Portwing-Record-Count`. HTTP `409` means the
+cursor was overwritten or belongs to a previous agent process; surface the gap
+and resume from the reset cursor in `X-Portwing-Next-Cursor`.
+
+For Edge mode, poll from the same private container or pod network and omit the
+Authorization header:
+
+```bash
+curl -sS -D headers.txt \
+  "http://portwing-edge:3000/_portwing/audit/export?cursor=42&limit=500"
+```
+
+See [Audit Logging](/audit-logging) for the stable sink/export schemas and
+shipping guidance.
+
+---
+
+## MCP
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/_portwing/mcp` | Required | Read-only Model Context Protocol server (Streamable HTTP, protocol revisions `2026-07-28` and `2025-11-25`). Not registered in Edge mode. |
+
+Each POST carries a single JSON-RPC 2.0 request and returns one JSON-RPC 2.0
+response; the server is stateless and assigns no `Mcp-Session-Id`. `GET
+/_portwing/mcp` returns HTTP `405` (no server-initiated SSE stream).
+
+The revision is chosen per request. A request whose
+`params._meta["io.modelcontextprotocol/protocolVersion"]` is set, or whose
+`MCP-Protocol-Version` header is `2026-07-28`, is a 2026-07-28 request.
+Supported methods there are `server/discover`, `tools/list` and `tools/call`;
+it must also send the `MCP-Protocol-Version` and `Mcp-Method` headers, plus
+`Mcp-Name` on `tools/call`, each matching the body. Every other request is a
+2025-11-25 request, with supported methods `initialize`, `ping`,
+`tools/list` and `tools/call`, and the headers are not checked.
+
+A notification (a request with no `id`) or a JSON-RPC response message sent
+to the server (a `result`/`error` object with no `method`) returns HTTP `202`
+with an empty body. HTTP `400` with an empty body is returned only for two
+notification-shaped cases: a `result`/`error` object with no `method` that
+fails JSON-RPC response validation, or a notification (no `id`) whose
+`params` is present but not a JSON object. A 2025-11-25 request carrying an
+`id` reports every error inside a `200` JSON-RPC error envelope. A 2026-07-28
+request does too, except for the errors that revision gives an HTTP status:
+
+| Error | Code | HTTP status |
+|-------|------|-------------|
+| Required `_meta` field missing or malformed | `-32602` | `400` |
+| Header missing or not matching the body (HeaderMismatch) | `-32020` | `400` |
+| Version other than `2026-07-28` (UnsupportedProtocolVersion) | `-32022` | `400` |
+| Unknown method, including `ping` and `initialize` | `-32601` | `404` |
+
+<Callout type="info">
+This section covers the HTTP contract only. See [MCP Server](/mcp-server) for the tool catalog, read-only guarantees, and client configuration for Claude Desktop, Claude Code, Cursor, and Windsurf.
+</Callout>
+
+### Request body
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}
+```
+
+### Response
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      { "name": "list_containers", "description": "..." }
+    ]
+  }
+}
+```
+
+### curl example
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  http://localhost:3000/_portwing/mcp | jq .
+```
+
+The same call as a 2026-07-28 request:
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/list" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  http://localhost:3000/_portwing/mcp | jq .
+```
+
+Its result also carries `"resultType": "complete"`, `"ttlMs": 3600000`,
+`"cacheScope": "public"`, and the server identity in `_meta`.
+
+---
+
+## Containers and Events (Drydock-compatible)
+
+These endpoints are used by the Drydock controller when Portwing runs in Standard mode. They share the `/api/` prefix and all require authentication.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/containers` | Required | Full container inventory with `dd.*` label metadata applied. |
+| `GET` | `/api/containers/{id}/logs` | Required | Demuxed container logs. Supports `tail`, `since`, `until`, `follow` query params. |
+| `DELETE` | `/api/containers/{id}` | Required | Force-remove a container. Returns HTTP 204 on success. |
+| `GET` | `/api/events` | Required | SSE stream of container lifecycle events in Drydock envelope format. |
+| `GET` | `/api/watchers` | Required | Watcher component descriptors registered with this agent. |
+| `GET` | `/api/watchers/{type}/{name}` | Required | Single watcher descriptor by type and name. Returns HTTP 404 when no watcher matches. |
+| `GET` | `/api/triggers` | Required | Trigger component descriptors registered with this agent. |
+| `GET` | `/api/log/entries` | Required | Compatibility stub for Drydock's agent log viewer. Portwing keeps no in-memory log buffer, so it always returns `[]`. |
+| `POST` | `/api/watchers/{type}/{name}` | Required | Trigger watcher poll — **not implemented in v1.0**, returns HTTP 501. |
+| `POST` | `/api/watchers/{type}/{name}/container/{id}` | Required | Check single container — **not implemented in v1.0**, returns HTTP 501. |
+| `POST` | `/api/triggers/{type}/{name}` | Required | Execute trigger — **not implemented in v1.0**, returns HTTP 501. |
+| `POST` | `/api/triggers/{type}/{name}/batch` | Required | Execute batch trigger — **not implemented in v1.0**, returns HTTP 501. |
+
+<Callout type="info">
+Registry checks (`/api/watchers/.../container/...`) are performed by the Drydock controller, not the agent. The stub endpoints exist for API-compatibility and always return HTTP 501.
+</Callout>
+
+### Log query parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tail` | integer | Number of lines from the end to return. |
+| `since` | string | Show logs since this RFC 3339 timestamp or relative duration (e.g. `1h`). |
+| `until` | string | Show logs before this timestamp or duration. |
+| `follow` | string | `1` or `true` to stream logs in real time (chunked transfer encoding). |
+
+### SSE event types (`/api/events`)
+
+| Type | Description |
+|------|-------------|
+| `dd:ack` | Initial handshake — agent metadata and current container counts. |
+| `dd:container-added` | New container discovered. |
+| `dd:container-updated` | Container state or metadata changed. |
+| `dd:container-removed` | Container removed. |
+
+### curl examples
+
+```bash
+# Container inventory
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/containers | jq .
+
+# Last 100 lines of logs for a container
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/containers/my-container/logs?tail=100"
+
+# Follow logs live
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/containers/my-container/logs?follow=1"
+
+# SSE event stream
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/events
+```
+
+---
+
+## Generic Adapter (`/api/v1/`)
+
+Available when `ADAPTER=generic`. These endpoints expose container management without requiring a Drydock controller. See [Standalone Mode](/standalone-mode) for setup instructions.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/version` | Required | Agent version, protocol name/version, and active adapter name. |
+| `GET` | `/api/v1/containers` | Required | Cached container inventory from the Docker daemon. |
+| `GET` | `/api/v1/containers/{id}/logs` | Required | Demuxed container logs. Same query parameters as the Drydock-compatible endpoint. |
+| `GET` | `/api/v1/events` | Required | SSE stream of Docker container lifecycle events in a stable generic envelope. |
+
+### `/api/v1/version` response
+
+```json
+{
+  "agentVersion": "0.9.26",
+  "protocolName": "portwing",
+  "protocolVersion": "1.0",
+  "adapter": "generic"
+}
+```
+
+### Generic event envelope (`/api/v1/events`)
+
+Each SSE frame carries a JSON object:
+
+```json
+{
+  "ts": "2026-06-11T10:00:00Z",
+  "type": "container",
+  "action": "start",
+  "containerId": "abc123def456",
+  "name": "my-container",
+  "image": "nginx:latest",
+  "labels": { "app": "web" }
+}
+```
+
+Observed `action` values: `create`, `start`, `stop`, `die`, `kill`, `restart`, `pause`, `unpause`, `destroy`, `rename`, `update`, `oom`, `health_status`.
+
+A comment heartbeat line (`: heartbeat`) is written every 30 seconds to keep the connection alive through proxies.
+
+### curl examples
+
+```bash
+TOKEN=my-secret
+
+# Agent version
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/version | jq .
+
+# Container inventory
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/containers | jq .
+
+# Last 50 log lines
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?tail=50"
+
+# Stream live logs
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/v1/containers/my-container/logs?follow=1"
+
+# SSE event stream
+curl -sN -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/v1/events
+```
+
+---
+
+## Compose
+
+Execute Docker Compose sub-commands within the managed stacks directory (`STACKS_DIR`, default `/data/stacks`).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/_portwing/compose` | Required | Run a Compose operation against a named stack. |
+
+### Request body
+
+```json
+{
+  "operation": "up",
+  "stackName": "myapp",
+  "stackDir": "myapp/v2",
+  "services": ["web", "worker"],
+  "build": false,
+  "forceRecreate": false,
+  "removeVolumes": false,
+  "noDeps": false,
+  "tail": 100,
+  "envVars": {
+    "APP_PORT": "8080"
+  },
+  "files": {
+    "docker-compose.yml": "version: '3'\nservices:\n  web:\n    image: nginx\n"
+  },
+  "registryAuth": {
+    "server": "ghcr.io",
+    "username": "myuser",
+    "password": "ghp_..."
+  }
+}
+```
+
+`operation` is required and must be one of: `up`, `down`, `pull`, `ps`, `logs`, `restart`, `stop`, `start`. `stackName` is required.
+
+For the `logs` operation, `tail` defaults to 100 lines and is clamped to a
+maximum of 500 — the agent always passes an explicit `--tail`, so an unbounded
+dump is never the default. Combined stdout and stderr from any compose
+operation is capped at 10 MB; output past the cap is dropped and the captured
+output ends with an `[output truncated: ...]` marker.
+
+### Response
+
+```json
+{
+  "success": true,
+  "output": "Container myapp-web-1  Started\n"
+}
+```
+
+On failure, `success` is `false` and the `error` field contains the exit message.
+
+### Security controls
+
+The agent applies these checks before running any Compose command:
+
+- Stack path is resolved to an absolute path and verified to stay within `STACKS_DIR` (path-traversal protection).
+- `envVars` keys must match `^[a-zA-Z_][a-zA-Z0-9_]*$` and are checked against a denylist that includes `LD_PRELOAD`, `PATH`, `DOCKER_HOST`, `HOME`, `SHELL`, and related variables.
+- Service names must not start with `-` (flag-injection prevention).
+- Registry credentials are passed via `--password-stdin` and never appear in the process argument list.
+- Files written into the stack directory are path-resolved and verified to remain within the stacks directory.
+
+### curl example
+
+```bash
+# Bring up a stack
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"operation":"up","stackName":"myapp"}' \
+  http://localhost:3000/_portwing/compose | jq .
+
+# Tear down a stack and remove volumes
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"operation":"down","stackName":"myapp","removeVolumes":true}' \
+  http://localhost:3000/_portwing/compose | jq .
+```
+
+---
+
+## Docker API Passthrough
+
+Any path not matched by a named Portwing route is transparently proxied to the local Docker daemon over its Unix socket. This gives Portwing clients the full Docker Engine API surface without additional tooling.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET / POST / DELETE / ...` | `/v1.44/{path}` (representative) | Required | Proxy to Docker Engine API. All HTTP methods are forwarded. |
+
+<Callout type="info">
+`v1.44` is the fallback API version. The agent negotiates the actual version with the Docker daemon on startup (e.g. `v1.47`). Clients may also omit the version prefix — the agent prepends it automatically.
+</Callout>
+
+Streaming endpoints include logs, attach, exec start, events, builds, image
+creation, named image pushes (`POST /images/{name}/push`) and container stats
+(`GET /containers/{id}/stats`). These responses use streaming transport and
+are flushed as data arrives. Stats requests use the normal request timeout when `stream` is explicitly
+empty, `0`, `no`, `false`, or `none` (case-insensitive, with surrounding
+whitespace ignored). An omitted `stream` defaults to streaming. Interactive exec sessions using `Upgrade: tcp` or
+`Upgrade: websocket` are handled via HTTP hijacking.
+
+The complete Docker Engine API is documented at [https://docs.docker.com/engine/api/v1.44/](https://docs.docker.com/engine/api/v1.44/).
+
+### curl example
+
+```bash
+# List running containers via Docker proxy
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/v1.44/containers/json" | jq .
+
+# Pull an image
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/v1.44/images/create?fromImage=nginx&tag=latest"
+```
+
+---
+
+## Enrollment
+
+One-shot bootstrap endpoint for registering an Ed25519 public key (Model C authentication). See [Authentication](/authentication) for the full key management workflow.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/portwing/enroll` | Enrollment token | Register an Ed25519 public key. Token is burned after first successful use. |
+
+<Callout type="info">
+This endpoint is only available when `ENROLLMENT_TOKEN` (and `AUTHORIZED_KEYS`) are configured. The endpoint is reachable without a prior agent token — the enrollment token is the credential. Its JSON body is limited to 64 KiB; oversized bodies return HTTP `413`. Malformed and oversized requests feed a separate per-IP abuse limiter, while bad credentials feed the authentication-failure limiter.
+</Callout>
+
+### Request body
+
+```json
+{
+  "enrollment_token": "<the value of ENROLLMENT_TOKEN>",
+  "public_key": "AAAAC3NzaC1lZDI1NTE5AAAAIB3..."
+}
+```
+
+`public_key` must be standard base64-encoded raw 32-byte Ed25519 public key material.
+
+### Response
+
+```json
+{
+  "key_id": "4a3f2b1c9d8e7f6a",
+  "comment": "enrolled:4a3f2b1c9d8e7f6a"
+}
+```
+
+`key_id` is `hex(SHA-256(pubkey)[:8])` — the value to supply in `X-Portwing-Key-ID` headers for subsequent signed requests.
+
+After enrollment, the key is immediately active. The enrollment token is burned; subsequent calls return HTTP `401` until the agent restarts with a new `ENROLLMENT_TOKEN`.
+
+### curl example
+
+```bash
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -d "{\"enrollment_token\":\"$ENROLL_TOKEN\",\"public_key\":\"$PUBKEY_B64\"}" \
+  http://localhost:3000/api/portwing/enroll | jq .
+```
+
+---
+
+## HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200` | Success |
+| `202` | Accepted, no body (MCP notifications and response messages) |
+| `204` | Success, no body (container delete) |
+| `400` | Bad request — invalid body or parameters |
+| `401` | Missing, invalid, or burned token |
+| `405` | Method not allowed |
+| `409` | Conflict — audit export cursor is outside the retained buffer, or a Docker conflict response passed through on container log/delete routes |
+| `413` | Payload too large — request body exceeds its limit (64 KiB enrollment, 1 MiB signed request, 10 MB exec/attach upgrade) |
+| `429` | Rate limit exceeded (10 failures/min/IP) |
+| `500` | Internal error |
+| `501` | Not implemented (stub Drydock endpoints) |
+| `502` | Docker daemon unreachable or returned an error (proxy) |
+| `503` | Docker daemon unreachable (health check) |

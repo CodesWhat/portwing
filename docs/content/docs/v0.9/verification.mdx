@@ -1,0 +1,189 @@
+---
+title: Verifying Releases
+description: How to verify the authenticity and integrity of Portwing container images and binary releases using cosign, GitHub attestations, SBOM, and checksums.
+---
+
+<Callout type="info">
+  Always verify a release before deploying it to any environment. Verification
+  takes under a minute and confirms the artifact was produced by the official
+  Portwing release pipeline — not a tampered build.
+</Callout>
+
+<Callout type="info">
+  These examples target Portwing v0.9.x and the `release.yml` signing identity.
+  If a verify command fails with a certificate mismatch, check the
+  [release notes](https://github.com/CodesWhat/portwing/releases) for a documented
+  signing-identity change before trusting the artifact.
+</Callout>
+
+All Portwing releases are signed via [Sigstore cosign](https://github.com/sigstore/cosign)
+using **keyless (OIDC) signing** from GitHub Actions — no static private key is
+stored anywhere. The signing certificate is issued by Fulcio against the
+GitHub Actions OIDC token, and the signature is recorded on the Rekor
+transparency log. The certificate identity is the URL of the release workflow
+itself:
+
+- **Certificate identity regexp:** `https://github.com/CodesWhat/portwing/.github/workflows/release.yml`
+- **OIDC issuer:** `https://token.actions.githubusercontent.com`
+
+This means verification is key-less: you authenticate the *workflow*, not a
+secret. See [Security Model](/security-model) for the broader trust
+hierarchy.
+
+---
+
+## Prerequisites
+
+Install `cosign` v2+ and the GitHub CLI (`gh`) v2.49+:
+
+```bash
+# cosign — via the official installer script or your package manager
+brew install cosign        # macOS
+go install github.com/sigstore/cosign/v2/cmd/cosign@latest  # any platform
+
+# GitHub CLI
+brew install gh            # macOS
+# or see https://cli.github.com/manual/installation
+```
+
+---
+
+## Verify the Container Image Signature
+
+Every image pushed to `ghcr.io/codeswhat/portwing` is cosign keyless-signed by
+the release workflow. Replace `TAG` with the version tag you are deploying
+(the tag is the semver without the leading `v`, matching GoReleaser's output —
+e.g. `0.9.26`, not `v0.9.26`):
+
+```bash
+TAG=0.9.26
+
+cosign verify \
+  --certificate-identity="https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${TAG}" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  "ghcr.io/codeswhat/portwing:${TAG}"
+```
+
+A successful run prints the signing certificate details and exits `0`. Any
+non-zero exit or a `FAIL` line means the image was not produced by the official
+pipeline.
+
+### Verify via GitHub Attestation
+
+The release pipeline also attaches a GitHub-native build-provenance attestation
+to the container manifest. This uses the Sigstore Rekor ledger and is
+independently verifiable without cosign:
+
+```bash
+TAG=0.9.26
+
+gh attestation verify "oci://ghcr.io/codeswhat/portwing:${TAG}" \
+  --repo CodesWhat/portwing
+```
+
+Both `cosign verify` and `gh attestation verify` should pass for a release to
+be considered trusted.
+
+---
+
+## Verify Downloadable Release Assets
+
+Binary archives (`.tar.gz`), native packages, and per-archive SBOMs are listed
+in `checksums.txt` and attested with GitHub build provenance. Download the asset,
+`checksums.txt`, and `checksums.txt.bundle` from the
+[Releases page](https://github.com/CodesWhat/portwing/releases), then:
+
+### 1. Verify the checksums file itself
+
+The `checksums.txt.bundle` file (also a release asset) contains the cosign
+keyless signature over `checksums.txt`:
+
+```bash
+TAG=0.9.26
+
+cosign verify-blob \
+  --certificate-identity="https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${TAG}" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  --bundle "checksums.txt.bundle" \
+  "checksums.txt"
+```
+
+### 2. Verify the archive checksum
+
+Once `checksums.txt` is proven authentic, verify the archive against it:
+
+```bash
+# Example for the Linux amd64 archive
+sha256sum --check --ignore-missing checksums.txt
+```
+
+On macOS, use `shasum -a 256 --check --ignore-missing checksums.txt`.
+
+### 3. Verify the asset's GitHub provenance attestation
+
+```bash
+# Verify a specific downloaded archive
+gh attestation verify portwing_0.9.26_linux_amd64.tar.gz \
+  --repo CodesWhat/portwing
+```
+
+---
+
+## Download, Authenticate, and Inspect an SBOM
+
+Each release archive has a corresponding [CycloneDX](https://cyclonedx.org/)
+SBOM named by appending `.cyclonedx.json` to the complete archive filename. For
+example, the Linux amd64 pair for v0.9.26 is
+`portwing_0.9.26_linux_amd64.tar.gz` and
+`portwing_0.9.26_linux_amd64.tar.gz.cyclonedx.json`.
+
+```bash
+VERSION=0.9.26
+RELEASE_TAG="v${VERSION}"
+ARCHIVE="portwing_${VERSION}_linux_amd64.tar.gz"
+SBOM="${ARCHIVE}.cyclonedx.json"
+
+# Download the archive, its SBOM, and the signed checksum manifest
+gh release download "${RELEASE_TAG}" \
+  --repo CodesWhat/portwing \
+  --pattern "${ARCHIVE}" \
+  --pattern "${SBOM}" \
+  --pattern "checksums.txt" \
+  --pattern "checksums.txt.bundle"
+
+# Authenticate checksums.txt, then verify both files are listed unchanged
+cosign verify-blob \
+  --certificate-identity="https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v${VERSION}" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  --bundle "checksums.txt.bundle" \
+  "checksums.txt"
+sha256sum --check --ignore-missing checksums.txt
+
+# Independently verify GitHub provenance for the SBOM
+gh attestation verify "${SBOM}" --repo CodesWhat/portwing
+
+# Inspect with any CycloneDX-compatible tool, e.g. the CycloneDX CLI
+cyclonedx validate --input-file "${SBOM}"
+```
+
+The SBOM does not have a separate cosign bundle. It is authenticated as an
+entry in the cosign-signed `checksums.txt` and as its own subject in the GitHub
+`subject-checksums` provenance attestation. Container images have a separate
+Buildx OCI SBOM attestation because they also include OS packages.
+
+---
+
+## Verification Summary
+
+| Artifact | Method | Command |
+|---|---|---|
+| Container image | cosign keyless | `cosign verify ... ghcr.io/codeswhat/portwing:TAG` |
+| Container image | GitHub attestation | `gh attestation verify oci://ghcr.io/codeswhat/portwing:TAG` |
+| `checksums.txt` | cosign blob | `cosign verify-blob ... --bundle checksums.txt.bundle checksums.txt` |
+| Binary archive | SHA-256 checksum | `sha256sum --check --ignore-missing checksums.txt` |
+| Binary archive | GitHub attestation | `gh attestation verify portwing_0.9.26_linux_amd64.tar.gz --repo CodesWhat/portwing` |
+| Per-archive SBOM | Signed checksum + GitHub attestation | `cosign verify-blob ... checksums.txt` and `gh attestation verify <archive>.cyclonedx.json ...` |
+| Container SBOM | OCI SBOM attestation | Inspect the attestation attached to `ghcr.io/codeswhat/portwing:TAG` with an OCI/SBOM-aware client |
+
+For the full security model — including authentication tokens, TLS configuration,
+and threat boundaries — see [Security Model](/security-model).

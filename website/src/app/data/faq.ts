@@ -34,7 +34,7 @@ export const faqItems: Array<{ question: string; answer: string }> = [
   {
     question: "Is Portwing production-ready?",
     answer:
-      "Portwing v0.9.x is a supported pre-v1 release, so operators should pin versions and review the changelog and published stability policy. Both standard and edge modes are production supported: edge is gated by a real multi-agent reconnect/load soak with concurrent exec, continuous logs, and controller backpressure. Use Drydock v1.6.0-rc.11+ for full v0.9 watcher/update feature compatibility; the stable wire contract remains DrydockCompat 1.4.0. The public roadmap still targets v1.0 for the first fully stable release. For the strongest deployment posture, pair either mode with sockguard. Report issues at https://github.com/CodesWhat/portwing/issues and security concerns at security@codeswhat.com.",
+      "The current v1.0 build is a release candidate for evaluation. The 0.9 line remains the supported stable release while the new v1 guarantees await GA. Pin versions and review the changelog and stability policy. Both standard and edge modes are production supported: edge is gated by a real multi-agent reconnect/load soak with concurrent exec, continuous logs, and controller backpressure. Use Drydock v1.6.0-rc.11+ for full v0.9 watcher/update feature compatibility; the stable wire contract remains DrydockCompat 1.4.0. The public roadmap still targets v1.0 for the first fully stable release. For the strongest deployment posture, pair either mode with sockguard. Report issues at https://github.com/CodesWhat/portwing/issues and security concerns at security@codeswhat.com.",
   },
   {
     question: "Do I need sockguard? What does adding it actually change?",

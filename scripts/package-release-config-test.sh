@@ -391,6 +391,20 @@ for example_file in \
 	validate_current_release_example_values "${example_file}" \
 		"$(grep -E 'ghcr\.io/codeswhat/portwing:' "${example_file}" || true)" \
 		"the example ${example_file} must pin the current release"
+	image_values="$(awk '
+		/^[[:space:]]*image:[[:space:]]*/ {
+			sub(/^[[:space:]]*image:[[:space:]]*/, "")
+			sub(/[[:space:]]+#.*/, "")
+			sub(/[[:space:]]*$/, "")
+			sub(/^["\047]/, "")
+			sub(/["\047]$/, "")
+			if ($0 ~ /^ghcr\.io\/codeswhat\/portwing([:@]|$)/) print
+		}
+	' "${example_file}")"
+	if [ -z "${image_values}" ] || [ -n "$(printf '%s\n' "${image_values}" | grep -Fvx -- "ghcr.io/codeswhat/portwing:${release_version}" || true)" ]; then
+		echo "FAIL: active Portwing images must use ghcr.io/codeswhat/portwing:${release_version} (${example_file})" >&2
+		failures=$((failures + 1))
+	fi
 done
 require_exactly_one_active "examples/observability/docker-compose.yml" '^[[:space:]]+test:' \
 	'test: ["CMD", "/usr/bin/portwing", "healthcheck"]' \
