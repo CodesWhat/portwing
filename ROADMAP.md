@@ -96,7 +96,7 @@ calendar date:
   modes share one exporter implementation; public docs and Kubernetes examples
   explicitly isolate Edge Mode's unauthenticated operations listener.
 - **Completed for v1.0.0-rc.1: Versioned docs archive.** The `v0.9` docs
-  were frozen from the final v0.9.26 tag and are served at `/docs/v0.9/...`,
+  were frozen from the final v0.9 release tag and are served at `/docs/v0.9/...`,
   with their source tree verified by the archive contract. The live
   `docs/content/docs/current/` tree serves at the unversioned `/docs/...` URLs
   and now includes explicitly labelled development features. Preserve frozen
