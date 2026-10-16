@@ -5,6 +5,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -572,6 +573,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				return
 			}
 			slog.Debug("ed25519 authentication succeeded", "key_id", applog.Sanitize(keyID), "ip", applog.Sanitize(clientIP))
+			r = r.WithContext(context.WithValue(r.Context(), verifiedKeyIDContextKey{}, keyID))
 			rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
 			if reg != nil {
 				reg.IncInFlight()

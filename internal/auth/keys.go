@@ -33,6 +33,8 @@ type KeyRegistry struct {
 	mu       sync.RWMutex
 	keys     map[string]*AuthorizedKey // keyed by KeyID
 	filePath string
+	roots    map[string]*AuthorizedKey
+	rotation *rotationStore
 }
 
 // NewKeyRegistry creates a KeyRegistry that will load keys from filePath.
@@ -53,13 +55,22 @@ func (r *KeyRegistry) Load() error {
 		return nil
 	}
 
+	r.mu.Lock()
 	newKeys, err := parseAuthorizedKeys(r.filePath)
 	if err != nil {
+		r.mu.Unlock()
 		return err
 	}
-
-	r.mu.Lock()
+	roots := newKeys
+	if r.rotation != nil {
+		newKeys, err = overlayRotationKeys(roots, r.rotation.keys)
+		if err != nil {
+			r.mu.Unlock()
+			return err
+		}
+	}
 	old := r.keys
+	r.roots = roots
 	r.keys = newKeys
 	r.mu.Unlock()
 
