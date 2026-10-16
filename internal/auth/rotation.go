@@ -93,7 +93,7 @@ func PrepareRotationDirectory(dir string) error {
 	if err != nil {
 		return fmt.Errorf("checking rotation directory: %w", err)
 	}
-	if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
 		return fmt.Errorf("rotation directory must be a directory with mode 0700")
 	}
 	return nil

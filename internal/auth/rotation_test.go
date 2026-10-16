@@ -4,6 +4,7 @@ package auth
 
 import (
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -231,5 +232,116 @@ func TestRotationSerializesReloadAndCompetingPreparation(t *testing.T) {
 	requireRotationKey(t, f.registry, f.old, true)
 	if f.registry.Len() != 3 {
 		t.Fatalf("reload lost the pending key: %d keys", f.registry.Len())
+	}
+}
+
+func TestRotationDirectoryRequiresOwnerAccess(t *testing.T) {
+	for _, mode := range []os.FileMode{0o500, 0o600, 0o750} {
+		t.Run(mode.String(), func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "private")
+			if err := os.Mkdir(dir, mode); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				// #nosec G302 -- restore owner search permission on a private test directory for cleanup.
+				if err := os.Chmod(dir, 0o700); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := PrepareRotationDirectory(dir); err == nil {
+				t.Fatalf("accepted unusable or shared directory %o", mode)
+			}
+		})
+	}
+}
+
+func TestRotationStatusAndDisabledOperations(t *testing.T) {
+	r := NewKeyRegistry("")
+	if err := r.EnableRotation(t.TempDir()); err == nil {
+		t.Fatal("accepted missing operator authority")
+	}
+	if _, err := r.RotationStatus("unknown"); !errors.Is(err, ErrRotationDisabled) {
+		t.Fatal(err)
+	}
+	if _, err := r.CommitRotation("unknown"); !errors.Is(err, ErrRotationDisabled) {
+		t.Fatal(err)
+	}
+	if _, err := r.AbortRotation("unknown"); !errors.Is(err, ErrRotationDisabled) {
+		t.Fatal(err)
+	}
+	f := newRotationFixture(t)
+	old := KeyIDForPublicKey(f.old)
+	if err := f.registry.EnableRotation(f.dir); err == nil {
+		t.Fatal("enabled twice")
+	}
+	status, err := f.registry.RotationStatus(old)
+	if err != nil || status.CurrentKeyID != old || status.PendingKeyID != "" {
+		t.Fatalf("status: %+v %v", status, err)
+	}
+	if _, err := f.registry.AbortRotation(old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.registry.RotationStatus("unknown"); !errors.Is(err, ErrRotationForbidden) {
+		t.Fatal(err)
+	}
+}
+
+func TestRotationRejectsInvalidPersistentState(t *testing.T) {
+	for _, name := range []string{"json", "version", "missing", "oversize", "bad-root", "bad-current", "bad-pending", "collision"} {
+		t.Run(name, func(t *testing.T) {
+			f := newRotationFixture(t)
+			root := KeyIDForPublicKey(f.old)
+			state := rotationState{Version: 1, Keys: map[string]rotationKeys{root: {Current: f.old}}}
+			switch name {
+			case "version":
+				state.Version = 2
+			case "missing":
+				state.Keys = nil
+			case "bad-root":
+				state.Keys = map[string]rotationKeys{"bad": {Current: f.old}}
+			case "bad-current":
+				state.Keys[root] = rotationKeys{Current: []byte("bad")}
+			case "bad-pending":
+				state.Keys[root] = rotationKeys{Current: f.old, Pending: []byte("bad")}
+			case "collision":
+				state.Keys[root] = rotationKeys{Current: f.other}
+			}
+			data, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "json" {
+				data = []byte("{")
+			}
+			if name == "oversize" {
+				data = make([]byte, maxRotationStateBytes+1)
+			}
+			if err := os.WriteFile(filepath.Join(f.dir, "authorized-rotation.json"), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			r := NewKeyRegistry(f.path)
+			err = r.EnableRotation(f.dir)
+			if err == nil {
+				err = r.Load()
+			}
+			if err == nil {
+				t.Fatal("accepted corrupt managed authorization")
+			}
+		})
+	}
+}
+
+func TestRotationStateRenameFailureLeavesOriginal(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "occupied")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRotationState(target, []byte("replacement")); err == nil {
+		t.Fatal("rename must fail")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "occupied" {
+		t.Fatalf("temporary credentials leaked: %v", err)
 	}
 }

@@ -14,11 +14,12 @@ import (
 
 	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/auth"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 type verifiedKeyIDContextKey struct{}
 
-const rotationRoute = "/_portwing/auth/rotation"
+const rotationRoute = protocol.KeyRotationPath
 
 func (s *Server) handleKeyRotation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
