@@ -10,7 +10,9 @@ info:
 
     ## Authentication
 
-    All protected endpoints require the agent token, supplied via one of:
+    Protected routes use the configured shared credential or Ed25519 request
+    signatures. Managed rotation requires Ed25519; a shared credential cannot
+    manage keys. Shared-secret authentication accepts one of:
 
     - `Authorization: Bearer <token>` (standard, checked first)
     - `X-Portwing-Token` header
