@@ -205,8 +205,12 @@ Hot reload rebuilds the in-memory key map and logs each added and removed key ID
 
 ### Controller-assisted rotation (development)
 
-This opt-in feature is in development. Portwing v1.0.0-rc.1 and published
-Drydock v1.6.x do not provide it. Use matching development builds on both sides.
+Use matching Portwing `dev/v1.0` and Drydock `dev/v1.8` builds for this opt-in
+feature. No published pairing currently provides it: Portwing v1.0.0-rc.1 and
+Drydock's v1.6 releases and v1.7 candidates do not include it. Released minimum
+versions will be recorded in the [compatibility matrix](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md)
+when the first supporting tags are published. Wire compatibility alone does not
+establish rotation support.
 
 Set `KEY_ROTATION_DIR` to a persistent directory owned by Portwing with mode
 `0700`. Container images prepare `/data/credentials` for UID/GID `65532`;

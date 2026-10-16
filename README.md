@@ -39,6 +39,12 @@
 > [!NOTE]
 > **v1.0.0-rc.1 is the current release candidate.** It introduces the MIT license, a frozen v0.9 docs archive, and a refreshed competitive review. This is a candidate for evaluation; the v1 semver guarantees become binding at GA. Stable container `latest` and Homebrew channels remain on the 0.9 release line. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
+Development on `dev/v1.0` also includes opt-in controller-assisted two-key
+rotation with Drydock `dev/v1.8`. It is unreleased and is not part of the
+candidate above. See [compatibility](COMPATIBILITY.md#development-only-controller-assisted-rotation)
+and the [rotation guide](docs/content/docs/current/authentication.mdx#controller-assisted-rotation-development)
+for availability and configuration.
+
 <h2 align="center">Contents</h2>
 
 - [Documentation](#documentation)
@@ -449,7 +455,7 @@ flowchart LR
 <details>
 <summary><strong>Version themes & highlights</strong></summary>
 
-This direction covers at least the next twelve months, through August 2027.
+This direction covers work through August 2027.
 High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals and [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 
 | Version | Theme | Highlights |
@@ -464,7 +470,8 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.8.x** ✅ | Operations & Distribution | Mode-aware `/health` and `/ready`, cursor-based NDJSON audit export, runnable Compose and Kubernetes observability examples, continuous edge logs, Homebrew cask and signed `deb`/`rpm` packages, published stability policy, edge mode production supported |
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks |
 | **v1.0.0** | Binding Stability | `STABILITY.md` guarantees become binding semver commitments, competitive review refreshed against primary sources, final v0.9 docs archived from its release tag. Gated on verifiable items, not a date |
-| **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport, controller-assisted two-key rotation |
+| **Development (unreleased)** | Credential Lifecycle | Opt-in controller-assisted two-key rotation with Drydock `dev/v1.8`; absent from the published v1.0 candidate |
+| **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.
 

@@ -8,6 +8,12 @@ info:
     only (Edge Mode communicates over a WebSocket multiplexed protocol documented
     separately in SPEC.md §3).
 
+    ## Release availability
+
+    The version above identifies the published release. Operations explicitly
+    marked as development features describe the development branch and are
+    absent from that release. See COMPATIBILITY.md for the required peer builds.
+
     ## Authentication
 
     Protected routes use the configured shared credential or Ed25519 request

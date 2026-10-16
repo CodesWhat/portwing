@@ -88,6 +88,29 @@ sit at "Expected" forever. So the order is:
 Read the effective ruleset back afterward rather than trusting the PATCH's
 200. The script prints it.
 
+## Release documentation and compatibility
+
+Prepare release changes through a reviewed PR into the active dev branch.
+Promote that branch to `main` immediately before a cut; `main` is not an
+independent target for release-preparation commits.
+
+- Keep shipped changelog sections intact and new work under Unreleased until
+  assigning its release. README highlights, API descriptions and current docs,
+  including comparison tables, must distinguish the published candidate from
+  later development work.
+- Record feature-specific peer minimums in [COMPATIBILITY.md](COMPATIBILITY.md).
+  For managed rotation, replace the matching-development-build requirement
+  only when supporting Portwing and Drydock tags exist. An unchanged wire
+  compatibility level does not prove support for an additive feature.
+- Record the exact candidate artifacts, peer versions and successful hosted
+  matrix runs. Earlier candidate evidence does not carry forward to a new
+  build. Keep manual overlapping-key/SIGHUP tests distinct from verification
+  of controller-assisted rotation when that feature enters a release.
+- Update [SECURITY.md](SECURITY.md) with the release metadata. Archiving a docs
+  line does not end its support window; the 0.9 line stays supported during
+  v1.0 candidate evaluation and retires at v1.0.0 GA. Leave frozen archives
+  unchanged and fix current guidance separately.
+
 ## Cutting a docs archive
 
 Do this in the prep PR for a new minor or major line (v0.9 to v1.0, say),

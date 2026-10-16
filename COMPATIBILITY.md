@@ -15,14 +15,43 @@ DrydockCompat bumps.
 
 ## Version matrix
 
-| Portwing version | Drydock wire connection | Full feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
+| Portwing version | Drydock wire connection | Watcher/update feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|---|
 | v1.0.0-rc.1 (release candidate) / `main` | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v0.9.x (stable) | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 
-The candidate keeps the existing wire and feature contract. Its published-artifact
-Standard/Edge conformance run must pass before GA; the version row does not
-claim a completed candidate run. The 0.9 line remains the stable release channel
-during candidate evaluation.
+The candidate keeps the existing wire and watcher/update contract. The 0.9
+line remains the stable release channel during candidate evaluation; see
+[SECURITY.md](SECURITY.md) for support boundaries.
+
+### Published candidate evidence
+
+The exact v1.0.0-rc.1 artifacts passed the hosted matrix on 2026-10-16:
+
+| Portwing | Drydock | Sockguard | Standard / Edge / legacy floor | Evidence |
+|---|---|---|---|---|
+| v1.0.0-rc.1 | v1.6.0 | v2.2.10 | PASS / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/38836428734) |
+| v1.0.0-rc.1 | v1.6.1 | v2.2.10 | PASS / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/38837070094) |
+
+Both runs used candidate manifest
+`sha256:e92d810c0281551efeeb5adb2b71c6bfe345d42760ebd67134a02d2b5834a611`.
+The Standard identity checks exercised enrollment, manual overlapping-key
+rotation, revocation, SIGHUP reloads and clock-skew recovery. They did not test
+the later controller-assisted implementation. Rerun the matrix against the
+exact next candidate before GA; these results do not verify newer code.
+
+### Development-only controller-assisted rotation
+
+Use Portwing `dev/v1.0` with Drydock `dev/v1.8` for opt-in managed rotation.
+No published pairing currently provides it: Portwing v1.0.0-rc.1 and Drydock's
+v1.6 releases and v1.7 candidates do not include it. The first supporting
+release tags on both sides must be recorded here when they are published.
+
+Standard mode requires `KEY_ROTATION_DIR` on Portwing and `rotationdir` on its
+Drydock agent configuration. Edge mode requires Portwing's managed storage and
+the negotiated `edge-key-rotation` capability. The wire remains `portwing/1.0`
+and `DrydockCompat` remains `1.4.0`; wire compatibility alone does not establish
+rotation support. See the [operator guide](docs/content/docs/current/authentication.mdx#controller-assisted-rotation-development).
 
 ## Wire compatibility versus feature compatibility
 
