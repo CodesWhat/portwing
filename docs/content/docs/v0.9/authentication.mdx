@@ -1,0 +1,237 @@
+---
+title: Authentication
+description: Configure token-based or Ed25519 per-client key authentication for the Portwing agent.
+---
+
+Portwing supports four authentication mechanisms, ordered below from weakest to strongest. One shared-secret option and Ed25519 keys can coexist during migration — the middleware checks for an `X-Portwing-Signature` header first and falls back to token verification when that header is absent. Plaintext token configuration (`TOKEN` or `TOKEN_FILE`) and hash-at-rest configuration (`TOKEN_HASH` or `TOKEN_HASH_FILE`) are mutually exclusive.
+
+Requests authenticate via `Authorization: Bearer`, `X-Portwing-Token`, or `X-Dd-Agent-Secret` for token-based auth, and via a set of `X-Portwing-*` headers for Ed25519.
+
+See [Configuration](/configuration) for a complete environment variable reference, and [Connection Modes](/connection-modes) for how auth applies in edge (WebSocket) mode.
+
+<Callout type="warn">
+Standard mode refuses to start without at least one configured credential.
+Unauthenticated local development must be explicitly enabled with
+`ALLOW_UNAUTHENTICATED=true` on a loopback bind; exposing that mode on a
+non-loopback address requires the separate
+`ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
+</Callout>
+
+The examples below publish port 3000 on host loopback only. For remote access, configure Portwing TLS before widening that bind, or keep the plaintext listener private behind a TLS-terminating reverse proxy.
+
+---
+
+## 1. Plaintext token
+
+Set `TOKEN` to a random secret. Every request must supply it in one of the accepted headers.
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TOKEN="$TOKEN" \
+  -p 127.0.0.1:3000:3000 \
+  ghcr.io/codeswhat/portwing:latest
+```
+
+<Callout type="warn">
+`TOKEN` is visible in `docker inspect` output and process listings. Use this option for local evaluation only. For any network-exposed deployment, use `TOKEN_FILE`, `TOKEN_HASH`, or Ed25519 keys instead.
+</Callout>
+
+---
+
+## 2. File-based token
+
+`TOKEN_FILE` points to a file containing the plaintext token. Mount the file as a read-only secret so the token never appears in environment variable dumps.
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+printf '%s' "$TOKEN" > /run/secrets/portwing-token
+chown 65532:65532 /run/secrets/portwing-token && chmod 0400 /run/secrets/portwing-token
+
+docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
+  -e TOKEN_FILE=/run/secrets/portwing-token \
+  -p 127.0.0.1:3000:3000 \
+  ghcr.io/codeswhat/portwing:latest
+```
+
+This is appropriate for Docker secrets, Kubernetes secret volumes, or any orchestrator that can inject files but not env vars safely.
+
+---
+
+## 3. Argon2id hash-at-rest
+
+`TOKEN_HASH` stores an Argon2id hash of the token so the plaintext never appears in environment variable dumps or config files. At runtime the agent performs a constant-time Argon2id comparison against the presented token. Cold verification is capped at two concurrent derivations across the agent; excess cold requests receive HTTP 429 before allocating Argon2 memory. After the first successful verification, a fixed-size SHA-256 success digest keeps normal request cost flat.
+
+**Generate the hash with `portwing hash-token`.** The token is read from stdin — it is never passed as a command-line argument to avoid exposure in shell history and process listings.
+
+```bash
+# Generate a token and hash it
+TOKEN=$(openssl rand -hex 32)
+HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
+# Output format: $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+
+# Start the agent with the hash
+docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TOKEN_HASH="$HASH" \
+  -p 127.0.0.1:3000:3000 \
+  ghcr.io/codeswhat/portwing:latest
+```
+
+To keep the hash out of the environment entirely, write it to a file and use `TOKEN_HASH_FILE`:
+
+```bash
+printf '%s' "$TOKEN" | portwing hash-token > /run/secrets/portwing-token-hash
+chown 65532:65532 /run/secrets/portwing-token-hash && chmod 0400 /run/secrets/portwing-token-hash
+
+docker run -d --name portwing \
+  -v /run/secrets/portwing-token-hash:/run/secrets/portwing-token-hash:ro \
+  -e TOKEN_HASH_FILE=/run/secrets/portwing-token-hash \
+  ...
+```
+
+<Callout type="info">
+`TOKEN_HASH` is the recommended *token-based* option — among the three shared-secret mechanisms above, it's the one to reach for, since the plaintext token exists only on the caller side and the agent stores and compares only the Argon2id hash. [Ed25519 per-client keys](#4-ed25519-per-client-keys) below remain the recommended mechanism overall for production, since they avoid a shared secret entirely; use `TOKEN_HASH` when a caller can't do per-request signing.
+</Callout>
+
+---
+
+## 4. Ed25519 per-client keys
+
+Ed25519 keypairs give each client a distinct cryptographic identity. Every
+version 2 request carries a detached signature over the HTTP method, complete
+origin-form request target, a SHA-256 body hash, a Unix timestamp, and a
+128-bit random nonce. The agent verifies the signature, rejects requests with
+a timestamp skew greater than 60 seconds, and tracks nonces in an in-memory
+LRU to prevent replay. Each nonce is retained for at least twice the skew
+window before it can be evicted, so a nonce stays blocked for as long as its
+timestamp could still verify.
+
+No shared secret is involved. Compromising one client's private key does not affect other enrolled clients.
+
+### Generate a keypair
+
+```bash
+# Writes the private key (PEM PKCS#8) and the authorized_keys line to stdout.
+portwing keygen -comment "my-platform:prod"
+```
+
+Copy the `authorized_keys` output line to the agent host:
+
+```text
+# /etc/portwing/authorized_keys  (root:65532, mode 0640 — readable by the
+# container's non-root user, not world-readable)
+ed25519 AAAA... my-platform:prod
+```
+
+The file format mirrors OpenSSH `authorized_keys`. Each non-blank, non-comment line is:
+
+```text
+ed25519 <base64-public-key> [comment]
+```
+
+Comment out or remove a line to revoke that key. Credential files must resolve
+to regular files. On Unix, the agent refuses files that are world-readable or
+group/world-writable; mode `0640` remains valid for secret mounts that need a
+container-readable group. Permissions are checked on the opened file
+descriptor so a path swap cannot race the validation.
+
+### Start the agent with Ed25519 auth
+
+```bash
+docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
+  -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
+  -p 127.0.0.1:3000:3000 \
+  ghcr.io/codeswhat/portwing:latest
+```
+
+### Request signing headers
+
+Signature version 2 clients must send five headers on every request:
+
+| Header | Format |
+|--------|--------|
+| `X-Portwing-Key-ID` | Hex-encoded first 8 bytes of SHA-256 of the raw public key |
+| `X-Portwing-Timestamp` | Unix epoch, seconds, decimal string |
+| `X-Portwing-Nonce` | 32 random hex characters (128-bit) |
+| `X-Portwing-Signature` | Base64url (no padding) Ed25519 signature over the canonical message |
+| `X-Portwing-Signature-Version` | Must be `2` for the full request-target format |
+
+Rejected Ed25519 requests return `401` with an `X-Portwing-Reason` response
+header set to `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`,
+or `nonce-capacity`. `nonce-capacity` means the agent could not record a fresh
+nonce because the cache contained only unexpired entries; it is distinct from
+replay. `invalid-signature` also covers missing headers, malformed nonces,
+malformed signatures, and signatures that fail verification.
+
+The canonical message is a newline-separated UTF-8 string:
+
+```text
+METHOD
+/path/to/resource?exact=raw&query=order
+<sha256-hex-of-body>
+<unix-timestamp>
+<nonce-hex>
+```
+
+The second line is the complete origin-form request target: escaped path plus
+the exact, unmodified raw query string. Adding, removing, changing, or
+reordering query parameters therefore invalidates the signature. For an empty
+body, use the SHA-256 of the empty string:
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+Unversioned legacy signatures remain accepted only for query-free requests.
+Any request with a query string must use signature version 2. This permits a
+bounded migration without retaining query-tampering exposure.
+
+### Key rotation (zero-downtime)
+
+1. Generate a new keypair: `portwing keygen -comment "my-platform:prod:2026-07"`
+2. Append the new public key line to the authorized-keys file on the agent host.
+3. Send `SIGHUP` to reload: `kill -HUP $(pidof portwing)` or `docker kill --signal HUP portwing`. Both old and new keys are now active.
+4. Update the platform to sign with the new private key.
+5. Remove the old key from the file and send another `SIGHUP`.
+
+Hot reload rebuilds the in-memory key map and logs each added and removed key ID. The nonce LRU is preserved across reload.
+
+### Key revocation
+
+Comment out or remove the key line from the authorized-keys file, then send `SIGHUP`. The key is removed from the in-memory map immediately and any subsequent request signed with that key is rejected with 401.
+
+### Edge mode (WebSocket)
+
+In edge mode the agent initiates an outbound WebSocket connection to the platform. Authentication happens in a signed hello message before the `welcome` response is sent. `PRIVATE_KEY_FILE` is **required** for edge mode — the Drydock controller endpoint accepts only Ed25519-signed hellos and rejects token-hash authentication (`ed25519-required`). Set it to the agent's Ed25519 private key, and register the matching public key with Drydock:
+
+```yaml
+# docker-compose.yml (edge mode)
+environment:
+  DRYDOCK_URL: wss://platform.example.com
+  PRIVATE_KEY_FILE: /run/secrets/portwing-private-key
+```
+
+The hello carries `pubKeyId`, `timestamp`, `nonce`, and `signature` fields. The controller verifies the signature against its own copy of the agent's registered public key before sending `welcome`; if verification fails the connection is closed. Individual messages after the hello are not signed separately — they are implicitly authorized by the authenticated TLS+WebSocket session.
+
+See [Connection Modes](/connection-modes) for a full description of edge mode.
+
+<Callout type="info">
+Drydock `v1.6.0-rc.11+` is the supported feature peer for Portwing v0.9.0 and implements its complete controller-owned watcher/update contract. Older controllers may remain wire-compatible without those feature semantics. A missing or disabled endpoint returns 404, which the agent treats as fatal rather than retrying forever.
+</Callout>
+
+<Callout type="warn">
+Drydock's bundled `AgentClient` (the HTTP-polling client used in Standard Mode) supports both token authentication (the default `X-Dd-Agent-Secret` path, see [3. Argon2id hash-at-rest](#3-argon2id-hash-at-rest) above) and per-request Ed25519 signing. Set `DD_AGENT_{name}_AUTHMODE=ed25519`, `DD_AGENT_{name}_SIGNINGKEYID`, and `DD_AGENT_{name}_SIGNINGKEY` to use the latter; the controller then sends the five `X-Portwing-*` signature headers instead of a shared secret. Standard Mode Ed25519 signing and Edge Mode's Ed25519 *hello* signing are separate mechanisms. The Edge Mode hello remains required by the supported Drydock `v1.6.0-rc.11+` WebSocket path.
+</Callout>
+
+---
+
+## Migrating from tokens to Ed25519
+
+Token auth and Ed25519 auth work simultaneously. Set both `TOKEN_HASH` and `AUTHORIZED_KEYS` during the transition period. The middleware checks for `X-Portwing-Signature` first; requests without that header fall through to token verification. Once all clients are sending signed requests, remove the token variables and restart.

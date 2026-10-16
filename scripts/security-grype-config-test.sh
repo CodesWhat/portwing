@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Contract for security-grype.yml's published-release re-scan lane.
 #
 # The lane exists because every other grype job in this repo scans something

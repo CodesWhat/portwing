@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import type { AnalyticsEvent, WebVitalName } from "./contract";
 
 export const WEB_VITALS_FLUSH_DELAY_MS = 5_000;

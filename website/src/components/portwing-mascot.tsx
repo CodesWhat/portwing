@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 "use client";
 
 import Image from "next/image";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package generic
 
 // events_mutant_test.go adds tests that target Gremlins mutants in events.go.

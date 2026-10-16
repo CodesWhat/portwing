@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 module_directory="${MODULE_DIRECTORY:-.}"
@@ -12,6 +13,7 @@ bash scripts/package-release-config-self-test-test.sh
 bash scripts/package-release-config-self-test-cleanup-test.sh
 bash scripts/package-release-config-test-test.sh
 bash scripts/package-release-config-test.sh
+bash scripts/release-cut-version-test.sh
 bash scripts/install-config-permissions-test.sh
 bash scripts/standard-mode-bind-config-test.sh
 bash scripts/setup-go-egress-config-test-test.sh

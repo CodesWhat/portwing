@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package edge
 
 // compose_failure_surface_test.go pins what the controller receives over the

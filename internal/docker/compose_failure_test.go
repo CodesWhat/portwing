@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package docker
 
 // compose_failure_test.go pins how Execute reports a compose subprocess that

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Apply (or update) the "Protect Renovate branches" ruleset on the portwing repo.
 #
 # deps.md: never delete Renovate's branches or close its PRs as cleanup — they

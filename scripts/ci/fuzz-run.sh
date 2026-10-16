@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Shared retry/classify engine for a single `go test -fuzz` target. Owns the

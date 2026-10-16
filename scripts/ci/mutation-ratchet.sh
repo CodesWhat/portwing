@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # Propose mutation floor ratchets from this run's per-package records and the
 # quality-history series, without writing anything back to the repository.

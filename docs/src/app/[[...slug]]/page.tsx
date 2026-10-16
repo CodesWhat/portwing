@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { Callout } from "fumadocs-ui/components/callout";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/page";
@@ -33,8 +35,11 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
     <DocsPage toc={page.data.toc} full={page.data.full}>
       {version && (
         <Callout type="warn" title={`Archived documentation for ${version}`}>
-          This page documents Portwing {version}, which is no longer supported. It is kept for
-          reference and is not updated.{" "}
+          This page is a frozen reference for Portwing {version} and is not updated. Check the{" "}
+          <Link href="https://github.com/CodesWhat/portwing/blob/main/SECURITY.md">
+            security policy
+          </Link>{" "}
+          for release support.{" "}
           <Link href={hasCounterpart ? hrefFor(counterpart) : "/"}>
             {hasCounterpart ? "Read this page in the current docs" : "Go to the current docs"}
           </Link>

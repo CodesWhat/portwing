@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -191,7 +193,10 @@ function assertFixedScripts() {
     } finally {
       fs.closeSync(fd);
     }
-    assert.match(source, /^#!\/usr\/bin\/env bash\nset -euo pipefail\n/u);
+    assert.match(
+      source,
+      /^#!\/usr\/bin\/env bash\n# SPDX-License-Identifier: MIT\nset -euo pipefail\n/u,
+    );
     for (const marker of markers) {
       assert.ok(source.includes(marker), `scripts/ci/${name} is missing ${marker}`);
     }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Apply (or update) the "Main branch protection" ruleset on the portwing repo.
 #
 # Branch protection as code. This ruleset mirrors drydock's posture and is tuned

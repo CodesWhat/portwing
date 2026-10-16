@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 export type Milestone = {
   version: string;
   title: string;
@@ -121,7 +123,9 @@ export const roadmap: Milestone[] = [
       "Stable HTTP API and environment-variable surface under semantic-versioning guarantees",
       "Stable agent ↔ controller wire protocol — no breaking changes without a major bump",
       "Threat model review; the HIGH+ CVE gate is already enforced on every release image, and v1.0 keeps it",
-      "Final re-verify of the published competitive review against primary sources at the v1.0 cut",
+      "Competitive review refreshed against primary sources for the candidate; recheck changing claims before GA",
+      "Final v0.9 docs archived from the release tag with byte-for-byte provenance checks",
+      "Published candidate must pass the current Standard/Edge and legacy-floor conformance matrix before GA",
     ],
   },
 ];

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # Self-test for scripts/starchart-config-test.sh. Each case breaks the real
@@ -433,19 +434,19 @@ assert_rejected \
 # --- the third slot: branch -------------------------------------------------
 
 reset_fixture
-sed -i.bak 's/^      branch: dev\/v0\.9$/      branch: main/' "${fixture}"
+sed -i.bak 's/^      branch: dev\/v1\.0$/      branch: main/' "${fixture}"
 assert_rejected \
 	"branch must not be main/master/HEAD/empty; the reusable workflow refuses these too, but this fails before a run is even needed: got 'main'" \
 	"contract must reject branch: main, which the reusable workflow also refuses at run time"
 
 reset_fixture
-sed -i.bak 's/^      branch: dev\/v0\.9$/      branch: some-feature-branch/' "${fixture}"
+sed -i.bak 's/^      branch: dev\/v1\.0$/      branch: some-feature-branch/' "${fixture}"
 assert_rejected \
 	"branch must match this repo's dev/vX.Y convention: got 'some-feature-branch'" \
 	"contract must reject a branch that isn't this repo's dev/vX.Y"
 
 reset_fixture
-sed -i.bak 's/^      branch: dev\/v0\.9$/      branch: dev\/v9.9/' "${fixture}"
+sed -i.bak 's/^      branch: dev\/v1\.0$/      branch: dev\/v9.9/' "${fixture}"
 assert_rejected \
 	"branch: (dev/v9.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject a branch: that is shaped like dev/vX.Y but disagrees with renovate.json"
@@ -456,7 +457,7 @@ assert_rejected \
 # diagnostics catch that shift the same way they catch any other deleted
 # line.
 reset_fixture
-sed -i.bak '/^      branch: dev\/v0\.9$/d' "${fixture}"
+sed -i.bak '/^      branch: dev\/v1\.0$/d' "${fixture}"
 assert_rejected \
 	'starchart.yml deviates from the pinned shape at line 78: expected '"'"'      branch: @BRANCH@'"'"', got '"'"'      accent: "#7230d2"'"'"'' \
 	"contract must reject a with: block with no branch: line, caught by the accent: line shifting into its place"
@@ -498,7 +499,7 @@ assert_rejected \
 # A seventh round found the sixth round's `jq -e` (no slurp) took its exit
 # status from only the LAST value it printed: two JSON documents
 # concatenated in one file -- {"baseBranchPatterns":["wrong"]} followed by
-# {"baseBranchPatterns":["dev/v0.9"]} -- makes jq print false then true and
+# {"baseBranchPatterns":["dev/v1.0"]} -- makes jq print false then true and
 # exit 0, so the cross-check passed on a file whose FIRST document was
 # wrong. `-s` slurps the whole input into a single array first, so there is
 # exactly one output value and nothing left for jq to pick a "last" one
@@ -515,7 +516,7 @@ cp renovate.json "${test_root}/renovate.json"
 reset_fixture
 echo '{not valid json' >"${test_root}/renovate.json"
 assert_rejected \
-	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
+	"branch: (dev/v1.0) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject malformed JSON in renovate.json, via the same exact-array-equality failure as any other renovate.json mismatch"
 cp renovate.json "${test_root}/renovate.json"
 
@@ -528,7 +529,7 @@ d["baseBranchPatterns"] = []
 json.dump(d, open(p, "w"))
 PY
 assert_rejected \
-	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
+	"branch: (dev/v1.0) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject renovate.json with zero baseBranchPatterns entries"
 cp renovate.json "${test_root}/renovate.json"
 
@@ -537,11 +538,11 @@ python3 - "${test_root}/renovate.json" <<'PY'
 import json, sys
 p = sys.argv[1]
 d = json.load(open(p))
-d["baseBranchPatterns"] = ["dev/v0.9", "dev/v1.0"]
+d["baseBranchPatterns"] = ["dev/v1.0", "dev/v1.1"]
 json.dump(d, open(p, "w"))
 PY
 assert_rejected \
-	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
+	"branch: (dev/v1.0) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject renovate.json with two baseBranchPatterns entries"
 cp renovate.json "${test_root}/renovate.json"
 
@@ -552,10 +553,10 @@ cp renovate.json "${test_root}/renovate.json"
 reset_fixture
 {
 	echo '{"baseBranchPatterns":["wrong"]}'
-	echo '{"baseBranchPatterns":["dev/v0.9"]}'
+	echo '{"baseBranchPatterns":["dev/v1.0"]}'
 } >"${test_root}/renovate.json"
 assert_rejected \
-	"branch: (dev/v0.9) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
+	"branch: (dev/v1.0) must exactly match .github/workflows/../../renovate.json's baseBranchPatterns as a single-entry array; both roll together at a release cut" \
 	"contract must reject a concatenated multi-document renovate.json, which a bare jq -e (no slurp) took its exit status from only the last document and let a wrong first document slip through unseen"
 cp renovate.json "${test_root}/renovate.json"
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package protocol
 
 // Guards against the drift this file is named for: metrics.HostMetrics is the

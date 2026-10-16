@@ -32,12 +32,12 @@
 <hr>
 
 > [!WARNING]
-> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v0.9.26`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v1.0.0-rc.1`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <!-- separate alerts: a blank-line-only gap between blockquotes trips markdownlint MD028 -->
 
 > [!NOTE]
-> **v0.9.26 is the current release.** The ARMv7 Docker and Compose clients now include the Go and HTTP/2 security fixes. The deployment examples pin the release image, and the ClusterFuzzLite build waits for Go initialization before starting libFuzzer to prevent a startup crash in the weekly batch. Binary request uploads require a controller that implements the negotiated `edge-request-body-stream` capability. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the full itemized history.
+> **v1.0.0-rc.1 is the current release candidate.** It introduces the MIT license, a frozen v0.9 docs archive, and a refreshed competitive review. This is a candidate for evaluation; the v1 semver guarantees become binding at GA. Stable container `latest` and Homebrew channels remain on the 0.9 release line. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
 <h2 align="center">Contents</h2>
 
@@ -160,7 +160,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.26
+    image: ghcr.io/codeswhat/portwing:1.0.0-rc.1
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -215,7 +215,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:0.9.26
+    image: ghcr.io/codeswhat/portwing:1.0.0-rc.1
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -255,10 +255,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_0.9.26_linux_amd64.deb
+sudo apt install ./portwing_1.0.0-rc.1_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_0.9.26_linux_amd64.rpm
+sudo rpm --install ./portwing_1.0.0-rc.1_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -281,7 +281,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:0.9.26
+  ghcr.io/codeswhat/portwing:1.0.0-rc.1
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -397,15 +397,15 @@ flowchart LR
 <tr><td>Transparent Docker API proxy</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">✅</td></tr>
 <tr><td>Inbound (controller-to-agent) connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Outbound edge connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
-<tr><td>Per-request signed HTTP authentication</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
+<tr><td>Request-bound, replay-resistant HTTP signing</td><td align="center">✅ (Ed25519 path)</td><td align="center">❌ (fixed-message signatures)</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Optional mTLS for the agent link</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">?</td><td align="center">✅</td><td align="center">?</td></tr>
-<tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">❌</td></tr>
+<tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td><td align="center">⚠️ (manager proxy)</td><td align="center">❌</td></tr>
 <tr><td>Agent-level structured audit log</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
-<tr><td>Prometheus scrape endpoint on the agent</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
+<tr><td>Prometheus scrape endpoint on the agent</td><td align="center">✅</td><td align="center">⚠️ (local Kubernetes Edge)</td><td align="center">?</td><td align="center">✅ (opt-in)</td><td align="center">?</td></tr>
 <tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
-<tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
+<tr><td>Signed release evidence (cosign, SBOM, provenance)</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">✅</td><td align="center">⚠️ (release attestation)</td></tr>
 <tr><td>Fleet UI and controller workflows</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">?</td></tr>
-<tr><td>License</td><td align="center">AGPL-3.0</td><td align="center">Zlib (agent) / proprietary Business features</td><td align="center">GPL-3.0</td><td align="center">BSD-3-Clause</td><td align="center">MIT</td></tr>
+<tr><td>License</td><td align="center">MIT</td><td align="center">Zlib (agent) / proprietary Business features</td><td align="center">GPL-3.0</td><td align="center">BSD-3-Clause</td><td align="center">MIT</td></tr>
 </tbody>
 </table>
 
@@ -424,20 +424,20 @@ flowchart LR
 </thead>
 <tbody>
 <tr><td>Remote Docker API proxy</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
-<tr><td>Authenticated remote access</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>Provides an authenticated Docker management endpoint</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Structured audit log</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Read-only MCP server</td><td align="center">✅</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Outbound edge / NAT tunnel</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
 <tr><td>Image update detection or auto-update</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Single lightweight Go binary</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
-<tr><td>License</td><td align="center">AGPL-3.0</td><td align="center">MIT</td><td align="center">Apache-2.0</td></tr>
+<tr><td>License</td><td align="center">MIT</td><td align="center">MIT</td><td align="center">Apache-2.0</td></tr>
 </tbody>
 </table>
 
-> Watchtower's upstream project is archived. Diun and Watchtower do update detection; Portwing is the access agent and leaves update decisions to Drydock.
+> Watchtower's upstream project is archived. Diun and Watchtower can connect to remote Docker endpoints, but do not expose a general-purpose management proxy. Portwing provides that access and leaves update decisions to Drydock.
 >
-> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.39.5, Komodo Periphery v2.3.2, Arcane Agent v2.10.1, Hawser v0.2.46. Reviewed 2026-08-29; Arcane re-checked 2026-09-02. Portainer and Komodo release evidence checked 2026-10-08. The update-tools table follows the Diun and Watchtower comparison pages, which pin no version or review date.
+> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.45.2, Komodo Periphery v2.3.3, Arcane Agent v2.16.1, Hawser v0.2.50, Diun v4.33.0 and Watchtower v1.7.1. Reviewed 2026-10-15. The canonical page records edition limits, source-inspection scope and artifact discovery limits. Portainer uses fixed-message signature headers; Arcane documents method/path filtering for its manager and agent Prometheus export. A GitHub release attestation is different from build provenance.
 > Contributions welcome if any information is inaccurate.
 
 </details>
@@ -463,7 +463,7 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.7.x** ✅ | Fail-Closed Standard Mode | Standard mode refuses to start without credentials, security hardening pass (PW-SEC-001 to 010), edge log and delete request correlation, edge reconnect classification of terminal hello rejections, dead `DOCKER_HOST` surface removed |
 | **v0.8.x** ✅ | Operations & Distribution | Mode-aware `/health` and `/ready`, cursor-based NDJSON audit export, runnable Compose and Kubernetes observability examples, continuous edge logs, Homebrew cask and signed `deb`/`rpm` packages, published stability policy, edge mode production supported |
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks |
-| **v1.0.0** | Binding Stability | `STABILITY.md` guarantees become binding semver commitments, final re-verify of the competitive review against primary sources, decision on a versioned docs archive. Gated on verifiable items, not a date |
+| **v1.0.0** | Binding Stability | `STABILITY.md` guarantees become binding semver commitments, competitive review refreshed against primary sources, final v0.9 docs archived from its release tag. Gated on verifiable items, not a date |
 | **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport, controller-assisted two-key rotation |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.
@@ -525,7 +525,9 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for the full compatibility matrix acros
 
 ---
 
-**[AGPL-3.0 License](LICENSE)**
+**[MIT License](LICENSE)**
+
+The v1.0 line uses MIT. All 0.x releases retain their AGPL-3.0 license.
 
 <a href="https://github.com/CodesWhat">
   <picture>

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package adapter
 
 type ContainerUpdateKind string

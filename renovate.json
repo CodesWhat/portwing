@@ -4,7 +4,7 @@
     "local>CodesWhat/.github:renovate-config"
   ],
   "baseBranchPatterns": [
-    "dev/v0.9"
+    "dev/v1.0"
   ],
   "lockFileMaintenance": {
     "enabled": false

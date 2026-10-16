@@ -1,0 +1,242 @@
+---
+title: MCP Server
+description: Portwing's built-in read-only Model Context Protocol endpoint lets MCP-aware AI agents query live Docker container and host state.
+---
+
+Portwing ships a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server at `POST /_portwing/mcp`. AI assistants — Claude Desktop, Cursor, Windsurf, or any MCP-compatible client — can call its tools to inspect containers and host metrics using their standard tool-call flow. No extra process or sidecar is needed; the endpoint is part of the main Portwing HTTP server.
+
+<Callout type="info">
+The MCP server is supported in Portwing v0.9.x. Its tool names, input schemas, and result shapes follow the repository's published pre-v1 stability policy.
+</Callout>
+
+---
+
+## Protocol
+
+| Property | Value |
+|---|---|
+| Endpoint | `POST /_portwing/mcp` |
+| Protocol revisions | MCP 2026-07-28 and MCP 2025-11-25 |
+| Transport | Streamable HTTP, stateless single-request mode |
+| Content-Type | `application/json` (request and response) |
+| Session management | None. No `Mcp-Session-Id` is issued or required |
+
+Every POST returns one JSON-RPC 2.0 response object. `GET /_portwing/mcp` returns `405 Method Not Allowed` to signal that no SSE stream is offered at this endpoint.
+
+### Protocol revisions
+
+Clients on either revision use the same URL, and the server picks the revision per request.
+
+A request is served as **2026-07-28** when `params._meta` carries `io.modelcontextprotocol/protocolVersion`, or when the `MCP-Protocol-Version` header is `2026-07-28`. That revision is stateless, so there is no `initialize` handshake:
+
+- `server/discover` returns `supportedVersions` (`["2026-07-28"]`), `capabilities` (`{"tools": {}}`), and cache hints.
+- Every result carries `"resultType": "complete"` and the server's name and version in `_meta["io.modelcontextprotocol/serverInfo"]`.
+- `tools/list` and `server/discover` carry `"ttlMs": 3600000` and `"cacheScope": "public"`. The tool list is fixed for a given Portwing binary and is the same for every caller, so a client or shared cache may keep it for an hour. A client that calls a tool removed by an upgrade gets an unknown-tool error, which the spec names as a reason to re-fetch early.
+- `_meta` must carry `io.modelcontextprotocol/protocolVersion` (a string) and `io.modelcontextprotocol/clientCapabilities` (an object). The `MCP-Protocol-Version` and `Mcp-Method` headers are required and must match the body, and `tools/call` also needs `Mcp-Name` matching `params.name`. A name that isn't plain ASCII is sent as `=?base64?...?=`.
+- `ping`, `initialize`, `logging/setLevel`, and any other method the revision doesn't define return `-32601` with HTTP `404`.
+
+| Failure | JSON-RPC code | HTTP status |
+|---|---|---|
+| Required `_meta` field missing or malformed | `-32602` | `400` |
+| Header missing, or not matching the body | `-32020` (HeaderMismatch) | `400` |
+| `_meta` names a version other than 2026-07-28 | `-32022` (UnsupportedProtocolVersion), with `data.supported` and `data.requested` | `400` |
+| Unknown method | `-32601` | `404` |
+| Unknown tool or malformed `tools/call` params | `-32602` | `200` |
+
+Every other request is served as **2025-11-25**, exactly as before: `initialize` negotiates `2025-11-25`, `ping` works, results carry no `resultType`, and the 2026-07-28 headers are ignored. A 2025-11-25 client that sends `MCP-Protocol-Version: 2025-11-25` after `initialize` stays on this path.
+
+Authentication follows the same bearer-token scheme used by all other Portwing endpoints. See [Authentication](/authentication).
+
+---
+
+## Enabling the endpoint
+
+The MCP endpoint is always active when Portwing is running — it is not gated by a separate flag or environment variable. Configure access using the standard token variables (`TOKEN`, `TOKEN_FILE`, or `TOKEN_HASH`). See [Configuration](/configuration) for the full variable reference.
+
+```bash
+# Minimal example: run Portwing with a token and connect an MCP client
+docker run -e TOKEN=mysecrettoken -p 3000:3000 ghcr.io/codeswhat/portwing:latest
+```
+
+---
+
+## Browser origins
+
+Both revisions require a Streamable HTTP server to validate the `Origin` header to prevent DNS rebinding, and to answer 403 when it is present and invalid. Portwing does this for every route with one middleware that runs before authentication. A request with no `Origin` header, which is what MCP clients such as Claude Desktop, Claude Code and Cursor send, is unaffected. When authentication is off, a `Host` that is not an IP address, `localhost`, a single-label name or listed in `ALLOWED_HOSTS` is rejected with the same 403, because a rebound page's reads carry no `Origin`. A request with any `Origin` that is not listed in `ALLOWED_ORIGINS` (empty by default) gets a plain `403 forbidden origin`; both specifications make a JSON-RPC error body optional here, so the body is not JSON-RPC. See [configuration](/configuration).
+
+---
+
+## Read-only tools, not a read-only credential
+
+<Callout type="info">
+The MCP tools themselves are strictly read-only. None of the five tools listed below can start, stop, restart, remove, or mutate any container or resource. There is no write tool, and none is planned. Destructive operations must go through the authenticated REST API directly.
+</Callout>
+
+<Callout type="warn">
+That boundary is at the protocol level, not the credential level. `/_portwing/mcp` is authenticated by the same middleware, and the same shared token or Ed25519 key, as every other Portwing route, including the Docker proxy catch-all at `/`. See [Authentication](/authentication) and [Security Model](/security-model). Whatever credential can call `tools/call` can also call the full Docker Engine API through the proxy: start, stop, remove containers, mount host paths, and anything else that API exposes. Portwing has no read-only role, scope, or permission tier for tokens or keys today, so every credential is all-or-nothing. A compromised MCP credential is a compromised Portwing credential, not a compromised read-only viewer.
+
+If you want the AI agent on a credential you can reason about independently, generate it its own [Ed25519 keypair](/authentication#4-ed25519-per-client-keys) instead of handing it an operator's shared token. Token-based auth (`TOKEN`, `TOKEN_HASH`) is a single shared secret for the whole agent, so it can't be split this way. A dedicated Ed25519 key does not narrow what the key can do; it still has full proxy access. But it lets you revoke that one key without affecting other integrations, and its calls appear under their own key ID in the audit log (see [Audit Logging](/audit-logging)).
+</Callout>
+
+Additionally, `inspect_container` returns only the *count* of environment variables — values are never transmitted. This prevents accidental leakage of secrets, API keys, or credentials that are commonly passed to containers via environment variables. See [Security Model](/security-model) for more detail.
+
+---
+
+## Tools
+
+The server advertises five tools via `tools/list`, in the same order on both revisions. All are read-only, and each carries standard tool annotations: a display `title`, `readOnlyHint: true`, and `openWorldHint`. `openWorldHint` is `false` for every tool except `container_logs`, whose text is written by the workload and often records outside traffic, so clients should treat it as untrusted input.
+
+### `list_containers`
+
+Returns all Docker containers (running and stopped).
+
+**Parameters:** none
+
+**Response fields per container:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Full container ID |
+| `names` | string[] | Container name(s) |
+| `image` | string | Image reference |
+| `state` | string | Runtime state (e.g. `running`, `exited`) |
+| `status` | string | Human-readable status string |
+| `labels` | object | Container labels (omitted if empty) |
+
+---
+
+### `inspect_container`
+
+Returns detailed state for a single container.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Container ID or name |
+
+**Response fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Full container ID |
+| `name` | string | Container name |
+| `state` | object | Runtime state struct |
+| `image` | string | Image reference |
+| `envCount` | integer | Number of environment variables (values never returned) |
+| `mounts` | array | Each mount: `source`, `destination`, `readOnly` |
+| `networks` | string[] | Network names the container is attached to |
+| `restartPolicy` | string | Restart policy name |
+
+---
+
+### `container_logs`
+
+Returns the last N lines of stdout and stderr from a container. Each line is prefixed with `stdout:` or `stderr:`.
+
+The output is bounded. Docker's `tail` limits how many lines come back but not how long they are, so the tool keeps at most 500 lines and at most 256 KiB of line text, prefixes included, dropping the oldest lines first. A single line longer than the whole budget keeps its first 262,136 bytes, cut on a UTF-8 boundary. `truncated` is `true` whenever a line was dropped or cut.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Container ID or name |
+| `tail` | integer | no | Lines to return (1–500, default 100) |
+
+**Response fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Container ID echoed back |
+| `lines` | string[] | Log lines, oldest first, each prefixed `stdout:` or `stderr:` |
+| `truncated` | boolean | `true` when lines were dropped or one was cut to fit the bounds |
+
+---
+
+### `host_metrics`
+
+Returns a point-in-time snapshot of host-level resource metrics. No parameters.
+
+**Parameters:** none
+
+**Response:** a metrics snapshot including CPU, memory, disk, network I/O, and uptime. The exact shape matches the Prometheus collector used internally by Portwing.
+
+**Linux only.** Every field except `cpuCores` and the disk fields is read from `/proc`, so this tool works on the container, `.deb` and `.rpm` builds and nowhere else. On a native macOS install it returns an MCP error naming the missing procfs instead of a snapshot of zeros, because a zero-filled snapshot is indistinguishable from a real reading of an idle host. The Prometheus endpoint reports the same thing as `portwing_host_metrics_supported 0`.
+
+Disk usage (`diskTotal`, `diskUsed`, `diskFree`) is measured with `statfs` against the Docker daemon's actual data root, resolved from `/info` rather than assumed to be `/var/lib/docker`. That read can fail independently of the `/proc` fields — for example if the data root is unreadable — in which case `diskMetricsAvailable` is `false`, the disk fields stay `0`, and `diskError` names the failure instead of the response being an MCP error. `/metrics` mirrors this as `portwing_host_disk_metrics_available 0` with the disk byte series omitted.
+
+---
+
+### `container_stats`
+
+Returns a one-shot CPU, memory, and network stats snapshot for a single container.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Container ID or name |
+
+**Response fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Container ID echoed back |
+| `cpuTotalUsage` | integer | Cumulative CPU usage in nanoseconds |
+| `memUsage` | integer | Current memory usage in bytes |
+| `memLimit` | integer | Memory limit in bytes |
+| `networks` | object | Per-interface map of `rxBytes` and `txBytes` |
+
+---
+
+## Client configuration
+
+Replace `YOUR_PORTWING_TOKEN` with the value you set in `TOKEN`, `TOKEN_FILE`, or `TOKEN_HASH` (see [Configuration](/configuration)).
+
+### Claude Desktop (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "portwing": {
+      "type": "http",
+      "url": "http://your-host:3000/_portwing/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_PORTWING_TOKEN"
+      }
+    }
+  }
+}
+```
+
+### Claude Code CLI
+
+```bash
+claude mcp add --transport http \
+  --header "Authorization: Bearer YOUR_PORTWING_TOKEN" \
+  portwing http://your-host:3000/_portwing/mcp
+```
+
+### Project-level `.mcp.json` (Cursor, Windsurf, or any MCP client)
+
+```json
+{
+  "mcpServers": {
+    "portwing": {
+      "type": "http",
+      "url": "http://your-host:3000/_portwing/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_PORTWING_TOKEN"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Related pages
+
+- [Configuration](/configuration) — all environment variables including token setup
+- [Authentication](/authentication) — token enrollment and key management
+- [Security Model](/security-model) — why env values are withheld and the read-only boundary

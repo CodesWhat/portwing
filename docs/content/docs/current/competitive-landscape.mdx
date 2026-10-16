@@ -4,133 +4,108 @@ description: An evidence-backed comparison of Portwing with current remote Docke
 ---
 
 <Callout type="info">
-This review is a snapshot from **August 29, 2026**, with Arcane re-checked on **September 2, 2026** and the Portainer and Komodo supply-chain evidence checked on **October 8, 2026**. Competitor behavior changes independently of Portwing. This page is the canonical matrix and decision record, with the primary sources listed under Primary evidence. Behavior a competitor's own docs or repo don't cover is recorded as "not documented", never guessed absent.
+Checked **October 15, 2026** against the versions below and current primary documentation. This page is the canonical comparison and decision record. Source inspection establishes implemented or documented behavior, not measured reliability. Behavior not covered by a peer's docs or inspected code remains "not documented". Artifact observations have the discovery limits described below.
 </Callout>
 
 Portwing is the host agent in a three-layer system:
 
-- **Portwing** authenticates the controller, mediates Docker operations, and
-  produces audit and metrics data.
-- **Drydock** owns users, RBAC, fleet workflows, UI, GitOps, schedules,
-  update policy, alerts, and vulnerability workflows.
+- **Portwing** authenticates the controller, mediates Docker operations, and produces audit and metrics data.
+- **Drydock** owns users, RBAC, fleet workflows, UI, GitOps, schedules, update policy, alerts, and vulnerability workflows.
 - **Sockguard** enforces the final Docker API path-and-method allowlist.
 
-That boundary matters. Portainer, Komodo, Arcane, and Dockhand combine their
-agents with broader controllers. A controller feature is not automatically a
-missing Portwing feature.
+Portainer, Komodo, Arcane, and Dockhand combine agents with broader controllers. A controller feature is not automatically a missing Portwing feature.
 
 ## Direct peers reviewed
 
 | Product | Release reviewed | Relevant agent model |
 | --- | --- | --- |
-| Portainer Agent / Edge Agent | [2.39.5](https://github.com/portainer/portainer/releases/tag/2.39.5) | Classic inbound agent, outbound Edge Agent, and Async Edge fleet operation |
-| Komodo Periphery | [v2.3.2](https://github.com/moghtech/komodo/releases/tag/v2.3.2) | Public-key authenticated bidirectional WebSocket; Periphery can dial Core |
-| Arcane Agent | [v2.10.1](https://github.com/getarcaneapp/arcane/releases/tag/v2.10.1) | Direct or outbound edge mode over gRPC/WebSocket, plus polling transport and optional mTLS, post-quantum since v2.10.0 |
-| Hawser | [v0.2.46](https://github.com/Finsys/hawser/releases/tag/v0.2.46) | Small Go Docker API proxy for Dockhand with inbound and outbound modes |
+| Portainer Agent / Edge Agent | [2.45.2](https://github.com/portainer/portainer/releases/tag/2.45.2) | Classic inbound Agent; outbound Standard Edge with an on-demand reverse tunnel; Async Edge is Business Edition |
+| Komodo Periphery | [v2.3.3](https://github.com/moghtech/komodo/releases/tag/v2.3.3) | Public-key authenticated bidirectional WebSocket; Periphery can dial Core |
+| Arcane Agent | [v2.16.1](https://github.com/getarcaneapp/arcane/releases/tag/v2.16.1) | Direct and persistent edge modes, poll-managed on-demand tunnels, and optional mTLS |
+| Hawser | [v0.2.50](https://github.com/Finsys/hawser/releases/tag/v0.2.50) | Go Docker API proxy for Dockhand with inbound and outbound modes |
 
-Docker's native SSH/TLS access and local socket proxies are security
-baselines. Distr, Docker Surgeon, Beszel, Diun, and Watchtower are adjacent
-products rather than direct general-purpose agent peers.
+Portainer also maintains an older 2.39 release track. The version above identifies this review, not a recommendation to switch release tracks.
 
-## High-signal comparison
+Docker's native SSH/TLS access and local socket proxies are security baselines. Distr, Docker Surgeon, Beszel, Diun, and Watchtower are adjacent products rather than direct general-purpose agent peers.
+
+## Capability comparison
 
 | Capability | Portwing | Market finding |
 | --- | --- | --- |
-| Inbound and outbound edge modes | Supported | All four direct peers now cover both directions. This is required parity, not a unique claim. It describes direction support only, not equal robustness; see the outbound-implementation caveats below. |
+| Inbound and outbound edge modes | Supported | All four direct peers cover both directions. Direction support does not establish equal reconnect or backpressure behavior. |
 | Transparent Docker API | Supported | Portainer and Hawser also proxy Docker's API. Komodo and Arcane expose controller-specific operations. |
-| Per-request signed HTTP | Ed25519 signature binds method, exact request target, body hash, timestamp, and nonce | No reviewed peer documents an equivalent per-request replay-resistant HTTP scheme. Komodo uses a public-key channel handshake; Arcane offers mTLS; Portainer uses claim/Edge credentials; Hawser uses a token. |
-| Edge authentication | Ed25519-signed hello over TLS, classical signatures with no post-quantum option | Komodo has automatic key rotation; Arcane has automated mTLS enrollment and renewal, and since v2.10.0 a freshly generated edge CA issues ML-DSA-87 (FIPS 204 post-quantum) certificates; Portainer has a mature Edge key and optional Business mTLS. |
-| Least-privilege Docker socket | Recommended Sockguard path/method policy | Arcane documents an optional Tecnativa category-level proxy. Other reviewed default deployments mount the Docker socket directly. |
-| Agent audit and metrics | Structured audit export plus Prometheus scrape endpoint | Competing controllers record activity and collect metrics, but the reviewed agents do not document the same mediation-point audit/export and scrape surfaces. |
-| Polling edge transport | Not supported | Arcane and Portainer cover intermittently connected fleets. Defer until a Drydock deployment requires it. |
-| Controller-managed agent upgrades | Not shipped | Portainer and Arcane provide fleet upgrade workflows. This belongs in Drydock plus Portwing packaging, not in an unaudited self-update endpoint. |
-| Builds behind the hardened socket profile | Denied by default, opt-in via preset | The base and compose presets deny builds; `portwing-with-build.yaml` allows classic `POST /build`, and `portwing-with-mediated-build.yaml` allows a stock BuildKit `docker compose build` by inspecting the `/session` and `/grpc` traffic in Sockguard. |
-| Host shell, file browser, and Swarm | Not supported | Intentional agent non-goals even though broader competitors provide them. |
-| Verifiable release artifacts | Cosign signatures, CycloneDX SBOM, and SLSA Build L2 provenance | Arcane ships Cosign-verifiable artifacts and images. Portainer 2.39.5 publishes checksum files with its release archives and its images carry BuildKit SPDX SBOM and SLSA v0.2 provenance attestations, but no cosign signature was found. Komodo v2.3.2 publishes bare binaries, and its Periphery image carries a BuildKit SLSA v1 provenance attestation with no SBOM or cosign signature found. The cosign check looked only for the legacy `.sig` tag, and only the first platform's attestation was read. Hawser publishes checksummed releases with no equivalent set documented. |
-| Credential rotation | Multiple keys; file update plus SIGHUP; manual operational flow | Portainer has a revolving Edge password and Edge key lifecycle. Komodo automatically rotates Periphery keys. Arcane automatically renews certificates and can regenerate its environment token. Hawser requires manual token replacement. |
+| Request-bound, replay-resistant HTTP signing | The configured Ed25519 path binds method, exact request target, body hash, timestamp, and nonce | Portainer's non-FIPS Agent verifies signature headers over a fixed message or configured shared secret. Komodo uses a public-key channel handshake; Arcane offers mTLS; Hawser uses a bearer credential. No reviewed peer documents the same request-binding and replay scheme. |
+| Edge authentication | Ed25519-signed hello over TLS; classical signatures | Komodo supports automatic key rotation. Arcane offers opt-in auto-enrolled/renewed mTLS and ML-DSA-87 certificate signatures from new edge CAs. Portainer offers Edge credentials and optional Business mTLS. These mechanisms have different properties; a single algorithm does not establish an overall security ranking. |
+| Docker socket policy | Recommended Sockguard method/path presets | Arcane recommends a wollomatic method/path proxy for its manager, with Tecnativa retained for existing deployments. Its remote-agent examples still mount the raw socket. The other reviewed deployment examples also use direct socket access. |
+| Agent metrics | Prometheus scrape endpoint plus controller metrics | Arcane agents support opt-in Prometheus and OTLP export. Portainer has local Kubernetes Edge metrics; an equivalent Docker mediation scrape is not documented. Komodo and Hawser collect host metrics for their controllers. |
+| Audit/export | Structured agent request/auth/Compose/exec audit with cursor-based NDJSON export | Arcane persists agent and controller events and exports OTLP logs/traces. Komodo has controller audit, Periphery JSON logs and OTLP traces. Portainer has Business controller activity logs; Hawser has debug request logging. An equivalent cursor-based agent audit API was not found in the reviewed material. |
+| Polling transport | Not supported | Arcane offers poll-managed on-demand tunnels. Portainer Async Edge supports command/snapshot operation without a live tunnel in Business Edition. These are different operating models. |
+| Controller-managed agent upgrades | Not shipped | Portainer's built-in update/rollback is Business Edition beta for standalone Linux Edge devices. Arcane provides self-upgrade workflows for Docker deployments. Portwing rollout policy belongs in Drydock plus packaging. |
+| Builds behind the hardened socket profile | Denied by default; explicit opt-in presets | Portwing's base and Compose presets deny builds. `portwing-with-build.yaml` allows classic `/build`; `portwing-with-mediated-build.yaml` allows BuildKit through Sockguard inspection. Arcane's recommended proxy allowlist includes builds, sessions and gRPC for its broader manager scope. |
+| Host shell, file browser, and Swarm | Not supported | These remain agent non-goals even though broader platforms provide them. |
+| Verifiable release artifacts | Cosign signatures, CycloneDX SBOMs, and SLSA Build L2 provenance | Several peers also publish signatures, SBOMs or provenance. See the exact evidence and limits below. |
+| Credential rotation | Multiple keys; file update plus SIGHUP; manual trust-root flow | Komodo has a Core rotation procedure for connected eligible servers; fresh installs create a daily procedure. Arcane renews certificates and can replace its environment credential. Portainer rotates tunnel/session credentials, which is different from automated CA rotation. Hawser uses manual credential replacement. |
 
-## What changed since the older comparison
+Portwing's standard mode can also use configured shared-secret authentication. Request-bound Ed25519 behavior describes its signature path, not every possible deployment.
 
-- **Komodo fully replaced its passkey-only auth.** Komodo v2.0.0 shipped
-  outbound Periphery connections and public-key authentication together: Core
-  and Periphery now authenticate with automatically generated public/private
-  key pairs, exchanged over a Noise-protocol handshake, with automatic key
-  rotation.
-- **Arcane is now a direct peer.** It offers direct and edge agents, polling,
-  automated mTLS, optional socket-proxy hardening, signed artifacts, Swarm,
-  and controller-managed upgrades.
-- **Arcane signs post-quantum as of v2.10.0.** Sessions, OIDC, passkeys, and
-  edge mTLS moved to ML-DSA-87. Edge mTLS is still opt-in, the agent token
-  still bootstraps the first enrollment, and an existing ECDSA P-384 CA keeps
-  issuing P-384 certificates, so only a freshly generated CA is ML-DSA-87.
-  Portwing's Ed25519 is not weaker against any attacker that exists today, but
-  it is classical and Portwing has no post-quantum option on any surface.
-- **Hawser is the closest scope match.** Both Hawser and Portwing are small Go
-  binaries with transparent Docker proxying, Compose, metrics collection, and
-  outbound WebSocket transport.
+## Scope the cryptographic claims
 
-Portwing's differentiators should therefore be stated precisely: per-request
-replay protection, signed edge enrollment without a reusable bearer credential
-on the agent, Sockguard's narrow policy boundary, agent-level structured audit,
-a native Prometheus endpoint, read-only MCP, and deliberately low dependency
-count.
+Arcane offers opt-in edge mTLS with ML-DSA-87 certificates from newly generated CAs. Existing P-384 CAs continue issuing classical certificates, and the environment credential remains part of the edge flow. A post-quantum certificate signature does not, by itself, establish post-quantum key exchange or an entirely post-quantum channel.
 
-## Known caveats in reviewed outbound/edge implementations
+The earlier platform-wide "moved to ML-DSA-87" wording was too broad: current browser sessions, OIDC and passkeys retain other algorithms. Portwing uses classical Ed25519 signatures and has no post-quantum signature option. This comparison does not establish a need for a new Portwing cryptographic subsystem before v1.0.
 
-Every direct peer now supports both inbound and outbound connection modes.
-That's required parity, not a unique claim, and it describes direction
-support only, not equal robustness. Two of the reviewed outbound
-implementations have maintainer-confirmed gaps:
+Komodo v2 added preferred public-key authentication and deprecated legacy passkeys. Configured inbound legacy passkeys remain supported in v2.3.3.
 
-- **Hawser's edge mode is not fully outbound-only.** It starts an HTTP server
-  on port 2376 (serving `/_hawser/health` and `/_hawser/info`) bound to all
-  interfaces unless the operator sets `BIND_ADDRESS=127.0.0.1`
-  (maintainer-confirmed: [hawser#71](https://github.com/Finsys/hawser/issues/71)).
-  Portwing's edge mode also runs a local health listener, but it defaults to
-  loopback and the config loader refuses a non-loopback bind unless the
-  operator sets `ALLOW_UNAUTHENTICATED_REMOTE=true`.
-- **Komodo's outbound leg has two open gaps.** It ignores
-  `https_proxy`/`HTTPS_PROXY` for the outbound connection
-  (open since 2026-06-09: [komodo#1473](https://github.com/moghtech/komodo/issues/1473)),
-  and a hardcoded 2-second handshake timeout can stall reconnection
-  indefinitely (open since 2026-07-08:
-  [komodo#1518](https://github.com/moghtech/komodo/issues/1518)).
-  Portwing's edge client honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`
-  for its outbound connection.
+## Outbound implementation caveats
+
+- **Hawser's health listener.** Hawser connects to Dockhand outbound and also starts an unauthenticated health-only HTTP listener, defaulting to `0.0.0.0:2376`. Set `BIND_ADDRESS=127.0.0.1` to bind it to loopback. A listener inside a container is not necessarily published on the host, and management does not require an inbound port. The tagged [v0.2.50 implementation](https://github.com/Finsys/hawser/blob/v0.2.50/internal/edge/client.go#L1260) serves `/_hawser/health`, not the older health/info pair described in the closed [issue #71](https://github.com/Finsys/hawser/issues/71). Portwing's edge operations listener defaults to loopback and rejects a non-loopback bind unless `ALLOW_UNAUTHENTICATED_REMOTE=true` is configured.
+- **Komodo's open user reports.** The current connector does not implement HTTP proxy environment handling, consistent with [#1473](https://github.com/moghtech/komodo/issues/1473). A v2.2.0 user reported reconnect stalls on unstable Tailscale links in [#1518](https://github.com/moghtech/komodo/issues/1518). The current release retains a two-second login-message timeout, but the reported indefinite stall and its suspected cause have not been independently reproduced here. Both issues remain open with no maintainer comments at the review date. Portwing's edge client uses `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` for its outbound connection.
+
+Peer caveats are not evidence that Portwing's own reconnect or streaming path passed. Its operational gates remain separate.
+
+## Release evidence
+
+These observations cover the listed release assets, image indexes/platform attestations, OCI referrer discovery and fallback/legacy attachment tags. A missing attachment in those paths is not proof that no alternate signing service or registry exists. SBOM formats and SLSA predicate versions are not build assurance levels.
+
+| Peer | Observed evidence |
+| --- | --- |
+| Arcane v2.16.1 | Image signatures and signed checksums passed Cosign public-key verification. Images carry SPDX SBOMs and BuildKit/GitHub provenance statements. The same fuller evidence was also present for the previously reviewed v2.10.1. |
+| Portainer 2.45.2 | Controller archives publish checksums. Agent images carry SPDX SBOMs and BuildKit SLSA v1 provenance statements. No Cosign signature was found in the inspected discovery paths. |
+| Komodo v2.3.3 | Release assets are binaries. Periphery images carry BuildKit SLSA v1 provenance statements; no SBOM or Cosign signature was found in the inspected discovery paths. |
+| Hawser v0.2.50 | Checksums and successful GitHub immutable-release attestation verification. Image SBOMs, build provenance and Cosign signatures were not found in the inspected image evidence. |
+| Diun v4.33.0 | Archive/image SPDX SBOMs and SLSA provenance statements, plus successful GitHub immutable-release attestation verification. No Cosign signature was found in the checked Docker Hub subjects. |
+
+GitHub immutable-release attestations bind a release's asset digests and tag commit. They are different from SLSA build provenance. The peer provenance statements above were read; only the explicitly named signatures and release attestations were cryptographically verified. One oversized Portainer Windows SBOM was inspected by descriptor only. GHCR referrer API 404s are discovery limits.
+
+The earlier Portainer "300 MB node image" comparison was unsupported and mixed image size with binary size. It has been removed. No runtime size or performance ranking follows from this review.
+
+## Adjacent update tools
+
+[Watchtower v1.7.1](https://github.com/containrrr/watchtower/releases/tag/v1.7.1) is an updater client for local or remote Docker daemons, including TLS connections. Its upstream repository is archived. Workload Cosign enforcement is not documented in the reviewed upstream arguments or tagged pull path; the previous "newer builds" claim had no verified build or source.
+
+[Diun v4.33.0](https://github.com/crazy-max/diun/releases/tag/v4.33.0) discovers images through providers, including a configurable Docker endpoint with TLS settings, and sends notifications. Neither tool exposes Portwing's general-purpose management proxy. Both document opt-in Prometheus metrics; Watchtower labels its `/v1/metrics` endpoint experimental.
 
 ## Pre-v1 decisions
 
-The review found no missing lifecycle, streaming, Compose, observability, or
-authentication primitive that requires new Portwing code before v1.0. The
-remaining gates are operational:
+This peer review identified no additional agent capability that must ship before v1.0. Release readiness still depends on validating the supported Portwing, Drydock and Sockguard versions together and completing these operational checks:
 
-1. Validate tagged Portwing, Drydock, and Sockguard artifacts together across
-   the complete standard/edge and allow/deny matrix.
-2. Exercise enrollment, overlapping-key rotation, revocation, SIGHUP reload,
-   clock-skew failure, and recovery against a real controller.
-3. Keep the OpenAPI contract, compatibility matrix, Sockguard presets, and
-   competitive claims synchronized.
-4. Keep the base and compose presets build-denied by default; the
-   `portwing-with-build.yaml` and `portwing-with-mediated-build.yaml` presets
-   are the opt-in paths for classic and BuildKit builds respectively.
+1. Validate tagged artifacts across the Standard/Edge and allow/deny matrix.
+2. Exercise enrollment, overlapping-key rotation, revocation, SIGHUP reload, clock-skew rejection and recovery against a real controller.
+3. Keep the OpenAPI contract, compatibility matrix, Sockguard presets and competitive claims synchronized.
+4. Keep base and Compose presets build-denied by default; retain explicit opt-in classic and mediated BuildKit presets.
 
-## Deliberate non-goals
+## Non-goals
 
-Portwing will not add arbitrary host shell access, host-file browsing, volume
-backup, Swarm/Kubernetes orchestration, a UI, RBAC database, GitOps engine,
-scheduler, scanner, notification system, or secrets vault for feature-table
-parity. Those capabilities belong in Drydock or a specialized service.
+Portwing will not add arbitrary host shell access, host-file browsing, volume backup, Swarm/Kubernetes orchestration, a UI, RBAC database, GitOps engine, scheduler, scanner, notification system or secrets vault for feature-table parity. Those capabilities belong in Drydock or a specialized service.
 
 ## Primary evidence
 
 - [Docker daemon access security](https://docs.docker.com/engine/security/protect-access/)
-- Portainer [agent security](https://docs.portainer.io/faqs/getting-started/how-does-portainer-secure-connectivity-to-and-from-agents-and-edge-agents) and [Edge architecture](https://docs.portainer.io/advanced/edge-agent)
-- Komodo [server onboarding](https://komo.do/docs/setup/connect-servers) and [v2 changes](https://komo.do/docs/releases/v2.0.0)
-- Arcane [remote environments](https://getarcane.app/docs/features/environments), [edge mTLS](https://getarcane.app/docs/security/edge-mtls), and [socket proxy](https://getarcane.app/docs/setup/socket-proxy)
-- Arcane ML-DSA-87 migration: [v2.10.0 release notes](https://github.com/getarcaneapp/arcane/releases/tag/v2.10.0), [PR #3785](https://github.com/getarcaneapp/arcane/pull/3785), and [v2.10.1 release notes](https://github.com/getarcaneapp/arcane/releases/tag/v2.10.1)
-- [Hawser repository](https://github.com/Finsys/hawser) and [edge-mode bind-address issue](https://github.com/Finsys/hawser/issues/71)
-- Portainer [2.39.5 release assets](https://github.com/portainer/portainer/releases/tag/2.39.5) and the `portainer/agent:2.39.5` image manifest and attestations, checked October 8, 2026
-- Komodo [v2.3.2 release assets](https://github.com/moghtech/komodo/releases/tag/v2.3.2) and the `ghcr.io/moghtech/komodo-periphery:2.3.2` image manifest and attestations, checked October 8, 2026
-- Komodo outbound-leg issues: [proxy env vars ignored](https://github.com/moghtech/komodo/issues/1473) and [hardcoded handshake timeout](https://github.com/moghtech/komodo/issues/1518)
-- Watchtower [metrics](https://containrrr.dev/watchtower/metrics/) and [arguments](https://containrrr.dev/watchtower/arguments/) (opt-in, experimental `/v1/metrics`), checked October 8, 2026; `containrrr/watchtower:1.7.1` linux/amd64 image manifest (`sha256:f9086bfda061…`, 5.63 MB of compressed layers), measured October 8, 2026
-- Diun [metrics configuration](https://crazymax.dev/diun/config/metrics/) (opt-in metrics server, `:9090/metrics`), checked October 8, 2026
+- Portainer [agent security](https://docs.portainer.io/faqs/getting-started/how-does-portainer-secure-connectivity-to-and-from-agents-and-edge-agents), [Edge architecture](https://docs.portainer.io/advanced/edge-agent), [Async Edge](https://docs.portainer.io/admin/environments/add/docker/edge-async), and [update/rollback scope](https://docs.portainer.io/admin/environments/update)
+- Portainer 2.45.2 [signature verifier](https://github.com/portainer/agent/blob/2.45.2/crypto/ecdsa.go#L85), [local metrics handler](https://github.com/portainer/agent/blob/2.45.2/http/handler/metrics/handler.go), and [release assets](https://github.com/portainer/portainer/releases/tag/2.45.2)
+- Komodo [server onboarding](https://komo.do/docs/setup/connect-servers), [v2 migration](https://komo.do/docs/releases/v2.0.0), [v2.3.3 connector](https://github.com/moghtech/komodo/blob/v2.3.3/lib/transport/src/websocket/tungstenite.rs), and [logging configuration](https://github.com/moghtech/komodo/blob/v2.3.3/config/periphery.config.toml#L199)
+- Arcane [remote environments](https://getarcane.app/docs/features/environments), [edge mTLS](https://getarcane.app/docs/security/edge-mtls), [socket proxy](https://getarcane.app/docs/security/socket-proxy), [OpenTelemetry](https://getarcane.app/docs/settings/opentelemetry), and [artifact verification](https://getarcane.app/docs/security/verify-artifacts)
+- Arcane v2.16.1 [authentication code](https://github.com/getarcaneapp/arcane/blob/v2.16.1/backend/internal/auth/service.go#L909), [agent events](https://github.com/getarcaneapp/arcane/blob/v2.16.1/backend/internal/event/service.go#L81), and [release workflow](https://github.com/getarcaneapp/arcane/blob/v2.16.1/.github/workflows/release.yml)
+- Hawser [repository and deployment](https://github.com/Finsys/hawser), [v0.2.50 health listener](https://github.com/Finsys/hawser/blob/v0.2.50/internal/edge/client.go#L1260), and [release workflow](https://github.com/Finsys/hawser/blob/v0.2.50/.github/workflows/release.yml)
+- Diun [Docker provider and TLS](https://crazymax.dev/diun/providers/docker/), [metrics](https://crazymax.dev/diun/config/metrics/), and [v4.33.0 build workflow](https://github.com/crazy-max/diun/blob/v4.33.0/.github/workflows/build.yml)
+- Watchtower [remote hosts](https://containrrr.dev/watchtower/remote-hosts/), [arguments](https://containrrr.dev/watchtower/arguments/), [metrics](https://containrrr.dev/watchtower/metrics/), and [v1.7.1 pull path](https://github.com/containrrr/watchtower/blob/v1.7.1/pkg/container/client.go#L350)

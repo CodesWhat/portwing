@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 failures=0
+release_version_pattern='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?'
+release_value_pattern='[0-9]+\.[0-9]+\.[0-9]+(-[[:alnum:].-]+)?'
 
 require_text() {
 	local file="$1"
@@ -127,7 +130,7 @@ validate_current_release_example_values() {
 	fi
 
 	stale_matches="$(printf '%s\n' "${matches}" |
-		grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' |
+		grep -Eo "${release_value_pattern}" |
 		grep -Fvx -- "${release_version}" || true)"
 	if [ -n "${stale_matches}" ]; then
 		echo "FAIL: active release examples must use ${release_version} (${file} contains:)" >&2
@@ -273,21 +276,21 @@ done
 # with the docs it was written to expect, not with the version actually
 # being released — that's exactly how this contract sat pinned at v0.9.2
 # through two release cuts and stayed green while the docs it exists to
-# police went stale. CHANGELOG.md's newest dated "## [vX.Y.Z] - YYYY-MM-DD"
-# heading is the same value release-cut.yml already requires to exist
+# police went stale. CHANGELOG.md's newest dated stable or RC heading
+# is the same value release-cut.yml already requires to exist
 # before it will push a tag ("Validate CHANGELOG entry for release tag"),
 # so sourcing it from there too leaves no separate constant to forget.
-changelog_heading_regex='^## \[v[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$'
+changelog_heading_regex="^## \\[v${release_version_pattern}\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$"
 release_heading="$(grep -E "${changelog_heading_regex}" CHANGELOG.md | sed -n '1p' || true)"
 previous_heading="$(grep -E "${changelog_heading_regex}" CHANGELOG.md | sed -n '2p' || true)"
-release_version="$(printf '%s\n' "${release_heading}" | sed -E 's/^## \[v([0-9.]+)\].*/\1/')"
+release_version="$(printf '%s\n' "${release_heading}" | sed -E 's/^## \[v([^]]+)\].*/\1/')"
 release_date="$(printf '%s\n' "${release_heading}" | sed -E 's/.*- ([0-9-]+)$/\1/')"
-previous_version="$(printf '%s\n' "${previous_heading}" | sed -E 's/^## \[v([0-9.]+)\].*/\1/')"
+previous_version="$(printf '%s\n' "${previous_heading}" | sed -E 's/^## \[v([^]]+)\].*/\1/')"
 
-if ! echo "${release_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' ||
+if ! echo "${release_version}" | grep -qE "^${release_version_pattern}$" ||
 	! echo "${release_date}" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' ||
-	! echo "${previous_version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-	echo "FAIL: could not derive release_version, release_date, and previous_version from CHANGELOG.md's two newest dated '## [vX.Y.Z] - YYYY-MM-DD' headings" >&2
+	! echo "${previous_version}" | grep -qE "^${release_version_pattern}$"; then
+	echo "FAIL: could not derive release_version, release_date, and previous_version from CHANGELOG.md's two newest dated stable or RC headings" >&2
 	failures=$((failures + 1))
 	release_version="unresolved"
 	release_date="unresolved"
@@ -347,7 +350,7 @@ require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"'
 require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
 require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
 release_version_regex="${release_version//./\\.}"
-stale_readme_examples="$(grep -Eo '(VERSION=|portwing_)[0-9]+\.[0-9]+\.[0-9]+' README.md |
+stale_readme_examples="$(grep -Eo "(VERSION=|portwing_)${release_value_pattern}" README.md |
 	grep -Ev "^(VERSION=|portwing_)${release_version_regex}$" || true)"
 if [ -n "${stale_readme_examples}" ]; then
 	echo "FAIL: README release commands and asset names must use ${release_version}:" >&2
@@ -369,7 +372,11 @@ if [ "${release_version}" != "unresolved" ] && [ "${docs_version_title}" != "${e
 fi
 require_text "website/public/llms.txt" "Portwing v${release_version} is" "agent discovery metadata must identify the current release"
 require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must identify the current release"
-require_text "COMPATIBILITY.md" "v${release_version} (latest release) / \`main\`" "the compatibility matrix must identify the current release"
+release_label="latest release"
+case "${release_version}" in
+*-rc.*) release_label="release candidate" ;;
+esac
+require_text "COMPATIBILITY.md" "v${release_version} (${release_label}) / \`main\`" "the compatibility matrix must identify the current release"
 require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
 for example_file in \
 	examples/docker-compose.edge.yml \
@@ -384,13 +391,27 @@ for example_file in \
 	validate_current_release_example_values "${example_file}" \
 		"$(grep -E 'ghcr\.io/codeswhat/portwing:' "${example_file}" || true)" \
 		"the example ${example_file} must pin the current release"
+	image_values="$(awk '
+		/^[[:space:]]*image:[[:space:]]*/ {
+			sub(/^[[:space:]]*image:[[:space:]]*/, "")
+			sub(/[[:space:]]+#.*/, "")
+			sub(/[[:space:]]*$/, "")
+			sub(/^["\047]/, "")
+			sub(/["\047]$/, "")
+			if ($0 ~ /^ghcr\.io\/codeswhat\/portwing([:@]|$)/) print
+		}
+	' "${example_file}")"
+	if [ -z "${image_values}" ] || [ -n "$(printf '%s\n' "${image_values}" | grep -Fvx -- "ghcr.io/codeswhat/portwing:${release_version}" || true)" ]; then
+		echo "FAIL: active Portwing images must use ghcr.io/codeswhat/portwing:${release_version} (${example_file})" >&2
+		failures=$((failures + 1))
+	fi
 done
 require_exactly_one_active "examples/observability/docker-compose.yml" '^[[:space:]]+test:' \
 	'test: ["CMD", "/usr/bin/portwing", "healthcheck"]' \
 	"the observability example must use the shell-free Portwing healthcheck"
 openapi_agent_version_examples="$(awk '
 	/^        (version|agentVersion):[[:space:]]*$/ { in_agent_version = 1; next }
-	in_agent_version && /^[[:space:]]+example: "[0-9]+\.[0-9]+\.[0-9]+"$/ {
+	in_agent_version && /^[[:space:]]+example: "[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?"$/ {
 		print
 		in_agent_version = 0
 		next
@@ -401,22 +422,22 @@ validate_current_release_example_values "api/openapi.yaml" \
 	"${openapi_agent_version_examples}" \
 	"OpenAPI agent-version examples must identify the current release"
 require_current_release_examples "api/openapi.yaml" \
-	'"type":"dd:ack".*"version":"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"\"type\":\"dd:ack\".*\"version\":\"${release_version_pattern}\"" \
 	"OpenAPI Drydock handshake examples must identify the current release"
 require_current_release_examples "docs/content/docs/current/api-reference.mdx" \
-	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"\"(agentVersion|version)\"[[:space:]]*:[[:space:]]*\"${release_version_pattern}\"" \
 	"API reference response examples must identify the current release"
 require_current_release_examples "docs/content/docs/current/standalone-mode.mdx" \
-	'"(agentVersion|version)"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"\"(agentVersion|version)\"[[:space:]]*:[[:space:]]*\"${release_version_pattern}\"" \
 	"standalone-mode response examples must identify the current release"
 require_current_release_examples "docs/content/docs/current/observability.mdx" \
-	'"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' \
+	"\"version\"[[:space:]]*:[[:space:]]*\"${release_version_pattern}\"" \
 	"observability response examples must identify the current release"
 require_current_release_examples "docs/content/docs/current/observability.mdx" \
-	'portwing_build_info\{version="[0-9]+\.[0-9]+\.[0-9]+"\}' \
+	"portwing_build_info\\{version=\"${release_version_pattern}\"\\}" \
 	"observability build metadata examples must identify the current release"
 require_current_release_examples "docs/content/docs/current/security-model.mdx" \
-	'^VERSION=[0-9]+\.[0-9]+\.[0-9]+$' \
+	"^VERSION=${release_version_pattern}$" \
 	"security verification examples must identify the current release"
 
 # The checks above assert the new version is present on each surface they name.
@@ -832,14 +853,14 @@ if cmp -s docs/assets/star-history.svg docs/assets/star-history-dark.svg; then
 fi
 
 require_file "docs/content/docs/current/installation.mdx" "the documentation site must include native installation guidance"
-require_file "NOTICE" "project identity and copyright must live outside the standard license text"
-require_first_line "LICENSE" "                    GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must begin with the canonical AGPL-3.0 text"
-require_sha256 "LICENSE" "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef" "LICENSE must match GitHub's canonical AGPL-3.0 template byte for byte"
-reject_text "LICENSE" "Portwing - Lightweight Remote Docker Agent" "LICENSE must not carry a project-specific preamble"
-reject_text "LICENSE" "Copyright (C) 2026 CodesWhat" "LICENSE must not carry a project-specific copyright preamble"
+require_file "NOTICE" "project identity must live outside the standard license text"
+require_first_line "LICENSE" "MIT License" "LICENSE must begin with the standard MIT text"
+require_text "LICENSE" "Copyright (c) 2026 CodesWhat" "LICENSE must carry the project copyright line"
+require_sha256 "LICENSE" "6b374071d23cf6dd8f5272eba9afdec6271b1cf39f36dd23315426e07a73cf9c" "LICENSE must match the standard MIT text with the project copyright line byte for byte"
+reject_text "LICENSE" "GNU AFFERO GENERAL PUBLIC LICENSE" "LICENSE must not carry the retired AGPL-3.0 text"
 if [ -f "NOTICE" ]; then
 	require_text "NOTICE" "Portwing - Lightweight Remote Docker Agent" "NOTICE must preserve the project identity"
-	require_text "NOTICE" "Copyright (C) 2026 CodesWhat" "NOTICE must preserve the project copyright"
+	require_text "NOTICE" "Copyright (c) 2026 CodesWhat" "NOTICE must preserve the project copyright"
 fi
 if [ -f "docs/content/docs/current/installation.mdx" ]; then
 	require_text "docs/content/docs/current/installation.mdx" "brew install --cask codeswhat/tap/portwing" "Homebrew installation must be documented"

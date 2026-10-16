@@ -1,0 +1,78 @@
+---
+title: Introduction
+description: Portwing is a security-first remote Docker agent — control your containers from anywhere, safely.
+---
+
+A security-first remote Docker agent. Control your containers from anywhere, safely.
+
+## Why Portwing?
+
+The Docker socket (`/var/run/docker.sock`) is effectively root on your host. Most
+remote-management agents mount it straight in and hope nothing goes wrong — a
+compromised agent, a leaked token, or a single missing check is enough to own the
+box. Portwing is built the other way around: **deny by default, prove every action,
+and never touch the raw socket if you can avoid it.**
+
+Portwing is the remote agent for [Drydock](https://github.com/CodesWhat/drydock) — one
+controller managing containers across every one of your hosts — and it runs happily
+standalone too.
+
+- **Default-deny socket** — bundle the sibling project [Sockguard](https://github.com/CodesWhat/sockguard)
+  and Portwing talks to a filtered unix socket instead of the raw daemon. Even a fully
+  compromised agent is constrained to an explicit Docker API allowlist.
+- **Ed25519 per-client auth** — signed requests with replay protection and no shared
+  secrets on the wire. Prefer a token? Store only its Argon2id hash.
+- **Signed & verifiable** — every release ships cosign signatures, per-archive
+  SBOMs, an image SBOM attestation, and SLSA provenance. Verify the image before
+  you trust it.
+- **Hardened runtime** — ships to run `read_only`, `cap_drop: ALL`, and
+  `no-new-privileges`, with tokens delivered as mounted secrets.
+- **Structured audit log** — every action recorded as JSON; auth and key-enrollment
+  events are first-class. Export to immutable storage for tamper evidence.
+- **Zero-dependency metrics** — a cAdvisor-compatible `/metrics` endpoint drops into
+  the dashboards you already run.
+- **AI-native** — a read-only Model Context Protocol server exposes host and container
+  state to MCP-aware agents.
+- **Tiny & multi-arch** — a single static Go binary, ~10 MB, for amd64 · arm64 · arm/v7.
+
+<Callout type="info">
+  Portwing `v0.9.x` is a supported pre-v1 release. Pin to an exact version and review
+  the changelog before upgrading; the HTTP API, environment variables, MCP tool
+  surface, and stable `portwing/1.0` protocol follow the published
+  [stability policy](https://github.com/CodesWhat/portwing/blob/main/STABILITY.md).
+</Callout>
+
+Evaluating another agent? The [competitive landscape](/competitive-landscape)
+compares the current Portainer, Komodo, Arcane, and Hawser agent models, records
+primary sources, and separates Portwing responsibilities from Drydock and
+Sockguard features.
+
+## Architecture
+
+One Drydock controller connects inbound to a Portwing agent on each host. Each agent
+reaches the Docker Engine only through a Sockguard socket filter:
+
+```text
+                         ┌──────────── Remote host A ───────────┐
+                         │  Portwing → sockguard → Docker Engine  │
+   Drydock ──HTTPS+SSE──▶│                                       │
+  (controller)           └───────────────────────────────────────┘
+        │                ┌──────────── Remote host B ───────────┐
+        └─────HTTPS+SSE─▶│  Portwing → sockguard → Docker Engine  │
+                         └───────────────────────────────────────┘
+```
+
+## Quick Start
+
+The strongest posture runs Portwing and Sockguard as two hardened containers sharing a
+filtered socket — neither mounts the raw Docker socket directly:
+
+```bash
+openssl rand -hex 32 > portwing_token.txt
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/docker-compose.with-sockguard.yml
+curl -fsSLO https://raw.githubusercontent.com/CodesWhat/portwing/main/examples/sockguard.yaml
+docker compose -f docker-compose.with-sockguard.yml up -d
+```
+
+See [Getting Started](/getting-started) for the full compose file, the edge-mode
+variant, and the upgrade to Ed25519 key authentication.

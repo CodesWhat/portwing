@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is pre-`v1.0.0` software (currently `v0.9.26`). This roadmap describes
+> Portwing is pre-`v1.0.0` software (currently `v1.0.0-rc.1`). This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
@@ -45,13 +45,14 @@ particular:
 The path to `v1.0.0` is gated on concrete, verifiable items rather than a
 calendar date:
 
-- **Completed 2026-08-29 (re-verified 2026-09-02): Competitive review gate.**
+- **Completed 2026-08-29 (re-verified 2026-10-15): Competitive review gate.**
   The market audit is published at
   [portwing.codeswhat.com/docs/competitive-landscape](https://portwing.codeswhat.com/docs/competitive-landscape). Comparison claims must
   stay tied to primary sources. The audit found no missing container lifecycle,
   streaming, Compose, observability, or authentication primitive that requires
-  new Portwing code for v1.0. A final re-verify against primary sources at the
-  v1.0 cut is the only work remaining.
+  new Portwing code for v1.0. The candidate review refreshed primary-source
+  evidence for the current peer versions, with edition and artifact limits
+  recorded on the canonical page. Recheck claims that change before GA.
 - **Completed 2026-08-29: Tagged acceptance matrix.** Published Portwing's
   then-current release, Drydock v1.6.0, and Sockguard v2.0.0 artifacts passed the full
   Standard/Edge matrix in the
@@ -59,6 +60,11 @@ calendar date:
   A real Drydock controller exercised enrollment, overlapping-key rotation,
   revocation, two SIGHUP reloads, and clock-skew rejection and recovery. The
   legacy-floor row passed alongside the current Standard and Edge rows.
+- **Candidate artifact verification before GA.** Run the hosted tri-tool
+  conformance matrix with the exact published candidate and current stable
+  Drydock and Sockguard artifacts. The historical acceptance above does not
+  establish a candidate result. Keep the current Standard, Edge and legacy
+  floor rows green and retain the workflow evidence.
 - **Completed for v0.8 — Edge-mode graduation.** Drydock 1.6 enables
   `/api/portwing/ws` by default, with `DD_EXPERIMENTAL_PORTWING=false` retained
   as an emergency disable. Drydock's `quality-portwing-fleet-soak.yml` runs the
@@ -88,9 +94,9 @@ calendar date:
 - **Completed for v0.9 — Edge audit export hardening.** Standard and Edge
   modes share one exporter implementation; public docs and Kubernetes examples
   explicitly isolate Edge Mode's unauthenticated operations listener.
-- **Versioned docs archive at v1.0.** `docs/content/docs/current/` holds the
+- **Versioned docs archive at the first v1.0 candidate.** `docs/content/docs/current/` holds the
   tree tracking the latest release, served at the unversioned `/docs/...`
-  URLs. Through `v0.9.x` it is the only tree. At `v1.0.0` the `v0.9` docs are
+  URLs. Through `v0.9.x` it is the only tree. At the first v1.0 candidate the `v0.9` docs are
   archived from the final `v0.9.x` tag into a sibling `v0.9/` directory,
   served at `/docs/v0.9/...` and verified against that tag's tree, so the
   semver guarantees in [STABILITY.md](STABILITY.md) keep the docs they were

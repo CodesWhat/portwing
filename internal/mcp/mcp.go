@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package mcp implements a read-only MCP (Model Context Protocol) server using
 // the Streamable HTTP transport. It exposes Docker container state to AI
 // assistants over a single POST endpoint and serves two protocol revisions:

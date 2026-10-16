@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package auth
 
 // gaps_test.go — targeted tests to reach the remaining uncovered statements

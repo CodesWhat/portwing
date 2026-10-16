@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package server
 
 // hijack_upgrade_header_test.go targets the CONDITIONALS_NEGATION mutant at

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 #
 # soak.sh — RSS-growth soak for the Portwing agent.
 #

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Cut a docs archive: copy docs/content/docs/current/ as it was at a release
 // tag into docs/content/docs/vX.Y/, record where it came from, and list it in
 // the root meta.json. Usage: npm run docs:archive -- vX.Y.Z

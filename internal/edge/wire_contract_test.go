@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package edge
 
 // Wire-contract tests for the integration-facing functions that were previously

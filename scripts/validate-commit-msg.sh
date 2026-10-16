@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Validates the Conventional Commits format used in this repo:
 #   <type>(scope): <description>
 # Scope is optional; "!" before ":" marks a breaking change.
