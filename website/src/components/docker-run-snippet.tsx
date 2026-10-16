@@ -37,7 +37,9 @@ export function DockerRunSnippet({
             {"  "}-p <span className="text-fuchsia-400">3000:3000</span> \{"\n"}
             {"  "}-e TOKEN=$(openssl rand -hex 24) \{"\n"}
             {"  "}
-            <span className="text-fuchsia-400">{SITE_CONFIG.dockerImage}:latest</span>
+            <span className="text-fuchsia-400">
+              {SITE_CONFIG.dockerImage}:{SITE_CONFIG.version}
+            </span>
           </code>
         </pre>
       </CardContent>

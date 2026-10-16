@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Archive the final v0.9 documentation from its release tag and label the live
   documentation as v1.0.
 - Accept explicit RC versions in the release workflow and metadata checks.
-  Candidate install examples pin the RC image and keep the stable channels.
+  Candidate homepage and current-docs install examples pin the RC image.
+  The stable image and Homebrew channels stay on the stable release.
 - Validate complete active image references in deployment examples, so a
   commented correct image cannot hide an untagged or suffixed active image.
 

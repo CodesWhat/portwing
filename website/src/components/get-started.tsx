@@ -42,7 +42,7 @@ const dockerCompose = `# Portwing — standard mode, hardened defaults.
 
 services:
   portwing:
-    image: ${SITE_CONFIG.dockerImage}:latest
+    image: ${SITE_CONFIG.dockerImage}:${SITE_CONFIG.version}
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -163,7 +163,7 @@ export function GetStarted() {
                 <span className="text-xs font-medium text-neutral-500">Native packages</span>
               </div>
               <pre className="overflow-x-auto p-6 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-neutral-300">
-                <code>{`# macOS
+                <code>{`# macOS (latest stable release)
 brew install --cask codeswhat/tap/portwing
 
 # Debian / Ubuntu
