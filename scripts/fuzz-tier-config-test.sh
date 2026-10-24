@@ -183,8 +183,8 @@ fi
 # mechanical line the workflows have to agree on; the reasoning for each choice
 # lives in the workflow comments, not here.
 cache_action_sha="55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
-upload_artifact_sha="043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-download_artifact_sha="3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+upload_artifact_sha="cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+download_artifact_sha="9000827ccba6bdab643e8b6fd33ac0654aef8333"
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 cache_key='          key: fuzz-corpus-v1-${{ runner.os }}-${{ matrix.fuzzer.name }}-${{ github.run_id }}-${{ github.run_attempt }}'
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.

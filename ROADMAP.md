@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is pre-`v1.0.0` software (currently `v1.0.0-rc.1`). This roadmap describes
+> Portwing is pre-`v1.0.0` software (currently `v1.0.0-rc.2`). This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
@@ -60,7 +60,7 @@ calendar date:
   A real Drydock controller exercised enrollment, overlapping-key rotation,
   revocation, two SIGHUP reloads, and clock-skew rejection and recovery. The
   legacy-floor row passed alongside the current Standard and Edge rows.
-- **Completed for v1.0.0-rc.1: Candidate artifact verification.** The exact
+- **Completed for the initial v1.0 candidate: Candidate artifact verification.** The exact
   published candidate passed Standard, Edge and legacy-floor rows with Drydock
   [v1.6.0](https://github.com/CodesWhat/sockguard/actions/runs/38836428734) and
   [v1.6.1](https://github.com/CodesWhat/sockguard/actions/runs/38837070094), both
@@ -95,7 +95,7 @@ calendar date:
 - **Completed for v0.9 — Edge audit export hardening.** Standard and Edge
   modes share one exporter implementation; public docs and Kubernetes examples
   explicitly isolate Edge Mode's unauthenticated operations listener.
-- **Completed for v1.0.0-rc.1: Versioned docs archive.** The `v0.9` docs
+- **Completed for the initial v1.0 candidate: Versioned docs archive.** The `v0.9` docs
   were frozen from the final v0.9 release tag and are served at `/docs/v0.9/...`,
   with their source tree verified by the archive contract. The live
   `docs/content/docs/current/` tree serves at the unversioned `/docs/...` URLs
@@ -109,22 +109,17 @@ calendar date:
   for any CodesWhat repo. The trigger is that workflow landing — portwing's
   release job moves onto it then, not before.
 
-**Implemented on the development branches: controller-assisted two-key rotation.**
+**Included in v1.0.0-rc.2: controller-assisted two-key rotation.**
 Opt-in durable managed credentials, Standard replacement proof and Edge
-signed-hello handoff are verified with Drydock. The published v1.0 candidate does not include this work.
+signed-hello handoff require Drydock `v1.8.0-rc.1+` on the v1.8 line. Portwing's
+previous candidate did not include this feature. Current operator docs, API,
+README and release metadata record the supporting tags together in
+[COMPATIBILITY.md](COMPATIBILITY.md#controller-assisted-rotation).
 
-**Completed in development: release documentation alignment.** The README,
-Unreleased changelog and current operator docs identify managed rotation as
-unreleased, with matching development branches recorded in
-[COMPATIBILITY.md](COMPATIBILITY.md#development-only-controller-assisted-rotation).
-The matrix records the completed rc.1 evidence separately from the new
-implementation. Archive guidance follows [SECURITY.md](SECURITY.md): v0.9 is
-supported until v1.0.0 GA; frozen content does not imply unsupported software.
-
-**Before the next candidate or GA:** record the first supporting release tags
-for rotation on both sides when published, rerun conformance against the exact
-new artifacts and update release/support metadata together. The existing wire
-level does not establish additive feature support. Follow
+**Before GA:** rerun conformance against the exact new artifacts and record the
+successful hosted runs. The rc.1 evidence above does not verify rc.2. Keep
+release/support metadata aligned; the existing wire level does not establish
+additive feature support. Follow
 [RELEASING.md](RELEASING.md#release-documentation-and-compatibility).
 Legacy query-free HTTP signatures have no scheduled removal.
 

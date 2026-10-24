@@ -21,7 +21,7 @@ docker run -d \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.0.0-rc.1
+  ghcr.io/codeswhat/portwing:1.0.0-rc.2
 ```
 
 <Callout type="warn">
@@ -54,7 +54,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ```json
 {
-  "agentVersion": "1.0.0-rc.1",
+  "agentVersion": "1.0.0-rc.2",
   "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"
@@ -155,7 +155,7 @@ curl -sf http://localhost:3000/_portwing/health
   "live": true,
   "ready": true,
   "mode": "standard",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "uptimeSeconds": 3842.7,
   "docker": "connected",
   "controller": "not_applicable"

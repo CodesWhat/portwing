@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes are shipped on the **latest stable release line**. The v1.0
+Security fixes are shipped on the **latest stable release line**. The v1.0.0-rc.2
 candidate is also supported during evaluation; it does not retire the 0.9
 stable line. That line becomes unsupported when v1.0.0 GA ships.
 

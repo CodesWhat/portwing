@@ -7,18 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.0-rc.2] - 2026-10-24
+
 ### Added
 
-- Opt-in controller-assisted Ed25519 key rotation with matching Drydock
-  development builds. Standard mode stages a successor, proves its private key
-  and then retires its predecessor. Edge mode generates the replacement on the
-  agent and proves it with a fresh signed hello before retiring the old key.
+- Opt-in controller-assisted Ed25519 key rotation with Drydock
+  v1.8.0-rc.1 or later on the v1.8 line. Standard mode stages a successor,
+  proves its private key and then retires its predecessor. Edge mode generates
+  the replacement on the agent and proves it with a fresh signed hello before
+  retiring the old key.
 - `KEY_ROTATION_DIR` enables private, durable managed credentials without
   rewriting deployment-owned bootstrap files. Rotation supports restart
   recovery, abort and retry; status and audit records expose public key IDs.
-  This feature is not included in v1.0.0-rc.1. See
-  [compatibility](COMPATIBILITY.md#development-only-controller-assisted-rotation)
-  for the development branches and released-version boundaries.
+  See [compatibility](COMPATIBILITY.md#controller-assisted-rotation) for peer
+  minimums and artifact verification.
+
+### Security
+
+- Build Portwing and the bundled ARMv7 Compose client with Go 1.27.3,
+  including the crypto/x509 fix for GO-2026-6809. Update x/crypto to v0.58.0.
+- Refresh the web lockfile to include patched Next.js, DOMPurify, fast-uri,
+  Puppeteer and Zod dependencies, with no npm audit findings.
+- Refresh the digest-pinned Go, Alpine, Wolfi and ClusterFuzzLite base images.
+
+### Fixed
+
+- Reference each workspace's direct PostCSS dependency from its overrides so
+  Renovate can update the version without an EOVERRIDE lockfile failure.
+- Align the fuzz artifact contract with updated upload/download action SHAs.
+
+### Changed
+
+- Update pending non-major npm dependencies and SHA-pinned GitHub Actions.
+- Identify the RC2 managed-rotation peer minimums in current operator docs and
+  API metadata. The v0.9 stable channel remains supported during evaluation.
 
 ## [v1.0.0-rc.1] - 2026-10-16
 
