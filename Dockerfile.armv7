@@ -43,7 +43,7 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && rm -rf /out/var/cache/apk/*
 
 # Static ARMv7 clients avoid Alpine's older bundled Go dependencies.
-ADD --checksum=sha256:b13646f48d2f8e7703b5fc86435088ceff6474e0a35ffb91656acddd70c2c519 https://download.docker.com/linux/static/stable/armhf/docker-29.9.1.tgz /tmp/docker.tgz
+ADD --checksum=sha256:7b911fe928d628e4eb6af8714d9ac8ad38b450649b05f3966e54994e6d25f21b https://download.docker.com/linux/static/stable/armhf/docker-29.9.2.tgz /tmp/docker.tgz
 COPY --from=compose-builder /docker-compose /out/usr/bin/docker-compose
 COPY --from=compose-builder /compose/LICENSE /out/usr/share/licenses/docker-compose/LICENSE
 RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker \

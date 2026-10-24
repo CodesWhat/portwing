@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Build Portwing and the bundled ARMv7 Compose client with Go 1.27.3,
   including the crypto/x509 fix for GO-2026-6809. Update x/crypto to v0.58.0.
+  The ARMv7 Docker CLI moves to 29.9.2, built with patched Go 1.26.10.
 - Refresh the web lockfile to include patched Next.js, DOMPurify, fast-uri,
   Puppeteer and Zod dependencies, with no npm audit findings.
 - Refresh the digest-pinned Go, Alpine, Wolfi and ClusterFuzzLite base images.
