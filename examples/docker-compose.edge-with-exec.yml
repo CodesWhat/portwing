@@ -55,7 +55,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.1
+    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
     restart: unless-stopped
     depends_on:
       - sockguard

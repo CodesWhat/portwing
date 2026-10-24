@@ -15,20 +15,20 @@
 # linux/arm/v7/portwing).
 
 # Compose v5.5.1 with patched containerd and x/net, isolated from Portwing modules.
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS compose-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS compose-builder
 ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee621025f2 https://github.com/docker/compose/archive/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de.tar.gz /tmp/compose.tar.gz
 WORKDIR /compose
 RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \
     && go get github.com/containerd/containerd/v2@v2.3.6 golang.org/x/net@v0.60.0 \
     && go mod verify \
     && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -tags e2e \
-        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.3" \
+        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.4" \
         -o /docker-compose ./cmd
 
 # Wolfi rootfs — amd64 and arm64 share one recipe; buildx pulls the per-arch
 # wolfi-base via --platform, so the arm64 build of this stage installs arm64
 # packages even though the stage is named "-amd64".
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:65e1acb87a2bf356b92c5f70f3980f03b4bb51dfd483c834e01557525f15c1d9 AS rootfs-amd64
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7 AS rootfs-amd64
 RUN apk add --no-cache --initdb --root /out \
     --repository https://packages.wolfi.dev/os \
     --keys-dir /etc/apk/keys \
@@ -44,7 +44,7 @@ FROM rootfs-amd64 AS rootfs-arm64
 # Alpine rootfs — armv7 only (Wolfi has no armv7). The branch (vMAJOR.MINOR) is
 # derived from the base image so the FROM tag is the single source of truth for
 # the version: Dependabot bumps the tag and the repositories follow.
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS rootfs-arm
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs-arm
 RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && apk add --no-cache --initdb --root /out \
         --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
@@ -59,7 +59,7 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && rm -rf /out/var/cache/apk/*
 
 # Static ARMv7 clients avoid Alpine's older bundled Go dependencies.
-ADD --checksum=sha256:b13646f48d2f8e7703b5fc86435088ceff6474e0a35ffb91656acddd70c2c519 https://download.docker.com/linux/static/stable/armhf/docker-29.9.1.tgz /tmp/docker.tgz
+ADD --checksum=sha256:7b911fe928d628e4eb6af8714d9ac8ad38b450649b05f3966e54994e6d25f21b https://download.docker.com/linux/static/stable/armhf/docker-29.9.2.tgz /tmp/docker.tgz
 COPY --from=compose-builder /docker-compose /out/usr/bin/docker-compose
 COPY --from=compose-builder /compose/LICENSE /out/usr/share/licenses/docker-compose/LICENSE
 RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker \

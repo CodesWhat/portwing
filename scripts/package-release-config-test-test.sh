@@ -447,9 +447,21 @@ expect_release_contract_failure \
 	"the package release contract must reject a line-pinned .gitleaksignore working-tree fingerprint"
 mv "${gitleaksignore_backup}" "${fixture}/.gitleaksignore"
 
-# The stale-previous-version exemption is scoped to README.md's "since
-# v<previous>" release note only. A plain previous-version literal anywhere
-# else - including another Markdown file - must still fail.
+# Plain previous-version references still fail outside historical evidence.
+compatibility_backup="${fixture}/COMPATIBILITY.md.evidence-backup"
+cp "${fixture}/COMPATIBILITY.md" "${compatibility_backup}"
+printf '\nThe exact v%s artifacts passed the hosted matrix on 2026-10-16:\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
+printf '| v%s | v1.6.1 | v2.2.10 | PASS / PASS / PASS | Matrix run |\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
+if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
+	echo "FAIL: published matrix evidence must retain the version actually tested" >&2
+	exit 1
+fi
+printf '\nStale reference to v%s.\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
+expect_release_contract_failure \
+	"FAIL: stale references to v${previous_version} remain outside the changelog" \
+	"the evidence exemption must not hide a stale reference elsewhere in COMPATIBILITY.md"
+mv "${compatibility_backup}" "${fixture}/COMPATIBILITY.md"
+
 releasing_stale_backup="${fixture}/RELEASING.md.stale-version-backup"
 cp "${fixture}/RELEASING.md" "${releasing_stale_backup}"
 printf '\nStale reference to v%s.\n' "${previous_version}" >>"${fixture}/RELEASING.md"

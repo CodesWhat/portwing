@@ -152,7 +152,7 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
-For a release candidate, pass an explicit version such as `1.0.0-rc.1`.
+For a release candidate, pass an explicit version such as `1.0.0-rc.2`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag and
@@ -262,10 +262,10 @@ the Git-backed deployment or update its GitHub status.
 
    **ARMv7 runtime.** Wolfi publishes no armv7 repository, so this image retains
    Alpine 3.24 release metadata and CA certificates alongside static binaries.
-   Docker CLI 29.9.1 is an official download pinned by SHA256 and built with Go
-   1.26.9. Compose is built from checksum-pinned upstream 5.5.1 source with
-   containerd 2.3.6, x/net 0.60.0, and Go 1.27.2, identifies itself as
-   `v5.5.1-portwing.3`, and runs directly or as a CLI plugin.
+   Docker CLI 29.9.2 is an official download pinned by SHA256 and built with Go
+   1.26.10. Compose is built from checksum-pinned upstream 5.5.1 source with
+   containerd 2.3.6, x/net 0.60.0, and Go 1.27.3, identifies itself as
+   `v5.5.1-portwing.4`, and runs directly or as a CLI plugin.
    Both ARM recipes omit BusyBox; image health checks use `portwing healthcheck`
    for HTTP/TLS probes, with HTTPS pinned to the configured `TLS_CERT` leaf.
    The static Docker CLI does not embed a complete Go module inventory, so a

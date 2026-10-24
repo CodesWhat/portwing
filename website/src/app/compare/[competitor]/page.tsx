@@ -32,6 +32,6 @@ export default async function CompetitorPage({
   if (!config) {
     notFound();
   }
-  const { RoutePage } = createComparisonRoute(config);
-  return <RoutePage />;
+  const { page } = createComparisonRoute(config);
+  return page;
 }

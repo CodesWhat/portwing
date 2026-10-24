@@ -467,14 +467,19 @@ require_current_release_examples "docs/content/docs/current/security-model.mdx" 
 # and editing them would break its byte-for-byte tie to the tag. The archive
 # contract (docs-archive-config-test.sh) polices those files instead. current/
 # gets no such pass.
+# Published matrix rows and their dated introduction in COMPATIBILITY.md retain
+# the exact tested version. The active release row is checked separately above;
+# other previous-version references in the same file still fail.
 stale_previous_version_matches="$(git grep -n -F -- "$previous_version" -- \
 	'*.md' '*.mdx' '*.ts' '*.tsx' '*.yaml' '*.yml' '*.txt' \
 	':(exclude)CHANGELOG.md' \
 	':(exclude)docs/content/docs/v[0-9]*' \
 	':(exclude)scripts/package-release-config-test.sh' || true)"
 if [ -n "${stale_previous_version_matches}" ]; then
-	stale_previous_version_matches="$(awk -v exempt="since v${previous_version}" '
+	stale_previous_version_matches="$(awk -v exempt="since v${previous_version}" -v previous="${previous_version}" '
 		index($0, "README.md:") == 1 && index($0, exempt) { next }
+		index($0, "COMPATIBILITY.md:") == 1 && (index($0, ":The exact v" previous " artifacts passed the hosted matrix on ") ||
+			index($0, ":| v" previous " | v")) { next }
 		{ print }
 	' <<<"${stale_previous_version_matches}")"
 fi
