@@ -126,3 +126,46 @@ test("invalid attempt and artifact identifiers cannot enter action outputs", (t)
   assert.match(badId.stderr, /No usable Go coverage artifact/u);
   assert.equal(badId.output, "");
 });
+
+function exerciseProfileGuard(t, script) {
+  for (const state of ["missing", "empty", "present"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pw-profile-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    if (state !== "missing") {
+      const report = path.join(root, "artifacts/go-test/coverage.out");
+      fs.mkdirSync(path.dirname(report), { recursive: true });
+      fs.writeFileSync(
+        report,
+        state === "empty" ? "" : "mode: atomic\nexample.invalid/a.go:1.1,1.2 1 1\n",
+      );
+    }
+    const result = spawnSync("/bin/bash", ["-eu", "-c", script], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+    assert.equal(result.status, state === "present" ? 0 : 1, `${state}: ${result.stderr}`);
+    if (state !== "present") assert.match(result.stdout, /coverage profile is missing or empty/u);
+  }
+}
+
+test("the actual workflow rejects missing and empty profiles while accepting a produced report", (t) => {
+  const workflow = fs.readFileSync(path.join(ROOT, ".github/workflows/ci-verify.yml"), "utf8");
+  const step = workflow
+    .split("      - name: Validate Go coverage profile\n")[1]
+    ?.split("\n      - name:")[0];
+  assert.ok(step, "coverage profile validation step is missing");
+  const run = step.split("        run: |\n")[1]?.split("\n        continue-on-error:")[0];
+  assert.ok(run, "coverage profile validation command is missing");
+  exerciseProfileGuard(
+    t,
+    run
+      .split("\n")
+      .map((line) => line.slice(10))
+      .join("\n"),
+  );
+});
+
+test("profile fixtures expose a guard that silently accepts missing coverage", (t) => {
+  assert.throws(() => exerciseProfileGuard(t, "true"), /missing:/u);
+});
