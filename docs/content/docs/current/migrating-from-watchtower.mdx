@@ -67,7 +67,7 @@ Use this when the Drydock controller can reach your host directly — no NAT.
 # docker-compose.yml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.1
+    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
     restart: unless-stopped
     # The image runs as non-root UID 65532; grant the Docker socket's group:
     #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
@@ -120,7 +120,7 @@ Edge mode is production supported under the stable `portwing/1.0` protocol. Dryd
 # docker-compose.yml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.1
+    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
     restart: unless-stopped
     # The image runs as non-root UID 65532; grant the Docker socket's group:
     #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)

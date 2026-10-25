@@ -88,6 +88,29 @@ sit at "Expected" forever. So the order is:
 Read the effective ruleset back afterward rather than trusting the PATCH's
 200. The script prints it.
 
+## Release documentation and compatibility
+
+Prepare release changes through a reviewed PR into the active dev branch.
+Promote that branch to `main` immediately before a cut; `main` is not an
+independent target for release-preparation commits.
+
+- Keep shipped changelog sections intact and new work under Unreleased until
+  assigning its release. README highlights, API descriptions and current docs,
+  including comparison tables, must distinguish the published candidate from
+  later development work.
+- Record feature-specific peer minimums in [COMPATIBILITY.md](COMPATIBILITY.md).
+  For managed rotation, replace the matching-development-build requirement
+  only when supporting Portwing and Drydock tags exist. An unchanged wire
+  compatibility level does not prove support for an additive feature.
+- Record the exact candidate artifacts, peer versions and successful hosted
+  matrix runs. Earlier candidate evidence does not carry forward to a new
+  build. Keep manual overlapping-key/SIGHUP tests distinct from verification
+  of controller-assisted rotation when that feature enters a release.
+- Update [SECURITY.md](SECURITY.md) with the release metadata. Archiving a docs
+  line does not end its support window; the 0.9 line stays supported during
+  v1.0 candidate evaluation and retires at v1.0.0 GA. Leave frozen archives
+  unchanged and fix current guidance separately.
+
 ## Cutting a docs archive
 
 Do this in the prep PR for a new minor or major line (v0.9 to v1.0, say),
@@ -129,7 +152,7 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
-For a release candidate, pass an explicit version such as `1.0.0-rc.1`.
+For a release candidate, pass an explicit version such as `1.0.0-rc.2`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag and
@@ -239,10 +262,10 @@ the Git-backed deployment or update its GitHub status.
 
    **ARMv7 runtime.** Wolfi publishes no armv7 repository, so this image retains
    Alpine 3.24 release metadata and CA certificates alongside static binaries.
-   Docker CLI 29.9.1 is an official download pinned by SHA256 and built with Go
-   1.26.9. Compose is built from checksum-pinned upstream 5.5.1 source with
-   containerd 2.3.6, x/net 0.60.0, and Go 1.27.2, identifies itself as
-   `v5.5.1-portwing.3`, and runs directly or as a CLI plugin.
+   Docker CLI 29.9.2 is an official download pinned by SHA256 and built with Go
+   1.26.10. Compose is built from checksum-pinned upstream 5.5.1 source with
+   containerd 2.3.6, x/net 0.60.0, and Go 1.27.3, identifies itself as
+   `v5.5.1-portwing.4`, and runs directly or as a CLI plugin.
    Both ARM recipes omit BusyBox; image health checks use `portwing healthcheck`
    for HTTP/TLS probes, with HTTPS pinned to the configured `TLS_CERT` leaf.
    The static Docker CLI does not embed a complete Go module inventory, so a

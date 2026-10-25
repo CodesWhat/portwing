@@ -161,8 +161,9 @@ export function createComparisonRoute(config: ComparisonRouteConfig) {
     twitterDescription: config.twitterDescription,
   });
 
-  function RoutePage() {
-    return (
+  return {
+    metadata,
+    page: (
       <ComparisonPage
         competitorName={config.competitorName}
         heroTitle={config.heroTitle}
@@ -180,10 +181,8 @@ export function createComparisonRoute(config: ComparisonRouteConfig) {
           competitorName: config.competitorName,
         })}
       />
-    );
-  }
-
-  return { metadata, RoutePage };
+    ),
+  };
 }
 
 function row(

@@ -218,6 +218,14 @@ if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"${toolchain_version}"; then
 	toolchain_version="unresolved"
 fi
 
+for dockerfile in Dockerfile Dockerfile.release Dockerfile.armv7 Dockerfile.dev; do
+	credential_root="/out"
+	if [ "${dockerfile}" = "Dockerfile.dev" ]; then
+		credential_root=""
+	fi
+	require_text "${dockerfile}" "install -d -m 0700 -o 65532 -g 65532 ${credential_root}/data/credentials" "rotation storage must be private and owned by the runtime user"
+done
+
 builder_ref=""
 for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
 	# shellcheck disable=SC2016 # Match the literal Docker BUILDPLATFORM arg.
@@ -459,14 +467,19 @@ require_current_release_examples "docs/content/docs/current/security-model.mdx" 
 # and editing them would break its byte-for-byte tie to the tag. The archive
 # contract (docs-archive-config-test.sh) polices those files instead. current/
 # gets no such pass.
+# Published matrix rows and their dated introduction in COMPATIBILITY.md retain
+# the exact tested version. The active release row is checked separately above;
+# other previous-version references in the same file still fail.
 stale_previous_version_matches="$(git grep -n -F -- "$previous_version" -- \
 	'*.md' '*.mdx' '*.ts' '*.tsx' '*.yaml' '*.yml' '*.txt' \
 	':(exclude)CHANGELOG.md' \
 	':(exclude)docs/content/docs/v[0-9]*' \
 	':(exclude)scripts/package-release-config-test.sh' || true)"
 if [ -n "${stale_previous_version_matches}" ]; then
-	stale_previous_version_matches="$(awk -v exempt="since v${previous_version}" '
+	stale_previous_version_matches="$(awk -v exempt="since v${previous_version}" -v previous="${previous_version}" '
 		index($0, "README.md:") == 1 && index($0, exempt) { next }
+		index($0, "COMPATIBILITY.md:") == 1 && (index($0, ":The exact v" previous " artifacts passed the hosted matrix on ") ||
+			index($0, ":| v" previous " | v")) { next }
 		{ print }
 	' <<<"${stale_previous_version_matches}")"
 fi

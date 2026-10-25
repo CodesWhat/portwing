@@ -16,7 +16,7 @@
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.1
+    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
     restart: unless-stopped
     read_only: true
     cap_drop:

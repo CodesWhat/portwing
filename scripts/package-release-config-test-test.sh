@@ -36,7 +36,7 @@ restore_grype_workflow() {
 git archive HEAD | tar -x -C "${fixture}"
 cp scripts/package-release-config-test.sh "${fixture}/scripts/"
 cp scripts/verify-scanner-exclusions.sh "${fixture}/scripts/"
-cp .grype.yaml Dockerfile.armv7 Dockerfile.release "${fixture}/"
+cp .grype.yaml Dockerfile Dockerfile.dev Dockerfile.armv7 Dockerfile.release "${fixture}/"
 cp api/openapi.yaml "${fixture}/api/"
 cp examples/observability/docker-compose.yml "${fixture}/examples/observability/"
 cp docs/content/docs/current/api-reference.mdx "${fixture}/docs/content/docs/current/"
@@ -100,6 +100,14 @@ case "${release_version}" in
 	git -C "${fixture}" tag "v${stable_version}"
 	;;
 esac
+
+for recipe in Dockerfile Dockerfile.dev Dockerfile.armv7 Dockerfile.release; do
+	sed 's/install -d -m 0700 -o 65532 -g 65532/install -d -m 0755 -o 65532 -g 65532/g' "${recipe}" >"${fixture}/${recipe}"
+	expect_release_contract_failure \
+		"rotation storage must be private and owned by the runtime user" \
+		"shared credential directories in ${recipe} must fail the image contract"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
 
 # A healthcheck in a build stage cannot protect the final scratch image.
 for recipe in Dockerfile.armv7 Dockerfile.release; do
@@ -439,9 +447,21 @@ expect_release_contract_failure \
 	"the package release contract must reject a line-pinned .gitleaksignore working-tree fingerprint"
 mv "${gitleaksignore_backup}" "${fixture}/.gitleaksignore"
 
-# The stale-previous-version exemption is scoped to README.md's "since
-# v<previous>" release note only. A plain previous-version literal anywhere
-# else - including another Markdown file - must still fail.
+# Plain previous-version references still fail outside historical evidence.
+compatibility_backup="${fixture}/COMPATIBILITY.md.evidence-backup"
+cp "${fixture}/COMPATIBILITY.md" "${compatibility_backup}"
+printf '\nThe exact v%s artifacts passed the hosted matrix on 2026-10-16:\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
+printf '| v%s | v1.6.1 | v2.2.10 | PASS / PASS / PASS | Matrix run |\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
+if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
+	echo "FAIL: published matrix evidence must retain the version actually tested" >&2
+	exit 1
+fi
+printf '\nStale reference to v%s.\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
+expect_release_contract_failure \
+	"FAIL: stale references to v${previous_version} remain outside the changelog" \
+	"the evidence exemption must not hide a stale reference elsewhere in COMPATIBILITY.md"
+mv "${compatibility_backup}" "${fixture}/COMPATIBILITY.md"
+
 releasing_stale_backup="${fixture}/RELEASING.md.stale-version-backup"
 cp "${fixture}/RELEASING.md" "${releasing_stale_backup}"
 printf '\nStale reference to v%s.\n' "${previous_version}" >>"${fixture}/RELEASING.md"

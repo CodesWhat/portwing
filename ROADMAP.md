@@ -1,11 +1,11 @@
 # Portwing Roadmap
 
-> Portwing is pre-`v1.0.0` software (currently `v1.0.0-rc.1`). This roadmap describes
+> Portwing is pre-`v1.0.0` software (currently `v1.0.0-rc.2`). This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
 
-This direction covers at least the next twelve months, through August 2027.
+This direction covers work through August 2027.
 Items without a release assignment remain demand-driven rather than promised.
 
 ## Shipped — edge mode, hardening, and quality gates
@@ -60,11 +60,12 @@ calendar date:
   A real Drydock controller exercised enrollment, overlapping-key rotation,
   revocation, two SIGHUP reloads, and clock-skew rejection and recovery. The
   legacy-floor row passed alongside the current Standard and Edge rows.
-- **Candidate artifact verification before GA.** Run the hosted tri-tool
-  conformance matrix with the exact published candidate and current stable
-  Drydock and Sockguard artifacts. The historical acceptance above does not
-  establish a candidate result. Keep the current Standard, Edge and legacy
-  floor rows green and retain the workflow evidence.
+- **Completed for the initial v1.0 candidate: Candidate artifact verification.** The exact
+  published candidate passed Standard, Edge and legacy-floor rows with Drydock
+  [v1.6.0](https://github.com/CodesWhat/sockguard/actions/runs/38836428734) and
+  [v1.6.1](https://github.com/CodesWhat/sockguard/actions/runs/38837070094), both
+  with Sockguard v2.2.10. These runs do not verify subsequent development work.
+  Rerun the matrix against the exact next published candidate before GA.
 - **Completed for v0.8 — Edge-mode graduation.** Drydock 1.6 enables
   `/api/portwing/ws` by default, with `DD_EXPERIMENTAL_PORTWING=false` retained
   as an emergency disable. Drydock's `quality-portwing-fleet-soak.yml` runs the
@@ -94,14 +95,13 @@ calendar date:
 - **Completed for v0.9 — Edge audit export hardening.** Standard and Edge
   modes share one exporter implementation; public docs and Kubernetes examples
   explicitly isolate Edge Mode's unauthenticated operations listener.
-- **Versioned docs archive at the first v1.0 candidate.** `docs/content/docs/current/` holds the
-  tree tracking the latest release, served at the unversioned `/docs/...`
-  URLs. Through `v0.9.x` it is the only tree. At the first v1.0 candidate the `v0.9` docs are
-  archived from the final `v0.9.x` tag into a sibling `v0.9/` directory,
-  served at `/docs/v0.9/...` and verified against that tag's tree, so the
-  semver guarantees in [STABILITY.md](STABILITY.md) keep the docs they were
-  written against. Each later minor line archives the one before it the same
-  way.
+- **Completed for the initial v1.0 candidate: Versioned docs archive.** The `v0.9` docs
+  were frozen from the final v0.9 release tag and are served at `/docs/v0.9/...`,
+  with their source tree verified by the archive contract. The live
+  `docs/content/docs/current/` tree serves at the unversioned `/docs/...` URLs
+  and now includes explicitly labelled development features. Preserve frozen
+  archives when preparing later release lines. Archiving docs does not end
+  release support; v0.9 remains supported until v1.0.0 GA.
 - **SLSA Build L2 is the ceiling for now.** Provenance attestation (see
   [RELEASING.md](RELEASING.md)) stays at Build L2 because GoReleaser, cosign,
   and attest all run inline inside `release.yml`. Build L3 needs an isolated,
@@ -109,9 +109,23 @@ calendar date:
   for any CodesWhat repo. The trigger is that workflow landing — portwing's
   release job moves onto it then, not before.
 
+**Included in v1.0.0-rc.2: controller-assisted two-key rotation.**
+Opt-in durable managed credentials, Standard replacement proof and Edge
+signed-hello handoff require Drydock `v1.8.0-rc.1+` on the v1.8 line. Portwing's
+previous candidate did not include this feature. Current operator docs, API,
+README and release metadata record the supporting tags together in
+[COMPATIBILITY.md](COMPATIBILITY.md#controller-assisted-rotation).
+
+**Before GA:** rerun conformance against the exact new artifacts and record the
+successful hosted runs. The rc.1 evidence above does not verify rc.2. Keep
+release/support metadata aligned; the existing wire level does not establish
+additive feature support. Follow
+[RELEASING.md](RELEASING.md#release-documentation-and-compatibility).
+Legacy query-free HTTP signatures have no scheduled removal.
+
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,
-polling/intermittent edge transport, and controller-assisted two-key rotation.
+and polling/intermittent edge transport.
 None should expand the base socket policy or add an unaudited
 self-update path merely for feature-table parity.
 

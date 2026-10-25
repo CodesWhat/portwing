@@ -181,15 +181,19 @@ func (c *Client) currentMessageSender() *edgeMessageSender {
 // Client is the edge-mode WebSocket client that connects to a controller
 // and tunnels Docker API requests over the WebSocket.
 type Client struct {
-	cfg          *config.Config
-	dockerClient dockerAPI
-	readiness    docker.HealthProbe
-	adapter      adapter.EdgeAdapter
-	compose      *docker.ComposeManager
-	collector    hostCollector
-	metrics      *metrics.Registry
-	auditor      *audit.Logger
-	startTime    time.Time
+	keyRotationOnce  sync.Once
+	keyRotation      *auth.EdgeKeyRotation
+	keyRotationErr   error
+	signedHelloKeyID string
+	cfg              *config.Config
+	dockerClient     dockerAPI
+	readiness        docker.HealthProbe
+	adapter          adapter.EdgeAdapter
+	compose          *docker.ComposeManager
+	collector        hostCollector
+	metrics          *metrics.Registry
+	auditor          *audit.Logger
+	startTime        time.Time
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
@@ -342,6 +346,9 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 // connect-retry loop with exponential backoff and jitter.
 func (c *Client) Run(ctx context.Context) error {
 	c.ensureOperationalState()
+	if err := c.initKeyRotation(); err != nil {
+		return fmt.Errorf("configuring key rotation: %w", err)
+	}
 	// Start minimal health HTTP server for Docker HEALTHCHECK.
 	c.startHealthServer()
 	defer func() {
@@ -449,6 +456,9 @@ func checkProxyScheme(proxyURL *url.URL) error {
 // state, and runs the read and write pumps.
 func (c *Client) connect(ctx context.Context) (bool, error) {
 	c.ensureOperationalState()
+	if err := c.initKeyRotation(); err != nil {
+		return false, fmt.Errorf("%w: configuring key rotation: %w", errFatal, err)
+	}
 	// Build TLS config. Pin a TLS 1.2 floor to match the server's inbound
 	// posture; the controller dial relies on Go defaults otherwise.
 	tlsConfig := &tls.Config{
@@ -552,6 +562,13 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		parsed := json.Unmarshal(env.Data, &errMsg) == nil
 		closeWebSocket(conn, "controller rejected hello")
 		rejErr := fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, errMsg.Code)
+		if parsed && isTerminalHelloRejection(errMsg.Code) && c.keyRotation != nil {
+			if rolledBack, err := c.keyRotation.RejectTrial(); err != nil {
+				return false, fmt.Errorf("rolling back rejected key trial: %w", err)
+			} else if rolledBack {
+				return false, rejErr
+			}
+		}
 
 		switch {
 		case !parsed:
@@ -623,6 +640,14 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 					"agentExpects", protocol.DrydockCompat,
 				)
 			}
+		}
+	}
+
+	if c.keyRotation != nil {
+		if changed, err := c.keyRotation.Confirm(); err != nil {
+			slog.Warn("controller accepted replacement but local confirmation is pending", "error", err)
+		} else if changed && c.auditor != nil {
+			c.auditor.KeyRotation(c.cfg.DrydockURL, "confirm", c.keyRotation.Status().CurrentKeyID, audit.OutcomeAllowed)
 		}
 	}
 
@@ -739,6 +764,12 @@ func (c *Client) sendHello(ctx context.Context) error {
 		protocol.CapRequestBodyStream,
 	}
 	capabilities = append(capabilities, c.adapter.Capabilities()...)
+	if err := c.initKeyRotation(); err != nil {
+		return fmt.Errorf("configuring key rotation: %w", err)
+	}
+	if c.keyRotation != nil {
+		capabilities = append(capabilities, protocol.CapKeyRotation)
+	}
 
 	hello := protocol.HelloMessage{
 		Version:       protocol.AgentVersion,
@@ -799,12 +830,24 @@ func (c *Client) setTokenHash(hello *protocol.HelloMessage) {
 // The WebSocket upgrade path is used as the "path" in the canonical string,
 // with the empty-body hash.
 func (c *Client) signHello(_ context.Context, hello *protocol.HelloMessage) error {
-	priv, err := auth.LoadPrivateKey(c.cfg.PrivateKeyFile)
-	if err != nil {
-		return fmt.Errorf("loading private key: %w", err)
+	if err := c.initKeyRotation(); err != nil {
+		return err
+	}
+	var priv ed25519.PrivateKey
+	if c.keyRotation != nil {
+		priv = c.keyRotation.SigningKey()
+	} else {
+		var err error
+		priv, err = auth.LoadPrivateKey(c.cfg.PrivateKeyFile)
+		if err != nil {
+			return fmt.Errorf("loading private key: %w", err)
+		}
 	}
 
 	pub := priv.Public().(ed25519.PublicKey)
+	c.connMu.Lock()
+	c.signedHelloKeyID = auth.KeyIDForPublicKey(pub)
+	c.connMu.Unlock()
 	keyID := auth.KeyIDForPublicKey(pub)
 
 	nonce, err := auth.NewNonce()
@@ -1312,6 +1355,9 @@ func (c *Client) handleRequest(ctx context.Context, req protocol.RequestMessage)
 }
 
 func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessage, target outboundTarget) {
+	if c.handleKeyRotationRequest(ctx, req, target) {
+		return
+	}
 	if strings.HasPrefix(req.Path, composeRequestPrefix) {
 		c.handleComposeRequestTo(ctx, req, target)
 		return

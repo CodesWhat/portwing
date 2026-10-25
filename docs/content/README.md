@@ -10,7 +10,7 @@ This directory is not part of the docs site. Fumadocs ingests everything under
 docs/content/docs/
   meta.json            lists the version roots: current first, then archives newest first
   current/             the live docs, served at /docs/<page>
-  vX.Y/                one frozen archive per retired release line, served at /docs/vX.Y/<page>
+  vX.Y/                one frozen archive per previous docs line, served at /docs/vX.Y/<page>
 docs/content/archive-provenance.json   where each archive came from
 ```
 
@@ -35,8 +35,11 @@ to that commit, and that the tag ends its line. Cut one with
 - Links inside an archive keep the form they had at release (`/authentication`).
   The `remarkVersionedLinks` plugin in `docs/source.config.ts` scopes them to
   `/vX.Y/...` at build time, so the copy stays identical to the tag.
-- Every archived page is `noindex`, shows an "archived, unsupported" notice
-  linking to the same page in the current docs, and is left out of the sitemap.
+- Every archived page is `noindex`, shows an archive notice linking to the same
+  page in the current docs and to the security policy, and is left out of the
+  sitemap. Archiving docs does not retire release support. Follow
+  [SECURITY.md](../../SECURITY.md); the 0.9 line stays supported during v1.0
+  candidate evaluation and retires when v1.0.0 GA ships.
 - The static export puts an archive's pages at `docs/out/vX.Y/<page>.html` and
   its index at `docs/out/vX.Y.html`; `npm run docs:export-contract` checks both.
 - Analytics counts archived paths under `/_other`; the allowlist in

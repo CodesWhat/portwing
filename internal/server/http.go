@@ -216,6 +216,11 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 	var ed25519Cfg Ed25519Config
 	if cfg.AuthorizedKeysFile != "" {
 		reg := auth.NewKeyRegistry(cfg.AuthorizedKeysFile)
+		if cfg.KeyRotationDir != "" {
+			if err := reg.EnableRotation(cfg.KeyRotationDir); err != nil {
+				return nil, fmt.Errorf("configuring key rotation: %w", err)
+			}
+		}
 		if err := reg.Load(); err != nil {
 			return nil, fmt.Errorf("loading authorized_keys: %w", err)
 		}
@@ -224,6 +229,10 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 			Nonces:         auth.NewNonceLRU(cfg.NonceLRUSize, cfg.MaxClockSkewSeconds),
 			MaxSkewSeconds: cfg.MaxClockSkewSeconds,
 		}
+	}
+
+	if cfg.KeyRotationDir != "" && ed25519Cfg.Registry == nil {
+		return nil, fmt.Errorf("KEY_ROTATION_DIR requires AUTHORIZED_KEYS")
 	}
 
 	// Missing authentication fails closed because the catch-all route proxies
@@ -401,6 +410,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	}
 
 	mux.Handle("GET /_portwing/info", authWrap(s.handleInfo))
+	mux.Handle("/_portwing/auth/rotation", authWrap(s.handleKeyRotation))
+	mux.Handle("/_portwing/auth/rotation/", authWrap(s.handleKeyRotation))
 	mux.Handle("POST /_portwing/compose", authWrap(s.handleCompose))
 	mux.Handle("GET /_portwing/metrics", authWrap(s.handleMetrics))
 	mux.Handle("GET /metrics", authWrap(s.handleMetrics))

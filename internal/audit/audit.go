@@ -73,6 +73,7 @@ const (
 	EventAuthFailure = "auth_failure" // invalid token presented
 	EventRateLimited = "rate_limited" // request blocked by rate limiter
 	EventEnrollment  = "enrollment"   // Ed25519 key enrolled via /api/portwing/enroll
+	EventKeyRotation = "key_rotation"
 )
 
 // Outcome values for the "outcome" field.
@@ -319,6 +320,19 @@ func (l *Logger) Enrollment(actor, keyID, outcome string) {
 			KeyID:   keyID,
 			Outcome: outcome,
 		})
+	}
+}
+
+func (l *Logger) KeyRotation(actor, operation, keyID, outcome string) {
+	if l.log != nil {
+		l.log.Info("", slog.String("event", EventKeyRotation),
+			slog.String("actor", applog.Sanitize(actor)),
+			slog.String("operation", applog.Sanitize(operation)),
+			slog.String("key_id", applog.Sanitize(keyID)), slog.String("outcome", outcome))
+	}
+	if l.ring != nil {
+		l.ring.push(Record{Time: time.Now().UTC(), Event: EventKeyRotation,
+			Actor: actor, Operation: operation, KeyID: keyID, Outcome: outcome})
 	}
 }
 

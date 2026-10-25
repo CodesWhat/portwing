@@ -76,6 +76,15 @@ test("Renovate disables scheduled lock maintenance while retaining dependency up
   assert.ok(config.packageRules.length > 0);
 });
 
+test("workspace PostCSS overrides follow the direct dependency when Renovate updates it", () => {
+  for (const workspace of ["docs", "website"]) {
+    const config = JSON.parse(fs.readFileSync(path.join(ROOT, workspace, "package.json"), "utf8"));
+    assert.ok(config.dependencies?.postcss || config.devDependencies?.postcss, workspace);
+    assert.equal(config.overrides.postcss, "$postcss", workspace);
+    assert.equal(config.overrides.next.postcss, "$postcss", workspace);
+  }
+});
+
 test("the refreshed Next dependency keeps Sharp and every optional platform package current", () => {
   const packageJson = readPackage();
   const lock = readLock();
