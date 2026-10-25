@@ -11,10 +11,10 @@ coverage_repository="${GITHUB_REPOSITORY:?}"
 coverage_run="${GITHUB_RUN_ID:?}"
 coverage_attempt="${GITHUB_RUN_ATTEMPT:?}"
 coverage_sha="${COVERAGE_EXPECTED_SHA:?}"
-[[ "$coverage_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail "Invalid repository"
-[[ "$coverage_run" =~ ^[1-9][0-9]*$ ]] || fail "Invalid run ID"
-[[ "$coverage_attempt" =~ ^[1-9][0-9]*$ ]] || fail "Invalid run attempt"
-[[ "$coverage_sha" =~ ^[a-f0-9]{40}$ ]] || fail "Invalid expected head"
+[[ $coverage_repository =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail "Invalid repository"
+[[ $coverage_run =~ ^[1-9][0-9]*$ ]] || fail "Invalid run ID"
+[[ $coverage_attempt =~ ^[1-9][0-9]*$ ]] || fail "Invalid run attempt"
+[[ $coverage_sha =~ ^[a-f0-9]{40}$ ]] || fail "Invalid expected head"
 
 coverage_metadata="$(gh api "repos/${coverage_repository}/actions/runs/${coverage_run}")"
 if ! jq -e --arg run "$coverage_run" --arg sha "$coverage_sha" \
@@ -39,9 +39,9 @@ coverage_selection="$(jq -r \
 	| sort_by(.producer_attempt, .id) | last // empty
 	| [.id, .name, .producer_attempt] | @tsv
 	' <<<"$coverage_pages")"
-[[ -n "$coverage_selection" ]] || fail "No usable Go coverage artifact for the intended run and head"
+[[ -n $coverage_selection ]] || fail "No usable Go coverage artifact for the intended run and head"
 IFS=$'\t' read -r coverage_id coverage_name coverage_producer <<<"$coverage_selection"
-[[ "$coverage_id" =~ ^[1-9][0-9]*$ ]] || fail "Invalid resolved artifact ID"
+[[ $coverage_id =~ ^[1-9][0-9]*$ ]] || fail "Invalid resolved artifact ID"
 
 {
 	printf 'artifact_id=%s\n' "$coverage_id"
@@ -50,7 +50,7 @@ IFS=$'\t' read -r coverage_id coverage_name coverage_producer <<<"$coverage_sele
 } >>"${GITHUB_OUTPUT:?}"
 printf 'Go coverage: %s, producer attempt %s, head %s\n' \
 	"$coverage_name" "$coverage_producer" "$coverage_sha"
-if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
 	printf 'Go coverage artifact: %s (ID %s), producer attempt %s, head %s.\n' \
 		"$coverage_name" "$coverage_id" "$coverage_producer" "$coverage_sha" >>"$GITHUB_STEP_SUMMARY"
 fi
