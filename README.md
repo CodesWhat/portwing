@@ -32,17 +32,17 @@
 <hr>
 
 > [!WARNING]
-> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v1.0.0-rc.1`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v1.0.0-rc.2`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 <!-- separate alerts: a blank-line-only gap between blockquotes trips markdownlint MD028 -->
 
 > [!NOTE]
-> **v1.0.0-rc.1 is the current release candidate.** It introduces the MIT license, a frozen v0.9 docs archive, and a refreshed competitive review. This is a candidate for evaluation; the v1 semver guarantees become binding at GA. Stable container `latest` and Homebrew channels remain on the 0.9 release line. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **v1.0.0-rc.2 is the current release candidate.** It adds opt-in controller-assisted key rotation and includes the latest Go and web dependency security fixes. This is a candidate for evaluation; the v1 semver guarantees become binding at GA. Stable container `latest` and Homebrew channels remain on the 0.9 release line. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-Development on `dev/v1.0` also includes opt-in controller-assisted two-key
-rotation with Drydock `dev/v1.8`. It is unreleased and is not part of the
-candidate above. See [compatibility](COMPATIBILITY.md#development-only-controller-assisted-rotation)
-and the [rotation guide](docs/content/docs/current/authentication.mdx#controller-assisted-rotation-development)
+Controller-assisted two-key rotation requires Portwing `v1.0.0-rc.2` or later
+and Drydock `v1.8.0-rc.1` or later on the v1.8 line. Both sides require explicit
+managed-storage configuration. See [compatibility](COMPATIBILITY.md#controller-assisted-rotation)
+and the [rotation guide](docs/content/docs/current/authentication.mdx#controller-assisted-rotation)
 for availability and configuration.
 
 <h2 align="center">Contents</h2>
@@ -166,7 +166,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.1
+    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -221,7 +221,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.1
+    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -261,10 +261,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_1.0.0-rc.1_linux_amd64.deb
+sudo apt install ./portwing_1.0.0-rc.2_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_1.0.0-rc.1_linux_amd64.rpm
+sudo rpm --install ./portwing_1.0.0-rc.2_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -287,7 +287,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.0.0-rc.1
+  ghcr.io/codeswhat/portwing:1.0.0-rc.2
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -470,7 +470,7 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.8.x** ✅ | Operations & Distribution | Mode-aware `/health` and `/ready`, cursor-based NDJSON audit export, runnable Compose and Kubernetes observability examples, continuous edge logs, Homebrew cask and signed `deb`/`rpm` packages, published stability policy, edge mode production supported |
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks |
 | **v1.0.0** | Binding Stability | `STABILITY.md` guarantees become binding semver commitments, competitive review refreshed against primary sources, final v0.9 docs archived from its release tag. Gated on verifiable items, not a date |
-| **Development (unreleased)** | Credential Lifecycle | Opt-in controller-assisted two-key rotation with Drydock `dev/v1.8`; absent from the published v1.0 candidate |
+| **v1.0.0-rc.2** | Credential Lifecycle | Opt-in controller-assisted two-key rotation with Drydock `v1.8.0-rc.1+` |
 | **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.

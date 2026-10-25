@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Explicit stable or RC version, e.g. 1.0.0 or v1.0.0-rc.1. Leave blank to auto-compute from conventional commits since the last stable tag."
+        description: "Explicit stable or RC version, e.g. 1.0.0 or v1.0.0-rc.2. Leave blank to auto-compute from conventional commits since the last stable tag."
         required: false
         type: string
 
@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1  # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25  # v2.22.1
         with:
           egress-policy: block
           allowed-endpoints: >

@@ -9,7 +9,7 @@ export const komodoComparisonRouteData = {
   comparisonTable: `
 Remote container control|Yes (Periphery)|Yes|tie
 Connection modes|Core-to-Periphery or outbound Periphery WebSocket|Standard HTTP/S or outbound edge WebSocket (Drydock v1.6.0-rc.11+)|tie
-Agent authentication|Public-key handshake; Core-managed rotation for connected eligible servers; legacy inbound passkeys remain supported|Ed25519 per-request HTTP signatures; signed edge hello; manual trust-root rotation|tie
+Agent authentication|Public-key handshake; Core-managed rotation for connected eligible servers; legacy inbound passkeys remain supported|Ed25519 per-request HTTP signatures; signed edge hello; opt-in controller-assisted rotation with Drydock v1.8.0-rc.1+|tie
 Transparent Docker API|No (Komodo resource/command API)|Yes|self
 Structured audit|Controller audit; Periphery JSON logs and OTLP traces|Agent-level API/auth/Compose/exec audit with cursor export|tie
 Host metrics|Collected for dashboards and alerts|Prometheus scrape endpoint plus edge metrics|tie
