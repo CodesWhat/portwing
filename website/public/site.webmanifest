@@ -2,6 +2,7 @@
   "name": "Portwing",
   "short_name": "Portwing",
   "description": "Security-first remote Docker agent",
+  "lang": "en",
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#FF5F33",

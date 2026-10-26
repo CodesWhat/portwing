@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: MIT -->
 # Deployment examples
 
 Ready-to-run Docker Compose and Kubernetes examples, hardened by default (`read_only`/`readOnlyRootFilesystem`, `cap_drop: [ALL]`, `no-new-privileges`/`allowPrivilegeEscalation: false`, secrets instead of inline tokens).

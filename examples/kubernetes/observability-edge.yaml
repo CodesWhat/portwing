@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Prometheus scraper for kubernetes/edge.yaml. The unauthenticated Edge
 # operations listener also exposes retained audit records, so the agent manifest
 # uses a headless Service plus NetworkPolicy that admits only this labeled pod.

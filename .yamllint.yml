@@ -1,4 +1,5 @@
 ---
+# SPDX-License-Identifier: MIT
 # qlty-managed yamllint — see .qlty/qlty.toml
 extends: default
 rules:

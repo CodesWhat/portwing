@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 name: Bug Report
 description: Report a bug in Portwing
 labels: ["bug"]
