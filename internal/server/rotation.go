@@ -85,11 +85,7 @@ func (s *Server) handleKeyRotation(w http.ResponseWriter, r *http.Request) {
 				status, err = s.ed25519.Registry.AbortRotation(caller)
 			}
 		}
-		outcome := audit.OutcomeAllowed
-		if err != nil {
-			outcome = audit.OutcomeDenied
-		}
-		s.auditor.KeyRotation(s.rateLimiter.clientIP(r), strings.TrimPrefix(action, "/"), caller, outcome)
+		s.auditor.KeyRotation(s.rateLimiter.clientIP(r), strings.TrimPrefix(action, "/"), caller, rotationAuditOutcome(err))
 	}
 	if err != nil {
 		code := http.StatusInternalServerError
@@ -110,4 +106,16 @@ func (s *Server) handleKeyRotation(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(status)
+}
+
+func rotationAuditOutcome(err error) string {
+	if err == nil {
+		return audit.OutcomeAllowed
+	}
+	for _, rejected := range []error{auth.ErrRotationForbidden, auth.ErrRotationConflict, auth.ErrRotationInvalid, auth.ErrRotationDisabled} {
+		if errors.Is(err, rejected) {
+			return audit.OutcomeDenied
+		}
+	}
+	return audit.OutcomeError
 }
