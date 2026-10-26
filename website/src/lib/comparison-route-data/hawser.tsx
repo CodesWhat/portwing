@@ -60,7 +60,7 @@ bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container
         signed-key authentication, Sockguard containment, structured audit export, Prometheus, and
         read-only MCP
       </strong>
-      . Hawser integrates with Dockhand; Portwing integrates with Drydock. Reviewed October 15,
+      . Hawser integrates with Dockhand; Portwing integrates with Drydock. Reviewed October 26,
       2026.
     </p>
   ),

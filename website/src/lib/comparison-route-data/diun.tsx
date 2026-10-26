@@ -6,7 +6,7 @@ import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types
 export const diunComparisonRouteData = {
   slug: "diun",
   comparisonTable: `
-Image update notifications|Yes (multi-registry polling + 17 notification backends plus Apprise)|No (Drydock notifies; Portwing is the access agent)|competitor
+Image update notifications|Yes (multi-registry polling + 17 notification backends, including Apprise)|No (Drydock notifies; Portwing is the access agent)|competitor
 Remote Docker API proxy|No, an image-discovery and notification client|Yes (full Docker API proxy with auth)|self
 Provides an authenticated Docker management endpoint|No; Docker provider supports remote endpoints and TLS|Yes, with Ed25519 signing or configured shared secret|self
 Management request audit|Notification records; no management proxy|Structured request records and cursor export|tie
@@ -55,9 +55,9 @@ activity|Complementary, Not Competing|Diun and Portwing solve different problems
   heroDescription: (
     <p>
       Diun v4.33.1 (Docker Image Update Notifier) polls container registries for new tags and fires
-      notifications through 17 built-in backends plus Apprise. It is a monitoring/notification
-      agent, not a remote Docker control agent — an adjacent product, not a direct general-purpose
-      agent peer. Portwing is a{" "}
+      notifications through 17 backends, including Apprise. It is a monitoring/notification agent,
+      not a remote Docker control agent — an adjacent product, not a direct general-purpose agent
+      peer. Portwing is a{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">remote access agent</strong> — it
       gives the Drydock controller a secure authenticated foothold on a Docker host. These tools are
       complementary: run Diun for registry monitoring and Portwing for remote Docker control from
