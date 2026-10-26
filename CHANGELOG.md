@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Audit a failed managed-credential write during Standard-mode key rotation
+  as `error` instead of `denied`. Rejected requests remain `denied`, matching
+  Edge mode.
+
 ## [v1.0.0-rc.2] - 2026-10-24
 
 ### Added
