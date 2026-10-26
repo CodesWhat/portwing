@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
