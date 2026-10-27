@@ -73,10 +73,6 @@ jobs:
     permissions:
       contents: read
     uses: CodesWhat/.github/.github/workflows/main-is-released.yml@11004e42d7d19e86eb3b7777c467ec9522b784e1  # main, 2026-08-21
-    # RC tags are promoted through main during the v1.0 candidate stage.
-    # Remove this opt-in when v1.0.0 GA replaces the candidate.
-    with:
-      allow-prerelease: true
 
   tree-parity:
     name: "Tree Parity"

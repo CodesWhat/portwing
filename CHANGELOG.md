@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.0] - 2026-10-27
+
+### Changed
+
+- v1.0.0 is the first stable release. The guarantees in
+  [STABILITY.md](STABILITY.md) now apply under semantic versioning.
+- v1.0.0 is the first stable release under the MIT license. v0.9.x and earlier
+  remain AGPL-3.0.
+- The stable container `latest` tag and the Homebrew cask move to 1.0.0. The
+  v0.9.x line is no longer supported.
+- Update posthog-js to 1.438.18.
+
 ### Fixed
 
 - Audit a failed managed-credential write during Standard-mode key rotation

@@ -32,7 +32,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.0.0-rc.2
+  ghcr.io/codeswhat/portwing:1.0.0
 ```
 
 <Callout type="warn">
@@ -56,7 +56,7 @@ docker run -d --name portwing \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
   -e TOKEN_FILE=/run/secrets/portwing-token \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.0.0-rc.2
+  ghcr.io/codeswhat/portwing:1.0.0
 ```
 
 This is appropriate for Docker secrets, Kubernetes secret volumes, or any orchestrator that can inject files but not env vars safely.
@@ -81,7 +81,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN_HASH="$HASH" \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.0.0-rc.2
+  ghcr.io/codeswhat/portwing:1.0.0
 ```
 
 To keep the hash out of the environment entirely, write it to a file and use `TOKEN_HASH_FILE`:
@@ -151,7 +151,7 @@ docker run -d --name portwing \
   -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.0.0-rc.2
+  ghcr.io/codeswhat/portwing:1.0.0
 ```
 
 ### Request signing headers
@@ -205,8 +205,8 @@ Hot reload rebuilds the in-memory key map and logs each added and removed key ID
 
 ### Controller-assisted rotation
 
-This opt-in feature requires Portwing `v1.0.0-rc.2` or later and Drydock
-`v1.8.0-rc.1` or later on the v1.8 line. The previous Portwing candidate and Drydock's
+This opt-in feature requires Portwing `v1.0.0` or later and Drydock
+`v1.8.0-rc.1` or later on the v1.8 line. Portwing v1.0.0-rc.1 and Drydock's
 v1.6/v1.7 lines do not provide this pairing. See the
 [compatibility matrix](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md)
 for artifact verification. Wire compatibility alone does not establish rotation
