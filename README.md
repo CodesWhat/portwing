@@ -443,7 +443,7 @@ flowchart LR
 
 > Watchtower's upstream project is archived. Diun and Watchtower can connect to remote Docker endpoints, but do not expose a general-purpose management proxy. Portwing provides that access and leaves update decisions to Drydock.
 >
-> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.45.2, Komodo Periphery v2.3.3, Arcane Agent v2.16.1, Hawser v0.2.50, Diun v4.33.0 and Watchtower v1.7.1. Reviewed 2026-10-15. The canonical page records edition limits, source-inspection scope and artifact discovery limits. Portainer uses fixed-message signature headers; Arcane documents method/path filtering for its manager and agent Prometheus export. A GitHub release attestation is different from build provenance.
+> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.45.3, Komodo Periphery v2.3.4, Arcane Agent v2.17.1, Hawser v0.2.52, Diun v4.33.1 and Watchtower v1.7.1. Reviewed 2026-10-26. The canonical page records edition limits, source-inspection scope and artifact discovery limits. Portainer uses fixed-message signature headers; Arcane documents method/path filtering for its manager and agent Prometheus export. A GitHub release attestation is different from build provenance.
 > Contributions welcome if any information is inaccurate.
 
 </details>

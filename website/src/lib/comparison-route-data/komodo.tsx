@@ -14,7 +14,7 @@ Transparent Docker API|No (Komodo resource/command API)|Yes|self
 Structured audit|Controller audit; Periphery JSON logs and OTLP traces|Agent-level API/auth/Compose/exec audit with cursor export|tie
 Host metrics|Collected for dashboards and alerts|Prometheus scrape endpoint plus edge metrics|tie
 Docker socket policy|Documented deployment mounts the raw socket|Recommended Sockguard path-and-method policy|self
-Supply-chain evidence|v2.3.3 has bare release binaries; Periphery images have BuildKit SLSA v1 provenance; no SBOM or Cosign signature found in checked discovery paths|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
+Supply-chain evidence|v2.3.3 has bare release binaries; Periphery images have BuildKit SLSA v1 provenance; no SBOM or Cosign signature found in checked discovery paths; v2.3.4 is a dependency-only release and its release assets still carry no attestation|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
 Host shell, builds, automation, and Swarm|Yes|Host shell and Swarm are non-goals; Drydock owns fleet workflows|competitor
 Documented read-only MCP endpoint|Not documented|Yes|self
 License|GPL-3.0|MIT|tie
@@ -36,7 +36,7 @@ bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes
     bot: Bot,
   },
   metadataTitle: "Komodo Periphery vs Portwing — Remote Docker Agent Comparison",
-  metadataDescription: `Compare Komodo Periphery v2.3.3 and Portwing v${SITE_CONFIG.version} across outbound agents, public-key authentication, Docker API compatibility, socket policy, audit, metrics, and product scope.`,
+  metadataDescription: `Compare Komodo Periphery v2.3.4 and Portwing v${SITE_CONFIG.version} across outbound agents, public-key authentication, Docker API compatibility, socket policy, audit, metrics, and product scope.`,
   metadataKeywords: [
     "komodo periphery vs portwing",
     "komodo alternative",
@@ -47,12 +47,12 @@ bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes
   ],
   openGraphDescription:
     "Komodo v2 and Portwing both support outbound public-key-authenticated agents. Compare transparent Docker access, socket policy, audit placement, and controller scope.",
-  twitterDescription: `Komodo Periphery v2.3.3 vs Portwing v${SITE_CONFIG.version}: outbound transport, key auth, audit, and socket containment.`,
+  twitterDescription: `Komodo Periphery v2.3.4 vs Portwing v${SITE_CONFIG.version}: outbound transport, key auth, audit, and socket containment.`,
   competitorName: "Komodo",
   heroTitle: "Komodo vs Portwing",
   heroDescription: (
     <p>
-      Komodo v2.3.3 is a full build, deployment, automation, and Swarm platform. Its Periphery agent
+      Komodo v2.3.4 is a full build, deployment, automation, and Swarm platform. Its Periphery agent
       now supports outbound WebSockets, public-key authentication, and automatic key rotation.
       Portwing v{SITE_CONFIG.version} is narrower and pairs with Drydock, emphasizing{" "}
       <strong className="text-neutral-900 dark:text-neutral-200">
@@ -60,12 +60,12 @@ bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes
         agent-level audit export
       </strong>
       . Komodo owns the broader controller workflows; Portwing keeps the access-agent boundary.
-      Reviewed October 15, 2026.
+      Reviewed October 26, 2026.
     </p>
   ),
   migrationTitle: "Coming from Komodo Periphery?",
   migrationDescription:
     "Treat this as a controller migration, not an agent image swap. Inventory Komodo builds, procedures, host terminals, Swarm resources, secrets, and Git-backed stacks; map controller responsibilities to Drydock first. Then deploy Portwing with Ed25519 keys and the narrowest Sockguard preset that covers the required Docker operations.",
   jsonLdName: "Komodo Periphery vs Portwing — Remote Docker Agent Comparison",
-  jsonLdDescription: `Evidence-backed comparison of Komodo Periphery v2.3.3 and Portwing v${SITE_CONFIG.version} for remote Docker access.`,
+  jsonLdDescription: `Evidence-backed comparison of Komodo Periphery v2.3.4 and Portwing v${SITE_CONFIG.version} for remote Docker access.`,
 } satisfies ComparisonRouteRawConfig;
