@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Explicit stable or RC version, e.g. 1.0.0 or v1.0.0-rc.2. Leave blank to auto-compute from conventional commits since the last stable tag."
+        description: "Explicit stable or RC version, e.g. 1.1.0 or v1.1.0-rc.1. Leave blank to auto-compute from conventional commits since the last stable tag."
         required: false
         type: string
 

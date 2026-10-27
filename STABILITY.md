@@ -1,9 +1,7 @@
 # Compatibility and Stability Policy
 
-This document defines the compatibility promises Portwing intends to make at
-`v1.0.0` GA. Portwing v1.0 release candidates publish this policy for final
-integration review. The new v1 guarantees are not binding until GA; existing
-compatibility commitments continue during evaluation.
+This document defines the compatibility promises Portwing makes from `v1.0.0`,
+the first stable release. These guarantees are binding semver commitments.
 
 The version matrix in [COMPATIBILITY.md](COMPATIBILITY.md) remains the
 authoritative record of which Portwing, Drydock, and sockguard releases are
@@ -89,7 +87,7 @@ variables are not public API.
 
 ## MCP surface
 
-The MCP endpoint remains experimental through `v0.x`. At `v1.0.0`, the
+The MCP endpoint was experimental through `v0.x`. From `v1.0.0`, the
 documented JSON-RPC transport, tool names, input schemas, output schemas, and
 read-only security model become stable.
 

@@ -2,15 +2,13 @@
 
 ## Supported Versions
 
-Security fixes are shipped on the **latest stable release line**. The v1.0.0-rc.2
-candidate is also supported during evaluation; it does not retire the 0.9
-stable line. That line becomes unsupported when v1.0.0 GA ships.
+Security fixes are shipped on the **latest stable release line**. The 0.9
+line became unsupported when v1.0.0 shipped.
 
 | Version        | Supported          |
 | -------------- | ------------------ |
-| 1.0.0-rc.x (candidate) | :white_check_mark: |
-| 0.9.x (latest stable) | :white_check_mark: |
-| < 0.9          | :x:                |
+| 1.0.x (latest stable) | :white_check_mark: |
+| < 1.0          | :x:                |
 
 ## Reporting a Vulnerability
 

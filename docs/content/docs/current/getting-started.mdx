@@ -88,7 +88,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
+    image: ghcr.io/codeswhat/portwing:1.0.0
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -157,7 +157,7 @@ docker compose -f docker-compose.standard.yml up -d
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
+    image: ghcr.io/codeswhat/portwing:1.0.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -238,7 +238,7 @@ docker compose -f docker-compose.edge.yml up -d
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
+    image: ghcr.io/codeswhat/portwing:1.0.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -287,7 +287,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.0.0-rc.2
+  ghcr.io/codeswhat/portwing:1.0.0
 ```
 
 Without `TOKEN`, `TOKEN_HASH`, or `AUTHORIZED_KEYS`, Standard mode refuses to
