@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The enrollment token is now burned durably through a
+  `<AUTHORIZED_KEYS>.enrolled` marker, so a used token no longer enrolls a key
+  after a restart. Agents upgraded with an existing enrolled key and the token
+  still set stay disarmed and log a warning.
+
 ## [v1.0.0] - 2026-10-27
 
 ### Changed

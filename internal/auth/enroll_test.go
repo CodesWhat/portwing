@@ -4,12 +4,15 @@ package auth
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -222,5 +225,121 @@ func TestEnroller_MethodNotAllowed(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405 for GET, got %d", rec.Code)
+	}
+}
+
+func enrollOnce(t *testing.T, e *Enroller, token string) int {
+	t.Helper()
+	_, b64 := genPubKeyB64(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/portwing/enroll", enrollBody(t, token, b64))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+func TestEnroller_BurnPersistsAcrossRestart(t *testing.T) {
+	t.Parallel()
+	e, reg, path := setupEnroller(t, "secrettok")
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusOK {
+		t.Fatalf("first enroll: got %d", code)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e2 := NewEnroller("secrettok", path, reg)
+	if code := enrollOnce(t, e2, "secrettok"); code != http.StatusUnauthorized {
+		t.Fatalf("after restart: expected 401, got %d", code)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("authorized_keys changed after burned enroll:\n%s\n---\n%s", before, after)
+	}
+}
+
+func TestEnroller_MarkerWithDifferentDigestArms(t *testing.T) {
+	t.Parallel()
+	e, reg, path := setupEnroller(t, "tok-one")
+	if code := enrollOnce(t, e, "tok-one"); code != http.StatusOK {
+		t.Fatalf("first enroll: got %d", code)
+	}
+	e2 := NewEnroller("tok-two", path, reg)
+	if code := enrollOnce(t, e2, "tok-two"); code != http.StatusOK {
+		t.Fatalf("rotated token: expected 200, got %d", code)
+	}
+}
+
+func TestEnroller_EnrolledKeyLineWithoutMarkerDisarms(t *testing.T) {
+	t.Parallel()
+	_, reg, path := setupEnroller(t, "secrettok")
+	pub, _ := genPubKeyB64(t)
+	line := AuthorizedKeyLine(pub, "enrolled:"+KeyIDForPublicKey(pub))
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e2 := NewEnroller("secrettok", path, reg)
+	if code := enrollOnce(t, e2, "secrettok"); code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", code)
+	}
+}
+
+func TestEnroller_MarkerWriteFailureFailsClosed(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("read-only directory not enforced on Windows or as root")
+	}
+	e, _, path := setupEnroller(t, "secrettok")
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", code)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Errorf("key appended despite marker failure: %q", data)
+	}
+	// Token stays armed in memory.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusOK {
+		t.Fatalf("retry after fixing dir: expected 200, got %d", code)
+	}
+}
+
+func TestEnroller_MarkerModeAndContent(t *testing.T) {
+	t.Parallel()
+	e, _, path := setupEnroller(t, "secrettok")
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusOK {
+		t.Fatalf("enroll: got %d", code)
+	}
+	marker := path + ".enrolled"
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("secrettok"))
+	if want := hex.EncodeToString(sum[:]) + "\n"; string(data) != want {
+		t.Errorf("marker content = %q, want %q", data, want)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(marker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("marker mode = %o, want 600", info.Mode().Perm())
+		}
 	}
 }
