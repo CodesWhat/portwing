@@ -56,10 +56,10 @@ once it exists.
 
 ### Controller-assisted rotation
 
-The first supporting tags are Portwing `v1.0` (first shipped in its rc.2
-candidate) and Drydock
+Support first shipped in the Portwing v1.0 line (its rc.2 candidate) and in
+Drydock
 [`v1.8.0-rc.1`](https://github.com/CodesWhat/drydock/releases/tag/v1.8.0-rc.1).
-Use that Portwing release or later with Drydock v1.8.0-rc.1 or later on the
+Use Portwing v1.0 or later with Drydock v1.8.0-rc.1 or later on the
 v1.8 line for opt-in managed rotation. The first v1.0 release candidate and Drydock's
 v1.6/v1.7 lines do not include this pairing.
 
