@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Enrollment no longer needs write access to the directory holding
+  `AUTHORIZED_KEYS`. v1.0.0 returned 500 for every correct enrollment when only
+  the file was writable. The burn is now recorded as a comment line in
+  authorized_keys; a `.enrolled` file written by v1.0.0 is still honoured.
+
 ## [v1.0.0] - 2026-10-29
 
 ### Changed
