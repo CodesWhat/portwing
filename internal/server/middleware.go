@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -771,16 +772,25 @@ func ParseTrustedProxies(entries []string) ([]*net.IPNet, error) {
 }
 
 // clientIP extracts the client IP for rate-limiting purposes. Forwarding
-// headers are only consulted when the direct peer is a trusted proxy; the
-// X-Forwarded-For chain is then walked right to left and the first hop that
-// is not itself a trusted proxy wins.
+// headers are only consulted when the direct peer is a trusted proxy.
+//
+// Every X-Forwarded-For field line is merged in order (a proxy such as HAProxy
+// with `option forwardfor` appends a separate line rather than extending the
+// first), and the combined chain is walked right to left. Each hop may be a
+// bare address or an ip:port / [v6]:port pair. A trusted-proxy hop continues
+// the walk and the first non-trusted hop wins. A hop that does not parse is a
+// boundary: the walk stops there and the direct peer is returned, because
+// anything to its left was written by a party we can't vouch for. X-Real-IP is
+// consulted only when the chain yields nothing (header absent or every hop a
+// trusted proxy), never after an unparseable boundary.
 //
 // Every value taken from a forwarding header must parse as an IP address. The
 // return value keys the auth rate limiter and lands in audit records as the
 // actor, so accepting an arbitrary header string would let a caller behind a
-// trusted proxy mint a fresh limiter bucket per request — defeating the
-// failed-attempt throttle it is supposed to enforce — and write arbitrary
-// actor values into the audit trail.
+// trusted proxy mint a fresh limiter bucket per request, defeating the
+// failed-attempt throttle it is supposed to enforce, and write arbitrary
+// actor values into the audit trail. Returned addresses are canonicalized
+// (IPv4-mapped IPv6 unmapped, zone dropped) so one client keeps one bucket.
 func (rl *RateLimiter) clientIP(r *http.Request) string {
 	remote := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(remote); err == nil {
@@ -792,23 +802,44 @@ func (rl *RateLimiter) clientIP(r *http.Request) string {
 		return remote
 	}
 
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		hops := strings.Split(xff, ",")
+	// Any X-Forwarded-For field line, even an empty one, makes the chain
+	// authoritative: an empty hop is unparseable and ends the walk.
+	if xffLines := r.Header.Values("X-Forwarded-For"); len(xffLines) > 0 {
+		hops := strings.Split(strings.Join(xffLines, ","), ",")
 		for i := len(hops) - 1; i >= 0; i-- {
-			hop := strings.TrimSpace(hops[i])
-			if ip := net.ParseIP(hop); ip != nil && !ipInNets(ip, rl.trustedProxies) {
-				return hop
+			addr, ok := parseForwardedHop(hops[i])
+			if !ok {
+				return remote
+			}
+			if !ipInNets(net.IP(addr.AsSlice()), rl.trustedProxies) {
+				return addr.String()
 			}
 		}
 	}
 
 	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		if ip := net.ParseIP(xri); ip != nil && !ipInNets(ip, rl.trustedProxies) {
-			return xri
+		if addr, ok := parseForwardedHop(xri); ok && !ipInNets(net.IP(addr.AsSlice()), rl.trustedProxies) {
+			return addr.String()
 		}
 	}
 
 	return remote
+}
+
+// parseForwardedHop parses one forwarding-header value as a bare address or an
+// ip:port pair and returns it canonicalized: IPv4-mapped IPv6 unmapped and any
+// zone dropped.
+func parseForwardedHop(hop string) (netip.Addr, bool) {
+	hop = strings.TrimSpace(hop)
+	addr, err := netip.ParseAddr(hop)
+	if err != nil {
+		ap, apErr := netip.ParseAddrPort(hop)
+		if apErr != nil {
+			return netip.Addr{}, false
+		}
+		addr = ap.Addr()
+	}
+	return addr.WithZone("").Unmap(), true
 }
 
 func ipInNets(ip net.IP, nets []*net.IPNet) bool {

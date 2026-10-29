@@ -12,6 +12,8 @@ Ready-to-run Docker Compose and Kubernetes examples, hardened by default (`read_
 | [`sockguard-with-exec.yaml`](sockguard-with-exec.yaml) | Sockguard preset (with-exec) | The policy file `docker-compose.edge-with-exec.yml` mounts; pairs with it, not used standalone |
 | [`observability/docker-compose.yml`](observability/docker-compose.yml) | Standard or edge + Prometheus + Fluent Bit | Complete TLS/auth, metrics, readiness, and audit-shipping topology selected with a Compose profile |
 
+> **Warning (edge-with-exec):** the exec rule can target any container, including the sockguard proxy that holds the Docker socket. A compromised Portwing or controller with exec can run code inside the proxy and step outside the allowlist. Only enable this bundle where exec into every container is acceptable. Sockguard has no per-container exec scoping yet.
+
 Before starting any of them, generate a token and export the Docker socket's group ID (the images run as the non-root `portwing` user, UID 65532, and need `group_add` to reach the socket):
 
 ```bash

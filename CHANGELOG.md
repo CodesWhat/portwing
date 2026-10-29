@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `<AUTHORIZED_KEYS>.enrolled` marker, so a used token no longer enrolls a key
   after a restart. Agents upgraded with an existing enrolled key and the token
   still set stay disarmed and log a warning.
+- Client IP resolution behind `TRUSTED_PROXIES` now merges every
+  `X-Forwarded-For` header line, parses `ip:port` and `[v6]:port` hops, ends
+  the walk at an unparseable hop (using the direct peer), and canonicalizes
+  addresses so IPv4-mapped IPv6 shares a bucket with IPv4. Before, a forged
+  first header line or an `ip:port` hop could pick the address that keys the
+  auth and enrollment rate limiter and the audit actor. Affects deployments
+  with `TRUSTED_PROXIES` set.
+
+### Documentation
+
+- Note that Standard-mode Ed25519 signatures don't name the target agent, so a
+  captured request can be replayed against another agent that trusts the same
+  key within the skew window. Use TLS and per-agent controller keys.
+- Warn that the edge-with-exec bundle lets exec target any container,
+  including the sockguard proxy, which can step outside the allowlist.
 
 ## [v1.0.0] - 2026-10-27
 

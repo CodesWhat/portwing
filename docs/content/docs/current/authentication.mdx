@@ -113,6 +113,13 @@ LRU to prevent replay. Each nonce is retained for at least twice the skew
 window before it can be evicted, so a nonce stays blocked for as long as its
 timestamp could still verify.
 
+Signatures cover the method, request target, body hash, timestamp and nonce,
+but not which agent they're meant for, and each agent keeps its own nonce
+cache. A request captured on its way to one agent can be replayed against
+another agent that trusts the same key within the skew window. Use TLS for
+Standard-mode traffic, and give each agent its own controller key where that
+matters.
+
 No shared secret is involved. Compromising one client's private key does not affect other enrolled clients.
 
 ### Generate a keypair

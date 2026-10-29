@@ -1404,6 +1404,109 @@ func TestClientIPAllHopsTrustedFallsBackToRemote(t *testing.T) {
 	}
 }
 
+func TestClientIPForwardedHeaderParsing(t *testing.T) {
+	t.Parallel()
+
+	nets, err := ParseTrustedProxies([]string{"192.0.2.0/24", "10.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		xff  []string
+		xri  string
+		want string
+	}{
+		{
+			name: "separate lines, proxy-appended line last",
+			xff:  []string{"198.51.100.66", "203.0.113.5"},
+			want: "203.0.113.5",
+		},
+		{
+			name: "separate lines, trusted hop skipped across lines",
+			xff:  []string{"198.51.100.66, 203.0.113.5", "10.0.0.2"},
+			want: "203.0.113.5",
+		},
+		{
+			name: "empty XFF line is a boundary, no X-Real-IP fallback",
+			xff:  []string{""},
+			xri:  "203.0.113.77",
+			want: "192.0.2.1",
+		},
+		{
+			name: "two empty XFF lines are a boundary",
+			xff:  []string{"", ""},
+			xri:  "203.0.113.77",
+			want: "192.0.2.1",
+		},
+		{
+			name: "ip:port hop",
+			xff:  []string{"203.0.113.5:4711"},
+			want: "203.0.113.5",
+		},
+		{
+			name: "bracketed v6 with port",
+			xff:  []string{"[2001:db8::1]:443"},
+			want: "2001:db8::1",
+		},
+		{
+			name: "unparseable hop right of a forged IP returns direct peer",
+			xff:  []string{"198.51.100.66, garbage"},
+			want: "192.0.2.1",
+		},
+		{
+			name: "v4-mapped v6 canonicalizes",
+			xff:  []string{"::ffff:203.0.113.5"},
+			want: "203.0.113.5",
+		},
+		{
+			name: "zone dropped",
+			xff:  []string{"fe80::1%eth0"},
+			want: "fe80::1",
+		},
+		{
+			name: "all hops trusted falls through to X-Real-IP",
+			xff:  []string{"10.0.0.1, 10.0.0.2"},
+			xri:  "203.0.113.77",
+			want: "203.0.113.77",
+		},
+		{
+			name: "X-Real-IP is canonicalized",
+			xri:  "::ffff:203.0.113.78",
+			want: "203.0.113.78",
+		},
+		{
+			name: "unparseable boundary does not fall back to X-Real-IP",
+			xff:  []string{"198.51.100.66, garbage"},
+			xri:  "203.0.113.77",
+			want: "192.0.2.1",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rl := NewRateLimiter()
+			rl.SetTrustedProxies(nets)
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = "192.0.2.1:50000"
+			for _, line := range tc.xff {
+				req.Header.Add("X-Forwarded-For", line)
+			}
+			if tc.xri != "" {
+				req.Header.Set("X-Real-IP", tc.xri)
+			}
+
+			if got := rl.clientIP(req); got != tc.want {
+				t.Fatalf("clientIP = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestClientIPRemoteAddrNoPort(t *testing.T) {
 	t.Parallel()
 
