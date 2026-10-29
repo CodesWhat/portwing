@@ -524,3 +524,27 @@ func TestEnroller_UnreadableMarkerDisarms(t *testing.T) {
 		t.Fatalf("expected 401, got %d", code)
 	}
 }
+
+func TestEnroller_MarkerRenameFailureFailsClosed(t *testing.T) {
+	t.Parallel()
+	e, _, path := setupEnroller(t, "secrettok")
+	// A non-empty directory at the marker path makes the rename fail after the
+	// enroller was armed.
+	marker := enrollmentMarkerPath(path)
+	if err := os.Mkdir(marker, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(marker, "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", code)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "enrolled:") {
+		t.Fatal("key appended despite marker failure")
+	}
+}

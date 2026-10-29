@@ -164,17 +164,10 @@ func writeEnrollmentMarkerContent(authorizedFile string, content []byte) (err er
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if err = tmp.Chmod(0o600); err != nil {
-		return fmt.Errorf("chmod enrollment marker: %w", err)
-	}
-	if _, err = tmp.Write(content); err != nil {
+	// os.CreateTemp already creates the file with mode 0600.
+	_, writeErr := tmp.Write(content)
+	if err = errors.Join(writeErr, tmp.Sync(), tmp.Close()); err != nil {
 		return fmt.Errorf("writing enrollment marker: %w", err)
-	}
-	if err = tmp.Sync(); err != nil {
-		return fmt.Errorf("syncing enrollment marker: %w", err)
-	}
-	if err = tmp.Close(); err != nil {
-		return fmt.Errorf("closing enrollment marker: %w", err)
 	}
 	if err = os.Rename(tmpName, marker); err != nil {
 		return fmt.Errorf("installing enrollment marker: %w", err)
