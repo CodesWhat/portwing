@@ -273,7 +273,16 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Append to the authorized_keys file.
-	if err := appendKeyLine(e.authorizedFile, line); err != nil {
+	if err := appendAuthorizedKey(e.authorizedFile, line); err != nil {
+		if !errors.Is(err, errAppendNotStarted) {
+			// The key line may already be on disk, so the burn has to stand.
+			e.tokenDigest = [sha256.Size]byte{}
+			e.tokenAvailable = false
+			e.burned = true
+			slog.Error("enrollment failed after authorized_keys was opened; keeping the burn", "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
 		if hadPrevMarker {
 			if rerr := writeEnrollmentMarkerContent(e.authorizedFile, prevMarker); rerr != nil {
 				slog.Error("enrollment failed: cannot restore previous enrollment marker", "error", rerr)
@@ -345,11 +354,19 @@ func remoteHost(r *http.Request) string {
 
 // appendKeyLine appends a single key line to the authorized_keys file,
 // creating it (mode 0600) if it does not exist.
+// errAppendNotStarted marks an append that failed before any byte could reach
+// authorized_keys, so rolling back the enrollment marker is safe.
+var errAppendNotStarted = errors.New("authorized_keys was not opened")
+
+// appendAuthorizedKey is a seam so tests can force a failure after the key
+// file was opened.
+var appendAuthorizedKey = appendKeyLine
+
 func appendKeyLine(path, line string) (err error) {
 	// #nosec G304 -- authorized_keys path is explicit operator configuration.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("opening authorized_keys for append: %w", err)
+		return fmt.Errorf("opening authorized_keys for append: %w: %w", errAppendNotStarted, err)
 	}
 	defer func() {
 		// Surface a deferred close error (e.g. a flush failure on the write)

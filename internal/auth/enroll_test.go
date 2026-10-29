@@ -548,3 +548,32 @@ func TestEnroller_MarkerRenameFailureFailsClosed(t *testing.T) {
 		t.Fatal("key appended despite marker failure")
 	}
 }
+
+// Not parallel: swaps the package-level appendAuthorizedKey seam.
+func TestEnroller_AppendFailureAfterOpenKeepsBurn(t *testing.T) {
+	_, reg, path := setupEnroller(t, "secrettok")
+	prev := appendAuthorizedKey
+	t.Cleanup(func() { appendAuthorizedKey = prev })
+	appendAuthorizedKey = func(string, string) error {
+		return errors.New("closing authorized_keys: simulated flush failure")
+	}
+
+	// An earlier token's marker exists, so a rollback would re-arm this token.
+	if err := writeEnrollmentMarker(path, sha256.Sum256([]byte("oldtok"))); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEnroller("secrettok", path, reg)
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", code)
+	}
+	// Same process: the token is burned.
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on retry, got %d", code)
+	}
+	// After a restart: the marker still holds this token's digest.
+	appendAuthorizedKey = prev
+	e2 := NewEnroller("secrettok", path, reg)
+	if code := enrollOnce(t, e2, "secrettok"); code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after restart, got %d", code)
+	}
+}
