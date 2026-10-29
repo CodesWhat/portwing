@@ -96,7 +96,7 @@ independent target for release-preparation commits.
 
 - Keep shipped changelog sections intact and new work under Unreleased until
   assigning its release. README highlights, API descriptions and current docs,
-  including comparison tables, must distinguish the published candidate from
+  including comparison tables, must distinguish the published release from
   later development work.
 - Record feature-specific peer minimums in [COMPATIBILITY.md](COMPATIBILITY.md).
   For managed rotation, replace the matching-development-build requirement
@@ -107,9 +107,8 @@ independent target for release-preparation commits.
   build. Keep manual overlapping-key/SIGHUP tests distinct from verification
   of controller-assisted rotation when that feature enters a release.
 - Update [SECURITY.md](SECURITY.md) with the release metadata. Archiving a docs
-  line does not end its support window; the 0.9 line stays supported during
-  v1.0 candidate evaluation and retires at v1.0.0 GA. Leave frozen archives
-  unchanged and fix current guidance separately.
+  line does not end its support window; the 0.9 line retired at v1.0.0 GA.
+  Leave frozen archives unchanged and fix current guidance separately.
 
 ## Cutting a docs archive
 
@@ -152,15 +151,15 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
-For a release candidate, pass an explicit version such as `1.0.0-rc.2`.
+For a release candidate, pass an explicit version such as `1.1.0-rc.1`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag and
-Homebrew channel unchanged. The v1.0 candidate stage opts the scheduled
-main-release monitor into prerelease tags while retaining exact-tag and
-ancestry checks. Remove `allow-prerelease: true` from `main-is-released.yml`
-when preparing v1.0.0 GA. Label its compatibility row `release candidate`
-instead of `latest release`.
+Homebrew channel unchanged. Label its compatibility row `release candidate`
+instead of `latest release`. The scheduled main-release monitor
+(`main-is-released.yml`) tracks stable tags only; to cut a future prerelease
+through `main`, re-add `allow-prerelease: true` to its `with:` block for that
+stage and remove it again when the stable release follows.
 
 This requires the **`RELEASE_PAT`** secret (fine-grained PAT, Contents:
 read/write on this repo). Tags pushed with the default `GITHUB_TOKEN` do not

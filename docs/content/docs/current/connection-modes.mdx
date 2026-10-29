@@ -29,7 +29,7 @@ Standard mode is active whenever `DRYDOCK_URL` is **not** set. The controller au
 
 The agent host must accept inbound TCP connections on `PORT`. Run Portwing behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik) — do not expose it on plain HTTP to the internet.
 
-### Key environment variables
+### Standard mode environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -50,7 +50,7 @@ For the complete variable reference, see [Configuration](/configuration).
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
+    image: ghcr.io/codeswhat/portwing:1.0.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -97,7 +97,7 @@ Setting `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is rejected at startup with a f
 
 Edge mode's trust in the controller is TLS-only and one-directional. The signed hello lets the controller verify Portwing, but nothing verifies the controller's identity in return, so a plaintext `http://` or `ws://` `DRYDOCK_URL` would let an on-path attacker complete the handshake and drive dockerd. Portwing fails closed on a plaintext `DRYDOCK_URL` unless `ALLOW_INSECURE_EDGE_URL=true` is set, which is for trusted local testing only. Always use `https://` or `wss://` against a real controller.
 
-### Key environment variables
+### Edge mode environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -172,7 +172,7 @@ On `SIGINT` or `SIGTERM` the agent closes all active exec sessions and sends a W
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
+    image: ghcr.io/codeswhat/portwing:1.0.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]

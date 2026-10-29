@@ -31,15 +31,10 @@
 
 <hr>
 
-> [!WARNING]
-> **Pre-1.0 software — APIs may still change.** Portwing is pre-`v1.0.0` (currently `v1.0.0-rc.2`). The compatibility guarantees that already apply are published in [STABILITY.md](STABILITY.md); other surfaces may still change between minor releases. Pin to an exact version and review the [CHANGELOG](CHANGELOG.md) before upgrading.
-
-<!-- separate alerts: a blank-line-only gap between blockquotes trips markdownlint MD028 -->
-
 > [!NOTE]
-> **v1.0.0-rc.2 is the current release candidate.** It adds opt-in controller-assisted key rotation and includes the latest Go and web dependency security fixes. This is a candidate for evaluation; the v1 semver guarantees become binding at GA. Stable container `latest` and Homebrew channels remain on the 0.9 release line. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **Portwing is currently `v1.0.0`, the first stable release.** The semver guarantees in [STABILITY.md](STABILITY.md) now apply. It is the first stable release under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. The stable container `latest` tag and Homebrew cask are on 1.0.0. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-Controller-assisted two-key rotation requires Portwing `v1.0.0-rc.2` or later
+Controller-assisted two-key rotation requires Portwing `v1.0.0` or later
 and Drydock `v1.8.0-rc.1` or later on the v1.8 line. Both sides require explicit
 managed-storage configuration. See [compatibility](COMPATIBILITY.md#controller-assisted-rotation)
 and the [rotation guide](docs/content/docs/current/authentication.mdx#controller-assisted-rotation)
@@ -166,7 +161,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
+    image: ghcr.io/codeswhat/portwing:1.0.0
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -221,7 +216,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0-rc.2
+    image: ghcr.io/codeswhat/portwing:1.0.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -261,10 +256,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_1.0.0-rc.2_linux_amd64.deb
+sudo apt install ./portwing_1.0.0_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_1.0.0-rc.2_linux_amd64.rpm
+sudo rpm --install ./portwing_1.0.0_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -287,7 +282,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.0.0-rc.2
+  ghcr.io/codeswhat/portwing:1.0.0
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -443,7 +438,7 @@ flowchart LR
 
 > Watchtower's upstream project is archived. Diun and Watchtower can connect to remote Docker endpoints, but do not expose a general-purpose management proxy. Portwing provides that access and leaves update decisions to Drydock.
 >
-> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.45.2, Komodo Periphery v2.3.3, Arcane Agent v2.16.1, Hawser v0.2.50, Diun v4.33.0 and Watchtower v1.7.1. Reviewed 2026-10-15. The canonical page records edition limits, source-inspection scope and artifact discovery limits. Portainer uses fixed-message signature headers; Arcane documents method/path filtering for its manager and agent Prometheus export. A GitHub release attestation is different from build provenance.
+> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.45.3, Komodo Periphery v2.3.4, Arcane Agent v2.17.1, Hawser v0.2.52, Diun v4.33.1 and Watchtower v1.7.1. Reviewed 2026-10-26. The canonical page records edition limits, source-inspection scope and artifact discovery limits. Portainer uses fixed-message signature headers; Arcane documents method/path filtering for its manager and agent Prometheus export. A GitHub release attestation is different from build provenance.
 > Contributions welcome if any information is inaccurate.
 
 </details>
@@ -469,8 +464,7 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.7.x** ✅ | Fail-Closed Standard Mode | Standard mode refuses to start without credentials, security hardening pass (PW-SEC-001 to 010), edge log and delete request correlation, edge reconnect classification of terminal hello rejections, dead `DOCKER_HOST` surface removed |
 | **v0.8.x** ✅ | Operations & Distribution | Mode-aware `/health` and `/ready`, cursor-based NDJSON audit export, runnable Compose and Kubernetes observability examples, continuous edge logs, Homebrew cask and signed `deb`/`rpm` packages, published stability policy, edge mode production supported |
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks |
-| **v1.0.0** | Binding Stability | `STABILITY.md` guarantees become binding semver commitments, competitive review refreshed against primary sources, final v0.9 docs archived from its release tag. Gated on verifiable items, not a date |
-| **v1.0.0-rc.2** | Credential Lifecycle | Opt-in controller-assisted two-key rotation with Drydock `v1.8.0-rc.1+` |
+| **v1.0.0** ✅ | Binding Stability | `STABILITY.md` guarantees are binding semver commitments, opt-in controller-assisted two-key rotation (first available in rc.2, Drydock `v1.8.0-rc.1+`), competitive review refreshed against primary sources, final v0.9 docs archived from its release tag |
 | **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.

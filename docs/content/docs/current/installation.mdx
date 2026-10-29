@@ -10,8 +10,7 @@ container image and tar archives:
 - `deb` packages for Linux `amd64`, `arm64`, and `armv7`;
 - `rpm` packages for Linux `amd64`, `arm64`, and `armv7`.
 
-Stable releases update the Homebrew tap. Release candidates and other
-prereleases remain available from the GitHub release page but do not move the
+Stable releases update the Homebrew tap. Prereleases remain available from the GitHub release page but do not move the
 stable Homebrew channel.
 
 <Callout type="warn">
@@ -40,7 +39,7 @@ Download the package for your architecture from the
 [GitHub release](https://github.com/CodesWhat/portwing/releases). For example:
 
 ```bash
-VERSION=1.0.0-rc.2
+VERSION=1.0.0
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.deb" \
@@ -59,7 +58,7 @@ Use `linux_arm64.deb` on 64-bit Arm or `linux_armv7.deb` on 32-bit Arm.
 Download the matching package and its signature bundle:
 
 ```bash
-VERSION=1.0.0-rc.2
+VERSION=1.0.0
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.rpm" \
@@ -151,8 +150,8 @@ sudo systemctl restart portwing.service
 ```
 
 Review the [changelog](https://github.com/CodesWhat/portwing/blob/main/CHANGELOG.md)
-and [stability policy](/stability-policy) before upgrading between pre-1.0
-minor versions.
+and [stability policy](/stability-policy) before upgrading between
+releases.
 
 ## Uninstall
 

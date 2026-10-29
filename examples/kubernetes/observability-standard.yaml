@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Prometheus scraper for kubernetes/standard.yaml. The Portwing token and TLS
 # certificate secrets are reused from that manifest's prerequisites.
 apiVersion: v1

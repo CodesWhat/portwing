@@ -170,6 +170,19 @@ func TestRotationReservedRoutesAndValidation(t *testing.T) {
 	}
 }
 
+func requireLatestRotationAudit(t *testing.T, s *Server, operation, outcome string) {
+	t.Helper()
+	for _, record := range s.auditor.Records(64) {
+		if record.Event == "key_rotation" {
+			if record.Operation != operation || record.Outcome != outcome {
+				t.Fatalf("latest rotation audit = %s/%s, want %s/%s", record.Operation, record.Outcome, operation, outcome)
+			}
+			return
+		}
+	}
+	t.Fatalf("no rotation audit record, want %s/%s", operation, outcome)
+}
+
 func TestRotationHTTPAbortConflictAndFailedPersistence(t *testing.T) {
 	t.Parallel()
 	s, old := newRotationServer(t, true)
@@ -184,12 +197,14 @@ func TestRotationHTTPAbortConflictAndFailedPersistence(t *testing.T) {
 	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/prepare", payload); response.Code != 500 {
 		t.Fatalf("failed persistence: %d", response.Code)
 	}
+	requireLatestRotationAudit(t, s, "prepare", "error")
 	if err := os.Rename(s.cfg.KeyRotationDir+"-offline", s.cfg.KeyRotationDir); err != nil {
 		t.Fatal(err)
 	}
 	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/prepare", payload); response.Code != 200 {
 		t.Fatalf("prepare retry: %d", response.Code)
 	}
+	requireLatestRotationAudit(t, s, "prepare", "allowed")
 	other, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -198,12 +213,15 @@ func TestRotationHTTPAbortConflictAndFailedPersistence(t *testing.T) {
 	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/prepare", conflicting); response.Code != 409 {
 		t.Fatalf("conflicting pending key: %d", response.Code)
 	}
+	requireLatestRotationAudit(t, s, "prepare", "denied")
 	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/abort", payload); response.Code != 400 {
 		t.Fatalf("abort with replacement: %d", response.Code)
 	}
+	requireLatestRotationAudit(t, s, "abort", "denied")
 	if response := rotationRequest(t, s, old, "POST", "/_portwing/auth/rotation/abort", "{}"); response.Code != 200 {
 		t.Fatalf("abort: %d", response.Code)
 	}
+	requireLatestRotationAudit(t, s, "abort", "allowed")
 	if response := rotationRequest(t, s, next, "GET", "/_portwing/auth/rotation", ""); response.Code != 401 {
 		t.Fatalf("aborted key remained active: %d", response.Code)
 	}

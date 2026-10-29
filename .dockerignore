@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Keep the build context to what the Dockerfile actually needs:
 # Go sources and go.mod/go.sum.
 .git/

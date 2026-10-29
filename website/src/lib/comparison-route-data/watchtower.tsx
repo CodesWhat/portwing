@@ -62,7 +62,9 @@ bot|MCP Server (AI-Native)|Portwing ships five read-only MCP tools for container
       <strong className="text-neutral-900 dark:text-neutral-200">remote access agent</strong> — it
       gives the Drydock controller a secure authenticated foothold on a Docker host. These tools
       solve different problems; Drydock can handle centralized update workflows with Portwing as the
-      agent on each host. This comparison covers Watchtower v1.7.1, reviewed October 15, 2026.
+      agent on each host. The archived containrrr project's maintained successor is{" "}
+      <a href="https://github.com/nicholas-fedor/watchtower">nicholas-fedor/watchtower</a> (v1.23.2,
+      2026-10-22); this comparison covers the archived v1.7.1 release, reviewed October 26, 2026.
     </p>
   ),
   migrationTitle: "Using Watchtower today?",

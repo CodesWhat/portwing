@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is pre-`v1.0.0` software (currently `v1.0.0-rc.2`). This roadmap describes
+> Portwing is stable software (currently `v1.0.0`). This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
@@ -40,19 +40,19 @@ particular:
   on Edge Mode's private operations listener, with deployment examples that
   isolate its intentionally unauthenticated trust boundary.
 
-## Toward `v1.0`
+## Shipped in `v1.0`
 
-The path to `v1.0.0` is gated on concrete, verifiable items rather than a
-calendar date:
+`v1.0.0` shipped once these concrete, verifiable items were met, rather than on
+a calendar date:
 
-- **Completed 2026-08-29 (re-verified 2026-10-15): Competitive review gate.**
+- **Completed 2026-08-29 (re-verified 2026-10-26): Competitive review gate.**
   The market audit is published at
   [portwing.codeswhat.com/docs/competitive-landscape](https://portwing.codeswhat.com/docs/competitive-landscape). Comparison claims must
   stay tied to primary sources. The audit found no missing container lifecycle,
   streaming, Compose, observability, or authentication primitive that requires
-  new Portwing code for v1.0. The candidate review refreshed primary-source
+  new Portwing code for v1.0. The release review refreshed primary-source
   evidence for the current peer versions, with edition and artifact limits
-  recorded on the canonical page. Recheck claims that change before GA.
+  recorded on the canonical page. Recheck claims that change.
 - **Completed 2026-08-29: Tagged acceptance matrix.** Published Portwing's
   then-current release, Drydock v1.6.0, and Sockguard v2.0.0 artifacts passed the full
   Standard/Edge matrix in the
@@ -60,12 +60,21 @@ calendar date:
   A real Drydock controller exercised enrollment, overlapping-key rotation,
   revocation, two SIGHUP reloads, and clock-skew rejection and recovery. The
   legacy-floor row passed alongside the current Standard and Edge rows.
-- **Completed for the initial v1.0 candidate: Candidate artifact verification.** The exact
+- **Completed for v1.0.0-rc.1: Candidate artifact verification.** The exact
   published candidate passed Standard, Edge and legacy-floor rows with Drydock
   [v1.6.0](https://github.com/CodesWhat/sockguard/actions/runs/38836428734) and
   [v1.6.1](https://github.com/CodesWhat/sockguard/actions/runs/38837070094), both
-  with Sockguard v2.2.10. These runs do not verify subsequent development work.
-  Rerun the matrix against the exact next published candidate before GA.
+  with Sockguard v2.2.10. These runs did not verify later development work.
+- **Completed for rc.2: Final candidate evidence.** The rc.2
+  [release run](https://github.com/CodesWhat/portwing/actions/runs/40236426154)
+  passed, including Verify Published and the cosign attestation, the
+  per-platform Grype scans and the native package checks. The
+  [sockguard tri-tool conformance run](https://github.com/CodesWhat/sockguard/actions/runs/40266007939)
+  passed with Drydock 1.7.0 and Sockguard 2.2.11. Managed rotation was run on
+  the NAS with Drydock 1.8.0-rc.1 against image digest
+  `sha256:4ef115970be2ceacfb58cdc603745da509b7637a62501507a40f300633048c3e`,
+  and the published image passed a smoke run on the mainframe. The v1.0.0
+  artifacts are verified after publication.
 - **Completed for v0.8 — Edge-mode graduation.** Drydock 1.6 enables
   `/api/portwing/ws` by default, with `DD_EXPERIMENTAL_PORTWING=false` retained
   as an emergency disable. Drydock's `quality-portwing-fleet-soak.yml` runs the
@@ -99,9 +108,9 @@ calendar date:
   were frozen from the final v0.9 release tag and are served at `/docs/v0.9/...`,
   with their source tree verified by the archive contract. The live
   `docs/content/docs/current/` tree serves at the unversioned `/docs/...` URLs
-  and now includes explicitly labelled development features. Preserve frozen
-  archives when preparing later release lines. Archiving docs does not end
-  release support; v0.9 remains supported until v1.0.0 GA.
+  and now includes the rotation feature. Preserve frozen archives when
+  preparing later release lines. The v0.9 line is no longer supported as of
+  v1.0.0.
 - **SLSA Build L2 is the ceiling for now.** Provenance attestation (see
   [RELEASING.md](RELEASING.md)) stays at Build L2 because GoReleaser, cosign,
   and attest all run inline inside `release.yml`. Build L3 needs an isolated,
@@ -109,15 +118,14 @@ calendar date:
   for any CodesWhat repo. The trigger is that workflow landing — portwing's
   release job moves onto it then, not before.
 
-**Included in v1.0.0-rc.2: controller-assisted two-key rotation.**
-Opt-in durable managed credentials, Standard replacement proof and Edge
-signed-hello handoff require Drydock `v1.8.0-rc.1+` on the v1.8 line. Portwing's
-previous candidate did not include this feature. Current operator docs, API,
-README and release metadata record the supporting tags together in
-[COMPATIBILITY.md](COMPATIBILITY.md#controller-assisted-rotation).
+**Shipped in v1.0.0, first available in rc.2: controller-assisted
+two-key rotation.** Opt-in durable managed credentials, Standard replacement
+proof and Edge signed-hello handoff require Drydock `v1.8.0-rc.1+` on the v1.8
+line. Operator docs, API and release metadata record the supporting tags together
+in [COMPATIBILITY.md](COMPATIBILITY.md#controller-assisted-rotation).
 
-**Before GA:** rerun conformance against the exact new artifacts and record the
-successful hosted runs. The rc.1 evidence above does not verify rc.2. Keep
+**For later releases:** rerun conformance against the exact new artifacts and
+record the successful hosted runs. Earlier evidence does not carry forward. Keep
 release/support metadata aligned; the existing wire level does not establish
 additive feature support. Follow
 [RELEASING.md](RELEASING.md#release-documentation-and-compatibility).

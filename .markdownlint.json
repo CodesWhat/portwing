@@ -1,5 +1,5 @@
 {
-  "$comment": "qlty-managed markdownlint — see .qlty/qlty.toml",
+  "$comment": "SPDX-License-Identifier: MIT. qlty-managed markdownlint — see .qlty/qlty.toml",
   "MD013": false,
   "MD024": false,
   "MD033": false,
