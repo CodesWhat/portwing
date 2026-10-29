@@ -468,8 +468,9 @@ require_current_release_examples "docs/content/docs/current/security-model.mdx" 
 # contract (docs-archive-config-test.sh) polices those files instead. current/
 # gets no such pass.
 # Published matrix rows and their dated introduction in COMPATIBILITY.md retain
-# the exact tested version. The active release row is checked separately above;
-# other previous-version references in the same file still fail.
+# the exact tested version, including the previous version's RC rows. The active
+# release row is checked separately above; other previous-version references in
+# the same file still fail.
 stale_previous_version_matches="$(git grep -n -F -- "$previous_version" -- \
 	'*.md' '*.mdx' '*.ts' '*.tsx' '*.yaml' '*.yml' '*.txt' \
 	':(exclude)CHANGELOG.md' \
@@ -479,7 +480,8 @@ if [ -n "${stale_previous_version_matches}" ]; then
 	stale_previous_version_matches="$(awk -v exempt="since v${previous_version}" -v previous="${previous_version}" '
 		index($0, "README.md:") == 1 && index($0, exempt) { next }
 		index($0, "COMPATIBILITY.md:") == 1 && (index($0, ":The exact v" previous " artifacts passed the hosted matrix on ") ||
-			index($0, ":| v" previous " | v")) { next }
+			index($0, ":| v" previous " | v") || index($0, ":The exact v" previous "-rc.") ||
+			index($0, ":| v" previous "-rc.")) { next }
 		{ print }
 	' <<<"${stale_previous_version_matches}")"
 fi

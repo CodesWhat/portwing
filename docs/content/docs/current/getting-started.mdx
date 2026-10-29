@@ -88,7 +88,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0
+    image: ghcr.io/codeswhat/portwing:1.0.1
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -157,7 +157,7 @@ docker compose -f docker-compose.standard.yml up -d
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0
+    image: ghcr.io/codeswhat/portwing:1.0.1
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -197,7 +197,7 @@ volumes:
 Edge mode lets Portwing dial **out** to your Drydock controller over a WebSocket tunnel instead of listening for inbound connections. This is useful for hosts behind NAT or a firewall where you cannot publish an inbound port.
 
 <Callout type="info">
-**Production supported; use Drydock `v1.6.0-rc.11+` with Portwing v1.0.0.** Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers the stable `portwing/1.0` path with real Portwing processes, multi-agent reconnect load, concurrent exec, continuous logs, and controller backpressure. Portwing's separate `quality-soak-weekly.yml` covers the Standard/generic HTTP path and SSE churn under an RSS-growth budget. Drydock `v1.6.0-rc.11+` implements the complete controller-owned watcher/update contract; older controllers may remain wire-compatible without that behavior. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
+**Production supported; use Drydock `v1.6.0-rc.11+` with Portwing v1.0 or later.** Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers the stable `portwing/1.0` path with real Portwing processes, multi-agent reconnect load, concurrent exec, continuous logs, and controller backpressure. Portwing's separate `quality-soak-weekly.yml` covers the Standard/generic HTTP path and SSE churn under an RSS-growth budget. Drydock `v1.6.0-rc.11+` implements the complete controller-owned watcher/update contract; older controllers may remain wire-compatible without that behavior. The endpoint is **Ed25519-only**: set `PRIVATE_KEY_FILE` and register the public key with Drydock; token-only connections are rejected.
 </Callout>
 
 ```bash
@@ -238,7 +238,7 @@ docker compose -f docker-compose.edge.yml up -d
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0
+    image: ghcr.io/codeswhat/portwing:1.0.1
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -287,7 +287,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.0.0
+  ghcr.io/codeswhat/portwing:1.0.1
 ```
 
 Without `TOKEN`, `TOKEN_HASH`, or `AUTHORIZED_KEYS`, Standard mode refuses to

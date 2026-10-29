@@ -38,7 +38,7 @@ to that commit, and that the tag ends its line. Cut one with
 - Every archived page is `noindex`, shows an archive notice linking to the same
   page in the current docs and to the security policy, and is left out of the
   sitemap. Archiving docs does not retire release support. Follow
-  [SECURITY.md](../../SECURITY.md); the 0.9 line retired when v1.0.0 GA shipped.
+  [SECURITY.md](../../SECURITY.md); the 0.9 line retired when v1.0 GA shipped.
 - The static export puts an archive's pages at `docs/out/vX.Y/<page>.html` and
   its index at `docs/out/vX.Y.html`; `npm run docs:export-contract` checks both.
 - Analytics counts archived paths under `/_other`; the allowlist in

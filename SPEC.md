@@ -53,7 +53,7 @@ Portwing runs an HTTP(S) server. The Drydock controller connects inbound.
 
 ### 2.3 Edge Mode
 
-Portwing initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/portwing/ws`). All communication is multiplexed over this single connection. The endpoint is Ed25519-only and uses the stable `portwing/1.0` protocol. Drydock `v1.6.0-rc.11+` provides the complete Portwing v0.9.0 controller-owned watcher/update contract; older compatible controllers may still establish the wire connection without those additive feature semantics. Portwing itself remains pre-`v1.0.0`.
+Portwing initiates an outbound WebSocket connection to the Drydock controller's edge endpoint (`/api/portwing/ws`). All communication is multiplexed over this single connection. The endpoint is Ed25519-only and uses the stable `portwing/1.0` protocol. Drydock `v1.6.0-rc.11+` provides the complete Portwing v0.9.0 controller-owned watcher/update contract; older compatible controllers may still establish the wire connection without those additive feature semantics. Portwing itself remains pre-`v1.0`.
 
 - Works behind NAT, firewalls, dynamic IPs
 - Auto-reconnect with exponential backoff + jitter

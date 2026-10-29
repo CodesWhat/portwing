@@ -107,7 +107,7 @@ independent target for release-preparation commits.
   build. Keep manual overlapping-key/SIGHUP tests distinct from verification
   of controller-assisted rotation when that feature enters a release.
 - Update [SECURITY.md](SECURITY.md) with the release metadata. Archiving a docs
-  line does not end its support window; the 0.9 line retired at v1.0.0 GA.
+  line does not end its support window; the 0.9 line retired at the v1.0 GA.
   Leave frozen archives unchanged and fix current guidance separately.
 
 ## Cutting a docs archive

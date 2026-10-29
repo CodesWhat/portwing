@@ -257,7 +257,7 @@ Handshake sequence:
 {
   "type": "hello",
   "data": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "protocol": "portwing/1.0",
     "agentId": "uuid",
     "agentName": "my-server",
@@ -506,7 +506,7 @@ These are set in Drydock's agent component configuration, not environment variab
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0
+    image: ghcr.io/codeswhat/portwing:1.0.1
     environment:
       TOKEN: "${DD_AGENT_SECRET}"
       PORT: "3000"

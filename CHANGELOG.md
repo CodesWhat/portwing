@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.1] - 2026-10-29
+
 ### Fixed
 
 - Enrollment no longer needs write access to the directory holding

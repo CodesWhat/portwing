@@ -456,6 +456,20 @@ if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null)
 	echo "FAIL: published matrix evidence must retain the version actually tested" >&2
 	exit 1
 fi
+# The previous version's RC evidence is exempt in COMPATIBILITY.md only.
+printf '\nThe exact v%s-rc.1 artifacts passed the hosted matrix on 2026-10-16:\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
+printf '| v%s-rc.1 | v1.6.1 | v2.2.10 | PASS / PASS / PASS | Matrix run |\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
+if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
+	echo "FAIL: previous-version RC matrix evidence must be accepted in COMPATIBILITY.md" >&2
+	exit 1
+fi
+releasing_rc_backup="${fixture}/RELEASING.md.rc-backup"
+cp "${fixture}/RELEASING.md" "${releasing_rc_backup}"
+printf '\nCandidate v%s-rc.1 notes.\n' "${previous_version}" >>"${fixture}/RELEASING.md"
+expect_release_contract_failure \
+	"FAIL: stale references to v${previous_version} remain outside the changelog" \
+	"the RC evidence exemption must not apply outside COMPATIBILITY.md"
+mv "${releasing_rc_backup}" "${fixture}/RELEASING.md"
 printf '\nStale reference to v%s.\n' "${previous_version}" >>"${fixture}/COMPATIBILITY.md"
 expect_release_contract_failure \
 	"FAIL: stale references to v${previous_version} remain outside the changelog" \

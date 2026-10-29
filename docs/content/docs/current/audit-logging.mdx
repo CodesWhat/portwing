@@ -23,15 +23,15 @@ export.
 ```bash
 # Append to a dedicated file (opened append-only, mode 0600)
 docker run -e AUDIT_LOG=/var/log/portwing-audit.log \
-  ghcr.io/codeswhat/portwing:1.0.0
+  ghcr.io/codeswhat/portwing:1.0.1
 
 # Write to stdout — useful when a log aggregator already captures container stdout
 docker run -e AUDIT_LOG=stdout \
-  ghcr.io/codeswhat/portwing:1.0.0
+  ghcr.io/codeswhat/portwing:1.0.1
 
 # Write to stderr
 docker run -e AUDIT_LOG=stderr \
-  ghcr.io/codeswhat/portwing:1.0.0
+  ghcr.io/codeswhat/portwing:1.0.1
 ```
 
 <Callout type="info">
