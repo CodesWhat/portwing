@@ -1,6 +1,12 @@
 # Portwing edge mode + sockguard, with exec enabled — the bundle for
 # drydock's edge exec feature.
 #
+# WARNING: the exec rule can target any container, including the sockguard
+# proxy that holds the Docker socket. A compromised Portwing or controller
+# with exec can run code inside the proxy and step outside the allowlist. Only
+# enable this bundle where exec into every container is acceptable; sockguard
+# has no per-container exec scoping yet.
+#
 # This is docker-compose.edge.yml (outbound WebSocket tunnel to Drydock, no
 # inbound ports) layered on docker-compose.with-sockguard.yml's two-layer
 # defense (sockguard proxies the real Docker socket; Portwing only ever talks

@@ -139,6 +139,8 @@ Replay protection uses two complementary mechanisms:
 1. **Timestamp window** — requests with a timestamp skew greater than `MAX_CLOCK_SKEW_SECONDS` (default 60 s) are rejected with `X-Portwing-Reason: timestamp-skew`.
 2. **Nonce LRU** — an in-memory cache (capacity `NONCE_LRU_SIZE`, default 10,000) tracks nonces within the timestamp window. Repeated nonces return `X-Portwing-Reason: replay`.
 
+Signatures don't name the agent they're for, and each agent keeps its own nonce cache, so a captured request can be replayed against a different agent that trusts the same key within the skew window. Use TLS for Standard-mode traffic and give each agent its own controller key where that matters.
+
 Authorized-keys and private-key paths must resolve to regular files. On Unix,
 world-readable and group/world-writable credential files are refused; mode
 `0640` is supported for group-readable secret mounts. The permission check is
