@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -64,9 +63,9 @@ type Enroller struct {
 // secret. authorizedFile is the path to the authorized_keys file.
 // registry is the live key registry to reload after enrollment.
 //
-// The burn is durable: a successful enrollment writes a marker file next to
-// authorized_keys (see enrollmentMarkerPath), and NewEnroller stays disarmed
-// when that marker matches the configured token.
+// The burn is durable: a successful enrollment appends a comment line to
+// authorized_keys (see enrollmentBurnLine), and NewEnroller stays disarmed when
+// that file holds a burn for the configured token.
 func NewEnroller(token, authorizedFile string, registry *KeyRegistry) *Enroller {
 	e := &Enroller{
 		tokenDigest:    sha256.Sum256([]byte(token)),
@@ -79,38 +78,113 @@ func NewEnroller(token, authorizedFile string, registry *KeyRegistry) *Enroller 
 		e.tokenAvailable = false
 		e.burned = true
 		slog.Warn("enrollment already happened for this agent; enrollment is disabled until a new token is configured, remove ENROLLMENT_TOKEN",
-			"marker", enrollmentMarkerPath(authorizedFile))
+			"authorized_keys", authorizedFile)
 	}
 	return e
 }
 
-// enrollmentMarkerPath is where the durable token burn is recorded.
-func enrollmentMarkerPath(authorizedFile string) string {
+const (
+	enrollmentBurnMarker = "portwing-enrollment-burned"
+	enrollmentBurnPrefix = "sha256:"
+)
+
+// enrollmentBurnLine is the comment line recording a burned token digest. The
+// key registry skips it like any other comment.
+func enrollmentBurnLine(digest [sha256.Size]byte) string {
+	return "# " + enrollmentBurnMarker + " " + enrollmentBurnPrefix + hex.EncodeToString(digest[:])
+}
+
+// legacyEnrollmentMarkerPath is where v1.0.0 wrote its burn. Read only.
+func legacyEnrollmentMarkerPath(authorizedFile string) string {
 	return authorizedFile + ".enrolled"
 }
 
+// burnScan summarises what authorized_keys says about past enrollments.
+type burnScan struct {
+	matched     bool // a burn line carries the configured digest
+	malformed   bool // a burn line has an invalid value
+	anyBurn     bool // at least one burn line exists
+	enrolledKey bool // a key line has an "enrolled:" comment
+}
+
+func scanAuthorizedKeysForBurn(data string, digest [sha256.Size]byte) burnScan {
+	var scan burnScan
+	want := []byte(hex.EncodeToString(digest[:]))
+	for _, line := range strings.Split(data, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if fields[0] == "#" && len(fields) >= 2 && fields[1] == enrollmentBurnMarker {
+			scan.anyBurn = true
+			if len(fields) != 3 || !strings.HasPrefix(fields[2], enrollmentBurnPrefix) {
+				scan.malformed = true
+				continue
+			}
+			got := []byte(strings.TrimPrefix(fields[2], enrollmentBurnPrefix))
+			if !validEnrollmentDigest(got) {
+				scan.malformed = true
+				continue
+			}
+			if subtle.ConstantTimeCompare(got, want) == 1 {
+				scan.matched = true
+			}
+			continue
+		}
+		if len(fields) >= 3 && !strings.HasPrefix(fields[0], "#") && strings.HasPrefix(fields[2], "enrolled:") {
+			scan.enrolledKey = true
+		}
+	}
+	return scan
+}
+
 // alreadyEnrolled reports whether the configured token has already been used.
-// It fails closed: an unreadable marker counts as used.
+// It fails closed: unreadable or malformed burn state counts as used.
 func alreadyEnrolled(digest [sha256.Size]byte, authorizedFile string) bool {
-	marker := enrollmentMarkerPath(authorizedFile)
+	// #nosec G304 -- authorized_keys path is explicit operator configuration.
+	data, err := os.ReadFile(authorizedFile)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Error("reading authorized_keys for enrollment state; treating token as used", "file", authorizedFile, "error", err)
+		return true
+	}
+	scan := scanAuthorizedKeysForBurn(string(data), digest)
+	if scan.matched {
+		return true
+	}
+	if scan.malformed {
+		slog.Error("authorized_keys has a malformed enrollment burn line; treating token as used", "file", authorizedFile)
+		return true
+	}
+	// A v1.0.0 marker, when present, decides: it names the token that agent
+	// burned, so a different token is a rotation.
+	if present, used := legacyMarkerState(digest, authorizedFile); present {
+		return used
+	}
+	// Builds before v1.0.0 left only an enrolled: key line.
+	return !scan.anyBurn && scan.enrolledKey
+}
+
+// legacyMarkerState reads the v1.0.0 "<authorized_keys>.enrolled" marker. It
+// reports whether a marker is present and, if so, whether it counts as used:
+// matching, unreadable or invalid markers do; a valid other digest does not.
+func legacyMarkerState(digest [sha256.Size]byte, authorizedFile string) (present, used bool) {
+	marker := legacyEnrollmentMarkerPath(authorizedFile)
 	// #nosec G304 -- marker path derives from explicit operator configuration.
 	data, err := os.ReadFile(marker)
 	if errors.Is(err, os.ErrNotExist) {
-		// No marker: builds that burned only in memory left an enrolled: key line.
-		return hasEnrolledKeyLine(authorizedFile)
+		return false, false
 	}
 	if err != nil {
-		slog.Error("reading enrollment marker; treating token as used", "marker", marker, "error", err)
-		return true
+		slog.Error("reading legacy enrollment marker; treating token as used", "marker", marker, "error", err)
+		return true, true
 	}
 	got := []byte(strings.TrimSpace(string(data)))
 	if !validEnrollmentDigest(got) {
-		slog.Error("enrollment marker is not a SHA-256 hex digest; treating token as used", "marker", marker)
-		return true
+		slog.Error("legacy enrollment marker is not a SHA-256 hex digest; treating token as used", "marker", marker)
+		return true, true
 	}
 	want := []byte(hex.EncodeToString(digest[:]))
-	// A different digest means the operator rotated to a new token.
-	return subtle.ConstantTimeCompare(got, want) == 1
+	return true, subtle.ConstantTimeCompare(got, want) == 1
 }
 
 // validEnrollmentDigest reports whether b is exactly 64 lowercase hex chars.
@@ -124,58 +198,6 @@ func validEnrollmentDigest(b []byte) bool {
 		}
 	}
 	return true
-}
-
-// hasEnrolledKeyLine reports whether authorized_keys holds a key written by
-// enrollment (comment starting with "enrolled:").
-func hasEnrolledKeyLine(path string) bool {
-	// #nosec G304 -- authorized_keys path is explicit operator configuration.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 3 && !strings.HasPrefix(fields[0], "#") && strings.HasPrefix(fields[2], "enrolled:") {
-			return true
-		}
-	}
-	return false
-}
-
-// writeEnrollmentMarker atomically records the burned token digest (temp file
-// in the same directory, fsync, rename), mode 0600.
-func writeEnrollmentMarker(authorizedFile string, digest [sha256.Size]byte) error {
-	return writeEnrollmentMarkerContent(authorizedFile, []byte(hex.EncodeToString(digest[:])+"\n"))
-}
-
-// writeEnrollmentMarkerContent atomically installs content as the marker, then
-// fsyncs the parent directory so the rename survives a crash.
-func writeEnrollmentMarkerContent(authorizedFile string, content []byte) (err error) {
-	marker := enrollmentMarkerPath(authorizedFile)
-	tmp, err := os.CreateTemp(filepath.Dir(marker), filepath.Base(marker)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("creating enrollment marker: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer func() {
-		if err != nil {
-			_ = tmp.Close()
-			_ = os.Remove(tmpName)
-		}
-	}()
-	// os.CreateTemp already creates the file with mode 0600.
-	_, writeErr := tmp.Write(content)
-	if err = errors.Join(writeErr, tmp.Sync(), tmp.Close()); err != nil {
-		return fmt.Errorf("writing enrollment marker: %w", err)
-	}
-	if err = os.Rename(tmpName, marker); err != nil {
-		return fmt.Errorf("installing enrollment marker: %w", err)
-	}
-	if err = syncRotationStateDirectory(filepath.Dir(marker)); err != nil {
-		return fmt.Errorf("syncing enrollment marker directory: %w", err)
-	}
-	return nil
 }
 
 // ServeHTTP implements http.Handler. It accepts POST /api/portwing/enroll,
@@ -259,38 +281,20 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	comment := fmt.Sprintf("enrolled:%s", keyID)
 	line := AuthorizedKeyLine(ed25519.PublicKey(rawPub), comment)
 
-	// Keep the previous marker so a failed rotated enrollment can restore it.
-	// #nosec G304 -- marker path derives from explicit operator configuration.
-	prevMarker, prevErr := os.ReadFile(enrollmentMarkerPath(e.authorizedFile))
-	hadPrevMarker := prevErr == nil
-
-	// Record the burn durably before the key lands, so a crash or restart
-	// between the two cannot leave a usable token. Fail closed.
-	if err := writeEnrollmentMarker(e.authorizedFile, e.tokenDigest); err != nil {
-		slog.Error("enrollment failed: cannot write enrollment marker", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Append to the authorized_keys file.
-	if err := appendAuthorizedKey(e.authorizedFile, line); err != nil {
-		if !errors.Is(err, errAppendNotStarted) {
-			// The key line may already be on disk, so the burn has to stand.
-			e.tokenDigest = [sha256.Size]byte{}
-			e.tokenAvailable = false
-			e.burned = true
-			slog.Error("enrollment failed after authorized_keys was opened; keeping the burn", "error", err)
+	// Append the burn comment and the key in one write, burn first, so the
+	// two land together. Only the keys file is written, never its directory.
+	burnLine := enrollmentBurnLine(e.tokenDigest)
+	if err := appendAuthorizedKey(e.authorizedFile, burnLine+"\n"+line); err != nil {
+		if errors.Is(err, errAppendNotStarted) {
+			slog.Error("enrollment failed: cannot write authorized_keys", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		if hadPrevMarker {
-			if rerr := writeEnrollmentMarkerContent(e.authorizedFile, prevMarker); rerr != nil {
-				slog.Error("enrollment failed: cannot restore previous enrollment marker", "error", rerr)
-			}
-		} else if rerr := os.Remove(enrollmentMarkerPath(e.authorizedFile)); rerr != nil {
-			slog.Error("enrollment failed: cannot remove enrollment marker", "error", rerr)
-		}
-		slog.Error("enrollment failed: cannot write authorized_keys", "error", err)
+		// Bytes may already be on disk, so the burn has to stand.
+		e.tokenDigest = [sha256.Size]byte{}
+		e.tokenAvailable = false
+		e.burned = true
+		slog.Error("enrollment failed after authorized_keys was opened; keeping the burn", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -352,21 +356,25 @@ func remoteHost(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// appendKeyLine appends a single key line to the authorized_keys file,
-// creating it (mode 0600) if it does not exist.
 // errAppendNotStarted marks an append that failed before any byte could reach
-// authorized_keys, so rolling back the enrollment marker is safe.
+// authorized_keys, so the token can safely stay armed.
 var errAppendNotStarted = errors.New("authorized_keys was not opened")
 
 // appendAuthorizedKey is a seam so tests can force a failure after the key
 // file was opened.
 var appendAuthorizedKey = appendKeyLine
 
+// appendKeyLine appends text plus a newline to the authorized_keys file in one
+// write, creating it (mode 0600) if it does not exist.
 func appendKeyLine(path, line string) (err error) {
 	// #nosec G304 -- authorized_keys path is explicit operator configuration.
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening authorized_keys for append: %w: %w", errAppendNotStarted, err)
+	}
+	if needsLeadingNewline(f) {
+		// Never glue the new lines onto an unterminated last line.
+		line = "\n" + line
 	}
 	defer func() {
 		// Surface a deferred close error (e.g. a flush failure on the write)
@@ -375,8 +383,27 @@ func appendKeyLine(path, line string) (err error) {
 			err = fmt.Errorf("closing authorized_keys: %w", cerr)
 		}
 	}()
-	if _, err = fmt.Fprintln(f, line); err != nil {
+	// Sync before reporting success: a burn lost to a crash would re-arm the
+	// token on the next start.
+	_, err = fmt.Fprintln(f, line)
+	if err == nil {
+		err = f.Sync()
+	}
+	if err != nil {
 		return fmt.Errorf("writing authorized_keys: %w", err)
 	}
 	return nil
+}
+
+// needsLeadingNewline reports whether f is non-empty and does not end in a
+// newline. It answers true when it cannot tell: an extra blank line is
+// harmless, a line glued onto the previous one is not.
+func needsLeadingNewline(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return err != nil
+	}
+	last := make([]byte, 1)
+	_, err = f.ReadAt(last, info.Size()-1)
+	return err != nil || last[0] != '\n'
 }

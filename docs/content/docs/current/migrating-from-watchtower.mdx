@@ -67,7 +67,7 @@ Use this when the Drydock controller can reach your host directly — no NAT.
 # docker-compose.yml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0
+    image: ghcr.io/codeswhat/portwing:1.0.1
     restart: unless-stopped
     # The image runs as non-root UID 65532; grant the Docker socket's group:
     #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
@@ -113,14 +113,14 @@ Key environment variables for Standard mode:
 Use this when your host is behind NAT, a firewall, or has a dynamic IP. Portwing initiates the outbound WebSocket connection to Drydock; no inbound port is required.
 
 <Callout type="info">
-Edge mode is production supported under the stable `portwing/1.0` protocol. Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers it with real Portwing processes under multi-agent reconnect, exec, continuous-log, and controller-backpressure load; Portwing's separate weekly soak covers Standard/generic HTTP and SSE RSS growth. Use Drydock `v1.6.0-rc.11+` with Portwing v1.0.0 for the full controller-owned watcher/update feature path. The endpoint is Ed25519-only: set `PRIVATE_KEY_FILE` (token-only connections are rejected).
+Edge mode is production supported under the stable `portwing/1.0` protocol. Drydock's cross-repo `quality-portwing-fleet-soak.yml` workflow covers it with real Portwing processes under multi-agent reconnect, exec, continuous-log, and controller-backpressure load; Portwing's separate weekly soak covers Standard/generic HTTP and SSE RSS growth. Use Drydock `v1.6.0-rc.11+` with Portwing v1.0 or later for the full controller-owned watcher/update feature path. The endpoint is Ed25519-only: set `PRIVATE_KEY_FILE` (token-only connections are rejected).
 </Callout>
 
 ```yaml
 # docker-compose.yml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.0
+    image: ghcr.io/codeswhat/portwing:1.0.1
     restart: unless-stopped
     # The image runs as non-root UID 65532; grant the Docker socket's group:
     #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)

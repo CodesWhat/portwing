@@ -1,6 +1,6 @@
 # Compatibility and Stability Policy
 
-This document defines the compatibility promises Portwing makes from `v1.0.0`,
+This document defines the compatibility promises Portwing makes from `v1.0`,
 the first stable release. These guarantees are binding semver commitments.
 
 The version matrix in [COMPATIBILITY.md](COMPATIBILITY.md) remains the
@@ -24,7 +24,7 @@ the migration path.
 
 ## HTTP and OpenAPI surface
 
-Beginning with `v1.0.0`, the following documented surfaces are stable:
+Beginning with the first `v1.0` release, the following documented surfaces are stable:
 
 - the generic REST and SSE API under `/api/v1`;
 - the documented Drydock-compatible HTTP and SSE routes;
@@ -43,7 +43,7 @@ The following are backward-compatible:
 - a new optional authentication mechanism that does not weaken an existing
   one.
 
-The following require a major release once `v1.0.0` ships:
+The following require a major release once `v1.0` ships:
 
 - removing or renaming an endpoint, event, field, or required header;
 - making an optional input required;
@@ -73,7 +73,7 @@ Both variants are covered by this policy.
 
 ## Environment variables
 
-At `v1.0.0`, every variable in the configuration reference is stable in name,
+At `v1.0`, every variable in the configuration reference is stable in name,
 value grammar, default, precedence, and security semantics.
 
 Adding an optional variable is backward-compatible. Renaming or removing a
@@ -87,7 +87,7 @@ variables are not public API.
 
 ## MCP surface
 
-The MCP endpoint was experimental through `v0.x`. From `v1.0.0`, the
+The MCP endpoint was experimental through `v0.x`. From `v1.0`, the
 documented JSON-RPC transport, tool names, input schemas, output schemas, and
 read-only security model become stable.
 

@@ -3,7 +3,7 @@
 ## Supported Versions
 
 Security fixes are shipped on the **latest stable release line**. The 0.9
-line became unsupported when v1.0.0 shipped.
+line became unsupported when v1.0 shipped.
 
 | Version        | Supported          |
 | -------------- | ------------------ |

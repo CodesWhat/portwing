@@ -562,11 +562,9 @@ func TestKeyRegistry_Load_ParseError(t *testing.T) {
 
 func TestEnroller_AppendKeyLineFailure(t *testing.T) {
 	t.Parallel()
-	// Set authorizedFile to a directory path; os.OpenFile with O_WRONLY on a
-	// directory will fail, exercising the "internal server error" branch.
-	dir := t.TempDir()
-	// Use the directory itself as the "file" path — opening a dir for write fails.
-	badPath := dir
+	// The keys file lives in a directory that does not exist, so the file is
+	// absent (token arms) but opening it for append fails.
+	badPath := filepath.Join(t.TempDir(), "missing", "authorized_keys")
 
 	reg := NewKeyRegistry("") // empty path = always-empty registry, no file needed
 	e := NewEnroller("tok", badPath, reg)

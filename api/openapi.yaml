@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Portwing Agent API
-  version: 1.0.0
+  version: 1.0.1
   description: |
     Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
@@ -11,7 +11,7 @@ info:
     ## Release availability
 
     The version above identifies the current release. Managed rotation is
-    available from v1.0.0; controller assistance requires Drydock
+    available from v1.0; controller assistance requires Drydock
     v1.8.0-rc.1 or later on the v1.8 line. See COMPATIBILITY.md for peer minimums.
 
     ## Authentication
@@ -184,7 +184,7 @@ components:
         version:
           type: string
           description: Portwing agent version.
-          example: "1.0.0"
+          example: "1.0.1"
         uptimeSeconds:
           type: number
           minimum: 0
@@ -205,7 +205,7 @@ components:
         version:
           type: string
           description: Portwing agent version
-          example: "1.0.0"
+          example: "1.0.1"
         dockerVersion:
           type: string
           description: Docker Engine version string
@@ -579,7 +579,7 @@ components:
       properties:
         agentVersion:
           type: string
-          example: "1.0.0"
+          example: "1.0.1"
         protocolName:
           type: string
           example: "portwing"
@@ -828,7 +828,7 @@ paths:
       operationId: statusManagedKeyRotation
       summary: Status managed Ed25519 rotation
       description: >
-        Available since v1.0.0. Requires
+        Available since v1.0. Requires
         KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
         version 2 with no query parameters. Bearer credentials cannot manage
         keys. Read the verified signer's own managed identity. Current and pending signers can read status.
@@ -858,7 +858,7 @@ paths:
       operationId: prepareManagedKeyRotation
       summary: Prepare managed Ed25519 rotation
       description: >
-        Available since v1.0.0. Requires
+        Available since v1.0. Requires
         KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
         version 2 with no query parameters. Bearer credentials cannot manage
         keys. The current signer stages a raw 32-byte Ed25519 successor. Both keys remain accepted until replacement proof commits.
@@ -901,7 +901,7 @@ paths:
       operationId: commitManagedKeyRotation
       summary: Commit managed Ed25519 rotation
       description: >
-        Available since v1.0.0. Requires
+        Available since v1.0. Requires
         KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
         version 2 with no query parameters. Bearer credentials cannot manage
         keys. Only the pending signer can retire its predecessor. Repeating a successful commit with the current signer is idempotent.
@@ -938,7 +938,7 @@ paths:
       operationId: abortManagedKeyRotation
       summary: Abort managed Ed25519 rotation
       description: >
-        Available since v1.0.0. Requires
+        Available since v1.0. Requires
         KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
         version 2 with no query parameters. Bearer credentials cannot manage
         keys. Only the current signer can cancel its uncommitted successor. The current key stays active.
@@ -1386,7 +1386,7 @@ paths:
 
         **Example stream:**
         ```
-        data: {"type":"dd:ack","data":{"version":"1.0.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+        data: {"type":"dd:ack","data":{"version":"1.0.1","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
 
         data: {"type":"dd:watcher-snapshot","data":{"watcher":{...WatcherComponent...},"containers":[{...Container...}]}}
 
