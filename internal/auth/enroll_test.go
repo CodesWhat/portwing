@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -344,5 +345,182 @@ func TestEnroller_MarkerModeAndContent(t *testing.T) {
 		if info.Mode().Perm() != 0o600 {
 			t.Errorf("marker mode = %o, want 600", info.Mode().Perm())
 		}
+	}
+}
+
+func TestEnroller_InvalidMarkerContentsDisarm(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"garbage":   "not-a-digest\n",
+		"empty":     "",
+		"short":     strings.Repeat("a", 63) + "\n",
+		"uppercase": strings.Repeat("A", 64) + "\n",
+		"non-hex":   strings.Repeat("g", 64) + "\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, reg, path := setupEnroller(t, "secrettok")
+			if err := os.WriteFile(path+".enrolled", []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			e := NewEnroller("secrettok", path, reg)
+			if code := enrollOnce(t, e, "secrettok"); code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d", code)
+			}
+		})
+	}
+}
+
+func TestEnroller_ValidDifferentMarkerArms(t *testing.T) {
+	t.Parallel()
+	_, reg, path := setupEnroller(t, "tok-two")
+	other := sha256.Sum256([]byte("tok-one"))
+	if err := os.WriteFile(path+".enrolled", []byte(hex.EncodeToString(other[:])+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEnroller("tok-two", path, reg)
+	if code := enrollOnce(t, e, "tok-two"); code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+}
+
+func makeAuthorizedKeysReadOnly(t *testing.T, path string) {
+	t.Helper()
+	// #nosec G302 -- read-only private test file to force the key append to fail.
+	if err := os.Chmod(path, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	// #nosec G302 -- restore owner write permission on a private test file for cleanup.
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+}
+
+func TestEnroller_FailedRotatedEnrollmentRestoresPreviousMarker(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("read-only file not enforced on Windows or as root")
+	}
+	_, reg, path := setupEnroller(t, "tok-two")
+	other := sha256.Sum256([]byte("tok-one"))
+	// Deliberately unusual bytes (no trailing newline) to prove an exact restore.
+	prev := []byte("  " + hex.EncodeToString(other[:]))
+	marker := path + ".enrolled"
+	if err := os.WriteFile(marker, prev, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEnroller("tok-two", path, reg)
+	makeAuthorizedKeysReadOnly(t, path)
+
+	if code := enrollOnce(t, e, "tok-two"); code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", code)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, prev) {
+		t.Errorf("marker = %q, want %q", got, prev)
+	}
+}
+
+func TestEnroller_FailedFirstEnrollmentRemovesMarker(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("read-only file not enforced on Windows or as root")
+	}
+	e, _, path := setupEnroller(t, "secrettok")
+	makeAuthorizedKeysReadOnly(t, path)
+
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", code)
+	}
+	if _, err := os.Stat(path + ".enrolled"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("marker should be removed, stat err = %v", err)
+	}
+}
+
+// Not parallel: swaps the package-level directory sync hook.
+func TestEnroller_MarkerDirectorySyncFailureFailsClosed(t *testing.T) {
+	e, _, path := setupEnroller(t, "secrettok")
+	realSync := syncRotationDirectory
+	syncRotationDirectory = func(*os.File) error { return errors.New("fixture directory sync failed") }
+	t.Cleanup(func() { syncRotationDirectory = realSync })
+
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", code)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Errorf("key appended despite directory sync failure: %q", data)
+	}
+}
+
+// Not parallel: swaps the package-level directory sync hook.
+func TestEnroller_RestoreFailureStillReturns500(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("read-only file not enforced on Windows or as root")
+	}
+	_, reg, path := setupEnroller(t, "tok-two")
+	other := sha256.Sum256([]byte("tok-one"))
+	if err := os.WriteFile(path+".enrolled", []byte(hex.EncodeToString(other[:])+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEnroller("tok-two", path, reg)
+	makeAuthorizedKeysReadOnly(t, path)
+
+	realSync := syncRotationDirectory
+	calls := 0
+	syncRotationDirectory = func(f *os.File) error {
+		calls++
+		if calls > 1 {
+			return errors.New("fixture restore sync failed")
+		}
+		return realSync(f)
+	}
+	t.Cleanup(func() { syncRotationDirectory = realSync })
+
+	if code := enrollOnce(t, e, "tok-two"); code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", code)
+	}
+	if calls != 2 {
+		t.Errorf("directory sync calls = %d, want 2 (install + restore)", calls)
+	}
+}
+
+// Not parallel: swaps the package-level directory sync hook.
+func TestEnroller_MarkerRemoveFailureStillReturns500(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("read-only file not enforced on Windows or as root")
+	}
+	e, _, path := setupEnroller(t, "secrettok")
+	makeAuthorizedKeysReadOnly(t, path)
+
+	realSync := syncRotationDirectory
+	// Remove the marker as it is installed so the rollback remove fails.
+	syncRotationDirectory = func(f *os.File) error {
+		_ = os.Remove(path + ".enrolled")
+		return realSync(f)
+	}
+	t.Cleanup(func() { syncRotationDirectory = realSync })
+
+	if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", code)
+	}
+}
+
+func TestEnroller_UnreadableMarkerDisarms(t *testing.T) {
+	t.Parallel()
+	_, reg, path := setupEnroller(t, "secrettok")
+	// A directory at the marker path makes the read fail with something other
+	// than not-exist, which must count as already used.
+	if err := os.Mkdir(enrollmentMarkerPath(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	e2 := NewEnroller("secrettok", path, reg)
+	if code := enrollOnce(t, e2, "secrettok"); code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", code)
 	}
 }

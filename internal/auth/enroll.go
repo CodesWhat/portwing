@@ -103,10 +103,27 @@ func alreadyEnrolled(digest [sha256.Size]byte, authorizedFile string) bool {
 		slog.Error("reading enrollment marker; treating token as used", "marker", marker, "error", err)
 		return true
 	}
-	want := []byte(hex.EncodeToString(digest[:]))
 	got := []byte(strings.TrimSpace(string(data)))
+	if !validEnrollmentDigest(got) {
+		slog.Error("enrollment marker is not a SHA-256 hex digest; treating token as used", "marker", marker)
+		return true
+	}
+	want := []byte(hex.EncodeToString(digest[:]))
 	// A different digest means the operator rotated to a new token.
 	return subtle.ConstantTimeCompare(got, want) == 1
+}
+
+// validEnrollmentDigest reports whether b is exactly 64 lowercase hex chars.
+func validEnrollmentDigest(b []byte) bool {
+	if len(b) != hex.EncodedLen(sha256.Size) {
+		return false
+	}
+	for _, c := range b {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // hasEnrolledKeyLine reports whether authorized_keys holds a key written by
@@ -128,7 +145,13 @@ func hasEnrolledKeyLine(path string) bool {
 
 // writeEnrollmentMarker atomically records the burned token digest (temp file
 // in the same directory, fsync, rename), mode 0600.
-func writeEnrollmentMarker(authorizedFile string, digest [sha256.Size]byte) (err error) {
+func writeEnrollmentMarker(authorizedFile string, digest [sha256.Size]byte) error {
+	return writeEnrollmentMarkerContent(authorizedFile, []byte(hex.EncodeToString(digest[:])+"\n"))
+}
+
+// writeEnrollmentMarkerContent atomically installs content as the marker, then
+// fsyncs the parent directory so the rename survives a crash.
+func writeEnrollmentMarkerContent(authorizedFile string, content []byte) (err error) {
 	marker := enrollmentMarkerPath(authorizedFile)
 	tmp, err := os.CreateTemp(filepath.Dir(marker), filepath.Base(marker)+".tmp-*")
 	if err != nil {
@@ -144,7 +167,7 @@ func writeEnrollmentMarker(authorizedFile string, digest [sha256.Size]byte) (err
 	if err = tmp.Chmod(0o600); err != nil {
 		return fmt.Errorf("chmod enrollment marker: %w", err)
 	}
-	if _, err = tmp.WriteString(hex.EncodeToString(digest[:]) + "\n"); err != nil {
+	if _, err = tmp.Write(content); err != nil {
 		return fmt.Errorf("writing enrollment marker: %w", err)
 	}
 	if err = tmp.Sync(); err != nil {
@@ -155,6 +178,9 @@ func writeEnrollmentMarker(authorizedFile string, digest [sha256.Size]byte) (err
 	}
 	if err = os.Rename(tmpName, marker); err != nil {
 		return fmt.Errorf("installing enrollment marker: %w", err)
+	}
+	if err = syncRotationStateDirectory(filepath.Dir(marker)); err != nil {
+		return fmt.Errorf("syncing enrollment marker directory: %w", err)
 	}
 	return nil
 }
@@ -240,6 +266,11 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	comment := fmt.Sprintf("enrolled:%s", keyID)
 	line := AuthorizedKeyLine(ed25519.PublicKey(rawPub), comment)
 
+	// Keep the previous marker so a failed rotated enrollment can restore it.
+	// #nosec G304 -- marker path derives from explicit operator configuration.
+	prevMarker, prevErr := os.ReadFile(enrollmentMarkerPath(e.authorizedFile))
+	hadPrevMarker := prevErr == nil
+
 	// Record the burn durably before the key lands, so a crash or restart
 	// between the two cannot leave a usable token. Fail closed.
 	if err := writeEnrollmentMarker(e.authorizedFile, e.tokenDigest); err != nil {
@@ -250,7 +281,13 @@ func (e *Enroller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Append to the authorized_keys file.
 	if err := appendKeyLine(e.authorizedFile, line); err != nil {
-		_ = os.Remove(enrollmentMarkerPath(e.authorizedFile))
+		if hadPrevMarker {
+			if rerr := writeEnrollmentMarkerContent(e.authorizedFile, prevMarker); rerr != nil {
+				slog.Error("enrollment failed: cannot restore previous enrollment marker", "error", rerr)
+			}
+		} else if rerr := os.Remove(enrollmentMarkerPath(e.authorizedFile)); rerr != nil {
+			slog.Error("enrollment failed: cannot remove enrollment marker", "error", rerr)
+		}
 		slog.Error("enrollment failed: cannot write authorized_keys", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
