@@ -155,33 +155,36 @@ func alreadyEnrolled(digest [sha256.Size]byte, authorizedFile string) bool {
 		slog.Error("authorized_keys has a malformed enrollment burn line; treating token as used", "file", authorizedFile)
 		return true
 	}
-	// Builds before v1.0.0 left only an enrolled: key line.
-	if !scan.anyBurn && scan.enrolledKey {
-		return true
+	// A v1.0.0 marker, when present, decides: it names the token that agent
+	// burned, so a different token is a rotation.
+	if present, used := legacyMarkerState(digest, authorizedFile); present {
+		return used
 	}
-	return legacyMarkerMatches(digest, authorizedFile)
+	// Builds before v1.0.0 left only an enrolled: key line.
+	return !scan.anyBurn && scan.enrolledKey
 }
 
-// legacyMarkerMatches reads the v1.0.0 "<authorized_keys>.enrolled" marker.
-// A missing marker is ignored; an unreadable or invalid one counts as used.
-func legacyMarkerMatches(digest [sha256.Size]byte, authorizedFile string) bool {
+// legacyMarkerState reads the v1.0.0 "<authorized_keys>.enrolled" marker. It
+// reports whether a marker is present and, if so, whether it counts as used:
+// matching, unreadable or invalid markers do; a valid other digest does not.
+func legacyMarkerState(digest [sha256.Size]byte, authorizedFile string) (present, used bool) {
 	marker := legacyEnrollmentMarkerPath(authorizedFile)
 	// #nosec G304 -- marker path derives from explicit operator configuration.
 	data, err := os.ReadFile(marker)
 	if errors.Is(err, os.ErrNotExist) {
-		return false
+		return false, false
 	}
 	if err != nil {
 		slog.Error("reading legacy enrollment marker; treating token as used", "marker", marker, "error", err)
-		return true
+		return true, true
 	}
 	got := []byte(strings.TrimSpace(string(data)))
 	if !validEnrollmentDigest(got) {
 		slog.Error("legacy enrollment marker is not a SHA-256 hex digest; treating token as used", "marker", marker)
-		return true
+		return true, true
 	}
 	want := []byte(hex.EncodeToString(digest[:]))
-	return subtle.ConstantTimeCompare(got, want) == 1
+	return true, subtle.ConstantTimeCompare(got, want) == 1
 }
 
 // validEnrollmentDigest reports whether b is exactly 64 lowercase hex chars.
@@ -380,7 +383,13 @@ func appendKeyLine(path, line string) (err error) {
 			err = fmt.Errorf("closing authorized_keys: %w", cerr)
 		}
 	}()
-	if _, err = fmt.Fprintln(f, line); err != nil {
+	// Sync before reporting success: a burn lost to a crash would re-arm the
+	// token on the next start.
+	_, err = fmt.Fprintln(f, line)
+	if err == nil {
+		err = f.Sync()
+	}
+	if err != nil {
 		return fmt.Errorf("writing authorized_keys: %w", err)
 	}
 	return nil

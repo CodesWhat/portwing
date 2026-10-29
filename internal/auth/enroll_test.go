@@ -557,3 +557,29 @@ func TestEnroller_UnterminatedKeysFileGetsNewline(t *testing.T) {
 		t.Fatalf("expected 401 after restart, got %d", code)
 	}
 }
+
+// A normal v1.0.0 enrollment leaves an enrolled: key and a marker for the old
+// token. After upgrading, a fresh token is a rotation and must arm, while the
+// old token stays burned.
+func TestEnroller_UpgradedV100RotationArms(t *testing.T) {
+	t.Parallel()
+	_, reg, path := setupEnroller(t, "newtok")
+	pub, _ := genPubKeyB64(t)
+	line := AuthorizedKeyLine(pub, "enrolled:"+KeyIDForPublicKey(pub))
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := sha256.Sum256([]byte("oldtok"))
+	if err := os.WriteFile(path+".enrolled", []byte(hex.EncodeToString(old[:])+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := enrollOnce(t, NewEnroller("oldtok", path, reg), "oldtok"); code != http.StatusUnauthorized {
+		t.Fatalf("old token: expected 401, got %d", code)
+	}
+	if code := enrollOnce(t, NewEnroller("newtok", path, reg), "newtok"); code != http.StatusOK {
+		t.Fatalf("new token: expected 200, got %d", code)
+	}
+	if code := enrollOnce(t, NewEnroller("newtok", path, reg), "newtok"); code != http.StatusUnauthorized {
+		t.Fatalf("new token after restart: expected 401, got %d", code)
+	}
+}
