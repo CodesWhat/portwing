@@ -92,7 +92,7 @@ spec:
         # supplementalGroups: [999]
       containers:
         - name: portwing
-          image: ghcr.io/codeswhat/portwing:1.0.0
+          image: ghcr.io/codeswhat/portwing:1.0.1
           imagePullPolicy: Always
           ports:
             - name: http

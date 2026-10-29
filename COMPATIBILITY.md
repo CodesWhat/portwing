@@ -17,10 +17,10 @@ DrydockCompat bumps.
 
 | Portwing version | Drydock wire connection | Watcher/update feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|---|
-| v1.0.0 (latest release) / `main` | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v1.0.1 (latest release) / `main` | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v0.9.x (unsupported) | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 
-v1.0.0 keeps the existing wire and watcher/update contract. The 0.9 line is
+v1.0.1 keeps the existing wire and watcher/update contract. The 0.9 line is
 no longer supported; see [SECURITY.md](SECURITY.md) for support boundaries.
 
 ### Published candidate evidence
@@ -34,6 +34,12 @@ The exact v1.0.0-rc.2 artifacts passed the hosted matrix on 2026-10-26:
 | v1.0.0-rc.1 | v1.6.1 | v2.2.10 | PASS / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/38837070094) |
 | v1.0.0-rc.2 | v1.7.0 | v2.2.11 | PASS / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/40266007939) |
 
+The exact v1.0.0 artifacts passed the hosted matrix on 2026-10-29 for Edge and the legacy floor; Standard failed enrollment, fixed in v1.0.1:
+
+| Portwing | Drydock | Sockguard | Standard / Edge / legacy floor | Evidence |
+|---|---|---|---|---|
+| v1.0.0 | v1.7.0 | v2.2.11 | FAIL / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/40870930418) |
+
 The rc.2 run used candidate manifest
 `sha256:4ef115970be2ceacfb58cdc603745da509b7637a62501507a40f300633048c3e`. The
 same image also passed controller-assisted Standard and Edge rotation, including
@@ -44,17 +50,17 @@ Both rc.1 runs used candidate manifest
 The Standard identity checks exercised enrollment, manual overlapping-key
 rotation, revocation, SIGHUP reloads and clock-skew recovery. They did not test
 the later controller-assisted implementation. Rerun the matrix against the
-exact next release; these results do not verify newer code. The v1.0.0
+exact next release; these results do not verify newer code. The v1.0.1
 artifacts are verified after publication, and that evidence is recorded here
 once it exists.
 
 ### Controller-assisted rotation
 
-The first supporting tags are Portwing `v1.0.0` (first shipped in its rc.2
+The first supporting tags are Portwing `v1.0` (first shipped in its rc.2
 candidate) and Drydock
 [`v1.8.0-rc.1`](https://github.com/CodesWhat/drydock/releases/tag/v1.8.0-rc.1).
 Use that Portwing release or later with Drydock v1.8.0-rc.1 or later on the
-v1.8 line for opt-in managed rotation. Portwing v1.0.0-rc.1 and Drydock's
+v1.8 line for opt-in managed rotation. The first v1.0 release candidate and Drydock's
 v1.6/v1.7 lines do not include this pairing.
 
 Standard mode requires `KEY_ROTATION_DIR` on Portwing and `rotationdir` on its
