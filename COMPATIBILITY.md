@@ -40,6 +40,17 @@ The exact v1.0.0 artifacts passed the hosted matrix on 2026-10-29 for Edge and t
 |---|---|---|---|---|
 | v1.0.0 | v1.7.0 | v2.2.11 | FAIL / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/40870930418) |
 
+The exact v1.0.1 artifacts passed the hosted matrix on 2026-10-29:
+
+| Portwing | Drydock | Sockguard | Standard / Edge / legacy floor | Evidence |
+|---|---|---|---|---|
+| v1.0.1 | v1.7.0 | v2.2.11 | PASS / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/40919376264) |
+
+The v1.0.1 run used release image
+`sha256:61883101a5c4992ec47cab9c3ccd5ebbc31b17b3f24a02d8fc9ad71cfcff93ea`. Its
+Standard row passed all five identity checks, enrollment included. The same
+image also passed the published-image smoke test on a dedicated test host.
+
 The rc.2 run used candidate manifest
 `sha256:4ef115970be2ceacfb58cdc603745da509b7637a62501507a40f300633048c3e`. The
 same image also passed controller-assisted Standard and Edge rotation, including
@@ -50,9 +61,7 @@ Both rc.1 runs used candidate manifest
 The Standard identity checks exercised enrollment, manual overlapping-key
 rotation, revocation, SIGHUP reloads and clock-skew recovery. They did not test
 the later controller-assisted implementation. Rerun the matrix against the
-exact next release; these results do not verify newer code. The v1.0.1
-artifacts are verified after publication, and that evidence is recorded here
-once it exists.
+exact next release; these results do not verify newer code.
 
 ### Controller-assisted rotation
 
