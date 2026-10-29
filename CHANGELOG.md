@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.0] - 2026-10-29
+
+### Changed
+
+- v1.0.0 is the first stable release. The guarantees in
+  [STABILITY.md](STABILITY.md) now apply under semantic versioning.
+- v1.0.0 is the first stable release under the MIT license. v0.9.x and earlier
+  remain AGPL-3.0.
+- The stable container `latest` tag and the Homebrew cask move to 1.0.0. The
+  v0.9.x line is no longer supported.
+- Update posthog-js to 1.438.18.
+
+### Fixed
+
+- Audit a failed managed-credential write during Standard-mode key rotation
+  as `error` instead of `denied`. Rejected requests remain `denied`, matching
+  Edge mode.
+
 ### Security
 
 - The enrollment token is now burned durably through a
@@ -28,24 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key within the skew window. Use TLS and per-agent controller keys.
 - Warn that the edge-with-exec bundle lets exec target any container,
   including the sockguard proxy, which can step outside the allowlist.
-
-## [v1.0.0] - 2026-10-27
-
-### Changed
-
-- v1.0.0 is the first stable release. The guarantees in
-  [STABILITY.md](STABILITY.md) now apply under semantic versioning.
-- v1.0.0 is the first stable release under the MIT license. v0.9.x and earlier
-  remain AGPL-3.0.
-- The stable container `latest` tag and the Homebrew cask move to 1.0.0. The
-  v0.9.x line is no longer supported.
-- Update posthog-js to 1.438.18.
-
-### Fixed
-
-- Audit a failed managed-credential write during Standard-mode key rotation
-  as `error` instead of `denied`. Rejected requests remain `denied`, matching
-  Edge mode.
 
 ## [v1.0.0-rc.2] - 2026-10-24
 
