@@ -294,9 +294,11 @@ func TestEnroller_MarkerWriteFailureFailsClosed(t *testing.T) {
 	}
 	e, _, path := setupEnroller(t, "secrettok")
 	dir := filepath.Dir(path)
+	// #nosec G302 -- read-only private test directory to force the marker write to fail.
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G302 -- restore owner write permission on a private test directory for cleanup.
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
@@ -310,6 +312,7 @@ func TestEnroller_MarkerWriteFailureFailsClosed(t *testing.T) {
 		t.Errorf("key appended despite marker failure: %q", data)
 	}
 	// Token stays armed in memory.
+	// #nosec G302 -- restore owner write permission on a private test directory.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
