@@ -1429,6 +1429,18 @@ func TestClientIPForwardedHeaderParsing(t *testing.T) {
 			want: "203.0.113.5",
 		},
 		{
+			name: "empty XFF line is a boundary, no X-Real-IP fallback",
+			xff:  []string{""},
+			xri:  "203.0.113.77",
+			want: "192.0.2.1",
+		},
+		{
+			name: "two empty XFF lines are a boundary",
+			xff:  []string{"", ""},
+			xri:  "203.0.113.77",
+			want: "192.0.2.1",
+		},
+		{
 			name: "ip:port hop",
 			xff:  []string{"203.0.113.5:4711"},
 			want: "203.0.113.5",

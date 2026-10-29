@@ -802,8 +802,10 @@ func (rl *RateLimiter) clientIP(r *http.Request) string {
 		return remote
 	}
 
-	if xff := strings.Join(r.Header.Values("X-Forwarded-For"), ","); xff != "" {
-		hops := strings.Split(xff, ",")
+	// Any X-Forwarded-For field line, even an empty one, makes the chain
+	// authoritative: an empty hop is unparseable and ends the walk.
+	if xffLines := r.Header.Values("X-Forwarded-For"); len(xffLines) > 0 {
+		hops := strings.Split(strings.Join(xffLines, ","), ",")
 		for i := len(hops) - 1; i >= 0; i-- {
 			addr, ok := parseForwardedHop(hops[i])
 			if !ok {
