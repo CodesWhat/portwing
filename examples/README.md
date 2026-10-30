@@ -60,7 +60,7 @@ DRYDOCK_URL=https://drydock.example.com \
   docker compose -f observability/docker-compose.yml --profile edge up -d
 ```
 
-Prometheus is available on `http://localhost:9090`. Portwing standard mode is
+Prometheus is published on loopback only, so it's available on `http://localhost:9090` from the Docker host and nowhere else. Portwing standard mode is
 available on `https://localhost:3000`; edge mode publishes no host port.
 
 For Ed25519 key-based auth instead of a shared token, see the Authentication section of the main [README](../README.md) and [`docs/security-model.md`](../docs/security-model.md).

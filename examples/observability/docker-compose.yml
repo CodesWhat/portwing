@@ -70,7 +70,8 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
     ports:
-      - "9090:9090"
+      # Loopback only: Prometheus has no auth of its own.
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.standard.yml:/etc/prometheus/prometheus.yml:ro
     secrets:
@@ -122,7 +123,8 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
     ports:
-      - "9090:9090"
+      # Loopback only: Prometheus has no auth of its own.
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.edge.yml:/etc/prometheus/prometheus.yml:ro
 

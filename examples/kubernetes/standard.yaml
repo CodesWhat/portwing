@@ -11,6 +11,12 @@
 #     -keyout portwing.key -out portwing.crt
 #   kubectl -n portwing create secret tls portwing-tls --cert=portwing.crt --key=portwing.key
 #
+# TOKEN_FILE keeps the plaintext shared secret in a Secret, and the example
+# Prometheus (observability-standard.yaml) needs that plaintext to scrape. If
+# you don't run that Prometheus, prefer TOKEN_HASH_FILE (Argon2id hash, see
+# "TOKEN_HASH" in docs/content/docs/current/authentication.mdx) or Ed25519
+# AUTHORIZED_KEYS so the agent never holds the plaintext.
+#
 # Then apply:
 #   kubectl apply -f kubernetes/standard.yaml
 #
@@ -198,12 +204,14 @@ spec:
         - name: portwing-token
           secret:
             secretName: portwing-token
+            defaultMode: 0440
             items:
               - key: token
                 path: token
         - name: portwing-tls
           secret:
             secretName: portwing-tls
+            defaultMode: 0440
         - name: audit-log
           emptyDir: {}
         - name: audit-forwarder-state
@@ -242,3 +250,36 @@ spec:
       port: 3000
       targetPort: 3000
       protocol: TCP
+---
+# Limits who can reach the agent's port 3000. The agent can control Docker on
+# its node, so only Drydock and the example Prometheus should connect. Drydock's
+# labels and namespace aren't defined in this repo: replace the two
+# PLACEHOLDER selectors below with the ones your Drydock pods actually carry.
+# Needs a CNI that enforces Kubernetes NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: portwing-ingress
+  namespace: portwing
+spec:
+  podSelector:
+    matchLabels:
+      app: portwing
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # PLACEHOLDER: Drydock's namespace and pod labels.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: drydock
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: drydock
+        # Example Prometheus from observability-standard.yaml (same namespace).
+        - podSelector:
+            matchLabels:
+              app: portwing-prometheus
+      ports:
+        - protocol: TCP
+          port: 3000

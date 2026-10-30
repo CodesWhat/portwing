@@ -101,3 +101,27 @@ spec:
     - name: http
       port: 9090
       targetPort: http
+---
+# Only pods labelled portwing-metrics-reader="true" (your Grafana, Alertmanager
+# or similar, in this namespace) may query Prometheus on 9090. The label is a
+# placeholder: apply it to the dashboard and alerting pods you trust, or swap
+# in your own selector. Needs a CNI that enforces Kubernetes NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: portwing-prometheus-ingress
+  namespace: portwing
+spec:
+  podSelector:
+    matchLabels:
+      app: portwing-prometheus
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              portwing-metrics-reader: "true"
+      ports:
+        - protocol: TCP
+          port: 9090
