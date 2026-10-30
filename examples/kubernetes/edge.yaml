@@ -17,8 +17,10 @@
 # This Secret is shared by every pod in the DaemonSet, so every node presents
 # the same identity and one compromised node can impersonate the others. For
 # anything beyond a trial, give each node its own keypair, register each public
-# key with Drydock under that node's agent name, and mount per-node Secrets
-# (for example one DaemonSet per node pool). See "Use one key per agent" in
+# key with Drydock under that node's agent name, and mount a distinct Secret
+# on each node (for example one DaemonSet pinned to each node with nodeName or a
+# per-node nodeSelector). A DaemonSet per node pool still shares one key across
+# that pool, and rotation refuses keys bound to more than one agent name. See "Use one key per agent" in
 # docs/content/docs/current/authentication.mdx.
 #
 # Then apply:
