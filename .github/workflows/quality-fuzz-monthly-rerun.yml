@@ -120,6 +120,8 @@ on:
   workflow_run:  # zizmor: ignore[dangerous-triggers]
     workflows: ["Quality: Deep Fuzz (monthly)"]
     types: [completed]
+    # Case-sensitive branch filter; expression comparisons in `if:` ignore case.
+    branches: [main, "dev/v**"]
 
 permissions: {}
 
@@ -148,7 +150,7 @@ jobs:
       contains(fromJSON('["schedule","workflow_dispatch"]'), github.event.workflow_run.event) &&
       (github.event.workflow_run.head_branch == github.event.repository.default_branch ||
        startsWith(github.event.workflow_run.head_branch, 'dev/v')) &&
-      startsWith(github.event.workflow_run.path, '.github/workflows/quality-fuzz-monthly.yml')
+      (github.event.workflow_run.path == '.github/workflows/quality-fuzz-monthly.yml' || startsWith(github.event.workflow_run.path, '.github/workflows/quality-fuzz-monthly.yml@'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 

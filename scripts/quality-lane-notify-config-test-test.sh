@@ -194,7 +194,9 @@ assert_rejected \
 # Rerun lane loses its workflow path pin.
 reset_fixture
 reset_rerun_fixture
-sed -i.bak 's/ &&$//;/startsWith(github.event.workflow_run.path/d' "${rerun_fixture}"
+sed -i.bak \
+	-e "/startsWith(github.event.workflow_run.head_branch, 'dev\/v'))/s/ &&\$//" \
+	-e '/github.event.workflow_run.path ==/d' "${rerun_fixture}"
 assert_rejected \
 	"rerun triage job condition must be exactly:" \
 	"contract must reject a rerun job with no workflow path pin"

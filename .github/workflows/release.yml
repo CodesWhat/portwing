@@ -184,18 +184,15 @@ jobs:
       - name: Resolve container manifest digest
         id: manifest-digest
         shell: bash
-        env:
-          IS_PUBLIC: ${{ github.event.repository.visibility == 'public' }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           DIGEST=$(docker buildx imagetools inspect "ghcr.io/codeswhat/portwing:${VERSION}" \
             --format '{{json .Manifest.Digest}}' | tr -d '"' || true)
           if [ -z "$DIGEST" ]; then
-            if [ "$IS_PUBLIC" = true ]; then
-              echo "::error::No manifest digest resolved for ghcr.io/codeswhat/portwing:${VERSION}; the image attestation would be skipped on a public release."
-              exit 1
-            fi
-            echo "No manifest digest resolved, skipping image attestation (private repo)."
+            # Not fatal here: failing this job would skip verify-published and
+            # the post-publish Grype scan. verify-published checks the image
+            # attestation and fails the run if it's missing.
+            echo "No manifest digest resolved, skipping image attestation."
           fi
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 

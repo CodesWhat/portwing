@@ -250,7 +250,7 @@ rerun_if="$(
 		sed -e 's/[[:space:]]\+/ /g' -e 's/[[:space:]]*$//'
 )"
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
-expected_rerun_if="github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 && github.event.workflow_run.head_repository.full_name == github.repository && contains(fromJSON('[\"schedule\",\"workflow_dispatch\"]'), github.event.workflow_run.event) && (github.event.workflow_run.head_branch == github.event.repository.default_branch || startsWith(github.event.workflow_run.head_branch, 'dev/v')) && startsWith(github.event.workflow_run.path, '.github/workflows/quality-fuzz-monthly.yml')"
+expected_rerun_if="github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 && github.event.workflow_run.head_repository.full_name == github.repository && contains(fromJSON('[\"schedule\",\"workflow_dispatch\"]'), github.event.workflow_run.event) && (github.event.workflow_run.head_branch == github.event.repository.default_branch || startsWith(github.event.workflow_run.head_branch, 'dev/v')) && (github.event.workflow_run.path == '.github/workflows/quality-fuzz-monthly.yml' || startsWith(github.event.workflow_run.path, '.github/workflows/quality-fuzz-monthly.yml@'))"
 if [ "${rerun_if}" != "${expected_rerun_if}" ]; then
 	fail "rerun triage job condition must be exactly: ${expected_rerun_if}"
 fi

@@ -84,6 +84,8 @@ on:
       - "Quality: ClusterFuzzLite (batch)"
       - "Quality: ClusterFuzzLite (prune)"
     types: [completed]
+    # Case-sensitive branch filter; expression comparisons in `if:` ignore case.
+    branches: [main, "dev/v**"]
 
 permissions: {}
 
