@@ -42,7 +42,7 @@ go test -run='^$' -fuzz='^FuzzComposeRequestValidate$' -fuzztime=5s ./internal/d
 go test -run='^$' -fuzz='^FuzzParseKeyLine$' -fuzztime=5s ./internal/auth/
 
 # Live drydock-compat smoke (agent must be running):
-./scripts/drydock-compat-check.sh http://localhost:3000 <token>
+PORTWING_TOKEN=<token> ./scripts/drydock-compat-check.sh http://localhost:3000
 ```
 
 ## Hard invariants — do not break these
