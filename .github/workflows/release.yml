@@ -150,6 +150,12 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
+      # Fetch the Sigstore TUF root once, up front. GoReleaser runs several
+      # cosign `signs` in parallel and each would otherwise race to write the
+      # same ~/.sigstore metadata. Fails the job on error.
+      - name: Initialize Sigstore trust root
+        run: cosign initialize
+
       - name: Install syft
         uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
 
@@ -183,6 +189,9 @@ jobs:
           DIGEST=$(docker buildx imagetools inspect "ghcr.io/codeswhat/portwing:${VERSION}" \
             --format '{{json .Manifest.Digest}}' | tr -d '"' || true)
           if [ -z "$DIGEST" ]; then
+            # Not fatal here: failing this job would skip verify-published and
+            # the post-publish Grype scan. verify-published checks the image
+            # attestation and fails the run if it's missing.
             echo "No manifest digest resolved, skipping image attestation."
           fi
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
