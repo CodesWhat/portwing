@@ -513,6 +513,8 @@ Non-security bugs and concrete feature requests go to **[GitHub Issues](https://
 
 <h2 align="center" id="codeswhat-ecosystem">CodesWhat Ecosystem</h2>
 
+[CodesWhat](https://codeswhat.com): small, sharp tools from one developer and a lot of agents.
+
 <table>
   <tr><th>Tool</th><th>Role</th></tr>
   <tr><td><a href="https://github.com/CodesWhat/drydock"><b>drydock</b></a></td><td>Container update monitoring — web UI and notification engine</td></tr>

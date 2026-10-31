@@ -4,9 +4,13 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -14,6 +18,53 @@ import (
 
 	"github.com/codeswhat/portwing/internal/auth"
 )
+
+func TestNewServerPlaintextEnrollmentWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		enrollment bool
+		tls        bool
+		burned     bool
+		wantWarn   bool
+	}{
+		{name: "armed plaintext", enrollment: true, wantWarn: true},
+		{name: "armed TLS", enrollment: true, tls: true},
+		{name: "disabled plaintext"},
+		{name: "already used plaintext", enrollment: true, burned: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, stop := newStubDockerClient(t)
+			defer stop()
+			cfg := minimalConfig()
+			cfg.AuthorizedKeysFile = filepath.Join(t.TempDir(), "authorized_keys")
+			var state string
+			if tc.burned {
+				state = fmt.Sprintf("# portwing-enrollment-burned sha256:%x\n", sha256.Sum256([]byte("bootstrap-secret")))
+			}
+			if err := os.WriteFile(cfg.AuthorizedKeysFile, []byte(state), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.enrollment {
+				cfg.EnrollmentToken = "bootstrap-secret"
+			}
+			if tc.tls {
+				cfg.TLSCert, cfg.TLSKey = "cert.pem", "key.pem"
+			}
+			logs := installLogCapture(t)
+			s, err := NewServer(cfg, client, &stubServerAdapter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
+			if got := logs.has("enrollment is armed without TLS"); got != tc.wantWarn {
+				t.Errorf("plaintext enrollment warning = %v, want %v", got, tc.wantWarn)
+			}
+			if logs.has("bootstrap-secret") {
+				t.Error("startup log exposed the enrollment secret")
+			}
+		})
+	}
+}
 
 // TestStripPortwingAuthHeaders verifies that every Portwing credential header is
 // removed before a request is proxied to the Docker socket, while unrelated

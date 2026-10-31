@@ -182,6 +182,15 @@ export function Footer({ maxWidthClassName = "max-w-6xl" }: { maxWidthClassName?
             <p className="text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
               {BLURB}
             </p>
+            <p className="text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
+              <a
+                href="https://codeswhat.com"
+                className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
+              >
+                CodesWhat
+              </a>
+              : small, sharp tools from one developer and a lot of agents.
+            </p>
             <SocialIcons />
           </div>
 

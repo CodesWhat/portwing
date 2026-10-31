@@ -545,6 +545,13 @@ One-shot bootstrap endpoint for registering an Ed25519 public key (Model C authe
 This endpoint is only available when `ENROLLMENT_TOKEN` (and `AUTHORIZED_KEYS`) are configured. The endpoint is reachable without a prior agent token — the enrollment token is the credential. Its JSON body is limited to 64 KiB; oversized bodies return HTTP `413`. Malformed and oversized requests feed a separate per-IP abuse limiter, while bad credentials feed the authentication-failure limiter.
 </Callout>
 
+Use HTTPS for enrollment. If native TLS is not configured, keep the listener
+private behind a TLS-terminating proxy. Portwing warns at startup when enrollment
+is armed without native TLS, including behind a proxy. This release still accepts
+HTTP enrollment. Starting in v1.1, enrollment will require native TLS or HTTPS
+reported by a trusted proxy, with a planned `ALLOW_INSECURE_ENROLLMENT` opt-in for
+plaintext HTTP. That setting is not available in 1.0.x.
+
 ### Request body
 
 ```json

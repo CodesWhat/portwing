@@ -47,6 +47,29 @@ func enrollBody(t *testing.T, token, pubKeyB64 string) *bytes.Buffer {
 	return bytes.NewBuffer(body)
 }
 
+func TestEnrollerArmedLifecycle(t *testing.T) {
+	empty, _, _ := setupEnroller(t, "")
+	if empty.Armed() {
+		t.Fatal("enrollment without a credential is armed")
+	}
+	e, registry, path := setupEnroller(t, "bootstrap-secret")
+	if !e.Armed() {
+		t.Fatal("fresh enrollment is not armed")
+	}
+	if code := enrollOnce(t, e, "bootstrap-secret"); code != http.StatusOK {
+		t.Fatalf("enrollment status = %d, want 200", code)
+	}
+	if e.Armed() {
+		t.Fatal("used enrollment remains armed")
+	}
+	if NewEnroller("bootstrap-secret", path, registry).Armed() {
+		t.Fatal("used enrollment is armed after restart")
+	}
+	if !NewEnroller("replacement-secret", path, registry).Armed() {
+		t.Fatal("replacement enrollment credential is not armed")
+	}
+}
+
 func TestEnroller_Success(t *testing.T) {
 	t.Parallel()
 	e, reg, _ := setupEnroller(t, "secrettok")

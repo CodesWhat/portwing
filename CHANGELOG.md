@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Warn at startup when Standard-mode enrollment is armed without native TLS.
+  Configure TLS or keep the HTTP listener private behind a TLS-terminating proxy.
+
+### Deprecated
+
+- Plaintext HTTP enrollment is deprecated. Starting in v1.1, enrollment will
+  require TLS, either directly or through a trusted proxy reporting HTTPS,
+  unless `ALLOW_INSECURE_ENROLLMENT` explicitly opts in. This release only warns;
+  the opt-in setting is planned for v1.1 and is not available yet.
+
 ## [v1.0.1] - 2026-10-29
 
 ### Fixed
