@@ -108,15 +108,17 @@ function assertReusableCaller(source) {
   const goWithLines = new Set(goWith.split("\n"));
   assert.match(
     go,
-    new RegExp(`uses: CodesWhat/\\.github/\\.github/workflows/go-ci\\.yml@${SHARED_SHA}`),
+    new RegExp(`uses: CodesWhat/\\.github/\\.github/workflows/go-ci\\.yml@${SHARED_SHA}(?=\\s|$)`),
   );
   assert.match(
     node,
-    new RegExp(`uses: CodesWhat/\\.github/\\.github/workflows/node-ci\\.yml@${SHARED_SHA}`),
+    new RegExp(
+      `uses: CodesWhat/\\.github/\\.github/workflows/node-ci\\.yml@${SHARED_SHA}(?=\\s|$)`,
+    ),
   );
   assert.doesNotMatch(
     source,
-    /CodesWhat\/\.github\/\.github\/workflows\/[^\s@]+@(?![0-9a-f]{40}\b)/u,
+    /CodesWhat\/\.github\/\.github\/workflows\/[^\s@]+@(?![0-9a-f]{40}(?=\s|$))/u,
   );
   assert.doesNotMatch(source, /secrets:\s*inherit/u);
 
@@ -277,6 +279,7 @@ test("retired X1 bridge jobs must not be reintroduced", () => {
 test("the contract rejects a moving reusable ref and a reintroduced bridge", () => {
   const source = fs.readFileSync(WORKFLOW, "utf8");
   assert.throws(() => assertReusableCaller(source.replaceAll(SHARED_SHA, "main")));
+  assert.throws(() => assertReusableCaller(source.replaceAll(SHARED_SHA, `${SHARED_SHA}-suffix`)));
   const go = jobSection(source, "go-ci");
   for (const inputName of GO_PROXY_STORAGE_INPUTS) {
     const endpoints = inputBlock(go, inputName);
