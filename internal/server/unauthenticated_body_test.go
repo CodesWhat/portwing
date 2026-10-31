@@ -42,6 +42,29 @@ func TestUnauthenticatedRoutesRejectUnreadBodies(t *testing.T) {
 	})
 }
 
+func TestAuthenticationRejectsUnreadBodies(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		opts       routeTestServerOpts
+		credential string
+	}{
+		{name: "missing bearer", opts: routeTestServerOpts{token: "expected-secret"}},
+		{name: "invalid bearer", opts: routeTestServerOpts{token: "expected-secret"}, credential: "Authorization: Bearer wrong\r\n"},
+		{name: "missing signature", opts: routeTestServerOpts{enroll: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, handler := newRouteTestServer(t, tc.opts)
+			ts := httptest.NewServer(handler)
+			defer ts.Close()
+			for _, framing := range []string{"Content-Length: 1\r\n", "Transfer-Encoding: chunked\r\n"} {
+				t.Run(strings.TrimSpace(framing), func(t *testing.T) {
+					assertUnreadBodyRejected(t, ts.URL, http.MethodPost, "/v1.47/containers/create", framing+tc.credential, "", http.StatusUnauthorized)
+				})
+			}
+		})
+	}
+}
+
 func assertUnreadBodyRejected(t *testing.T, baseURL, method, path, framing, prefix string, status int) {
 	t.Helper()
 	assertUnreadBodyRejectedOnHost(t, baseURL, "localhost", method, path, framing, prefix, status)

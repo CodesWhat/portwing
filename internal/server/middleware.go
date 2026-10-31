@@ -600,7 +600,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncRequest(r.Method, http.StatusUnauthorized)
 				reg.IncAuthFailure("no_credentials")
 			}
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			rejectUnadmitted(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
@@ -634,7 +634,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncRequest(r.Method, http.StatusUnauthorized)
 				reg.IncAuthFailure("bad_token")
 			}
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			rejectUnadmitted(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
