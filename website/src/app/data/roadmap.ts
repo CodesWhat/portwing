@@ -125,7 +125,7 @@ export const roadmap: Milestone[] = [
       "Threat model review; the HIGH+ CVE gate is already enforced on every release image, and v1.0 keeps it",
       "Competitive review refreshed against primary sources",
       "Final v0.9 docs archived from the release tag with byte-for-byte provenance checks",
-      "The release candidate passed the Standard/Edge and legacy-floor conformance matrix before GA; v1.0.1's own artifacts are verified after publication",
+      "The release candidate passed the Standard/Edge and legacy-floor conformance matrix before GA; each later release needs fresh published-artifact verification",
     ],
   },
 ];

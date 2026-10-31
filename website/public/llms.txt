@@ -4,7 +4,7 @@
 
 Portwing sits between the Drydock controller and the Docker Engine on each remote host. The controller connects inbound to Portwing over HTTP/SSE (standard mode), or Portwing dials outbound over a WebSocket tunnel when the host is behind NAT or a firewall (edge mode). Standard-mode authentication supports Ed25519 signed requests, raw shared credentials, or Argon2id-hashed credentials. Edge tunnels use Ed25519-signed hellos over TLS. The audit log records every security-relevant action as structured JSON.
 
-Portwing v1.0.1 is the current release of the first stable line (v1.0), and the v0.9 line is no longer supported. STABILITY.md describes the semver guarantees for the HTTP API, environment variables, MCP tool surface, and stable portwing/1.0 wire protocol, which are binding from the first v1.0 release. Operators should pin versions and review the changelog when upgrading. Full controller-owned watcher/update feature compatibility requires Drydock v1.6.0-rc.11+ while DrydockCompat remains 1.4.0.
+Portwing v1.0.2 is the current release of the first stable line (v1.0), and the v0.9 line is no longer supported. STABILITY.md describes the semver guarantees for the HTTP API, environment variables, MCP tool surface, and stable portwing/1.0 wire protocol, which are binding from the first v1.0 release. Operators should pin versions and review the changelog when upgrading. Full controller-owned watcher/update feature compatibility requires Drydock v1.6.0-rc.11+ while DrydockCompat remains 1.4.0.
 
 ## Key capabilities
 
