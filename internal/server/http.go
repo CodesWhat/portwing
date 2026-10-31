@@ -255,6 +255,9 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		}
 		enroller = auth.NewEnroller(cfg.EnrollmentToken, cfg.AuthorizedKeysFile, ed25519Cfg.Registry)
 		enroller.OnResult = auditor.Enrollment
+		if enroller.Armed() && (cfg.TLSCert == "" || cfg.TLSKey == "") {
+			slog.Warn("enrollment is armed without TLS: plaintext HTTP can expose the enrollment credential; configure TLS_CERT and TLS_KEY or keep the listener private behind a TLS-terminating proxy; plaintext enrollment is deprecated and will be refused by default in v1.1")
+		}
 	}
 
 	s := &Server{
