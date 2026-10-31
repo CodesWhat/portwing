@@ -28,14 +28,7 @@ export function PortwingMascot({ size = 168, className }: Props) {
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      <Image
-        src="/portwing.png"
-        alt=""
-        width={size}
-        height={size}
-        priority
-        className="lk-frame"
-      />
+      <Image src="/portwing.png" alt="" width={size} height={size} priority className="lk-frame" />
     </div>
   );
 }

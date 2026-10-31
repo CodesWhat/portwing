@@ -50,7 +50,6 @@ const dim = (s: string) => <span className={tok.dim}>{s}</span>;
 const bold = (s: string) => <span className={tok.bold}>{s}</span>;
 const cyan = (s: string) => <span className={tok.cyan}>{s}</span>;
 const violet = (s: string) => <span className={tok.violet}>{s}</span>;
-const green = (s: string) => <span className={tok.green}>{s}</span>;
 
 // ───────────────────────────────────────────────────────────────
 // Audit log helpers — build JSON audit entries in Portwing's real
