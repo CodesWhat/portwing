@@ -237,9 +237,8 @@ type Client struct {
 	// its welcome frame (nil/empty for a controller that predates
 	// capabilities, or one with none to advertise). Set once per connection
 	// in connect() before the read pump starts dispatching handleRequest
-	// goroutines, and read-only for the rest of that connection's lifetime —
-	// same single-writer-before-readers pattern as welcomePollInterval above,
-	// so handleRequest's concurrent goroutines read it without a lock.
+	// goroutines. Guarded by connMu because old-generation request workers
+	// may finish while a replacement connection negotiates its capabilities.
 	controllerCaps []string
 
 	// pendingBodies tracks in-flight request.bodyStream=true requests
@@ -599,14 +598,18 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	// Reset per-connection negotiated state so a reconnect to an older
 	// controller (or one with a parse failure below) doesn't inherit
 	// capabilities advertised by a previous connection.
+	c.connMu.Lock()
 	c.controllerCaps = nil
+	c.connMu.Unlock()
 	c.welcomePollInterval = 0
 
 	var welcome protocol.WelcomeMessage
 	if err := json.Unmarshal(env.Data, &welcome); err != nil {
 		slog.Warn("could not parse welcome payload", "error", err)
 	} else {
+		c.connMu.Lock()
 		c.controllerCaps = welcome.Capabilities
+		c.connMu.Unlock()
 		// A zero pollInterval means the controller did not supply one, so the
 		// configured default stands. A supplied value still has to be usable:
 		// writePump converts it to a time.Duration and hands it to
@@ -811,6 +814,8 @@ func (c *Client) sendHello(ctx context.Context) error {
 // as a nil slice, so this reports false for it — the correct legacy-path
 // answer — rather than erroring.
 func (c *Client) hasControllerCap(token string) bool {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 	for _, got := range c.controllerCaps {
 		if got == token {
 			return true

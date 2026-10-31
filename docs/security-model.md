@@ -131,18 +131,21 @@ one-minute window:
 
 - **Threshold:** 10 failures within 60 seconds triggers a block.
 - **Response:** HTTP 429 (`Too Many Requests`) until the window expires.
-- **Connection reuse:** auth admission rejections before body reads close the
+- **Connection reuse:** auth failures and admission rejections before body reads close the
   HTTP/1 connection and expire its read deadline. This is the permanent
   trade-off: a legitimate client reconnects after rejection, while a client
   that declares a body and never sends it cannot hold the handler in
-  `net/http`'s post-response drain. Keep-alive is not preserved on this path.
+  `net/http`'s post-response drain. HTTP/2 rejects only the affected stream
+  and keeps its shared connection available for other requests.
 - **Memory cap:** At most 10,000 IP entries are tracked simultaneously;
   new entries beyond the cap are silently dropped to prevent memory
   exhaustion (fail-open for tracking, not for auth).
 - **Cleanup:** A background goroutine prunes expired entries every 5 minutes.
 - **Expensive-verification capacity:** no more than two authentication
-  attempts per IP and two cold Argon2id derivations agent-wide may be in
-  flight; excess work receives HTTP 429 before credential verification.
+  attempts per tracked IP and two cold Argon2id derivations agent-wide may be in
+  flight; excess work receives HTTP 429 before credential verification. Sources
+  omitted when the IP table is full are not covered by the per-IP cap; the
+  agent-wide Argon2id cap still applies.
 - **Enrollment abuse accounting:** malformed and oversized enrollment bodies
   use a separate per-IP failure window, so they cannot evade throttling while
   remaining independent of credential-failure accounting.
