@@ -242,7 +242,7 @@ fi
 rerun_if="$(
 	awk '
         $0 == "  triage:" { in_job = 1; next }
-        in_job && /^  [^[:space:]]/ { in_job = 0; in_if = 0 }
+        in_job && /^  [^[:space:]#][^:]*:/ { in_job = 0; in_if = 0 }
         in_job && /^    if: >-$/ { in_if = 1; next }
         in_job && in_if && /^    runs-on:/ { in_if = 0 }
         in_job && in_if { print }
