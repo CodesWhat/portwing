@@ -147,11 +147,21 @@ func moduleRoot(t *testing.T) string {
 	}
 }
 
+func TestFixtureContainersCanOverlap(t *testing.T) {
+	first, cleanupFirst := startAlpineContainer(t)
+	defer cleanupFirst()
+	second, cleanupSecond := startAlpineContainer(t)
+	defer cleanupSecond()
+	if first == second {
+		t.Fatal("overlapping fixtures returned the same container ID")
+	}
+}
+
 // startAlpineContainer pulls alpine (already pulled by CI step) and runs a
 // sleep container so the container list is non-trivial. Returns the container ID.
 func startAlpineContainer(t *testing.T) (id string, cleanupFn func()) {
 	t.Helper()
-	cmd := exec.Command("docker", "run", "-d", "--name", "portwing-integ-test", testImage, "sleep", "300")
+	cmd := exec.Command("docker", "run", "-d", testImage, "sleep", "300")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("docker run: %v\n%s", err, out)

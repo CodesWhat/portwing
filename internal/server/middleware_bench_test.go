@@ -58,6 +58,7 @@ func BenchmarkAuthMiddleware(b *testing.B) {
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
 			rl := NewRateLimiter()
+			b.Cleanup(rl.Stop)
 			h := rl.AuthMiddlewareWithEd25519(c.verifier, Ed25519Config{}, auditor, nil, next)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/containers", nil)
 			req.RemoteAddr = "192.0.2.10:40000"
@@ -77,8 +78,10 @@ func BenchmarkAuthMiddleware(b *testing.B) {
 // expensive shape.
 func BenchmarkClientIP(b *testing.B) {
 	direct := NewRateLimiter()
+	b.Cleanup(direct.Stop)
 
 	proxied := NewRateLimiter()
+	b.Cleanup(proxied.Stop)
 	nets, err := ParseTrustedProxies([]string{"10.0.0.0/8", "192.0.2.0/24"})
 	if err != nil {
 		b.Fatalf("ParseTrustedProxies: %v", err)
@@ -167,6 +170,7 @@ func BenchmarkAgentToken(b *testing.B) {
 func BenchmarkRateLimiter(b *testing.B) {
 	b.Run("is_rate_limited", func(b *testing.B) {
 		rl := NewRateLimiter()
+		b.Cleanup(rl.Stop)
 		rl.RecordFailure("203.0.113.5")
 		b.ReportAllocs()
 		for b.Loop() {
@@ -176,6 +180,7 @@ func BenchmarkRateLimiter(b *testing.B) {
 
 	b.Run("record_failure", func(b *testing.B) {
 		rl := NewRateLimiter()
+		b.Cleanup(rl.Stop)
 		b.ReportAllocs()
 		for b.Loop() {
 			rl.RecordFailure("203.0.113.5")
@@ -184,6 +189,7 @@ func BenchmarkRateLimiter(b *testing.B) {
 
 	b.Run("is_rate_limited_parallel", func(b *testing.B) {
 		rl := NewRateLimiter()
+		b.Cleanup(rl.Stop)
 		rl.RecordFailure("203.0.113.5")
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
