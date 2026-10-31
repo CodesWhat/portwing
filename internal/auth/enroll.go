@@ -83,6 +83,13 @@ func NewEnroller(token, authorizedFile string, registry *KeyRegistry) *Enroller 
 	return e
 }
 
+// Armed reports whether enrollment can still accept its configured credential.
+func (e *Enroller) Armed() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.tokenAvailable && !e.burned
+}
+
 const (
 	enrollmentBurnMarker = "portwing-enrollment-burned"
 	enrollmentBurnPrefix = "sha256:"
