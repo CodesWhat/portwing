@@ -34,7 +34,7 @@ export function PortwingMascot({ size = 168, className }: Props) {
         width={size}
         height={size}
         priority
-        className="lk-frame dark:invert"
+        className="lk-frame"
       />
     </div>
   );

@@ -16,7 +16,7 @@ const quality: Badge[] = [
   },
   {
     href: `${GITHUB_URL}/actions/workflows/ci-verify.yml`,
-    src: `https://github.com/${REPO_SLUG}/actions/workflows/ci-verify.yml/badge.svg?branch=main`,
+    src: `https://github.com/${REPO_SLUG}/actions/workflows/ci-verify.yml/badge.svg?branch=main&event=push`,
     alt: "CI",
   },
   {
