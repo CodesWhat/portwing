@@ -32,7 +32,7 @@
 <hr>
 
 > [!NOTE]
-> **Portwing is currently `v1.0.2`, the current release of the first stable line (v1.0).** The semver guarantees in [STABILITY.md](STABILITY.md) now apply. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. The stable container `latest` tag and Homebrew cask are on 1.0.2. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **Release preparation is currently `v1.0.2` on `dev/v1.0`.** Confirm publication in [GitHub Releases](https://github.com/CodesWhat/portwing/releases) before using the version-pinned examples below. The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1.0 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
 Controller-assisted two-key rotation requires Portwing `v1.0` or later
 and Drydock `v1.8.0-rc.1` or later on the v1.8 line. Both sides require explicit

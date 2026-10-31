@@ -1,7 +1,8 @@
 # Portwing Roadmap
 
-> Portwing is stable software (currently `v1.0.2`, which hardens enrollment and rejected-request handling
-> and fixes an edge reconnect race). This roadmap describes
+> Portwing is stable software. Release preparation is currently `v1.0.2`,
+> covering enrollment hardening, rejected requests and an edge reconnect race.
+> Check [published releases](https://github.com/CodesWhat/portwing/releases) for availability. This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).

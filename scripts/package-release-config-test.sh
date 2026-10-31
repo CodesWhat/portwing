@@ -380,11 +380,11 @@ if [ "${release_version}" != "unresolved" ] && [ "${docs_version_title}" != "${e
 fi
 require_text "website/public/llms.txt" "Portwing v${release_version} is" "agent discovery metadata must identify the current release"
 require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must identify the current release"
-release_label="latest release"
+release_label="release metadata"
 case "${release_version}" in
 *-rc.*) release_label="release candidate" ;;
 esac
-require_text "COMPATIBILITY.md" "v${release_version} (${release_label}) / \`main\`" "the compatibility matrix must identify the current release"
+require_text "COMPATIBILITY.md" "| v${release_version} (${release_label}) |" "the compatibility matrix must identify the release metadata"
 require_text "api/openapi.yaml" "  version: ${release_version}" "the OpenAPI contract must identify the current release"
 for example_file in \
 	examples/docker-compose.edge.yml \

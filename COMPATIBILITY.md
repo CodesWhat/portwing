@@ -17,13 +17,13 @@ DrydockCompat bumps.
 
 | Portwing version | Drydock wire connection | Watcher/update feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|---|
-| v1.0.2 (latest release) / `main` | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v1.0.2 (release metadata) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v0.9.x (unsupported) | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 
 v1.0.2 keeps the existing wire and watcher/update contract. The 0.9 line is
 no longer supported; see [SECURITY.md](SECURITY.md) for support boundaries.
 
-The v1.0.2 release metadata is prepared on dev. Its exact published artifacts
+The v1.0.2 release metadata is prepared on dev; check [published releases](https://github.com/CodesWhat/portwing/releases) for availability. Its exact published artifacts
 must pass a fresh hosted matrix after the release is cut. The historical runs
 below do not verify this build.
 
