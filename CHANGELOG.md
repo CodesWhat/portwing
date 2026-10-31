@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Synchronize controller capability negotiation with delayed requests from a
+  previous Edge tunnel, preventing a data race during reconnects.
+
 ### Security
 
 - Close rejected, unauthenticated HTTP connections before an unread request body
