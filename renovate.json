@@ -39,6 +39,13 @@
         "google/clusterfuzzlite"
       ],
       "abandonmentThreshold": null
+    },
+    {
+      "description": "Lighthouse 13.6.0 adds vulnerable glob/minimatch through its Sentry chain (GHSA-3g3m-2fjr-6pw4 and GHSA-g3hv-75wg-m249), verified 2026-10-31. Skip this release; later versions remain eligible for the normal dependency review.",
+      "matchPackageNames": [
+        "lighthouse"
+      ],
+      "allowedVersions": "!/^13\\.6\\.0$/"
     }
   ]
 }
