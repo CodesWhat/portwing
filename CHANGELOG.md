@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Pin the deployment examples to Sockguard 2.4.1 and sync its released presets.
+  The exec bundle labels the proxy `com.sockguard.exec=deny`, preventing exec
+  into it in enforce mode, including with custom proxy images.
 - Close rejected, unauthenticated HTTP/1 connections before an unread request body
   can keep them draining indefinitely. Covers missing Ed25519 credentials and
   missing or invalid bearer credentials, including chunked request bodies.

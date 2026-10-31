@@ -1,11 +1,11 @@
 # Portwing edge mode + sockguard, with exec enabled — the bundle for
 # drydock's edge exec feature.
 #
-# WARNING: the exec rule can target any container, including the sockguard
-# proxy that holds the Docker socket. A compromised Portwing or controller
-# with exec can run code inside the proxy and step outside the allowlist. Only
-# enable this bundle where exec into every container is acceptable; sockguard
-# has no per-container exec scoping yet.
+# Requires Sockguard 2.4.1 or newer in enforce mode. Containers labeled
+# com.sockguard.exec=deny cannot be exec targets. Preserve this label on the
+# proxy (including custom images) and add it to other protected containers.
+# Exec still grants arbitrary commands inside unprotected workloads. Use
+# ownership labels and client profiles for narrower workload access.
 #
 # This is docker-compose.edge.yml (outbound WebSocket tunnel to Drydock, no
 # inbound ports) layered on docker-compose.with-sockguard.yml's two-layer
@@ -44,7 +44,9 @@
 
 services:
   sockguard:
-    image: ghcr.io/codeswhat/sockguard:latest
+    image: ghcr.io/codeswhat/sockguard:2.4.1
+    labels:
+      com.sockguard.exec: "deny"
     restart: unless-stopped
     read_only: true
     cap_drop:
