@@ -36,6 +36,9 @@ restore_grype_workflow() {
 git archive HEAD | tar -x -C "${fixture}"
 cp scripts/package-release-config-test.sh "${fixture}/scripts/"
 cp scripts/verify-scanner-exclusions.sh "${fixture}/scripts/"
+cp README.md COMPATIBILITY.md ROADMAP.md "${fixture}/"
+cp website/public/llms.txt "${fixture}/website/public/"
+cp website/src/app/data/faq.ts "${fixture}/website/src/app/data/"
 cp .grype.yaml Dockerfile Dockerfile.dev Dockerfile.armv7 Dockerfile.release "${fixture}/"
 cp api/openapi.yaml "${fixture}/api/"
 cp examples/observability/docker-compose.yml "${fixture}/examples/observability/"
@@ -100,6 +103,20 @@ case "${release_version}" in
 	git -C "${fixture}" tag "v${stable_version}"
 	;;
 esac
+
+compatibility_version_backup="${fixture}/COMPATIBILITY.md.version-backup"
+cp "${fixture}/COMPATIBILITY.md" "${compatibility_version_backup}"
+python3 - "${fixture}/COMPATIBILITY.md" "${release_version}" <<'PYCASE'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+path.write_text(path.read_text().replace(
+    f"| v{sys.argv[2]} (", "| v0.0.0 (", 1))
+PYCASE
+expect_release_contract_failure \
+	"the compatibility matrix must identify the release metadata" \
+	"prepared metadata must still reject a mismatched compatibility version"
+mv "${compatibility_version_backup}" "${fixture}/COMPATIBILITY.md"
 
 for recipe in Dockerfile Dockerfile.dev Dockerfile.armv7 Dockerfile.release; do
 	sed 's/install -d -m 0700 -o 65532 -g 65532/install -d -m 0755 -o 65532 -g 65532/g' "${recipe}" >"${fixture}/${recipe}"
@@ -602,7 +619,7 @@ meta["title"] = "v" + ".".join(candidate.split(".")[:2])
 meta_path.write_text(json.dumps(meta, indent=2) + "\n")
 compatibility = root / "COMPATIBILITY.md"
 compatibility.write_text(compatibility.read_text().replace(
-    f"v{candidate} (latest release)", f"v{candidate} (release candidate)"))
+    f"v{candidate} (release metadata)", f"v{candidate} (release candidate)"))
 changelog = root / "CHANGELOG.md"
 entry = f"## [Unreleased]\n\n## [v{candidate}] - 2026-10-15\n\n- Release candidate."
 changelog.write_text(changelog.read_text().replace("## [Unreleased]", entry, 1))

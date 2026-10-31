@@ -99,7 +99,7 @@ spec:
         # supplementalGroups: [999]
       containers:
         - name: portwing
-          image: ghcr.io/codeswhat/portwing:1.0.1
+          image: ghcr.io/codeswhat/portwing:1.0.2
           imagePullPolicy: Always
           # Private operations port only; no host port is published. The Edge
           # listener has no inbound auth and includes audit export as well as
