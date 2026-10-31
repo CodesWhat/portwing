@@ -60,8 +60,14 @@ DRYDOCK_URL=https://drydock.example.com \
   docker compose -f observability/docker-compose.yml --profile edge up -d
 ```
 
-Prometheus is published on loopback only, so other hosts can't reach it; it's available on `http://localhost:9090` from the Docker host. Containers on the same Compose network can still reach it on port 9090, and it has no authentication of its own. Portwing standard mode is
-available on `https://localhost:3000`; edge mode publishes no host port.
+Prometheus is published on loopback at `http://localhost:9090`. On
+[Docker Engine releases older than 28.0.0](https://docs.docker.com/engine/network/port-publishing/),
+hosts on the same L2 network can also reach ports published to localhost.
+Upgrade Docker Engine or enforce independent network access controls before
+relying on loopback isolation. Containers on the same Compose network can
+still reach Prometheus on port 9090, and it has no authentication of its own.
+Portwing standard mode is available on `https://localhost:3000`; edge mode
+publishes no host port.
 
 For Ed25519 key-based auth instead of a shared token, see the Authentication section of the main [README](../README.md) and [`docs/security-model.md`](../docs/security-model.md).
 

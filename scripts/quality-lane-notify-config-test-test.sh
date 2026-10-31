@@ -259,4 +259,26 @@ assert_rejected \
 	"rerun workflow's triage job must grant issues: write" \
 	"contract must reject a rerun workflow missing issues: write"
 
+# YAML comments do not end the triage job.
+reset_fixture
+reset_rerun_fixture
+sed -i.bak '/^  triage:$/a\
+  # This comment belongs to the same job: keep checking its condition.
+' "${rerun_fixture}"
+assert_passes "contract must allow a two-space comment before the triage condition"
+
+# A condition on a different job cannot gate triage.
+reset_fixture
+reset_rerun_fixture
+sed -i.bak 's/^  triage:$/  decoy:/' "${rerun_fixture}"
+cat >>"${rerun_fixture}" <<'YAML'
+  triage:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ungated triage
+YAML
+assert_rejected \
+	"rerun triage job condition must be exactly:" \
+	"contract must reject the required condition on another job instead of triage"
+
 echo "Quality lane notify contract self-tests passed."
