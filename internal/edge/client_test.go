@@ -2776,7 +2776,9 @@ func TestControllerCapsAcrossConnectionGenerations(t *testing.T) {
 	c := newWireClient(t, cfg)
 	c.controllerCaps = []string{protocol.CapResponseBodyBase64}
 	fd := c.dockerClient.(*fakeDocker)
-	fd.doResp = mkResp(http.StatusOK, "application/json", `{"old":true}`)
+	response := mkResp(http.StatusOK, "application/json", `{"old":true}`)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	fd.doResp = response
 	fd.doEntered, fd.doGate = entered, gate
 	oldCtx, oldCancel := context.WithCancel(context.Background())
 	defer oldCancel()
