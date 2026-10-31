@@ -1,4 +1,4 @@
-# Copy of sockguard/app/configs/portwing.yaml — update both together.
+# Copy of sockguard/app/configs/portwing.yaml at v2.4.1.
 # Sockguard — Portwing Preset
 #
 # Optimized for the Portwing Docker agent (https://github.com/CodesWhat/portwing).
@@ -81,6 +81,8 @@ response:
 # HostConfig.Runtime — without it every recreation is rejected at
 # POST /containers/create with 403 "runtime \"runc\" is not allowlisted".
 request_body:
+  container_remove:
+    allow_force: true
   container_create:
     allowed_bind_mounts: []
     allowed_runtimes:
