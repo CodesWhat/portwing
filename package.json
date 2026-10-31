@@ -23,10 +23,10 @@
     "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run knip && npm run build && npm run docs:export-contract && npm run budget:web && npm run lighthouse"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.2",
+    "@biomejs/biome": "2.6.3",
     "chrome-launcher": "1.2.2",
-    "knip": "6.42.1",
-    "lighthouse": "13.5.0",
+    "knip": "6.43.0",
+    "lighthouse": "13.6.0",
     "remark-mdx": "3.1.1",
     "remark-parse": "11.0.0",
     "remark-stringify": "11.0.0",
