@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Close rejected, unauthenticated HTTP connections before an unread request body
+- Close rejected, unauthenticated HTTP/1 connections before an unread request body
   can keep them draining indefinitely. Covers missing Ed25519 credentials and
   missing or invalid bearer credentials, including chunked request bodies.
+  HTTP/2 rejections stay stream-scoped so other requests can reuse the connection.
 - Warn at startup when Standard-mode enrollment is armed without native TLS.
   Configure TLS or keep the HTTP listener private behind a TLS-terminating proxy.
 

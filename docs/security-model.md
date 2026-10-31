@@ -135,7 +135,8 @@ one-minute window:
   HTTP/1 connection and expire its read deadline. This is the permanent
   trade-off: a legitimate client reconnects after rejection, while a client
   that declares a body and never sends it cannot hold the handler in
-  `net/http`'s post-response drain. Keep-alive is not preserved on this path.
+  `net/http`'s post-response drain. HTTP/2 rejects only the affected stream
+  and keeps its shared connection available for other requests.
 - **Memory cap:** At most 10,000 IP entries are tracked simultaneously;
   new entries beyond the cap are silently dropped to prevent memory
   exhaustion (fail-open for tracking, not for auth).

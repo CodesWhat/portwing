@@ -452,7 +452,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 // at both the compatibility path /_portwing/health and the explicit /ready.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength != 0 {
-		rejectUnadmitted(w, "health requests must not have a body", http.StatusBadRequest)
+		rejectUnadmitted(w, r, "health requests must not have a body", http.StatusBadRequest)
 		return
 	}
 	err := s.readiness.Check(r.Context(), s.dockerClient.Ping)
@@ -483,7 +483,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleSimpleHealth reports process liveness without probing dependencies.
 func (s *Server) handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength != 0 {
-		rejectUnadmitted(w, "health requests must not have a body", http.StatusBadRequest)
+		rejectUnadmitted(w, r, "health requests must not have a body", http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

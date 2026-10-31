@@ -358,7 +358,7 @@ func (rl *RateLimiter) rateLimitOnly(next http.Handler, reg *metrics.Registry) h
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
 				reg.IncRateLimited()
 			}
-			rejectUnadmitted(w, "too many requests", http.StatusTooManyRequests)
+			rejectUnadmitted(w, r, "too many requests", http.StatusTooManyRequests)
 			return
 		}
 		rw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
@@ -415,13 +415,16 @@ func isDeadlineExceeded(err error) bool {
 // handler goroutine there indefinitely — exactly what an admission rejection
 // exists to prevent. An already-elapsed read deadline aborts the drain on its
 // first read from the connection, and "Connection: close" stops the connection
-// being reused with a half-sent body still on the wire.
-func rejectUnadmitted(w http.ResponseWriter, message string, status int) {
+// being reused with a half-sent body still on the wire. HTTP/2 deadlines are
+// stream-scoped; closing the shared connection would disrupt other requests.
+func rejectUnadmitted(w http.ResponseWriter, r *http.Request, message string, status int) {
 	// Best effort: a ResponseWriter with no underlying connection to bound
 	// (httptest.ResponseRecorder, some wrappers) reports ErrNotSupported and
 	// has no drain to abort either.
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now())
-	w.Header().Set("Connection", "close")
+	if r.ProtoMajor == 1 {
+		w.Header().Set("Connection", "close")
+	}
 	http.Error(w, message, status)
 }
 
@@ -476,7 +479,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
 				reg.IncRateLimited()
 			}
-			rejectUnadmitted(w, "too many failed attempts", http.StatusTooManyRequests)
+			rejectUnadmitted(w, r, "too many failed attempts", http.StatusTooManyRequests)
 			return
 		}
 
@@ -497,7 +500,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 					reg.IncRequest(r.Method, http.StatusTooManyRequests)
 					reg.IncRateLimited()
 				}
-				rejectUnadmitted(w, "too many failed attempts", http.StatusTooManyRequests)
+				rejectUnadmitted(w, r, "too many failed attempts", http.StatusTooManyRequests)
 				return
 			}
 			// The slot covers the body read and the signature check only, not
@@ -600,7 +603,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncRequest(r.Method, http.StatusUnauthorized)
 				reg.IncAuthFailure("no_credentials")
 			}
-			rejectUnadmitted(w, "unauthorized", http.StatusUnauthorized)
+			rejectUnadmitted(w, r, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
@@ -611,7 +614,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
 				reg.IncRateLimited()
 			}
-			rejectUnadmitted(w, "too many failed attempts", http.StatusTooManyRequests)
+			rejectUnadmitted(w, r, "too many failed attempts", http.StatusTooManyRequests)
 			return
 		}
 		valid, attempted := verifyTokenWithCapacity(verifier, provided)
@@ -622,7 +625,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
 				reg.IncRateLimited()
 			}
-			rejectUnadmitted(w, "authentication verification capacity exceeded", http.StatusTooManyRequests)
+			rejectUnadmitted(w, r, "authentication verification capacity exceeded", http.StatusTooManyRequests)
 			return
 		}
 		rl.finishAuth(clientIP, valid)
@@ -634,7 +637,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncRequest(r.Method, http.StatusUnauthorized)
 				reg.IncAuthFailure("bad_token")
 			}
-			rejectUnadmitted(w, "unauthorized", http.StatusUnauthorized)
+			rejectUnadmitted(w, r, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
