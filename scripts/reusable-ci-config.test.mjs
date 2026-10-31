@@ -10,7 +10,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKFLOW = path.join(ROOT, ".github", "workflows", "ci-verify.yml");
 const LEFTHOOK = path.join(ROOT, "lefthook.yml");
 const COVERAGE = path.join(ROOT, "COVERAGE.md");
-const SHARED_SHA = "01bf40b06b110946f12a49b82e407d77c6480df7";
+const SHARED_SHA = "29a963e6df100295bdd88c3d87dc1f73ceb30f65";
 
 const FIXED_SCRIPTS = new Map([
   ["go-test.sh", ["go mod verify", "go test -race", "COVERAGE_MIN"]],
