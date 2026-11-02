@@ -2,7 +2,6 @@
 
 import { Ic } from "@/components/icons";
 import { MenuDismiss } from "@/components/menu-dismiss";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { TrackedLink } from "@/components/tracked-link";
 import { GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 
@@ -35,7 +34,6 @@ export function SiteHeader() {
           </TrackedLink>
         </nav>
         <span className="spacer" />
-        <ThemeToggle />
         <details className="menu" id="mobile-menu">
           <summary aria-label="Open menu">
             <Ic name="list" />

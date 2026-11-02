@@ -27,6 +27,8 @@ changes since v1.0.3.
   and the article column can grow to 900px.
 - The docs header no longer carries Compare. It stays in the docs footer and
   on the website.
+- The docs theme toggle moved from the header to the bottom of the sidebar,
+  including the mobile drawer.
 
 ### Security
 
