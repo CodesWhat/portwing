@@ -10,8 +10,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 type Config struct {
@@ -46,6 +44,14 @@ type Config struct {
 	// Identity
 	AgentID   string
 	AgentName string
+	// StateDir holds Portwing's own persistent state: the generated agent ID
+	// and the per-key signature version locks (STATE_DIR).
+	StateDir string
+	// SignatureV3Unavailable is empty when signature version 3 is offered, or
+	// the reason it is refused: agent-id-not-v3-compatible (AGENT_ID outside
+	// ^[a-z0-9-]{1,64}$) or agent-id-not-persistent (no AGENT_ID and no usable
+	// state directory). v2 and legacy signatures are unaffected.
+	SignatureV3Unavailable string
 
 	// Operational
 	HeartbeatInterval int
@@ -76,6 +82,9 @@ type Config struct {
 	AuthorizedKeysFile  string // AUTHORIZED_KEYS / AUTHORIZED_KEYS_FILE
 	MaxClockSkewSeconds int    // MAX_CLOCK_SKEW_SECONDS (default 60)
 	NonceLRUSize        int    // NONCE_LRU_SIZE (default 10000)
+	// SignatureMinVersion is the lowest request signature version accepted for
+	// every key (SIGNATURE_MIN_VERSION: 1 legacy, 2, or 3; default 1).
+	SignatureMinVersion int
 
 	// Model C enrollment token (consumed on first use)
 	EnrollmentToken string // ENROLLMENT_TOKEN / ENROLLMENT_TOKEN_FILE
@@ -182,9 +191,15 @@ func Load() (*Config, error) {
 		}
 	}
 
-	agentID := getEnv("AGENT_ID", "")
-	if agentID == "" {
-		agentID = uuid.New().String()
+	stateDir, stateDirExplicit := resolveStateDir(keyRotationDir)
+	signatureMinVersion, err := parseSignatureMinVersion(getEnv("SIGNATURE_MIN_VERSION", ""))
+	if err != nil {
+		return nil, err
+	}
+
+	agentID, v3Reason, err := resolveAgentID(stateDir, stateDirExplicit, signatureMinVersion)
+	if err != nil {
+		return nil, err
 	}
 
 	agentName := getEnv("AGENT_NAME", "")
@@ -238,6 +253,9 @@ func Load() (*Config, error) {
 
 		AgentID:   agentID,
 		AgentName: agentName,
+		StateDir:  stateDir,
+
+		SignatureV3Unavailable: v3Reason,
 
 		LogLevel:          getEnv("LOG_LEVEL", "info"),
 		SkipDFCollection:  getEnvBool("SKIP_DF_COLLECTION", false),
@@ -251,6 +269,8 @@ func Load() (*Config, error) {
 
 		AuthorizedKeysFile: authorizedKeysFile,
 		NonceLRUSize:       getEnvInt("NONCE_LRU_SIZE", 10000),
+
+		SignatureMinVersion: signatureMinVersion,
 
 		EnrollmentToken: enrollmentToken,
 
