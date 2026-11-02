@@ -192,6 +192,11 @@ test("build output packages the exact rendered files and per-page CSP", () => {
   }
 });
 
+function imgSources(csp) {
+  const directive = csp.split("; ").find((part) => part.startsWith("img-src "));
+  return directive ? directive.split(" ").slice(1) : [];
+}
+
 test("the Star History chart origin lands only on the page that renders it", () => {
   const cspFor = (html) =>
     headersForHTML(html).find((header) => header.key === "Content-Security-Policy")?.value ?? "";
@@ -199,13 +204,13 @@ test("the Star History chart origin lands only on the page that renders it", () 
     '<a href="https://www.star-history.com/?repos=CodesWhat%2Fportwing"><img src="https://api.star-history.com/chart?repos=CodesWhat/portwing&amp;type=date&amp;legend=top-left" alt="Star history"><img src="https://api.star-history.com/chart?repos=CodesWhat/portwing&amp;type=date&amp;legend=top-left&amp;theme=dark" alt=""></a>';
 
   const withChart = cspFor(chart);
-  assert.match(withChart, /img-src 'self' data: https:\/\/api\.star-history\.com(;|$)/);
+  assert.deepEqual(imgSources(withChart), ["'self'", "data:", "https://api.star-history.com"]);
   // The chart page link is navigation, not a fetch, so www.star-history.com gets no grant.
   assert.deepEqual(cspOrigins(withChart), [
     "https://api.star-history.com",
     "https://e.codeswhat.com",
   ]);
-  assert.doesNotMatch(cspFor("<p>no chart</p>"), /star-history/);
+  assert.deepEqual(imgSources(cspFor("<p>no chart</p>")), ["'self'", "data:"]);
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-bop-star-"));
   const target = path.join(root, ".vercel", "output");
@@ -218,8 +223,8 @@ test("the Star History chart origin lands only on the page that renders it", () 
     const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
     const csp = (src) =>
       config.routes.find((route) => route.src === src).headers["Content-Security-Policy"];
-    assert.match(csp("^/$"), /api\.star-history\.com/);
-    assert.doesNotMatch(csp("^/docs/guide/?$"), /star-history/);
+    assert.ok(imgSources(csp("^/$")).includes("https://api.star-history.com"));
+    assert.deepEqual(imgSources(csp("^/docs/guide/?$")), ["'self'", "data:"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
