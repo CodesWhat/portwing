@@ -50,8 +50,9 @@
 
 ## Required checks and the promotion order
 
-`main` requires 15 check contexts, declared in
-`scripts/apply-branch-protection.sh`. Seven are `Go CI / ...`, produced by
+`scripts/apply-branch-protection.sh` declares 15 required check contexts for
+`main`. Until it's applied to the live ruleset, `Website Browser Checks` is
+declared but not yet enforced. Seven are `Go CI / ...`, produced by
 the caller job's name in `ci-verify.yml` plus a job name inside the upstream
 reusable workflow. Seven are this repo's own jobs: `Security: Secrets`,
 `Dependency Review`, `CodeQL Analysis`, `Security: Gosec SAST`,
