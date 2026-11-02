@@ -464,7 +464,7 @@ unrecognized code are retried with backoff.
 | `CA_CERT` | CA cert for Edge Mode TLS | Drydock agent `cafile` |
 | `TLS_SKIP_VERIFY` | Skip TLS verification in Edge Mode | n/a |
 | `DRYDOCK_URL` | Edge Mode controller URL; agent dials out to `/api/portwing/ws` | n/a |
-| `AGENT_ID` | UUID for this agent | Drydock registers via `hello.agentId` |
+| `AGENT_ID` | Stable ID for this agent (generated once; `^[a-z0-9-]{1,64}$` for v3) | Drydock registers via `hello.agentId`; standard mode signs v3 requests for it |
 | `AGENT_NAME` | Display name (default: hostname) | Drydock agent component `name` |
 | `DD_POLL_INTERVAL` | Container refresh interval in seconds (default `300`) | n/a |
 | `ADAPTER` | `drydock` (default) or `generic` | n/a |

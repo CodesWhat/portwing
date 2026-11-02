@@ -63,6 +63,7 @@ services:
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
       - TOKEN_FILE=/run/secrets/portwing_token
@@ -76,3 +77,4 @@ secrets:
 volumes:
   sockguard-socket:
   portwing-stacks:
+  portwing-state:

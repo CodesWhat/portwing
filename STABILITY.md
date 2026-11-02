@@ -31,8 +31,9 @@ Beginning with the first `v1.0` release, the following documented surfaces are s
 - `/ready`, `/_portwing/health`, `/_portwing/info`, `/_portwing/metrics`,
   `/_portwing/audit`, `/_portwing/audit/export`, and `/_portwing/mcp`;
 - `/health` as a minimal unauthenticated liveness response; and
-- Ed25519 HTTP signature version 2, including its exact escaped-path and raw
-  query request target.
+- Ed25519 HTTP signature versions 2 and 3, including their exact escaped-path
+  and raw query request target and, for version 3, the `portwing-sig-v3`
+  canonical bytes bound to the agent ID.
 
 The following are backward-compatible:
 

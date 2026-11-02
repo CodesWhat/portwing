@@ -399,6 +399,15 @@ for example_file in \
 	validate_current_release_example_values "${example_file}" \
 		"$(grep -E 'ghcr\.io/codeswhat/portwing:' "${example_file}" || true)" \
 		"the example ${example_file} must pin the current release"
+	# Signature version 3 needs a persistent agent ID and persistent downgrade
+	# locks, so every example that runs Portwing must mount /data/credentials.
+	# Active lines only: a commented-out mount must not satisfy the check.
+	portwing_images="$(active_lines "${example_file}" | grep -cE 'image:[[:space:]]*["'\'']?ghcr\.io/codeswhat/portwing:' || true)"
+	credential_mounts="$(active_lines "${example_file}" | grep -cE '/data/credentials' || true)"
+	if [ "${credential_mounts}" -lt 1 ] || [ "${credential_mounts}" -lt "${portwing_images}" ]; then
+		echo "FAIL: every Portwing service in ${example_file} must mount /data/credentials (found ${credential_mounts} mounts for ${portwing_images} images)" >&2
+		failures=$((failures + 1))
+	fi
 	image_values="$(awk '
 		/^[[:space:]]*image:[[:space:]]*/ {
 			sub(/^[[:space:]]*image:[[:space:]]*/, "")

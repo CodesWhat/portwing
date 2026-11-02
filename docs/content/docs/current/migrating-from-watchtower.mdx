@@ -76,6 +76,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /data/stacks:/data/stacks        # Compose stack files (host dir must be writable by UID 65532)
+      - /data/credentials:/data/credentials  # agent ID + v3 signature locks (mode 0700, UID 65532)
     ports:
       - "3000:3000"
     environment:
@@ -102,7 +103,7 @@ Key environment variables for Standard mode:
 | `TLS_CERT` | — | Server TLS certificate path |
 | `TLS_KEY` | — | Server TLS key path |
 | `STACKS_DIR` | `/data/stacks` | Compose stack directory |
-| `AGENT_ID` | UUID v4 | Stable agent identifier |
+| `AGENT_ID` | generated once, kept in `STATE_DIR` | Stable agent identifier; use `^[a-z0-9-]{1,64}$` for v3 |
 | `AGENT_NAME` | hostname | Human-readable name in Drydock UI |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `DD_POLL_INTERVAL` | `300` | Container inventory refresh interval (seconds) |
@@ -129,6 +130,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /data/stacks:/data/stacks        # host dir must be writable by UID 65532
+      - /data/credentials:/data/credentials  # agent ID + v3 signature locks (mode 0700, UID 65532)
     environment:
       DRYDOCK_URL: "wss://your-drydock.example.com:3001"
       # Edge requires an Ed25519 key; mount it and set PRIVATE_KEY_FILE

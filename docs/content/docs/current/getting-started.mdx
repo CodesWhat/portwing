@@ -105,6 +105,7 @@ services:
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
       - TOKEN_FILE=/run/secrets/portwing_token
@@ -118,6 +119,7 @@ secrets:
 volumes:
   sockguard-socket:
   portwing-stacks:
+  portwing-state:
 ```
 
 <Callout type="info">
@@ -174,6 +176,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - TOKEN_FILE=/run/secrets/portwing_token
       # Stronger at-rest posture: replace TOKEN_FILE with an Argon2id hash
@@ -188,6 +191,7 @@ secrets:
 
 volumes:
   portwing-stacks:
+  portwing-state:
 ```
 
 ---
@@ -253,6 +257,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - DRYDOCK_URL=https://drydock.example.com
       - PRIVATE_KEY_FILE=/run/secrets/portwing_key
@@ -266,6 +271,7 @@ secrets:
 
 volumes:
   portwing-stacks:
+  portwing-state:
 ```
 
 Set `DRYDOCK_URL` to your Drydock instance, `AGENT_NAME` to a unique identifier for the host, and `PRIVATE_KEY_FILE` to the agent's Ed25519 key (register its public key with Drydock). No control port needs to be published on the agent side. Use Drydock `v1.6.0-rc.11+` for the complete v0.9 watcher/update feature path. See [Connection Modes](/connection-modes) for a full comparison of standard vs. edge mode and the private operations-listener boundary.
@@ -285,6 +291,7 @@ docker run -d \
   --name portwing \
   --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -v portwing-state:/data/credentials \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
   ghcr.io/codeswhat/portwing:1.0.4

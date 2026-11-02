@@ -102,6 +102,12 @@ Native Linux packages install:
 - `/etc/portwing/` for operator-owned configuration;
 - `/data/stacks/` for Compose stack state.
 
+The package creates no state directory. Without `AGENT_ID` or a writable
+`STATE_DIR` the agent serves version 2 and legacy signatures only and refuses
+signature version 3 (`agent-id-not-persistent`). Set `AGENT_ID` in the
+environment file to use version 3, or add a `STATE_DIR` to the unit's
+`ReadWritePaths`. See [Authentication](/authentication#signature-version-3-audience-bound).
+
 The package deliberately does **not** enable or start `portwing.service`.
 Portwing fails closed without authentication, so create the configuration first:
 

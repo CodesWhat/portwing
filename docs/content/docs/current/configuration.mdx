@@ -50,6 +50,8 @@ The following variables govern how Portwing authenticates incoming requests. `TO
 | `NONCE_LRU_SIZE` | `10000` | Capacity of the in-memory nonce cache used for replay protection. |
 | `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on first use. The burn is recorded as a `# portwing-enrollment-burned` comment in the authorized_keys file and persists across restarts. |
 | `ENROLLMENT_TOKEN_FILE` | — | Path to a file containing the enrollment token. |
+| `SIGNATURE_MIN_VERSION` | `1` | Lowest Ed25519 request signature version accepted for every key: `1` (legacy, the default), `2`, or `3`. Rejected requests answer `signature-version-too-low` after the signature verified. See [Authentication](/authentication#signature-version-3-audience-bound). |
+| `STATE_DIR` | `KEY_ROTATION_DIR`, else `/data/credentials` | Directory for Portwing's own persistent state: the generated agent ID (`agent-id`) and the per-key signature locks (`signature-locks.json`). Created with mode `0700` when set explicitly. The default is used only if it already exists, as in the container images. The directory must be writable and not world-writable (group write is fine). Without a usable directory and without `AGENT_ID`, v3 is refused. The shipped examples mount `/data/credentials`. |
 | `KEY_ROTATION_DIR` | — | Opt-in private persistent directory for controller-assisted Ed25519 rotation. Requires `AUTHORIZED_KEYS` in Standard mode or `PRIVATE_KEY_FILE` in Edge mode. Directory mode must be `0700`; managed files contain credentials and require backup. Available since v1.0; controller assistance requires Drydock v1.8.0-rc.1+ on the v1.8 line. See [Authentication](/authentication#controller-assisted-rotation). |
 | `PRIVATE_KEY_FILE` | — | Path to an Ed25519 private key (PEM PKCS#8) used to sign the agent's Edge-mode hello message. |
 | `ALLOW_UNAUTHENTICATED` | `false` | Explicit development-only opt-in to start Standard mode without a credential. Safe by default only on a loopback `BIND_ADDRESS`. |
@@ -84,7 +86,7 @@ Portwing talks to the Docker daemon over the Unix socket only — there is no `D
 
 | Variable | Default | Description |
 |---|---|---|
-| `AGENT_ID` | UUID v4 (generated) | Stable unique identifier for this agent instance. Set explicitly to preserve identity across restarts. |
+| `AGENT_ID` | 32 hex characters (generated once, stored in `STATE_DIR`) | Stable unique identifier for this agent. It is the audience that signature version 3 binds to. Any value is still accepted, as in earlier releases, but one outside `^[a-z0-9-]{1,64}$` (lowercase letters, digits and hyphens, 1 to 64 characters) logs a startup warning and disables v3 (`agent-id-not-v3-compatible`); v2 and legacy keep working. A valid value is used as is, is not written to `STATE_DIR`, and makes v3 available as long as `STATE_DIR` is writable; if it is not, v3 is refused (`state-not-writable`) because the downgrade locks could not be stored. Without `AGENT_ID` and without a usable `STATE_DIR` the generated ID would change on restart, so v3 is refused (`agent-id-not-persistent`). `GET /_portwing/info` reports `v3` and `v3Reason`. |
 | `AGENT_NAME` | System hostname | Human-readable label shown in Drydock and audit logs. Falls back to `portwing` if the hostname cannot be read. |
 
 ---

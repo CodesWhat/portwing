@@ -107,7 +107,7 @@ Edge mode's trust in the controller is TLS-only and one-directional. The signed 
 | `TOKEN` | — | Not accepted for edge mode — startup fails if set with `DRYDOCK_URL` and no `PRIVATE_KEY_FILE` |
 | `AUTHORIZED_KEYS` | — | Not accepted for edge mode |
 | `AGENT_NAME` | hostname | Human-readable label sent in the hello message |
-| `AGENT_ID` | random UUID | Stable identity across reconnects (persist this) |
+| `AGENT_ID` | generated once, kept in `STATE_DIR` | Stable identity across restarts. Standard mode signs v3 only for an ID matching `^[a-z0-9-]{1,64}$`. `hello.agentId` is the same value `/_portwing/info` reports |
 | `RECONNECT_DELAY` | `1` | Initial reconnect delay in seconds |
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect delay in seconds |
 | `HEARTBEAT_INTERVAL` | `30` | Ping interval in seconds |

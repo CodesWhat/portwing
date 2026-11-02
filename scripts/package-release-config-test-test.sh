@@ -447,6 +447,19 @@ expect_stale_release_example_failure "docs/content/docs/current/standalone-mode.
 expect_stale_release_example_failure "docs/content/docs/current/observability.mdx" 'portwing_build_info{version="0.0.1"} 1'
 expect_stale_release_example_failure "docs/content/docs/current/security-model.mdx" 'VERSION=0.0.1'
 
+# Every example that runs Portwing must mount /data/credentials for the agent
+# ID and signature locks; a missing or commented-out mount must fail.
+for mount_example in examples/docker-compose.standard.yml examples/kubernetes/edge.yaml; do
+	mount_backup="${fixture}/${mount_example}.mount-backup"
+	cp "${fixture}/${mount_example}" "${mount_backup}"
+	sed -i.bak 's#/data/credentials#/data/other#' "${fixture}/${mount_example}"
+	rm -f "${fixture}/${mount_example}.bak"
+	expect_release_contract_failure \
+		"FAIL: every Portwing service in ${mount_example} must mount /data/credentials" \
+		"the package release contract must reject an example without the /data/credentials mount (${mount_example})"
+	mv "${mount_backup}" "${fixture}/${mount_example}"
+done
+
 docs_meta_backup="${fixture}/docs/content/docs/current/meta.json.title-backup"
 cp "${fixture}/docs/content/docs/current/meta.json" "${docs_meta_backup}"
 sed -i.bak 's/"title": "v[0-9.]*"/"title": "v0.0"/' "${fixture}/docs/content/docs/current/meta.json"

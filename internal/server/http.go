@@ -224,6 +224,24 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		if err := reg.Load(); err != nil {
 			return nil, fmt.Errorf("loading authorized_keys: %w", err)
 		}
+		locks := auth.NewMemorySignatureLocks()
+		if cfg.StateDir != "" {
+			locks, err = auth.OpenSignatureLocks(cfg.StateDir)
+			if err != nil {
+				return nil, fmt.Errorf("loading signature locks: %w", err)
+			}
+		} else if cfg.SignatureV3Unavailable == "" {
+			// Locks that cannot survive a restart would reopen the downgrade,
+			// so v3 is not offered without a state directory. /_portwing/info
+			// reads the same field.
+			cfg.SignatureV3Unavailable = "state-not-writable"
+		}
+		reg.SetSignaturePolicy(auth.SignaturePolicy{
+			AgentID:       cfg.AgentID,
+			MinVersion:    cfg.SignatureMinVersion,
+			V3Unavailable: cfg.SignatureV3Unavailable,
+			Locks:         locks,
+		})
 		ed25519Cfg = Ed25519Config{
 			Registry:       reg,
 			Nonces:         auth.NewNonceLRU(cfg.NonceLRUSize, cfg.MaxClockSkewSeconds),
@@ -535,6 +553,10 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"agentId":       s.cfg.AgentID,
 		"agentName":     s.cfg.AgentName,
 		"capabilities":  capabilities,
+		"v3":            s.cfg.SignatureV3Unavailable == "",
+	}
+	if s.cfg.SignatureV3Unavailable != "" {
+		info["v3Reason"] = s.cfg.SignatureV3Unavailable
 	}
 
 	w.Header().Set("Content-Type", "application/json")

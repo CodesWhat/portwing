@@ -33,6 +33,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - TOKEN_FILE=/run/secrets/portwing_token
       # Stronger at-rest posture: replace TOKEN_FILE with an Argon2id hash
@@ -47,3 +48,4 @@ secrets:
 
 volumes:
   portwing-stacks:
+  portwing-state:
