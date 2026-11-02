@@ -75,3 +75,7 @@ website/vercel.json
 .qlty/results
 .vercel
 .env.local
+
+# Playwright browser checks (e2e/): HTML report, traces and failure artifacts
+/playwright-report/
+/test-results/
