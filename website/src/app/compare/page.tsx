@@ -2,7 +2,8 @@
 
 import type { Metadata } from "next";
 import { CompareMatrix } from "@/components/compare-matrix";
-import { MarketingShell } from "@/components/marketing-shell";
+import { Footer } from "@/components/footer";
+import { SiteHeader } from "@/components/site-header";
 import { BASE_URL, SITE_CONFIG } from "@/lib/site-config";
 
 export const metadata: Metadata = {
@@ -106,27 +107,26 @@ export default function ComparePage() {
   return (
     <>
       <JsonLdScript data={jsonLd} />
-      <MarketingShell>
-        {/* Hero */}
-        <section className="px-4 pt-16 pb-12">
-          <div className="mx-auto max-w-4xl text-center">
-            <h1 className="mb-4 text-4xl font-bold tracking-tight text-neutral-900 sm:text-5xl dark:text-neutral-100">
+      <SiteHeader current="compare" />
+      <main id="main-content">
+        <section className="cmp-hero" aria-labelledby="ix-h1">
+          <div className="wrap">
+            <h1 className="cp" id="ix-h1">
               Portwing vs Alternatives
             </h1>
-            <p className="mx-auto max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
+            <p className="cp-sub">
               Current agent capabilities, controller tradeoffs, and deliberate non-goals — sourced
               from published product documentation and reviewed October 26, 2026.
             </p>
           </div>
         </section>
-
-        {/* Full comparison matrix */}
-        <section className="px-4 pb-24">
-          <div className="mx-auto max-w-5xl">
+        <section style={{ padding: "20px 0 56px" }}>
+          <div className="wrap">
             <CompareMatrix />
           </div>
         </section>
-      </MarketingShell>
+      </main>
+      <Footer />
     </>
   );
 }

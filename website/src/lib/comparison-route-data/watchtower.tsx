@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-import { Activity, Bot, FileText, Key, PackageCheck, Shield } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 
 export const watchtowerComparisonRouteData = {
@@ -28,12 +27,12 @@ activity|Prometheus Metrics|Both expose Prometheus metrics. Watchtower's is an o
 bot|MCP Server (AI-Native)|Portwing ships five read-only MCP tools for container and host inspection. Watchtower has no documented MCP support.
 `,
   highlightIconMap: {
-    key: Key,
-    shield: Shield,
-    filetext: FileText,
-    packagecheck: PackageCheck,
-    activity: Activity,
-    bot: Bot,
+    key: "key",
+    shield: "shield-check",
+    filetext: "scroll",
+    packagecheck: "package",
+    activity: "heartbeat",
+    bot: "cpu",
   },
   metadataTitle: "Watchtower vs Portwing — Docker Agent Comparison",
   metadataDescription:
@@ -58,11 +57,10 @@ bot|MCP Server (AI-Native)|Portwing ships five read-only MCP tools for container
       Watchtower is an automated container updater — it polls registries and restarts containers
       when new images are available. It can update local or remote Docker daemons. It is an updater
       client rather than a general-purpose access agent, and its upstream repository is archived.
-      Portwing is a{" "}
-      <strong className="text-neutral-900 dark:text-neutral-200">remote access agent</strong> — it
-      gives the Drydock controller a secure authenticated foothold on a Docker host. These tools
-      solve different problems; Drydock can handle centralized update workflows with Portwing as the
-      agent on each host. The archived containrrr project's maintained successor is{" "}
+      Portwing is a <strong>remote access agent</strong> — it gives the Drydock controller a secure
+      authenticated foothold on a Docker host. These tools solve different problems; Drydock can
+      handle centralized update workflows with Portwing as the agent on each host. The archived
+      containrrr project's maintained successor is{" "}
       <a href="https://github.com/nicholas-fedor/watchtower">nicholas-fedor/watchtower</a> (v1.23.2,
       2026-10-22); this comparison covers the archived v1.7.1 release, reviewed October 26, 2026.
     </p>

@@ -3,21 +3,20 @@
 "use client";
 
 import { type CtaId, captureCta } from "@codeswhat/public-analytics";
-import { PackageOpen, ShieldCheck, Terminal, TriangleAlert, Zap } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import { DockerRunSnippet } from "@/components/docker-run-snippet";
-import { SectionHeading } from "@/components/section-heading";
+import { useRef, useState } from "react";
+import { HighlightedYaml } from "@/components/code-highlight";
+import { Ic } from "@/components/icons";
+import { Section } from "@/components/section";
 import { TrackedLink } from "@/components/tracked-link";
-import { YamlBlock } from "@/components/yaml-block";
 import { SITE_CONFIG } from "@/lib/site-config";
 
 type Tab = "quick" | "secure" | "native";
 
-const TABS: { id: Tab; label: string; icon: typeof Zap }[] = [
-  { id: "quick", label: "Quick", icon: Zap },
-  { id: "secure", label: "Secure", icon: ShieldCheck },
-  { id: "native", label: "Native", icon: PackageOpen },
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: "quick", label: "Quick", icon: "lightning" },
+  { id: "secure", label: "Secure", icon: "shield-check" },
+  { id: "native", label: "Native", icon: "package" },
 ];
 
 const INSTALL_CTA: Record<Tab, CtaId> = {
@@ -74,143 +73,153 @@ volumes:
 export function GetStarted() {
   const [tab, setTab] = useState<Tab>("quick");
   const pathname = usePathname();
+  const buttons = useRef<Record<Tab, HTMLButtonElement | null>>({
+    quick: null,
+    secure: null,
+    native: null,
+  });
 
-  const selectTab = (nextTab: Tab) => {
-    setTab(nextTab);
-    captureCta(pathname, INSTALL_CTA[nextTab], "get_started");
+  const selectTab = (next: Tab, focus = false) => {
+    setTab(next);
+    captureCta(pathname, INSTALL_CTA[next], "get_started");
+    if (focus) buttons.current[next]?.focus();
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    const index = TABS.findIndex((t) => t.id === tab);
+    const at = (i: number) => TABS[(i + TABS.length) % TABS.length].id;
+    if (event.key === "ArrowRight") selectTab(at(index + 1), true);
+    else if (event.key === "ArrowLeft") selectTab(at(index - 1), true);
+    else if (event.key === "Home") selectTab(TABS[0].id, true);
+    else if (event.key === "End") selectTab(TABS[TABS.length - 1].id, true);
+    else return;
+    event.preventDefault();
   };
 
   return (
-    <section className="border-t border-border/60 px-4 py-16">
-      <div className="mx-auto max-w-3xl">
-        <SectionHeading
-          eyebrow="Get running"
-          title="Get started in minutes"
-          subtitle="Add Portwing to your compose file and point Drydock at it — one agent per host."
-          align="right"
-        />
-
-        {/* Quick / Secure tab toggle */}
-        <div className="mb-5 flex justify-center">
-          <div
-            role="tablist"
-            aria-label="Install method"
-            className="inline-flex gap-1 rounded-xl border border-neutral-200 bg-white/60 p-1 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/60"
-            onKeyDown={(e) => {
-              const currentIndex = TABS.findIndex((t) => t.id === tab);
-              if (e.key === "ArrowRight") {
-                e.preventDefault();
-                selectTab(TABS[(currentIndex + 1) % TABS.length].id);
-              } else if (e.key === "ArrowLeft") {
-                e.preventDefault();
-                selectTab(TABS[(currentIndex - 1 + TABS.length) % TABS.length].id);
-              } else if (e.key === "Home") {
-                e.preventDefault();
-                selectTab(TABS[0].id);
-              } else if (e.key === "End") {
-                e.preventDefault();
-                selectTab(TABS[TABS.length - 1].id);
-              }
+    <Section
+      id="get-started"
+      headingId="gs-h"
+      eyebrow="Get running"
+      title="Get started in minutes"
+      subtitle="Add Portwing to your compose file and point Drydock at it — one agent per host."
+      variant="b"
+      split
+    >
+      <div className="tabs" role="tablist" aria-label="Install method" onKeyDown={onKeyDown}>
+        {TABS.map(({ id, label, icon }) => (
+          <button
+            key={id}
+            ref={(node) => {
+              buttons.current[id] = node;
             }}
+            role="tab"
+            type="button"
+            id={`tab-${id}`}
+            aria-selected={tab === id}
+            aria-controls={`panel-${id}`}
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => selectTab(id)}
           >
-            {TABS.map(({ id, label, icon: Icon }) => {
-              const active = tab === id;
-              return (
-                <button
-                  key={id}
-                  id={`tab-${id}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  aria-controls="get-started-panel"
-                  tabIndex={active ? 0 : -1}
-                  onClick={() => selectTab(id)}
-                  className={[
-                    "flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors",
-                    active
-                      ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                      : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100",
-                  ].join(" ")}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+            <Ic name={icon} />
+            {label}
+          </button>
+        ))}
+      </div>
 
-        <div role="tabpanel" id="get-started-panel" aria-labelledby={`tab-${tab}`}>
-          {tab === "quick" ? (
-            <DockerRunSnippet />
-          ) : tab === "secure" ? (
-            <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl">
-              <div className="flex items-center gap-2 border-b border-neutral-800 px-4 py-3">
-                <Terminal className="h-4 w-4 text-neutral-500" />
-                <span className="text-xs font-medium text-neutral-500">
-                  docker-compose.standard.yml
-                </span>
-              </div>
-              <YamlBlock
-                code={dockerCompose}
-                className="overflow-x-auto p-6 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-neutral-300"
-              />
-            </div>
-          ) : (
-            <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl">
-              <div className="flex items-center gap-2 border-b border-neutral-800 px-4 py-3">
-                <PackageOpen className="h-4 w-4 text-neutral-500" />
-                <span className="text-xs font-medium text-neutral-500">Native packages</span>
-              </div>
-              <pre className="overflow-x-auto p-6 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-neutral-300">
-                <code>{`# macOS (latest stable release)
+      <div id="panel-quick" role="tabpanel" aria-labelledby="tab-quick" hidden={tab !== "quick"}>
+        <div className="code">
+          <div className="lab">
+            <Ic name="terminal-window" />
+            Quick start · docker run
+          </div>
+          <pre>
+            <code>
+              <span className="y-c">$</span> <span className="y-v">docker run</span>
+              {` -d \\
+  --name portwing \\
+  -v /var/run/docker.sock:/var/run/docker.sock \\
+  -p 3000:3000 \\
+  -e TOKEN=$(openssl rand -hex 24) \\
+  `}
+              <span className="y-v">
+                {SITE_CONFIG.dockerImage}:{SITE_CONFIG.version}
+              </span>
+            </code>
+          </pre>
+        </div>
+        <p className="note t-warning">
+          <span className="chip">
+            <Ic name="warning" />
+            Heads up
+          </span>
+          TOKEN is visible in docker inspect — fine for a local try, not for production.
+        </p>
+      </div>
+
+      <div id="panel-secure" role="tabpanel" aria-labelledby="tab-secure" hidden={tab !== "secure"}>
+        <div className="code">
+          <div className="lab">
+            <Ic name="terminal-window" />
+            docker-compose.standard.yml
+          </div>
+          <pre>
+            <code>
+              <HighlightedYaml code={dockerCompose} />
+            </code>
+          </pre>
+        </div>
+        <p className="note t-success">
+          <span className="chip">
+            <Ic name="shield-check" />
+            Secret
+          </span>
+          Token delivered as a Docker secret — never in env vars or inspect output.{" "}
+          <TrackedLink
+            href="/docs/getting-started"
+            ctaId="docs_getting_started"
+            placement="get_started"
+          >
+            Full getting-started docs →
+          </TrackedLink>
+        </p>
+      </div>
+
+      <div id="panel-native" role="tabpanel" aria-labelledby="tab-native" hidden={tab !== "native"}>
+        <div className="code">
+          <div className="lab">
+            <Ic name="package" />
+            Native packages
+          </div>
+          <pre>
+            <code>
+              <span className="y-c"># macOS (latest stable release)</span>
+              {`
 brew install --cask codeswhat/tap/portwing
 
-# Debian / Ubuntu
+`}
+              <span className="y-c"># Debian / Ubuntu</span>
+              {`
 sudo apt install ./portwing_1.0.2_linux_amd64.deb
 
-# Fedora / RHEL
-sudo rpm --install ./portwing_1.0.2_linux_amd64.rpm`}</code>
-              </pre>
-            </div>
-          )}
-
-          <div className="mt-4 flex items-center justify-center gap-2 text-center text-sm">
-            {tab === "quick" ? (
-              <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
-                <TriangleAlert className="h-4 w-4 shrink-0 text-amber-500" />
-                TOKEN is visible in docker inspect — fine for a local try, not for production.
-              </p>
-            ) : tab === "secure" ? (
-              <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
-                <ShieldCheck className="h-4 w-4 shrink-0 text-violet-500" />
-                Token delivered as a Docker secret — never in env vars or inspect output.{" "}
-                <TrackedLink
-                  href="/docs/getting-started"
-                  ctaId="docs_getting_started"
-                  placement="get_started"
-                  className="font-medium text-neutral-900 underline-offset-4 hover:underline dark:text-neutral-100"
-                >
-                  Full getting-started docs →
-                </TrackedLink>
-              </p>
-            ) : (
-              <p className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
-                <ShieldCheck className="h-4 w-4 shrink-0 text-violet-500" />
-                Stable packages are checksummed, keyless-signed, and install-tested.{" "}
-                <TrackedLink
-                  href="/docs/installation"
-                  ctaId="docs_installation"
-                  placement="get_started"
-                  className="font-medium text-neutral-900 underline-offset-4 hover:underline dark:text-neutral-100"
-                >
-                  Install and verify →
-                </TrackedLink>
-              </p>
-            )}
-          </div>
+`}
+              <span className="y-c"># Fedora / RHEL</span>
+              {`
+sudo rpm --install ./portwing_1.0.2_linux_amd64.rpm`}
+            </code>
+          </pre>
         </div>
+        <p className="note t-success">
+          <span className="chip">
+            <Ic name="shield-check" />
+            Verified
+          </span>
+          Stable packages are checksummed, keyless-signed, and install-tested.{" "}
+          <TrackedLink href="/docs/installation" ctaId="docs_installation" placement="get_started">
+            Install and verify →
+          </TrackedLink>
+        </p>
       </div>
-    </section>
+    </Section>
   );
 }

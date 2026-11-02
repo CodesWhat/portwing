@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-import type { LucideIcon } from "lucide-react";
 import type { ComparisonRouteConfig } from "@/lib/comparison-route";
 
 export type ComparisonRouteRawConfig = Omit<
@@ -9,5 +8,5 @@ export type ComparisonRouteRawConfig = Omit<
 > & {
   comparisonTable: string;
   highlightsTable: string;
-  highlightIconMap: Record<string, LucideIcon>;
+  highlightIconMap: Record<string, string>;
 };

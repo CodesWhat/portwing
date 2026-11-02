@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-import { Activity, Bot, KeyRound, Network, PackageCheck, ShieldCheck } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 import { SITE_CONFIG } from "@/lib/site-config";
 
@@ -28,12 +27,12 @@ packagecheck|Both Publish Verifiable Artifacts|Arcane image signatures and signe
 bot|Read-Only MCP|Portwing exposes five read-only host and container inspection tools over MCP. Arcane does not document an MCP endpoint in the reviewed v2.17.1 material.
 `,
   highlightIconMap: {
-    keyround: KeyRound,
-    shieldcheck: ShieldCheck,
-    network: Network,
-    activity: Activity,
-    packagecheck: PackageCheck,
-    bot: Bot,
+    keyround: "key",
+    shieldcheck: "shield-check",
+    network: "plugs-connected",
+    activity: "heartbeat",
+    packagecheck: "package",
+    bot: "cpu",
   },
   metadataTitle: "Arcane Agent vs Portwing — Remote Docker Agent Comparison",
   metadataDescription: `Compare Arcane Agent v2.17.1 and Portwing v${SITE_CONFIG.version} across edge transport, ML-DSA-87 mTLS and Ed25519 auth, Docker API compatibility, socket policy, auditing, and fleet scope.`,
@@ -57,7 +56,7 @@ bot|Read-Only MCP|Portwing exposes five read-only host and container inspection 
       post-quantum certificates from a freshly generated CA. An existing ECDSA P-384 CA keeps
       issuing P-384 client certificates. Portwing v{SITE_CONFIG.version} is a narrower access agent
       for Drydock, focused on{" "}
-      <strong className="text-neutral-900 dark:text-neutral-200">
+      <strong>
         replay-resistant signed requests, transparent Docker compatibility, Sockguard policy, and
         mediation-point audit
       </strong>

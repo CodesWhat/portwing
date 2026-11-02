@@ -104,10 +104,12 @@ function outputRelativePath(outputDir, file) {
 export function buildOutputConfig(outputDir) {
   const routes = [];
   const overrides = {};
+  let notFoundCsp = null;
   for (const file of htmlFiles(outputDir)) {
     const relative = outputRelativePath(outputDir, file);
     const publicRoute = routeForOutputPath(relative);
     const csp = headerMap(headersForHTML(fs.readFileSync(file, "utf8")))["Content-Security-Policy"];
+    if (relative === "404.html") notFoundCsp = csp;
     const suffix = publicRoute === "/" ? "" : "/?";
     routes.push({
       src: `^${escapeRoute(publicRoute)}${suffix}$`,
@@ -130,6 +132,18 @@ export function buildOutputConfig(outputDir) {
   }
 
   routes.push({ src: "^/.*$", headers: headerMap(COMMON_HEADERS), continue: true });
+  // A missing path never matched a per-page CSP route above, so the not-found page is
+  // served from the error phase and carries its own CSP. Without this the static output
+  // falls back to the platform's generic 404.
+  if (notFoundCsp) {
+    routes.push({ handle: "error" });
+    routes.push({
+      status: 404,
+      src: "^/.*$",
+      headers: { "Content-Security-Policy": notFoundCsp },
+      dest: "/404",
+    });
+  }
   return {
     version: 3,
     routes,

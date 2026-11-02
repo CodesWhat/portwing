@@ -1,27 +1,81 @@
 // SPDX-License-Identifier: MIT
 
 import type { Metadata } from "next";
-import { CliDemo } from "@/components/cli-demo";
 import { CompareSection } from "@/components/compare-section";
 import { CtaButtons } from "@/components/cta-buttons";
 import { Ecosystem } from "@/components/ecosystem";
 import { FAQ } from "@/components/faq";
-import { FeaturesBrowser } from "@/components/features-browser";
+import { FeaturePalette } from "@/components/feature-palette";
+import { Footer } from "@/components/footer";
 import { GetStarted } from "@/components/get-started";
-import { GitHubBadges } from "@/components/github-badges";
-import { MarketingShell } from "@/components/marketing-shell";
-import { PortwingMascot } from "@/components/portwing-mascot";
+import { Ic } from "@/components/icons";
 import { Roadmap } from "@/components/roadmap";
-import { SectionHeading } from "@/components/section-heading";
-import { Badge } from "@/components/ui/badge";
-import { BASE_URL, GITHUB_RELEASES_URL, GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
+import { Section } from "@/components/section";
+import { SiteHeader } from "@/components/site-header";
+import { Terminal } from "@/components/terminal";
+import { Topology } from "@/components/topology";
+import {
+  BASE_URL,
+  GITHUB_RELEASES_URL,
+  GITHUB_URL,
+  REPO_SLUG,
+  SITE_CONFIG,
+} from "@/lib/site-config";
 import { faqItems } from "./data/faq";
+import { features } from "./data/features";
 
 export const metadata: Metadata = {
   alternates: {
     canonical: BASE_URL,
   },
 };
+
+type Badge = { href: string; src: string; alt: string };
+
+// The README's badges, live. Each link goes where the README links it.
+const BADGES: Badge[] = [
+  {
+    href: `${GITHUB_URL}/blob/main/LICENSE`,
+    src: `https://img.shields.io/github/license/${REPO_SLUG}`,
+    alt: "License",
+  },
+  {
+    href: `${GITHUB_URL}/actions/workflows/ci-verify.yml`,
+    src: `${GITHUB_URL}/actions/workflows/ci-verify.yml/badge.svg?branch=main`,
+    alt: "CI",
+  },
+  {
+    href: `https://securityscorecards.dev/viewer/?uri=github.com/${REPO_SLUG}`,
+    src: `https://img.shields.io/ossf-scorecard/github.com/${REPO_SLUG}?label=openssf+scorecard&style=flat`,
+    alt: "OpenSSF Scorecard",
+  },
+  {
+    href: "https://www.bestpractices.dev/projects/14029",
+    src: "https://www.bestpractices.dev/projects/14029/badge",
+    alt: "OpenSSF Best Practices",
+  },
+  {
+    href: `https://qlty.sh/gh/${SITE_CONFIG.githubOwner}/projects/${SITE_CONFIG.githubRepo}`,
+    src: "https://qlty.sh/badges/0c146428-4c10-46d3-8b6e-0622a7b07720/maintainability.svg",
+    alt: "Maintainability",
+  },
+  {
+    href: `${GITHUB_URL}/stargazers`,
+    src: `https://img.shields.io/github/stars/${REPO_SLUG}?style=flat`,
+    alt: "GitHub stars",
+  },
+  {
+    href: `https://codecov.io/gh/${REPO_SLUG}`,
+    src: `https://codecov.io/gh/${REPO_SLUG}/graph/badge.svg`,
+    alt: "Coverage",
+  },
+];
+
+function JsonLd({ data }: { data: Record<string, unknown> }) {
+  return (
+    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />
+  );
+}
 
 export default function Home() {
   const softwareAppJsonLd = {
@@ -79,122 +133,112 @@ export default function Home() {
 
   return (
     <>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareAppJsonLd) }}
-      />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
-      />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqPageJsonLd) }}
-      />
-      <MarketingShell aurora="violet">
-        {/* ── Hero ────────────────────────────────────────────────────────────── */}
-        <section className="relative px-4 py-20">
-          {/* Background glow */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
-          >
-            <div className="absolute left-1/2 top-0 h-96 w-96 -translate-x-1/2 -translate-y-1/4 rounded-full bg-[var(--au-glow)] blur-3xl opacity-60" />
-          </div>
-
-          <div className="mx-auto max-w-6xl px-4">
-            <div className="flex flex-col items-center gap-6 text-center">
-              <Badge variant="secondary" className="font-mono text-xs">
-                v{SITE_CONFIG.version} &middot; Open Source &middot; MIT
-              </Badge>
-
-              <h1 className="max-w-3xl text-6xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 sm:text-7xl lg:text-8xl">
-                Remote Docker
-                <br />
-                <span className="text-neutral-400 dark:text-neutral-500">Agent</span>
-              </h1>
-
-              <p className="max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
-                We built Portwing to give Drydock a secure foothold on every host. Pair it with
-                sockguard and it never touches the raw Docker socket. Ed25519 auth proves every
-                request, and a structured audit log records everything it touches for export to
-                immutable storage, so you control your fleet without exposing it.
-              </p>
-
-              <CtaButtons align="center" />
-            </div>
-
-            {/* Mascot moment */}
-            <div className="relative mt-12 flex justify-center">
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0 -z-10 flex items-center justify-center"
-              >
-                <div className="h-72 w-72 rounded-full bg-[var(--au-glow)] opacity-50 blur-3xl" />
+      <JsonLd data={softwareAppJsonLd} />
+      <JsonLd data={websiteJsonLd} />
+      <JsonLd data={faqPageJsonLd} />
+      <SiteHeader home />
+      <main id="main-content">
+        <section className="hero" id="hero" aria-labelledby="h1" style={{ paddingTop: 64 }}>
+          <div className="wrap">
+            <div className="grid">
+              <div className="lcol">
+                <p className="ver">
+                  <span className="chip t-neutral">v{SITE_CONFIG.version} · Open Source · MIT</span>
+                </p>
+                <h1 className="display" id="h1">
+                  <span>Remote Docker</span> <span className="mut">Agent</span>
+                </h1>
+                <p className="lede">
+                  We built Portwing to give Drydock a secure foothold on every host. Pair it with
+                  sockguard and it never touches the raw Docker socket. Ed25519 auth proves every
+                  request, and a structured audit log records everything it touches for export to
+                  immutable storage, so you control your fleet without exposing it.
+                </p>
+                <CtaButtons />
               </div>
-              <PortwingMascot size={200} />
+              <div className="heroobj">
+                <img
+                  className="mascot"
+                  src="/brand/pigeon-800.webp"
+                  alt="Portwing mascot, a slate and violet toy pigeon"
+                  width={800}
+                  height={800}
+                  fetchPriority="high"
+                />
+              </div>
             </div>
-
-            {/* Badges */}
-            <div className="mt-12">
-              <GitHubBadges />
+            <div className="proof2">
+              <ul className="pstats" aria-label="At a glance">
+                <li>
+                  <b>{features.length}</b>
+                  <span className="micro">capabilities</span>
+                </li>
+                <li>
+                  <b>~10 MB</b>
+                  <span className="micro">binary</span>
+                </li>
+                <li>
+                  <b>3</b>
+                  <span className="micro">architectures</span>
+                </li>
+                <li className="sp">
+                  <a href="https://github.com/sponsors/CodesWhat">
+                    <Ic name="heart" />
+                    Sponsor
+                  </a>
+                </li>
+              </ul>
+              <ul className="pbadges" aria-label="Project badges">
+                {BADGES.map((badge) => (
+                  <li key={badge.alt}>
+                    <a href={badge.href}>
+                      <img
+                        src={badge.src}
+                        alt={badge.alt}
+                        height={20}
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    </a>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </section>
 
-        {/* ── CLI Demo ──────────────────────────────────────────────────────────── */}
-        <div className="reveal" suppressHydrationWarning>
-          <section className="border-t border-border/60 px-4 py-16">
-            <div className="mx-auto max-w-5xl">
-              <SectionHeading
-                eyebrow="In the real CLI"
-                title="See it work"
-                subtitle="A looping recreation of the real CLI — boot the agent in standard and edge mode and watch it stream structured audit logs."
-              />
-              <CliDemo />
-            </div>
-          </section>
-        </div>
+        <Section
+          id="features"
+          headingId="features-h"
+          eyebrow="What it does"
+          title={`${features.length} reasons your Docker hosts are safer`}
+          subtitle="Security isn't a checkbox — it's every layer. Here's what we built."
+          split
+        >
+          <FeaturePalette />
+        </Section>
 
-        {/* ── Features ──────────────────────────────────────────────────────────── */}
-        <div className="reveal" suppressHydrationWarning>
-          <section className="border-t border-border/60 px-4 py-16">
-            <div className="mx-auto max-w-6xl px-4">
-              <SectionHeading
-                eyebrow="What it does"
-                title="14 reasons your Docker hosts are safer"
-                subtitle="Security isn't a checkbox — it's every layer. Here's what we built."
-              />
-              <FeaturesBrowser />
-            </div>
-          </section>
-        </div>
+        <GetStarted />
 
-        {/* ── Get Started ───────────────────────────────────────────────────────── */}
-        <div className="reveal" suppressHydrationWarning>
-          <GetStarted />
-        </div>
+        <Section
+          id="demo"
+          headingId="demo-h"
+          eyebrow="In the real CLI"
+          title="See it in action!"
+          subtitle="Recorded from the real CLI: generate a key, boot the agent, sign a request, and watch it reject four kinds of tampering in the audit log."
+          strikeEyebrow
+          split
+        >
+          <Terminal />
+          <Topology />
+        </Section>
 
-        {/* ── Roadmap ───────────────────────────────────────────────────────────── */}
-        <div className="reveal" suppressHydrationWarning>
-          <Roadmap />
-        </div>
-
-        {/* ── Compare ───────────────────────────────────────────────────────────── */}
-        <div className="reveal" suppressHydrationWarning>
-          <CompareSection />
-        </div>
-
-        {/* ── Ecosystem ─────────────────────────────────────────────────────────── */}
-        <div className="reveal" suppressHydrationWarning>
-          <Ecosystem />
-        </div>
-
-        {/* ── FAQ ───────────────────────────────────────────────────────────────── */}
-        <div className="reveal" suppressHydrationWarning>
-          <FAQ />
-        </div>
-      </MarketingShell>
+        <Roadmap />
+        <CompareSection />
+        <Ecosystem />
+        <FAQ />
+      </main>
+      <Footer full />
     </>
   );
 }

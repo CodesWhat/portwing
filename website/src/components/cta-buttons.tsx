@@ -1,33 +1,28 @@
 // SPDX-License-Identifier: MIT
 
-import { BookOpen } from "lucide-react";
-import { GithubIcon } from "@/components/github-icon";
+import { Ic } from "@/components/icons";
 import { TrackedLink } from "@/components/tracked-link";
-import { Button } from "@/components/ui/button";
 import { GITHUB_URL } from "@/lib/site-config";
 
-export function CtaButtons({ align = "center" }: { align?: "center" | "start" } = {}) {
-  const justifyClass = align === "start" ? "sm:justify-start" : "sm:justify-center";
+// Placement stays "hero": the analytics contract only allows these CTAs at header/hero/footer.
+export function CtaButtons() {
   return (
-    <div className={`grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:gap-4 ${justifyClass}`}>
-      <Button size="lg" className="w-full sm:w-auto" asChild>
-        <TrackedLink
-          href={GITHUB_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          ctaId="github_repository"
-          placement="hero"
-        >
-          <GithubIcon className="h-4 w-4" />
-          View on GitHub
-        </TrackedLink>
-      </Button>
-      <Button variant="outline" size="lg" className="w-full sm:w-auto" asChild>
-        <TrackedLink href="/docs" ctaId="docs_root" placement="hero">
-          <BookOpen className="h-4 w-4" />
-          Read the docs
-        </TrackedLink>
-      </Button>
+    <div className="ctas">
+      <TrackedLink
+        className="btn primary"
+        href={GITHUB_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        ctaId="github_repository"
+        placement="hero"
+      >
+        <Ic name="github-logo" />
+        View on GitHub
+      </TrackedLink>
+      <TrackedLink className="btn" href="/docs" ctaId="docs_root" placement="hero">
+        <Ic name="book-open" />
+        Read the docs
+      </TrackedLink>
     </div>
   );
 }
