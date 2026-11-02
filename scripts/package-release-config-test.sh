@@ -802,6 +802,8 @@ required_ci_contexts=(
 	"CodeQL Analysis"
 	"Security: Gosec SAST"
 	"Security: Grype Dependency Scan (Go + npm)"
+	"Release Contract"
+	"Website Browser Checks"
 )
 
 for context in "${required_ci_contexts[@]}"; do
@@ -951,6 +953,29 @@ grype_pr_paths="$(
 )"
 if [ -n "$grype_pr_paths" ]; then
 	echo "FAIL: security-grype.yml must not path-filter its pull_request trigger; its jobs are required contexts" >&2
+	failures=$((failures + 1))
+fi
+
+# "Website Browser Checks" is a required context too, so ci-verify.yml must
+# fire on every PR: no `paths:` or `paths-ignore:` under pull_request, and the
+# browser job's own `if:` must be exactly the schedule exclusion (a narrower
+# condition would skip it on some PRs and wedge them at "Expected").
+ci_verify_workflow="${CI_VERIFY_WORKFLOW:-.github/workflows/ci-verify.yml}"
+ci_verify_pr_paths="$(
+	perl -0777 -ne 'print "path-filtered" if /^  pull_request:\n(?:(?:    .*)?\n)*?    paths(?:-ignore)?:/m' \
+		"${ci_verify_workflow}"
+)"
+if [ -n "$ci_verify_pr_paths" ]; then
+	echo "FAIL: ci-verify.yml must not path-filter its pull_request trigger (paths or paths-ignore); Website Browser Checks is a required context" >&2
+	failures=$((failures + 1))
+fi
+website_browser_if_lines="$(awk '
+	/^  website-browser-checks:/ { in_job = 1; next }
+	in_job && /^  [A-Za-z0-9_-]+:/ { in_job = 0 }
+	in_job && /^    if:/ { print }
+' "${ci_verify_workflow}")"
+if [ "${website_browser_if_lines}" != "    if: github.event_name != 'schedule'" ]; then
+	echo "FAIL: the website-browser-checks job in ci-verify.yml must have exactly one job-level 'if: github.event_name != 'schedule'' and no other condition (found: ${website_browser_if_lines:-none})" >&2
 	failures=$((failures + 1))
 fi
 

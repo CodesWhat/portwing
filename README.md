@@ -32,7 +32,7 @@
 <hr>
 
 > [!NOTE]
-> **Release preparation is currently `v1.0.3` on `dev/v1.0`.** Confirm publication in [GitHub Releases](https://github.com/CodesWhat/portwing/releases) before using the version-pinned examples below. The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1.0 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **Release preparation is currently `v1.0.4` on `dev/v1.0`.** Confirm publication in [GitHub Releases](https://github.com/CodesWhat/portwing/releases) before using the version-pinned examples below. The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1.0 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
 Controller-assisted two-key rotation requires Portwing `v1.0` or later
 and Drydock `v1.8.0-rc.1` or later on the v1.8 line. Both sides require explicit
@@ -144,7 +144,7 @@ This runs sockguard and Portwing as separate containers sharing a filtered socke
 
 services:
   sockguard:
-    image: ghcr.io/codeswhat/sockguard:2.4.1
+    image: ghcr.io/codeswhat/sockguard:2.4.2
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -161,7 +161,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.3
+    image: ghcr.io/codeswhat/portwing:1.0.4
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -216,7 +216,7 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.3
+    image: ghcr.io/codeswhat/portwing:1.0.4
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -256,10 +256,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_1.0.3_linux_amd64.deb
+sudo apt install ./portwing_1.0.4_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_1.0.3_linux_amd64.rpm
+sudo rpm --install ./portwing_1.0.4_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -282,7 +282,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.0.3
+  ghcr.io/codeswhat/portwing:1.0.4
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,

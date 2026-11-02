@@ -7,6 +7,7 @@ import { AnalyticsRuntime } from "@/components/analytics-runtime";
 import { Footer } from "@/components/footer";
 import { IconSprite } from "@/components/icons";
 import { SiteHeader } from "@/components/site-header";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { versionTabsOption } from "@/lib/docs-versions";
 import { BASE_URL, SITE_CONFIG } from "@/lib/site-config";
 import { source } from "@/lib/source";
@@ -82,7 +83,7 @@ export default function RootLayout({
           <main id="main-content">
             {/*
              * DocsLayout owns the sidebar. The built-in theme switch and search toggle are
-             * disabled so SiteHeader above is the sole chrome.
+             * disabled; the mode toggle lives in the sidebar footer instead.
              */}
             <DocsLayout
               tree={source.pageTree}
@@ -98,6 +99,13 @@ export default function RootLayout({
                   </>
                 ),
                 children: <span className="subnav-label">Docs navigation</span>,
+              }}
+              sidebar={{
+                footer: (
+                  <div className="sidefoot">
+                    <ThemeToggle />
+                  </div>
+                ),
               }}
               themeSwitch={{ enabled: false }}
               searchToggle={{ enabled: false }}

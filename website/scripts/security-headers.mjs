@@ -132,15 +132,18 @@ export function buildOutputConfig(outputDir) {
   }
 
   routes.push({ src: "^/.*$", headers: headerMap(COMMON_HEADERS), continue: true });
-  // A missing path never matched a per-page CSP route above, so the not-found page is
-  // served from the error phase and carries its own CSP. Without this the static output
-  // falls back to the platform's generic 404.
+  // Phase order matches what @vercel/next emits for a static export: header routes
+  // (continue), then handle:filesystem, then handle:error with the 404 page. A config
+  // with no filesystem phase never reached the error phase, so a missing path got the
+  // platform's generic NOT_FOUND instead of the app's page. The error response is a new
+  // response, so it carries the 404 page's CSP plus the common headers itself.
+  routes.push({ handle: "filesystem" });
   if (notFoundCsp) {
     routes.push({ handle: "error" });
     routes.push({
       status: 404,
       src: "^/.*$",
-      headers: { "Content-Security-Policy": notFoundCsp },
+      headers: { ...headerMap(COMMON_HEADERS), "Content-Security-Policy": notFoundCsp },
       dest: "/404",
     });
   }

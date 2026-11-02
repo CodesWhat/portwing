@@ -70,7 +70,7 @@ html[data-product="portwing"] #nd-sidebar {
    Layout: the mock's 272px sidebar, fluid column, 224px "on this page" rail
 --------------------------------------------------------------------------- */
 #nd-docs-layout {
-  --fd-layout-width: 1240px;
+  --fd-layout-width: 1600px;
 }
 @media (min-width: 768px) {
   #nd-docs-layout {
@@ -141,7 +141,7 @@ html[data-product="portwing"] #nd-sidebar {
    Page header
 --------------------------------------------------------------------------- */
 #nd-page {
-  max-width: 780px;
+  max-width: 900px;
   font-size: 13.5px;
 }
 .ph {
@@ -380,4 +380,27 @@ figure.shiki > div:first-child:not([role="region"]) {
 /* the header's mobile menu panel has to open above the docs sub-header (z-30) */
 .top {
   z-index: 50;
+}
+
+/* the header no longer carries the mode toggle, so the mobile menu takes the right edge */
+@media (max-width: 720px) {
+  .top .menu {
+    margin-left: auto;
+  }
+}
+
+/* mode toggle in the sidebar footer (desktop sidebar and mobile drawer) */
+.sidefoot {
+  display: flex;
+}
+.sidefoot .modetog .ml {
+  display: inline;
+}
+
+/* header and footer content follow the 1600px layout; 15px lines the logo up with the sidebar content */
+@media (min-width: 721px) {
+  .wrap {
+    max-width: 1600px;
+    padding-inline: 15px;
+  }
 }
