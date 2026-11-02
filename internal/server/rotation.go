@@ -32,8 +32,8 @@ func (s *Server) handleKeyRotation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Ed25519 authentication required", http.StatusForbidden)
 		return
 	}
-	if r.Header.Get(auth.HeaderSignatureVersion) != auth.SignatureVersion2 || r.URL.RawQuery != "" || r.URL.ForceQuery {
-		http.Error(w, "rotation requires signature version 2 and no query parameters", http.StatusBadRequest)
+	if version := r.Header.Get(auth.HeaderSignatureVersion); (version != auth.SignatureVersion2 && version != auth.SignatureVersion3) || r.URL.RawQuery != "" || r.URL.ForceQuery {
+		http.Error(w, "rotation requires signature version 2 or 3 and no query parameters", http.StatusBadRequest)
 		return
 	}
 	action := strings.TrimPrefix(r.URL.Path, rotationRoute)

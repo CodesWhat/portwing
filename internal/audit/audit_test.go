@@ -190,6 +190,66 @@ func TestKeyRotationEvent(t *testing.T) {
 	}
 }
 
+func TestSignatureLockEvent(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		sink bool
+		size int
+	}{
+		{name: "disabled"},
+		{name: "sink", sink: true},
+		{name: "buffer", size: 2},
+		{name: "sink and buffer", sink: true, size: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dest := ""
+			if tc.sink {
+				dest = filepath.Join(t.TempDir(), "lock.log")
+			}
+			l, closeLog, err := New(dest, tc.size)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeLog()
+			l.SignatureLock("cli", "clear", "0123456789abcdef", OutcomeAllowed)
+			if tc.sink {
+				data, err := os.ReadFile(dest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				event := decodeEvent(t, string(data))
+				for field, want := range map[string]string{
+					"event": EventSignatureLock, "actor": "cli", "operation": "clear",
+					"key_id": "0123456789abcdef", "outcome": OutcomeAllowed,
+				} {
+					if event[field] != want {
+						t.Errorf("%s = %v, want %s", field, event[field], want)
+					}
+				}
+				if len(event) != 8 {
+					t.Errorf("unexpected audit fields: %v", event)
+				}
+			}
+			records := l.Records(0)
+			if tc.size == 0 {
+				if len(records) != 0 {
+					t.Fatalf("disabled buffer retained %d records", len(records))
+				}
+				return
+			}
+			if len(records) != 1 {
+				t.Fatalf("records = %d, want 1", len(records))
+			}
+			r := records[0]
+			if r.Event != EventSignatureLock || r.Actor != "cli" || r.Operation != "clear" ||
+				r.KeyID != "0123456789abcdef" || r.Outcome != OutcomeAllowed || r.Time.IsZero() {
+				t.Errorf("unexpected signature lock record: %+v", r)
+			}
+		})
+	}
+}
+
 func TestFileSinkPermissions(t *testing.T) {
 	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "audit.log")
