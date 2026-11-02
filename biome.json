@@ -7,7 +7,9 @@
       "scripts/**/*.mjs",
       "website/src/**/*.{ts,tsx,mjs}",
       "website/scripts/security-headers*.mjs",
-      "docs/src/**/*.{ts,tsx}"
+      "docs/src/**/*.{ts,tsx}",
+      "e2e/**/*.{ts,mjs}",
+      "playwright.config.ts"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },

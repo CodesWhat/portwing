@@ -162,6 +162,78 @@ jobs:
         registry.npmjs.org:443
         release-assets.githubusercontent.com:443
 
+  website-browser-checks:
+    name: "Website Browser Checks"
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    # The suite itself is about a minute. The rest is npm ci, the site build and the browser
+    # downloads. Kept short on purpose: hosted runners kill sustained-CPU jobs past ~14 minutes.
+    timeout-minutes: 12
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: block
+          # registry.npmjs.org: npm ci. cdn.playwright.dev and
+          # playwright.download.prss.microsoft.com: the Chromium, Firefox and WebKit builds.
+          # The Ubuntu and Microsoft package hosts are `playwright install --with-deps` pulling
+          # the WebKit system libraries through apt. The last three are artifact upload on failure.
+          allowed-endpoints: >
+            api.github.com:443
+            archive.ubuntu.com:80
+            azure.archive.ubuntu.com:80
+            cdn.playwright.dev:443
+            github.com:443
+            packages.microsoft.com:443
+            playwright.download.prss.microsoft.com:443
+            registry.npmjs.org:443
+            release-assets.githubusercontent.com:443
+            security.ubuntu.com:80
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The tests serve website/out, so this is the same static export the other web gates build.
+      - name: Build the site
+        run: npm run build
+
+      # Browsers are not cached: three downloads are cheap next to the build, and a restore
+      # that goes stale against the pinned @playwright/test is a worse failure than a download.
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run browser checks
+        run: npm run test:browser
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: website-browser-checks-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
   codecov:
     name: "Coverage: Codecov Upload"
     needs: go-ci

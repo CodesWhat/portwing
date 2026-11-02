@@ -142,6 +142,41 @@ test("check:web runs knip so dead-code coverage travels with the same gate", () 
   );
 });
 
+test("website browser checks run all three engines in one fail-closed job", () => {
+  const job = jobSection(workflow, "website-browser-checks");
+  assert.ok(job, "missing website-browser-checks job");
+  assert.match(job, /^ {4}name: "Website Browser Checks"$/mu);
+  assert.doesNotMatch(job, /^\s+strategy:/mu, "one job for all engines; the org shares 20 runners");
+  assert.doesNotMatch(job, /continue-on-error/u, "a browser failure must fail the job");
+  assert.match(job, /egress-policy: block/u);
+  assert.match(job, /persist-credentials: false/u);
+  assert.match(job, /^ {4}permissions:\n {6}contents: read$/mu);
+  for (const host of ["cdn.playwright.dev:443", "playwright.download.prss.microsoft.com:443"]) {
+    assert.ok(job.includes(host), `browser download host missing from egress: ${host}`);
+  }
+  assert.match(job, /npx playwright install --with-deps chromium firefox webkit/u);
+  assert.match(job, /run: npm run test:browser$/mu);
+  assert.match(job, /if: failure\(\)\n\s+uses: actions\/upload-artifact@[0-9a-f]{40}/u);
+  assert.match(job, /timeout-minutes: (?:[1-9]|1[0-2])$/mu);
+  for (const use of job.matchAll(/uses: (\S+)@(\S+)/gu)) {
+    assert.match(use[2], /^[0-9a-f]{40}$/u, `${use[1]} must be pinned to a full SHA`);
+  }
+});
+
+test("playwright is pinned exactly and drives chromium, firefox and webkit", () => {
+  assert.match(packageJson.devDependencies["@playwright/test"], /^\d+\.\d+\.\d+$/u);
+  assert.equal(packageJson.scripts["test:browser"], "playwright test");
+  const config = fs.readFileSync(path.join(ROOT, "playwright.config.ts"), "utf8");
+  for (const engine of ["chromium", "firefox", "webkit"]) {
+    assert.ok(config.includes(`name: "${engine}"`), `playwright config is missing ${engine}`);
+  }
+  assert.match(config, /reuseExistingServer: false/u);
+  // Real per-page CSP, from the same function the build output uses.
+  const server = fs.readFileSync(path.join(ROOT, "e2e/serve.mjs"), "utf8");
+  assert.match(server, /headersForHTML/u);
+  assert.match(server, /404\.html/u);
+});
+
 test("Vercel deploys main while disabling automatic preview deployments", () => {
   const deploymentEnabled = vercelConfig.git?.deploymentEnabled;
   assert.deepEqual(deploymentEnabled, { "**": false, main: true });

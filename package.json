@@ -14,6 +14,7 @@
     "format": "biome format --write .",
     "test:web": "node --test analytics/src/contract.test.ts scripts/*.test.mjs && npm --workspace website run test:headers",
     "knip": "knip",
+    "test:browser": "playwright test",
     "docs:archive": "node scripts/docs-archive-cut.mjs",
     "docs:export-contract": "node scripts/docs-export-contract.mjs",
     "budget:web": "node scripts/page-weight-budget.mjs",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",
+    "@playwright/test": "1.64.1",
     "chrome-launcher": "1.2.2",
     "knip": "6.43.0",
     "lighthouse": "13.5.0",
