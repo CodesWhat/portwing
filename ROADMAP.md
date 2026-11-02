@@ -1,8 +1,8 @@
 # Portwing Roadmap
 
-> Portwing is stable software. Release preparation is currently `v1.0.4`,
+> Portwing is stable software. The current release line is `v1.0.4`,
 > a custom 404 page on Vercel and Sockguard 2.4.2 example pins, with no change to the agent or images.
-> Check [published releases](https://github.com/CodesWhat/portwing/releases) for availability. This roadmap describes
+> [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
