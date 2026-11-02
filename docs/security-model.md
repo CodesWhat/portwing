@@ -131,18 +131,21 @@ one-minute window:
 
 - **Threshold:** 10 failures within 60 seconds triggers a block.
 - **Response:** HTTP 429 (`Too Many Requests`) until the window expires.
-- **Connection reuse:** auth admission rejections before body reads close the
+- **Connection reuse:** auth failures and admission rejections before body reads close the
   HTTP/1 connection and expire its read deadline. This is the permanent
   trade-off: a legitimate client reconnects after rejection, while a client
   that declares a body and never sends it cannot hold the handler in
-  `net/http`'s post-response drain. Keep-alive is not preserved on this path.
+  `net/http`'s post-response drain. HTTP/2 rejects only the affected stream
+  and keeps its shared connection available for other requests.
 - **Memory cap:** At most 10,000 IP entries are tracked simultaneously;
   new entries beyond the cap are silently dropped to prevent memory
   exhaustion (fail-open for tracking, not for auth).
 - **Cleanup:** A background goroutine prunes expired entries every 5 minutes.
 - **Expensive-verification capacity:** no more than two authentication
-  attempts per IP and two cold Argon2id derivations agent-wide may be in
-  flight; excess work receives HTTP 429 before credential verification.
+  attempts per tracked IP and two cold Argon2id derivations agent-wide may be in
+  flight; excess work receives HTTP 429 before credential verification. Sources
+  omitted when the IP table is full are not covered by the per-IP cap; the
+  agent-wide Argon2id cap still applies.
 - **Enrollment abuse accounting:** malformed and oversized enrollment bodies
   use a separate per-IP failure window, so they cannot evade throttling while
   remaining independent of credential-failure accounting.
@@ -251,6 +254,15 @@ and compared only as a fixed-size SHA-256 digest. Bodies are capped at 64 KiB
 and must contain a single JSON value. A caller presents the token and a public key;
 the agent appends the key to the authorized_keys file, reloads the registry,
 and burns the token (refusing further enrollment until restart).
+
+Enrollment sends its bootstrap credential in the request body, so use HTTPS.
+When enrollment is armed without native TLS, startup logs a warning. A
+TLS-terminating proxy is suitable if Portwing's HTTP listener stays private;
+the warning still appears because TLS is not configured on Portwing itself.
+Plaintext enrollment is deprecated and will be refused by default in v1.1,
+which will accept native TLS or HTTPS reported by a trusted proxy and provide
+an explicit `ALLOW_INSECURE_ENROLLMENT` opt-in. Version 1.0.x only warns and
+does not implement that opt-in yet.
 
 See `docs/design/ed25519-auth.md` for full threat analysis, key rotation
 procedures, and migration path from token auth.

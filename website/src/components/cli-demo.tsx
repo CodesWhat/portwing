@@ -50,7 +50,6 @@ const dim = (s: string) => <span className={tok.dim}>{s}</span>;
 const bold = (s: string) => <span className={tok.bold}>{s}</span>;
 const cyan = (s: string) => <span className={tok.cyan}>{s}</span>;
 const violet = (s: string) => <span className={tok.violet}>{s}</span>;
-const green = (s: string) => <span className={tok.green}>{s}</span>;
 
 // ───────────────────────────────────────────────────────────────
 // Audit log helpers — build JSON audit entries in Portwing's real
@@ -80,76 +79,48 @@ type AuditEntry = {
   exec_id?: string;
 };
 
-function buildAuditLine(entry: AuditEntry, iso: string): RawFrameLine {
-  const outcomeCls = entry.outcome === "allowed" ? tok.green : tok.red;
+function jsonLogLine(
+  msg: string,
+  fields: Record<string, string | number | undefined>,
+  time: string,
+): RawFrameLine {
+  const entries = Object.entries({ time, level: "INFO", msg, ...fields }).filter(
+    ([, value]) => value !== undefined,
+  );
   return {
     kind: "text",
     content: (
       <span className="whitespace-nowrap text-[0.72rem]">
-        <span className={tok.dim}>time={iso} level=INFO msg=</span>
-        <span className={tok.dim}>&quot;&quot; </span>
-        <span className={tok.dim}>event=</span>
-        <span className={tok.violet}>{entry.event}</span> <span className={tok.dim}>actor=</span>
-        {entry.actor}{" "}
-        {entry.method && (
-          <>
-            <span className={tok.dim}>method=</span>
-            {entry.method}{" "}
-          </>
-        )}
-        {entry.path && (
-          <>
-            <span className={tok.dim}>path=</span>
-            <span className={tok.cyan}>{entry.path}</span>{" "}
-          </>
-        )}
-        <span className={tok.dim}>outcome=</span>
-        <span className={outcomeCls}>{entry.outcome}</span>
-        {entry.status !== undefined && (
-          <>
-            {" "}
-            <span className={tok.dim}>status=</span>
-            {entry.status}
-          </>
-        )}
-        {entry.duration_ms !== undefined && (
-          <>
-            {" "}
-            <span className={tok.dim}>duration_ms=</span>
-            {entry.duration_ms.toFixed(2)}
-          </>
-        )}
-        {entry.operation && (
-          <>
-            {" "}
-            <span className={tok.dim}>operation=</span>
-            {entry.operation}
-          </>
-        )}
-        {entry.stack && (
-          <>
-            {" "}
-            <span className={tok.dim}>stack=</span>
-            {entry.stack}
-          </>
-        )}
-        {entry.container && (
-          <>
-            {" "}
-            <span className={tok.dim}>container=</span>
-            {entry.container}
-          </>
-        )}
-        {entry.exec_id && (
-          <>
-            {" "}
-            <span className={tok.dim}>exec_id=</span>
-            {entry.exec_id}
-          </>
-        )}
+        {"{"}
+        {entries.map(([key, value], index) => (
+          <span key={key}>
+            {index > 0 ? "," : ""}
+            <span className={tok.dim}>{JSON.stringify(key)}:</span>
+            <span
+              className={
+                key === "outcome"
+                  ? value === "allowed"
+                    ? tok.green
+                    : tok.red
+                  : key === "event"
+                    ? tok.violet
+                    : key === "path" || key === "level"
+                      ? tok.cyan
+                      : undefined
+              }
+            >
+              {JSON.stringify(value)}
+            </span>
+          </span>
+        ))}
+        {"}"}
       </span>
     ),
   };
+}
+
+function buildAuditLine(entry: AuditEntry, iso: string): RawFrameLine {
+  return jsonLogLine("", entry, iso);
 }
 
 // buildAuditStream builds the fake audit log stream that plays under the
@@ -291,27 +262,8 @@ function buildAuditStream(): RawFrameLine[] {
   });
 }
 
-// buildSlogLine builds a single logfmt-style operational log line matching
-// Go's slog text handler output: time=<iso> level=INFO msg="<msg>" k=v ...
-function slogLine(msg: string, fields: Array<[string, string]>): RawFrameLine {
-  const ts = "2026-06-30T00:00:00.001Z";
-  return {
-    kind: "text",
-    content: (
-      <span className="whitespace-nowrap text-[0.72rem]">
-        <span className={tok.dim}>time={ts} level=</span>
-        <span className={tok.cyan}>INFO</span>
-        <span className={tok.dim}> msg=&quot;{msg}&quot;</span>
-        {fields.map(([k, v]) => (
-          <span key={k}>
-            {" "}
-            <span className={tok.dim}>{k}=</span>
-            {v}
-          </span>
-        ))}
-      </span>
-    ),
-  };
+function slogLine(msg: string, fields: Array<[string, string | number]>): RawFrameLine {
+  return jsonLogLine(msg, Object.fromEntries(fields), "2026-06-30T00:00:00.001Z");
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -391,93 +343,47 @@ const RAW_FRAMES: RawFrame[] = [
       slogLine("adapter selected", [["adapter", "drydock"]]),
       slogLine("starting in edge mode", [["url", "https://drydock.example.com"]]),
       { kind: "blank" },
-      {
-        kind: "text",
-        content: (
-          <span className="whitespace-nowrap text-[0.72rem]">
-            <span className={tok.dim}>time=2026-06-30T00:00:00.120Z level=</span>
-            <span className={tok.cyan}>INFO</span>
-            <span className={tok.dim}> msg=&quot;websocket connected&quot;</span>{" "}
-            <span className={tok.dim}>controller=</span>
-            https://drydock.example.com
-          </span>
-        ),
-      },
-      {
-        kind: "text",
-        content: (
-          <span className="whitespace-nowrap text-[0.72rem]">
-            <span className={tok.dim}>time=2026-06-30T00:00:00.140Z level=</span>
-            <span className={tok.cyan}>INFO</span>
-            <span className={tok.dim}> msg=&quot;hello sent&quot;</span>{" "}
-            <span className={tok.dim}>agent=</span>
-            edge-host-01 <span className={tok.dim}>id=</span>
-            f4e3d2c1-b0a9-4e7f-8c6d-5a4b3c2d1e0f
-          </span>
-        ),
-      },
-      {
-        kind: "text",
-        content: (
-          <span className="whitespace-nowrap text-[0.72rem]">
-            <span className={tok.dim}>time=2026-06-30T00:00:00.280Z level=</span>
-            <span className={tok.cyan}>INFO</span>
-            <span className={tok.dim}> msg=&quot;welcome received&quot;</span>{" "}
-            <span className={tok.dim}>agent_id=</span>
-            f4e3d2c1-b0a9-4e7f-8c6d-5a4b3c2d1e0f
-          </span>
-        ),
-      },
-      {
-        kind: "text",
-        content: (
-          <span className="whitespace-nowrap text-[0.72rem]">
-            <span className={tok.dim}>time=2026-06-30T00:00:00.310Z level=</span>
-            <span className={tok.cyan}>INFO</span>
-            <span className={tok.dim}> msg=&quot;container sync sent&quot;</span>{" "}
-            <span className={tok.dim}>count=</span>
-            {green("14")}
-          </span>
-        ),
-      },
+      jsonLogLine(
+        "websocket connected",
+        { controller: "https://drydock.example.com" },
+        "2026-06-30T00:00:00.120Z",
+      ),
+      jsonLogLine(
+        "hello sent",
+        { agent: "edge-host-01", id: "f4e3d2c1-b0a9-4e7f-8c6d-5a4b3c2d1e0f" },
+        "2026-06-30T00:00:00.140Z",
+      ),
+      jsonLogLine(
+        "welcome received",
+        { agent_id: "f4e3d2c1-b0a9-4e7f-8c6d-5a4b3c2d1e0f" },
+        "2026-06-30T00:00:00.280Z",
+      ),
+      jsonLogLine("container sync sent", { count: 14 }, "2026-06-30T00:00:00.310Z"),
       { kind: "blank" },
-      {
-        kind: "text",
-        content: (
-          <span className="whitespace-nowrap text-[0.72rem]">
-            <span className={tok.dim}>
-              time=2026-06-30T00:00:30.001Z level=INFO msg=&quot;&quot;{" "}
-            </span>
-            <span className={tok.dim}>event=</span>
-            <span className={tok.violet}>api_request</span> <span className={tok.dim}>actor=</span>
-            edge-tunnel <span className={tok.dim}>method=</span>
-            GET <span className={tok.dim}>path=</span>
-            <span className={tok.cyan}>/api/containers</span>{" "}
-            <span className={tok.dim}>outcome=</span>
-            <span className={tok.green}>allowed</span> <span className={tok.dim}>status=</span>
-            200 <span className={tok.dim}>duration_ms=</span>
-            5.91
-          </span>
-        ),
-      },
-      {
-        kind: "text",
-        content: (
-          <span className="whitespace-nowrap text-[0.72rem]">
-            <span className={tok.dim}>
-              time=2026-06-30T00:00:30.200Z level=INFO msg=&quot;&quot;{" "}
-            </span>
-            <span className={tok.dim}>event=</span>
-            <span className={tok.violet}>api_request</span> <span className={tok.dim}>actor=</span>
-            edge-tunnel <span className={tok.dim}>method=</span>
-            GET <span className={tok.dim}>path=</span>
-            <span className={tok.cyan}>/api/events</span> <span className={tok.dim}>outcome=</span>
-            <span className={tok.green}>allowed</span> <span className={tok.dim}>status=</span>
-            200 <span className={tok.dim}>duration_ms=</span>
-            0.44
-          </span>
-        ),
-      },
+      buildAuditLine(
+        {
+          event: "api_request",
+          actor: "edge-tunnel",
+          method: "GET",
+          path: "/api/containers",
+          outcome: "allowed",
+          status: 200,
+          duration_ms: 5.91,
+        },
+        "2026-06-30T00:00:30.001Z",
+      ),
+      buildAuditLine(
+        {
+          event: "api_request",
+          actor: "edge-tunnel",
+          method: "GET",
+          path: "/api/events",
+          outcome: "allowed",
+          status: 200,
+          duration_ms: 0.44,
+        },
+        "2026-06-30T00:00:30.200Z",
+      ),
     ],
     pauseAfterMs: 4000,
   },
@@ -523,8 +429,8 @@ const RAW_FRAMES: RawFrame[] = [
         kind: "text",
         content: (
           <span className="whitespace-nowrap text-[0.72rem]">
-            <span className={tok.violet}>ssh-ed25519</span>{" "}
-            AAAAC3NzaC1lZDI1NTE5AAAAIGZr8vQm3NdXqKpLhY2eRfWs6cTnAzBxOuDiGvE1Fk {dim("edge-host-01")}
+            <span className={tok.violet}>ed25519</span> 11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo={" "}
+            {dim("edge-host-01")}
           </span>
         ),
       },

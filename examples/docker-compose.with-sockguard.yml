@@ -29,7 +29,7 @@
 
 services:
   sockguard:
-    image: ghcr.io/codeswhat/sockguard:latest
+    image: ghcr.io/codeswhat/sockguard:2.4.1
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -46,7 +46,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.1
+    image: ghcr.io/codeswhat/portwing:1.0.2
     restart: unless-stopped
     depends_on:
       - sockguard

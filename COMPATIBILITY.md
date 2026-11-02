@@ -17,11 +17,15 @@ DrydockCompat bumps.
 
 | Portwing version | Drydock wire connection | Watcher/update feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|---|
-| v1.0.1 (latest release) / `main` | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v1.0.2 (release metadata) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v0.9.x (unsupported) | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 
-v1.0.1 keeps the existing wire and watcher/update contract. The 0.9 line is
+v1.0.2 keeps the existing wire and watcher/update contract. The 0.9 line is
 no longer supported; see [SECURITY.md](SECURITY.md) for support boundaries.
+
+The v1.0.2 release metadata is prepared on dev; check [published releases](https://github.com/CodesWhat/portwing/releases) for availability. Its exact published artifacts
+must pass a fresh hosted matrix after the release is cut. The historical runs
+below do not verify this build.
 
 ### Published candidate evidence
 
@@ -34,11 +38,22 @@ The exact v1.0.0-rc.2 artifacts passed the hosted matrix on 2026-10-26:
 | v1.0.0-rc.1 | v1.6.1 | v2.2.10 | PASS / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/38837070094) |
 | v1.0.0-rc.2 | v1.7.0 | v2.2.11 | PASS / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/40266007939) |
 
-The exact v1.0.0 artifacts passed the hosted matrix on 2026-10-29 for Edge and the legacy floor; Standard failed enrollment, fixed in v1.0.1:
+The exact v1.0.0 artifacts passed the hosted matrix on 2026-10-29 for Edge and the legacy floor; Standard failed enrollment; the following patch fixed it:
 
 | Portwing | Drydock | Sockguard | Standard / Edge / legacy floor | Evidence |
 |---|---|---|---|---|
 | v1.0.0 | v1.7.0 | v2.2.11 | FAIL / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/40870930418) |
+
+The exact v1.0.1 artifacts passed the hosted matrix on 2026-10-29:
+
+| Portwing | Drydock | Sockguard | Standard / Edge / legacy floor | Evidence |
+|---|---|---|---|---|
+| v1.0.1 | v1.7.0 | v2.2.11 | PASS / PASS / PASS | [Matrix run](https://github.com/CodesWhat/sockguard/actions/runs/40919376264) |
+
+That passing patch run used release image
+`sha256:61883101a5c4992ec47cab9c3ccd5ebbc31b17b3f24a02d8fc9ad71cfcff93ea`. Its
+Standard row passed all five identity checks, enrollment included. The same
+image also passed the published-image smoke test on a dedicated test host.
 
 The rc.2 run used candidate manifest
 `sha256:4ef115970be2ceacfb58cdc603745da509b7637a62501507a40f300633048c3e`. The
@@ -50,9 +65,7 @@ Both rc.1 runs used candidate manifest
 The Standard identity checks exercised enrollment, manual overlapping-key
 rotation, revocation, SIGHUP reloads and clock-skew recovery. They did not test
 the later controller-assisted implementation. Rerun the matrix against the
-exact next release; these results do not verify newer code. The v1.0.1
-artifacts are verified after publication, and that evidence is recorded here
-once it exists.
+exact next release; these results do not verify newer code.
 
 ### Controller-assisted rotation
 

@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/CodesWhat/sockguard",
+  "tag": "v2.4.1",
+  "files": {
+    "sockguard.yaml": {
+      "source": "app/configs/portwing.yaml",
+      "sha256": "480c1c74694f420fb49fa1d5375783b340611ec5d328df90b9cb022ef5e00826"
+    },
+    "sockguard-with-exec.yaml": {
+      "source": "app/configs/portwing-with-exec.yaml",
+      "sha256": "728cc6ab0ea0703363050fa928bbc623f2408a0ecb0f4b3383fd0f27219c5763"
+    }
+  }
+}

@@ -63,7 +63,7 @@ The hardened compose file (`examples/docker-compose.with-sockguard.yml`) demonst
 ```yaml
 services:
   sockguard:
-    image: ghcr.io/codeswhat/sockguard:latest
+    image: ghcr.io/codeswhat/sockguard:2.4.1
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -78,7 +78,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.1
+    image: ghcr.io/codeswhat/portwing:1.0.2
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -108,6 +108,18 @@ volumes:
   sockguard-socket:
   portwing-stacks:
 ```
+
+The baseline preset denies exec. The optional exec bundle requires
+[Sockguard 2.4.1 or newer](https://github.com/CodesWhat/sockguard/releases/tag/v2.4.1)
+in enforce mode: exec create and start are refused when the target container
+has `com.sockguard.exec=deny`. The official Sockguard image carries this label,
+and the exec Compose bundle also sets it explicitly so custom image overrides
+retain the protection. Preserve it on the proxy and add it to other protected
+containers. Older Sockguard releases do not provide this protection.
+
+Exec still allows arbitrary commands inside unprotected workloads. Keep the
+filtered socket access-controlled, and use Sockguard ownership labels and
+client profiles when access must be limited to particular workloads.
 
 ---
 
@@ -323,7 +335,7 @@ Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0
 Verify a release before running it:
 
 ```bash
-VERSION=1.0.1
+VERSION=1.0.2
 
 # Verify the checksums file
 cosign verify-blob \

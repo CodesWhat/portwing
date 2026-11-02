@@ -148,25 +148,58 @@ assert_rejected \
 	"notify job condition must be exactly:" \
 	"contract must reject an exclusion that ORs its clauses instead of ANDing them"
 
-# The pull_request exclusion dropped: a green PR run of the engine-matrix lane
-# would close a tracking issue the weekly run is still legitimately failing on.
+# The same-repo clause dropped: a fork PR run using a PR-family event could
+# drive issues: write.
 reset_fixture
-sed -i.bak "/github.event.workflow_run.event != 'pull_request' &&/d" "${fixture}"
+sed -i.bak "/github.event.workflow_run.head_repository.full_name == github.repository &&/d" "${fixture}"
 assert_rejected \
 	"notify job condition must be exactly:" \
-	"contract must reject a condition that lets pull_request runs drive the issue state machine"
+	"contract must reject a condition with no same-repo gate"
 
-# The exclusion narrowed to an allow-list of the two scheduled triggers, which
-# reads equivalent and silently drops quality-fuzz-monthly-rerun.yml, whose own
-# events arrive as workflow_run.
+# The event allow-list widened back to the old deny-list shape.
 reset_fixture
 sed -i.bak \
-	-e "s/      github.event.workflow_run.event != 'pull_request' &&/      (github.event.workflow_run.event == 'schedule' ||/" \
-	-e "s/      github.event.workflow_run.event != 'push' &&/       github.event.workflow_run.event == 'workflow_dispatch') \&\&/" \
+	-e "s/      contains(fromJSON('\\[\"schedule\",\"workflow_dispatch\",\"workflow_run\"\\]'), github.event.workflow_run.event) &&/      github.event.workflow_run.event != 'pull_request' \&\& github.event.workflow_run.event != 'push' \&\&/" \
 	"${fixture}"
 assert_rejected \
 	"notify job condition must be exactly:" \
+	"contract must reject the old deny-list of pull_request and push"
+
+# The event allow-list loses workflow_run, which silently drops the rerun
+# lane's own events.
+reset_fixture
+sed -i.bak 's/,\"workflow_run\"\]/]/' "${fixture}"
+assert_rejected \
+	"notify job condition must be exactly:" \
 	"contract must reject an allow-list that drops the rerun lane's workflow_run events"
+
+# The branch clause dropped.
+reset_fixture
+sed -i.bak \
+	-e "/(github.event.workflow_run.head_branch == github.event.repository.default_branch ||/d" \
+	-e "/startsWith(github.event.workflow_run.head_branch, 'dev\/v')) &&/d" \
+	"${fixture}"
+assert_rejected \
+	"notify job condition must be exactly:" \
+	"contract must reject a condition with no branch gate"
+
+# Rerun lane loses its origin gate (same-repo clause).
+reset_fixture
+reset_rerun_fixture
+sed -i.bak "/github.event.workflow_run.head_repository.full_name == github.repository &&/d" "${rerun_fixture}"
+assert_rejected \
+	"rerun triage job condition must be exactly:" \
+	"contract must reject a rerun job with no same-repo gate"
+
+# Rerun lane loses its workflow path pin.
+reset_fixture
+reset_rerun_fixture
+sed -i.bak \
+	-e "/startsWith(github.event.workflow_run.head_branch, 'dev\/v'))/s/ &&\$//" \
+	-e '/github.event.workflow_run.path ==/d' "${rerun_fixture}"
+assert_rejected \
+	"rerun triage job condition must be exactly:" \
+	"contract must reject a rerun job with no workflow path pin"
 
 # Success branch dropped entirely.
 reset_fixture
@@ -225,5 +258,27 @@ sed -i.bak 's/^      issues: write$/      pull-requests: write/' "${rerun_fixtur
 assert_rejected \
 	"rerun workflow's triage job must grant issues: write" \
 	"contract must reject a rerun workflow missing issues: write"
+
+# YAML comments do not end the triage job.
+reset_fixture
+reset_rerun_fixture
+sed -i.bak '/^  triage:$/a\
+  # This comment belongs to the same job: keep checking its condition.
+' "${rerun_fixture}"
+assert_passes "contract must allow a two-space comment before the triage condition"
+
+# A condition on a different job cannot gate triage.
+reset_fixture
+reset_rerun_fixture
+sed -i.bak 's/^  triage:$/  decoy:/' "${rerun_fixture}"
+cat >>"${rerun_fixture}" <<'YAML'
+  triage:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ungated triage
+YAML
+assert_rejected \
+	"rerun triage job condition must be exactly:" \
+	"contract must reject the required condition on another job instead of triage"
 
 echo "Quality lane notify contract self-tests passed."

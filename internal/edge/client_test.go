@@ -2764,3 +2764,62 @@ func TestHealthServerBindsIPv6BindAddress(t *testing.T) {
 		})
 	}
 }
+
+// A response from the previous tunnel can finish after its pumps have exited.
+// The next real handshake must not race that response's capability lookup.
+func TestControllerCapsAcrossConnectionGenerations(t *testing.T) {
+	entered := make(chan struct{})
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	finished := make(chan struct{})
+	cfg := &config.Config{HeartbeatInterval: 30, WelcomeTimeout: 2, DDPollInterval: 300, SkipDFCollection: true}
+	c := newWireClient(t, cfg)
+	c.controllerCaps = []string{protocol.CapResponseBodyBase64}
+	fd := c.dockerClient.(*fakeDocker)
+	response := mkResp(http.StatusOK, "application/json", `{"old":true}`)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	fd.doResp = response
+	fd.doEntered, fd.doGate = entered, gate
+	oldCtx, oldCancel := context.WithCancel(context.Background())
+	defer oldCancel()
+	t.Cleanup(func() {
+		oldCancel()
+		release()
+		select {
+		case <-finished:
+		case <-time.After(2 * time.Second):
+			t.Error("old request worker did not stop during cleanup")
+		}
+	})
+	oldTarget := c.currentOutboundTarget()
+	go func() {
+		defer close(finished)
+		c.handleRequestTo(oldCtx, protocol.RequestMessage{RequestID: "old-generation", Method: http.MethodGet, Path: "/info"}, oldTarget)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("old request did not enter Docker")
+	}
+	oldCancel()
+	cfg.DrydockURL = newControllerServer(t, func(ctrl *websocket.Conn) {
+		readAndAckHello(t, ctrl)
+		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{Capabilities: []string{protocol.CapResponseBodyBase64}})
+		release()
+		select {
+		case <-finished:
+		case <-time.After(2 * time.Second):
+			t.Error("old request did not finish")
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if established, _ := c.connect(ctx); !established {
+		t.Fatal("replacement connection did not complete its welcome")
+	}
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("old request remained live")
+	}
+}

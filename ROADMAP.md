@@ -1,7 +1,8 @@
 # Portwing Roadmap
 
-> Portwing is stable software (currently `v1.0.1`, which fixes enrollment when only the keys file is
-> writable). This roadmap describes
+> Portwing is stable software. Release preparation is currently `v1.0.2`,
+> covering enrollment hardening, rejected requests and an edge reconnect race.
+> Check [published releases](https://github.com/CodesWhat/portwing/releases) for availability. This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
 > [CHANGELOG](CHANGELOG.md).
@@ -74,8 +75,8 @@ a calendar date:
   passed with Drydock 1.7.0 and Sockguard 2.2.11. Managed rotation was run on
   the NAS with Drydock 1.8.0-rc.1 against image digest
   `sha256:4ef115970be2ceacfb58cdc603745da509b7637a62501507a40f300633048c3e`,
-  and the published image passed a smoke run on the mainframe. The v1.0.1
-  artifacts are verified after publication.
+  and the published image passed a smoke run on the mainframe. Each later release needs its own published-artifact verification;
+  see [COMPATIBILITY.md](COMPATIBILITY.md) for the exact runs.
 - **Completed for v0.8 — Edge-mode graduation.** Drydock 1.6 enables
   `/api/portwing/ws` by default, with `DD_EXPERIMENTAL_PORTWING=false` retained
   as an emergency disable. Drydock's `quality-portwing-fleet-soak.yml` runs the

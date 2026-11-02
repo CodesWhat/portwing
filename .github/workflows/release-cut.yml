@@ -2,6 +2,9 @@ name: "Release: Cut"
 run-name: "Release: Cut — manual by ${{ github.actor }}"
 
 # Requires RELEASE_PAT secret (fine-grained PAT, Contents: RW on this repo).
+# The cut job runs in the Release environment (main-only deployment branches).
+# RELEASE_PAT is still a repository secret; moving it into the environment is a
+# tracked follow-up, so don't delete the repository secret.
 # GITHUB_TOKEN-pushed tags do not trigger downstream workflows under
 # default_workflow_permissions; the PAT is needed so the v* tag push
 # fires release.yml automatically.
@@ -30,13 +33,14 @@ jobs:
     name: "Release: Cut Tag"
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    environment: Release
     permissions:
       actions: read
       contents: read
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25  # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
         with:
           egress-policy: block
           allowed-endpoints: >

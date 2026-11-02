@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,29 @@ func TestUnauthenticatedRoutesRejectUnreadBodies(t *testing.T) {
 		}
 		assertUnreadBodyRejected(t, ts.URL, http.MethodPost, "/api/portwing/enroll", "Content-Length: 1\r\n", "", http.StatusTooManyRequests)
 	})
+}
+
+func TestAuthenticationRejectsUnreadBodies(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		opts       routeTestServerOpts
+		credential string
+	}{
+		{name: "missing bearer", opts: routeTestServerOpts{token: "expected-secret"}},
+		{name: "invalid bearer", opts: routeTestServerOpts{token: "expected-secret"}, credential: "Authorization: Bearer wrong\r\n"},
+		{name: "missing signature", opts: routeTestServerOpts{enroll: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, handler := newRouteTestServer(t, tc.opts)
+			ts := httptest.NewServer(handler)
+			defer ts.Close()
+			for _, framing := range []string{"Content-Length: 1\r\n", "Transfer-Encoding: chunked\r\n"} {
+				t.Run(strings.TrimSpace(framing), func(t *testing.T) {
+					assertUnreadBodyRejected(t, ts.URL, http.MethodPost, "/v1.47/containers/create", framing+tc.credential, "", http.StatusUnauthorized)
+				})
+			}
+		})
+	}
 }
 
 func assertUnreadBodyRejected(t *testing.T, baseURL, method, path, framing, prefix string, status int) {
@@ -74,5 +98,75 @@ func assertUnreadBodyRejectedOnHost(t *testing.T, baseURL, host, method, path, f
 	}
 	if _, err := reader.ReadByte(); err != io.EOF {
 		t.Fatalf("connection not released: %v", err)
+	}
+}
+
+func TestHTTP2AuthenticationRejectionsPreserveConnection(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		opts       routeTestServerOpts
+		credential string
+	}{
+		{name: "missing bearer", opts: routeTestServerOpts{token: "expected-secret"}},
+		{name: "invalid bearer", opts: routeTestServerOpts{token: "expected-secret"}, credential: "Bearer wrong"},
+		{name: "missing signature", opts: routeTestServerOpts{enroll: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, handler := newRouteTestServer(t, tc.opts)
+			ts := httptest.NewUnstartedServer(handler)
+			ts.EnableHTTP2 = true
+			ts.StartTLS()
+			defer ts.Close()
+			client := ts.Client()
+			client.Timeout = 2 * time.Second
+			reader, writer := io.Pipe()
+			defer func() { _ = writer.Close() }()
+			var firstConnection net.Conn
+			for i, path := range []string{"/v1.47/containers/create", "/health"} {
+				method := http.MethodGet
+				var body io.Reader
+				if i == 0 {
+					method, body = http.MethodPost, reader
+				}
+				req, err := http.NewRequest(method, ts.URL+path, body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if i == 0 {
+					req.Header.Set("Authorization", tc.credential)
+					req.ContentLength = 1
+				}
+				var connection net.Conn
+				req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+					GotConn: func(info httptrace.GotConnInfo) { connection = info.Conn },
+				}))
+				resp, err := client.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if connection == nil {
+					t.Fatal("HTTP2 request did not report its connection")
+				}
+				defer resp.Body.Close()
+				if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+					t.Fatal(err)
+				}
+				if err := resp.Body.Close(); err != nil {
+					t.Fatal(err)
+				}
+				want := http.StatusOK
+				if i == 0 {
+					want = http.StatusUnauthorized
+				}
+				if resp.StatusCode != want || resp.ProtoMajor != 2 {
+					t.Fatalf("status/protocol = %d/%s, want %d/HTTP2", resp.StatusCode, resp.Proto, want)
+				}
+				if i == 0 {
+					firstConnection = connection
+				} else if connection != firstConnection {
+					t.Fatal("HTTP2 auth rejection closed the shared connection")
+				}
+			}
+		})
 	}
 }

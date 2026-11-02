@@ -85,6 +85,23 @@ test("workspace PostCSS overrides follow the direct dependency when Renovate upd
   }
 });
 
+test("the root PostCSS override follows workspace patch floors", () => {
+  const floor = readPackage().overrides.postcss.replace(/^\^/u, "");
+  for (const workspace of ["docs", "website"]) {
+    const config = JSON.parse(fs.readFileSync(path.join(ROOT, workspace, "package.json"), "utf8"));
+    const declared = (config.dependencies?.postcss ?? config.devDependencies.postcss).replace(
+      /^\^/u,
+      "",
+    );
+    assertAtLeast(floor, declared, `${workspace} root PostCSS override`);
+  }
+  for (const [name, dependency] of Object.entries(readLock().packages)) {
+    if (name.endsWith("node_modules/postcss")) {
+      assertAtLeast(dependency.version, floor, name);
+    }
+  }
+});
+
 test("the refreshed Next dependency keeps Sharp and every optional platform package current", () => {
   const packageJson = readPackage();
   const lock = readLock();

@@ -14,6 +14,15 @@
 #   kubectl -n portwing create secret generic portwing-key \
 #     --from-file=portwing_ed25519.pem=portwing_ed25519.pem
 #
+# This Secret is shared by every pod in the DaemonSet, so every node presents
+# the same identity and one compromised node can impersonate the others. For
+# anything beyond a trial, give each node its own keypair, register each public
+# key with Drydock under that node's agent name, and mount a distinct Secret
+# on each node (for example one DaemonSet pinned to each node with nodeName or a
+# per-node nodeSelector). A DaemonSet per node pool still shares one key across
+# that pool, and rotation refuses keys bound to more than one agent name. See "Use one key per agent" in
+# docs/content/docs/current/authentication.mdx.
+#
 # Then apply:
 #   kubectl apply -f kubernetes/edge.yaml
 ---
@@ -90,7 +99,7 @@ spec:
         # supplementalGroups: [999]
       containers:
         - name: portwing
-          image: ghcr.io/codeswhat/portwing:1.0.1
+          image: ghcr.io/codeswhat/portwing:1.0.2
           imagePullPolicy: Always
           # Private operations port only; no host port is published. The Edge
           # listener has no inbound auth and includes audit export as well as
@@ -206,6 +215,9 @@ spec:
         - name: portwing-key
           secret:
             secretName: portwing-key
+            # The agent refuses a world-readable key. 0440 plus the pod
+            # fsGroup (65532) gives the container group read and nobody else.
+            defaultMode: 0440
             items:
               - key: portwing_ed25519.pem
                 path: portwing_ed25519.pem

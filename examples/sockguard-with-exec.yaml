@@ -1,4 +1,4 @@
-# Copy of sockguard/app/configs/portwing-with-exec.yaml — update both together.
+# Copy of sockguard/app/configs/portwing-with-exec.yaml at v2.4.1.
 # Sockguard — Portwing with Exec Preset
 #
 # Extends the portwing preset with exec support for interactive terminal access
@@ -32,8 +32,13 @@
 #   - Drydock drives exec calls through the Portwing edge mode
 #   - You need exec for container debugging via the Portwing UI
 #
-# Security note: exec grants arbitrary command execution inside any container
-# that Portwing can reach. Keep the proxy socket access-controlled (unix peer
+# Exec targets labeled com.sockguard.exec=deny are always refused in enforce
+# mode. The official Sockguard image carries that label; preserve it on the
+# proxy and add it to custom proxy images and other protected containers.
+# For narrower workload access, use ownership labels and client profiles.
+#
+# Security note: exec grants arbitrary command execution inside unprotected
+# containers that Portwing can reach. Keep the proxy socket access-controlled (unix peer
 # credentials or client CIDR allowlist) so only the Portwing process can call
 # the exec paths. See portwing.yaml for the exec-disabled baseline.
 
@@ -74,6 +79,8 @@ insecure_allow_read_exfiltration: true
 # interactive sessions. To pin allowed commands, replace allow_root_user
 # with an allowed_commands list (argv prefix allowlist).
 request_body:
+  container_remove:
+    allow_force: true
   container_create:
     allowed_bind_mounts: []
     allowed_runtimes:

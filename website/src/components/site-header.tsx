@@ -29,7 +29,7 @@ export function SiteHeader({ maxWidthClassName = "max-w-6xl" }: { maxWidthClassN
             href="/docs"
             ctaId="docs_root"
             placement="header"
-            className={`hidden px-3 py-2 sm:inline-block ${navLinkCn}`}
+            className={`inline-flex min-h-11 items-center px-2 py-2 sm:px-3 ${navLinkCn}`}
           >
             Docs
           </TrackedLink>

@@ -156,7 +156,9 @@ Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag and
 Homebrew channel unchanged. Label its compatibility row `release candidate`
-instead of `latest release`. The scheduled main-release monitor
+instead of the stable `release metadata` label. Keep publication status linked
+to GitHub Releases rather than asserting that prepared channels already moved.
+The scheduled main-release monitor
 (`main-is-released.yml`) tracks stable tags only; to cut a future prerelease
 through `main`, re-add `allow-prerelease: true` to its `with:` block for that
 stage and remove it again when the stable release follows.

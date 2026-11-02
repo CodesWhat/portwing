@@ -9,6 +9,8 @@
 #   HOST   Base URL of the Portwing instance (default: http://localhost:3000)
 #   TOKEN  Shared secret (X-Portwing-Token)
 #          If omitted, no auth header is sent (works when Portwing runs without a token).
+#          Prefer PORTWING_TOKEN in the environment: a positional argument is
+#          visible in this script's own process listing.
 #
 # Environment (used when the positional argument is omitted):
 #   PORTWING_URL   Same as HOST
@@ -24,6 +26,16 @@ set -euo pipefail
 
 HOST="${1:-${PORTWING_URL:-http://localhost:3000}}"
 TOKEN="${2:-${PORTWING_TOKEN:-${TOKEN:-}}}"
+
+# The token never goes on a curl command line (visible in process listings).
+# curl reads the header from a 0600 file instead, removed on exit.
+AUTH_HEADER_FILE=""
+if [[ -n $TOKEN ]]; then
+	AUTH_HEADER_FILE=$(mktemp)
+	trap 'rm -f "$AUTH_HEADER_FILE"' EXIT
+	chmod 600 "$AUTH_HEADER_FILE"
+	printf 'X-Portwing-Token: %s\n' "$TOKEN" >"$AUTH_HEADER_FILE"
+fi
 
 PASS=0
 FAIL=0
@@ -43,7 +55,7 @@ curl_api() {
 	local extra_args=("$@")
 	local auth_args=()
 	if [[ -n $TOKEN ]]; then
-		auth_args=(-H "X-Portwing-Token: ${TOKEN}")
+		auth_args=(-H "@${AUTH_HEADER_FILE}")
 	fi
 	curl -sf --max-time 10 \
 		${auth_args[@]+"${auth_args[@]}"} \
@@ -201,7 +213,7 @@ bold "5. GET /api/watchers/unknown/missing (should 404)"
 
 if [[ -n $TOKEN ]]; then
 	HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-		-H "X-Portwing-Token: ${TOKEN}" \
+		-H "@${AUTH_HEADER_FILE}" \
 		"${HOST}/api/watchers/unknown/missing" 2>/dev/null || echo "000")
 else
 	HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
@@ -246,7 +258,7 @@ fi
 bold "8. GET /api/events SSE headers"
 
 AUTH_ARGS=()
-[[ -n $TOKEN ]] && AUTH_ARGS+=(-H "X-Portwing-Token: ${TOKEN}")
+[[ -n $TOKEN ]] && AUTH_ARGS+=(-H "@${AUTH_HEADER_FILE}")
 
 SSE_HEADERS=$(curl -sf --max-time 5 -D - -o /dev/null \
 	${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \

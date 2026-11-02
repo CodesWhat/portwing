@@ -12,7 +12,7 @@ Ready-to-run Docker Compose and Kubernetes examples, hardened by default (`read_
 | [`sockguard-with-exec.yaml`](sockguard-with-exec.yaml) | Sockguard preset (with-exec) | The policy file `docker-compose.edge-with-exec.yml` mounts; pairs with it, not used standalone |
 | [`observability/docker-compose.yml`](observability/docker-compose.yml) | Standard or edge + Prometheus + Fluent Bit | Complete TLS/auth, metrics, readiness, and audit-shipping topology selected with a Compose profile |
 
-> **Warning (edge-with-exec):** the exec rule can target any container, including the sockguard proxy that holds the Docker socket. A compromised Portwing or controller with exec can run code inside the proxy and step outside the allowlist. Only enable this bundle where exec into every container is acceptable. Sockguard has no per-container exec scoping yet.
+> **Exec scope (edge-with-exec):** use Sockguard 2.4.1 or newer in enforce mode. It refuses exec into containers labeled `com.sockguard.exec=deny`. The bundle explicitly labels the proxy, including when its image is overridden; preserve that label and apply it to other protected containers. Exec still grants arbitrary commands inside unprotected workloads. Use ownership labels and client profiles when access must be narrower.
 
 Before starting any of them, generate a token and export the Docker socket's group ID (the images run as the non-root `portwing` user, UID 65532, and need `group_add` to reach the socket):
 
@@ -60,8 +60,14 @@ DRYDOCK_URL=https://drydock.example.com \
   docker compose -f observability/docker-compose.yml --profile edge up -d
 ```
 
-Prometheus is available on `http://localhost:9090`. Portwing standard mode is
-available on `https://localhost:3000`; edge mode publishes no host port.
+Prometheus is published on loopback at `http://localhost:9090`. On
+[Docker Engine releases older than 28.0.0](https://docs.docker.com/engine/network/port-publishing/),
+hosts on the same L2 network can also reach ports published to localhost.
+Upgrade Docker Engine or enforce independent network access controls before
+relying on loopback isolation. Containers on the same Compose network can
+still reach Prometheus on port 9090, and it has no authentication of its own.
+Portwing standard mode is available on `https://localhost:3000`; edge mode
+publishes no host port.
 
 For Ed25519 key-based auth instead of a shared token, see the Authentication section of the main [README](../README.md) and [`docs/security-model.md`](../docs/security-model.md).
 
