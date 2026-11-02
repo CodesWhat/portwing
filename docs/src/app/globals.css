@@ -396,3 +396,11 @@ figure.shiki > div:first-child:not([role="region"]) {
 .sidefoot .modetog .ml {
   display: inline;
 }
+
+/* header and footer content follow the 1600px layout; 15px lines the logo up with the sidebar content */
+@media (min-width: 721px) {
+  .wrap {
+    max-width: 1600px;
+    padding-inline: 15px;
+  }
+}
