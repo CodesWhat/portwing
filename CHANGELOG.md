@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.4] - 2026-11-02
+
+This release fixes the website 404 page and pins the deployment examples to
+Sockguard 2.4.2. The agent binary and container images have no functional
+changes since v1.0.3.
+
+### Fixed
+
+- Missing website paths on Vercel now serve the site's 404 page instead of the
+  platform's generic NOT_FOUND response. The generated routing config was
+  missing the filesystem phase before the error route.
+
+### Changed
+
+- The website now gets browser checks in Chromium, Firefox and WebKit on
+  every pull request.
+
 ### Security
 
 - Pin the deployment examples to Sockguard 2.4.2, which tightens exec-session

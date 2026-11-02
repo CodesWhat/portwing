@@ -4,7 +4,7 @@
 // unix socket (see the provenance note rendered under the terminal). Recorded from the
 // v1.0.0 build (commit db6c0b1, 2026-10-29). The code paths shown (keygen, startup banner,
 // Ed25519 verification and its rejection reasons, the info reply) are unchanged through
-// v1.0.3, so the only edit is the version string: "{{version}}" is replaced with
+// v1.0.4, so the only edit is the version string: "{{version}}" is replaced with
 // SITE_CONFIG.version when rendered.
 //
 // k: "cmd" is a typed command, "out" is an output line, "note" is a caption line.
