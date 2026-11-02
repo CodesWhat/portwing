@@ -158,8 +158,8 @@ jobs:
       # WIDER THAN THIS REPO'S `contents: read` DEFAULT, on purpose, and this is
       # the only workflow here that needs it. `gh run rerun` is an Actions API
       # write; `actions: read` returns 403 for it and nothing narrower than
-      # `actions: write` grants it (the same wall `starchart.yml` documents for
-      # RELEASE_PAT: contents: write does not imply actions: write). It is
+      # `actions: write` grants it (contents: write does not imply
+      # actions: write). It is
       # scoped to this one job, which checks out no code, builds nothing, and
       # runs no third-party action other than harden-runner — so the widened
       # credential never sits next to attacker-influenced input. `contents` is

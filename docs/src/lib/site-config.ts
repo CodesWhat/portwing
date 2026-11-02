@@ -9,9 +9,6 @@
 const githubOwner = "CodesWhat";
 const githubRepo = "portwing";
 
-// Aurora palette options: "ember" | "ocean" | "violet" | "forest" | "mono"
-type AuroraPalette = "ember" | "ocean" | "violet" | "forest" | "mono";
-
 export const SITE_CONFIG = {
   /** Brand name shown in the header, footer, and metadata. */
   name: "Portwing",
@@ -28,17 +25,11 @@ export const SITE_CONFIG = {
   githubOwner,
   /** GitHub repository name. */
   githubRepo,
-  /** Logo asset in /public. */
-  logo: "/portwing.png",
-  /** Whether the logo inverts in dark mode (adds `dark:invert`). */
-  logoInvertOnDark: true,
+  /** Discord community invite. */
+  discordUrl: "https://discord.gg/mWHCPJRzSx",
   /** License link shown in the footer. */
   licenseUrl: "https://opensource.org/licenses/MIT",
-  /** Aurora background palette — violet matches the pigeon's slate palette. */
-  aurora: "violet" as AuroraPalette,
 } as const;
-
-type SiteConfig = typeof SITE_CONFIG;
 
 /** "owner/repo" slug — used to build GitHub URLs. */
 const REPO_SLUG = `${SITE_CONFIG.githubOwner}/${SITE_CONFIG.githubRepo}`;

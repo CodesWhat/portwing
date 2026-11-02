@@ -1,183 +1,55 @@
 // SPDX-License-Identifier: MIT
 
-import { ArrowRight, Check, CircleQuestionMark, Minus, X } from "lucide-react";
 import Link from "next/link";
-import { type CellValue, ComparisonCellIcon } from "@/components/comparison-cell-icon";
-import { SectionHeading } from "@/components/section-heading";
-import { SITE_CONFIG } from "@/lib/site-config";
+import { CellMark, MarkLegend } from "@/components/compare-marks";
+import { Ic } from "@/components/icons";
+import { Section } from "@/components/section";
+import { TEASER_ROWS, TEASER_TOOLS } from "@/lib/comparison-matrix";
 
-// Mini comparison teaser for the four direct remote-agent peers.
-
-interface FeatureRow {
-  label: string;
-  portwing: CellValue;
-  portainer: CellValue;
-  komodo: CellValue;
-  arcane: CellValue;
-  hawser: CellValue;
-}
-
-const featureRows: FeatureRow[] = [
-  {
-    label: "Inbound + outbound edge modes",
-    portwing: "yes",
-    portainer: "yes",
-    komodo: "yes",
-    arcane: "yes",
-    hawser: "yes",
-  },
-  {
-    label: "Asymmetric agent identity",
-    portwing: "yes",
-    portainer: "partial",
-    komodo: "yes",
-    arcane: "partial",
-    hawser: "no",
-  },
-  {
-    label: "Documented socket policy layer",
-    portwing: "yes",
-    portainer: "no",
-    komodo: "no",
-    arcane: "partial",
-    hawser: "no",
-  },
-  {
-    label: "Structured agent-level audit",
-    portwing: "yes",
-    portainer: "partial",
-    komodo: "partial",
-    arcane: "partial",
-    hawser: "partial",
-  },
-  {
-    label: "Transparent Docker API",
-    portwing: "yes",
-    portainer: "yes",
-    komodo: "no",
-    arcane: "no",
-    hawser: "yes",
-  },
-  {
-    label: "Read-only MCP server",
-    portwing: "yes",
-    portainer: "undocumented",
-    komodo: "undocumented",
-    arcane: "undocumented",
-    hawser: "undocumented",
-  },
-];
-
-function ViewAllLink() {
-  return (
-    <Link
-      href="/compare"
-      className="group inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white/50 px-6 py-3 font-medium text-neutral-900 backdrop-blur-sm transition-all hover:border-neutral-300 hover:bg-white/80 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-neutral-100 dark:hover:border-neutral-700 dark:hover:bg-neutral-900/80"
-    >
-      View all comparisons
-      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-    </Link>
-  );
-}
-
-const tools = [SITE_CONFIG.name, "Portainer", "Komodo", "Arcane", "Hawser"] as const;
-type Tool = (typeof tools)[number];
-
-function cellValue(row: FeatureRow, tool: Tool): CellValue {
-  const map: Record<Tool, CellValue> = {
-    [SITE_CONFIG.name]: row.portwing,
-    Portainer: row.portainer,
-    Komodo: row.komodo,
-    Arcane: row.arcane,
-    Hawser: row.hawser,
-  };
-  return map[tool];
-}
+// Home page teaser: the four direct remote-agent peers. Full matrix lives at /compare.
 
 export function CompareSection() {
   return (
-    <section className="border-t border-border/60 py-20">
-      <div className="mx-auto max-w-4xl px-4">
-        <SectionHeading
-          eyebrow={`Why ${SITE_CONFIG.name}`}
-          title="How we compare"
-          subtitle="A sourced snapshot of the four closest remote-agent peers. Partial marks usually mean the capability exists at the controller layer or is optional."
-          align="right"
-        />
-
-        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-neutral-200 dark:border-neutral-800">
-                  <th className="px-5 py-3 text-left font-medium text-neutral-500 dark:text-neutral-400">
-                    Feature
-                  </th>
-                  {tools.map((tool) => (
-                    <th
-                      key={tool}
-                      className={[
-                        "px-4 py-3 text-center font-semibold",
-                        tool === SITE_CONFIG.name
-                          ? "bg-violet-500/10 text-violet-700 dark:bg-violet-400/10 dark:text-violet-300"
-                          : "text-neutral-500 dark:text-neutral-400",
-                      ].join(" ")}
-                    >
-                      {tool}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {featureRows.map((row, i) => (
-                  <tr
-                    key={row.label}
-                    className={[
-                      "border-b border-neutral-100 last:border-0 dark:border-neutral-800/60",
-                      i % 2 === 1 ? "bg-neutral-50/50 dark:bg-neutral-800/20" : "",
-                    ].join(" ")}
-                  >
-                    <td className="px-5 py-3 text-neutral-700 dark:text-neutral-300">
-                      {row.label}
-                    </td>
-                    {tools.map((tool) => (
-                      <td
-                        key={tool}
-                        className={[
-                          "px-4 py-3 text-center",
-                          tool === SITE_CONFIG.name ? "bg-violet-500/5" : "",
-                        ].join(" ")}
-                      >
-                        <ComparisonCellIcon value={cellValue(row, tool)} />
-                      </td>
-                    ))}
-                  </tr>
+    <Section
+      id="compare"
+      headingId="cmp-h"
+      eyebrow="Why Portwing"
+      title="How we compare"
+      subtitle="A sourced snapshot of the four closest remote-agent peers. Partial marks usually mean the capability exists at the controller layer or is optional."
+      variant="c"
+    >
+      <div className="scroll" tabIndex={0} role="region" aria-label="Comparison table">
+        <table className="cmp">
+          <thead>
+            <tr>
+              <th scope="col">Feature</th>
+              {TEASER_TOOLS.map((tool, i) => (
+                <th key={tool.name} scope="col" className={i === 0 ? "me" : undefined}>
+                  {tool.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {TEASER_ROWS.map((row) => (
+              <tr key={row.key}>
+                <th scope="row">{row.label}</th>
+                {TEASER_TOOLS.map((tool, i) => (
+                  <td key={tool.name} className={i === 0 ? "me" : undefined}>
+                    <CellMark value={tool.cells[row.key]} />
+                  </td>
                 ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="border-t border-neutral-200 px-5 py-4 text-xs text-neutral-500 dark:border-neutral-800 dark:text-neutral-500">
-            <span className="inline-flex items-center gap-1.5">
-              <Check className="h-3 w-3 text-violet-500" /> Yes
-            </span>
-            <span className="mx-3 inline-flex items-center gap-1.5">
-              <Minus className="h-3 w-3 text-fuchsia-400" /> Partial
-            </span>
-            <span className="mr-3 inline-flex items-center gap-1.5">
-              <X className="h-3 w-3 text-neutral-400" /> No
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <CircleQuestionMark className="h-3 w-3 text-neutral-400 dark:text-neutral-500" /> Not
-              documented
-            </span>
-          </div>
-        </div>
-
-        <div className="mt-8 text-center">
-          <ViewAllLink />
-        </div>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <MarkLegend />
       </div>
-    </section>
+      <div className="more">
+        <Link className="btn" href="/compare">
+          View all comparisons <Ic name="arrow-right" />
+        </Link>
+      </div>
+    </Section>
   );
 }

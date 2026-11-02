@@ -110,13 +110,7 @@ test("CSP permits only image origins present in the rendered page", () => {
 
 test("website source and runtime CSP contain no Go Report Card surface", () => {
   const source = fs.readFileSync(
-    path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "src",
-      "components",
-      "github-badges.tsx",
-    ),
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "app", "page.tsx"),
     "utf8",
   );
   assert.doesNotMatch(source, /goreportcard\.com|Go Report Card/i);
@@ -130,6 +124,30 @@ test("website source and runtime CSP contain no Go Report Card surface", () => {
   // Card and anything else that shows up, and it fails loudly when the set
   // legitimately changes, which is when someone should be looking.
   assert.deepEqual(cspOrigins(csp), ["https://e.codeswhat.com", "https://pkg.go.dev"]);
+});
+
+test("build output serves the not-found page from the error phase with its own CSP", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-bop-404-"));
+  const source = path.join(root, "source");
+  const target = path.join(root, ".vercel", "output");
+  try {
+    fs.mkdirSync(source, { recursive: true });
+    fs.writeFileSync(path.join(source, "index.html"), "<script>root()</script>");
+    fs.writeFileSync(path.join(source, "404.html"), "<script>missing()</script>");
+
+    generateBuildOutput(source, target);
+
+    const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
+    assert.deepEqual(config.overrides["404.html"], { path: "404" });
+    const errorAt = config.routes.findIndex((route) => route.handle === "error");
+    assert.ok(errorAt > 0, "an error phase must follow the normal routes");
+    const notFound = config.routes[errorAt + 1];
+    assert.equal(notFound.status, 404);
+    assert.equal(notFound.dest, "/404");
+    assert.match(notFound.headers["Content-Security-Policy"], /script-src[^;]*'sha256-/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("build output packages the exact rendered files and per-page CSP", () => {
@@ -172,4 +190,61 @@ test("build output packages the exact rendered files and per-page CSP", () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+function imgSources(csp) {
+  const directive = csp.split("; ").find((part) => part.startsWith("img-src "));
+  return directive ? directive.split(" ").slice(1) : [];
+}
+
+test("the Star History chart origin lands only on the page that renders it", () => {
+  const cspFor = (html) =>
+    headersForHTML(html).find((header) => header.key === "Content-Security-Policy")?.value ?? "";
+  const chart =
+    '<a href="https://www.star-history.com/?repos=CodesWhat%2Fportwing"><img src="https://api.star-history.com/chart?repos=CodesWhat/portwing&amp;type=date&amp;legend=top-left" alt="Star history"><img src="https://api.star-history.com/chart?repos=CodesWhat/portwing&amp;type=date&amp;legend=top-left&amp;theme=dark" alt=""></a>';
+
+  const withChart = cspFor(chart);
+  assert.deepEqual(imgSources(withChart), ["'self'", "data:", "https://api.star-history.com"]);
+  // The chart page link is navigation, not a fetch, so www.star-history.com gets no grant.
+  assert.deepEqual(cspOrigins(withChart), [
+    "https://api.star-history.com",
+    "https://e.codeswhat.com",
+  ]);
+  assert.deepEqual(imgSources(cspFor("<p>no chart</p>")), ["'self'", "data:"]);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-bop-star-"));
+  const target = path.join(root, ".vercel", "output");
+  try {
+    const source = path.join(root, "source");
+    fs.mkdirSync(path.join(source, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(source, "index.html"), chart);
+    fs.writeFileSync(path.join(source, "docs", "guide.html"), "<p>guide</p>");
+    generateBuildOutput(source, target);
+    const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
+    const csp = (src) =>
+      config.routes.find((route) => route.src === src).headers["Content-Security-Policy"];
+    assert.deepEqual(imgSources(csp("^/$")), ["'self'", "data:", "https://api.star-history.com"]);
+    assert.deepEqual(imgSources(csp("^/docs/guide/?$")), ["'self'", "data:"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("only the home page source references Star History", () => {
+  const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
+  const hits = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const target = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(target);
+      else if (
+        /\.(tsx?|css|mdx?)$/u.test(entry.name) &&
+        /star-history/iu.test(fs.readFileSync(target, "utf8"))
+      ) {
+        hits.push(path.relative(srcDir, target));
+      }
+    }
+  };
+  walk(srcDir);
+  assert.deepEqual(hits, [path.join("app", "page.tsx")]);
 });

@@ -2,10 +2,17 @@
 
 "use client";
 
-import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { Ic } from "@/components/icons";
 
+/**
+ * Light/dark switch. next-themes owns the mode: it follows the system scheme until the visitor
+ * picks one, then keeps that in localStorage ("theme"), the same key and values website/ reads.
+ * The icon and label come from <html data-mode> in CSS, so a saved light choice never flashes
+ * dark. aria-pressed waits for mount, because the server cannot know the saved choice and
+ * rendering it would not match the first client render.
+ */
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -17,21 +24,15 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
-      aria-label={
-        mounted ? (isDark ? "Switch to light theme" : "Switch to dark theme") : "Toggle theme"
-      }
+      className="modetog"
+      aria-pressed={mounted ? isDark : undefined}
+      aria-label="Dark mode"
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="rounded-full p-2 text-neutral-600 transition-colors hover:bg-neutral-200 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:rounded-sm"
     >
-      {mounted ? (
-        isDark ? (
-          <Sun className="h-5 w-5" />
-        ) : (
-          <Moon className="h-5 w-5" />
-        )
-      ) : (
-        <span className="block h-5 w-5" />
-      )}
+      <Ic name="moon" className="i-moon" />
+      <Ic name="sun" className="i-sun" />
+      <span className="ml l-dark">Dark</span>
+      <span className="ml l-light">Light</span>
     </button>
   );
 }

@@ -7,7 +7,7 @@
     "docs": {},
     "website": {
       "entry": ["scripts/gen-bird-png.mjs"],
-      "ignoreIssues": { "src/components/ui/**": ["exports", "types"] },
+      "ignoreDependencies": ["postcss"],
       "ignoreBinaries": ["magick"]
     },
     "analytics": {}

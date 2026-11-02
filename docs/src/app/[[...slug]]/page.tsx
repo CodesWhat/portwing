@@ -2,12 +2,12 @@
 
 import { Callout } from "fumadocs-ui/components/callout";
 import defaultMdxComponents from "fumadocs-ui/mdx";
-import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/page";
+import { DocsBody, DocsDescription, DocsPage, DocsTitle, EditOnGitHub } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { archiveVersionOf } from "@/lib/docs-versions";
-import { BASE_URL } from "@/lib/site-config";
+import { archiveVersionOf, CURRENT_DOCS_VERSION } from "@/lib/docs-versions";
+import { BASE_URL, GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 import { getDocsPage, source } from "@/lib/source";
 
 // The same page in the current docs, as the slug list the loader knows it by.
@@ -21,6 +21,10 @@ function hrefFor(slugs: string[]): string {
   return slugs.length === 0 ? "/" : `/${slugs.join("/")}`;
 }
 
+function canonicalFor(slugs: string[]): string {
+  return new URL(`/docs${hrefFor(slugs).replace(/^\/$/u, "")}`, BASE_URL).toString();
+}
+
 export default async function Page(props: { params: Promise<{ slug?: string[] }> }) {
   const params = await props.params;
   const page = getDocsPage(params.slug);
@@ -32,7 +36,7 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
   const hasCounterpart = version !== undefined && getDocsPage(counterpart) !== undefined;
 
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsPage toc={page.data.toc} full={page.data.full} breadcrumb={{ enabled: true }}>
       {version && (
         <Callout type="warn" title={`Archived documentation for ${version}`}>
           This page is a frozen reference for Portwing {version} and is not updated. Check the{" "}
@@ -46,11 +50,21 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
           .
         </Callout>
       )}
-      <DocsTitle>{page.data.title}</DocsTitle>
+      <div className="ph">
+        <DocsTitle>{page.data.title}</DocsTitle>
+        <span className="chip nocase">{version ?? CURRENT_DOCS_VERSION}</span>
+      </div>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>
         <MDX components={defaultMdxComponents} />
       </DocsBody>
+      {!version && (
+        <EditOnGitHub
+          href={`${GITHUB_URL}/edit/main/docs/content/docs/${page.path}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        />
+      )}
     </DocsPage>
   );
 }
@@ -69,19 +83,27 @@ export async function generateMetadata(props: {
   const version = archiveVersionOf(page.path);
   if (version) {
     // Archives are frozen reference copies: out of search results, but crawlers
-    // may still follow their links on to the current docs.
+    // may still follow their links on to the current docs. The canonical points at
+    // the same page in the current docs, or at the docs root when it no longer exists.
+    const counterpart = currentSlugs(page.slugs);
+    const target = getDocsPage(counterpart) ? counterpart : [];
     return {
       title: `${page.data.title} (${version})`,
       description: page.data.description,
       robots: { index: false, follow: true },
+      alternates: { canonical: canonicalFor(target) },
     };
   }
 
+  // The landing page's own title is "Introduction", which says nothing in a tab or a result.
+  const title =
+    page.slugs.length === 0
+      ? { absolute: `${SITE_CONFIG.name} Docs: security-first remote Docker agent` }
+      : page.data.title;
+
   return {
-    title: page.data.title,
+    title,
     description: page.data.description,
-    alternates: {
-      canonical: new URL(`/docs${hrefFor(page.slugs).replace(/^\/$/u, "")}`, BASE_URL).toString(),
-    },
+    alternates: { canonical: canonicalFor(page.slugs) },
   };
 }

@@ -26,6 +26,17 @@
           }
         }
       }
+    },
+    {
+      "includes": ["website/src/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off",
+            "noNoninteractiveTabindex": "off"
+          }
+        }
+      }
     }
   ]
 }

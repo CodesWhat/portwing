@@ -1,185 +1,53 @@
 // SPDX-License-Identifier: MIT
 
-import { ArrowUpRight, Check, CircleQuestionMark, Minus, X } from "lucide-react";
 import Link from "next/link";
-import { type CellValue, ComparisonCellIcon } from "@/components/comparison-cell-icon";
+import { CellMark, MarkLegend } from "@/components/compare-marks";
+import { Ic } from "@/components/icons";
+import { FEATURES, TOOLS } from "@/lib/comparison-matrix";
 import { SITE_CONFIG } from "@/lib/site-config";
 
-// Full comparison matrix for /compare. Each competitor row links to its
-// dedicated deep-dive page. Cell values are derived from comparison-rows.ts
-// and the per-competitor data in lib/comparison-route-data/.
-
-type Cell = CellValue;
-
-const FEATURES = [
-  { key: "remoteControl", label: "Remote control" },
-  { key: "standardEdge", label: "Inbound + edge" },
-  { key: "asymmetricIdentity", label: "Asymmetric identity" },
-  { key: "leastPrivilege", label: "Socket policy" },
-  { key: "agentAudit", label: "Agent audit" },
-  { key: "transparentApi", label: "Docker API" },
-  { key: "metrics", label: "Agent Prometheus" },
-  { key: "mcpServer", label: "MCP server" },
-] as const;
-
-type FeatureKey = (typeof FEATURES)[number]["key"];
-
-type Tool = {
-  name: string;
-  slug: string | null;
-  highlight?: boolean;
-  cells: Record<FeatureKey, Cell>;
-};
-
-const TOOLS: Tool[] = [
-  {
-    name: SITE_CONFIG.name,
-    slug: null,
-    highlight: true,
-    cells: {
-      remoteControl: "yes",
-      standardEdge: "yes",
-      asymmetricIdentity: "yes",
-      leastPrivilege: "yes",
-      agentAudit: "yes",
-      transparentApi: "yes",
-      metrics: "yes",
-      mcpServer: "yes",
-    },
-  },
-  {
-    name: "Portainer",
-    slug: "portainer",
-    cells: {
-      remoteControl: "yes",
-      standardEdge: "yes",
-      asymmetricIdentity: "partial",
-      leastPrivilege: "no",
-      agentAudit: "partial",
-      transparentApi: "yes",
-      metrics: "undocumented",
-      mcpServer: "undocumented",
-    },
-  },
-  {
-    name: "Komodo",
-    slug: "komodo",
-    cells: {
-      remoteControl: "yes",
-      standardEdge: "yes",
-      asymmetricIdentity: "yes",
-      leastPrivilege: "no",
-      agentAudit: "partial",
-      transparentApi: "no",
-      metrics: "partial",
-      mcpServer: "undocumented",
-    },
-  },
-  {
-    name: "Arcane",
-    slug: "arcane",
-    cells: {
-      remoteControl: "yes",
-      standardEdge: "yes",
-      asymmetricIdentity: "partial",
-      leastPrivilege: "partial",
-      agentAudit: "partial",
-      transparentApi: "no",
-      metrics: "partial",
-      mcpServer: "undocumented",
-    },
-  },
-  {
-    name: "Hawser",
-    slug: "hawser",
-    cells: {
-      remoteControl: "yes",
-      standardEdge: "yes",
-      asymmetricIdentity: "no",
-      leastPrivilege: "no",
-      agentAudit: "partial",
-      transparentApi: "yes",
-      metrics: "partial",
-      mcpServer: "undocumented",
-    },
-  },
-  {
-    name: "Watchtower",
-    slug: "watchtower",
-    cells: {
-      remoteControl: "partial",
-      standardEdge: "no",
-      asymmetricIdentity: "no",
-      leastPrivilege: "no",
-      agentAudit: "no",
-      transparentApi: "no",
-      metrics: "yes",
-      mcpServer: "undocumented",
-    },
-  },
-  {
-    name: "Diun",
-    slug: "diun",
-    cells: {
-      remoteControl: "partial",
-      standardEdge: "no",
-      asymmetricIdentity: "no",
-      leastPrivilege: "no",
-      agentAudit: "no",
-      transparentApi: "no",
-      metrics: "yes",
-      mcpServer: "undocumented",
-    },
-  },
-];
+// Full comparison matrix for /compare. Each competitor row links to its dedicated page.
 
 export function CompareMatrix() {
+  const peers = TOOLS.length - 1;
   return (
-    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-sm">
+    <div className="mx">
+      <div
+        className="scroll"
+        tabIndex={0}
+        role="region"
+        aria-label={`${SITE_CONFIG.name} comparison matrix. Scroll sideways to see every column.`}
+      >
+        <table className="cmp mxt">
+          <caption className="sr">
+            {SITE_CONFIG.name} compared with {peers} alternatives across {FEATURES.length} features
+          </caption>
           <thead>
-            <tr className="border-b border-neutral-200 dark:border-neutral-800">
-              <th className="px-4 py-3 text-left font-medium text-neutral-500 dark:text-neutral-400">
-                Tool
-              </th>
-              {FEATURES.map((f) => (
-                <th
-                  key={f.key}
-                  className="whitespace-nowrap px-3 py-3 text-center text-xs font-medium text-neutral-500 dark:text-neutral-400"
-                >
-                  {f.label}
+            <tr>
+              <th scope="col">Tool</th>
+              {FEATURES.map((feature) => (
+                <th key={feature.key} scope="col">
+                  {feature.label}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {TOOLS.map((tool) => (
-              <tr
-                key={tool.name}
-                className={[
-                  "border-b border-neutral-100 last:border-0 dark:border-neutral-800/60",
-                  tool.highlight ? "bg-violet-500/5" : "",
-                ].join(" ")}
-              >
-                <th scope="row" className="whitespace-nowrap px-4 py-3 text-left font-normal">
+              <tr key={tool.name} className={tool.slug ? undefined : "me-r"}>
+                <th scope="row">
                   {tool.slug ? (
-                    <Link
-                      href={`/compare/${tool.slug}`}
-                      className="group inline-flex items-center gap-1.5 font-medium text-neutral-700 transition-colors hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-100"
-                    >
+                    <Link href={`/compare/${tool.slug}`}>
                       {tool.name}
-                      <ArrowUpRight className="h-3.5 w-3.5 text-neutral-400 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                      <Ic name="arrow-up-right" />
                     </Link>
                   ) : (
-                    <span className="font-semibold text-violet-600 dark:text-violet-400">
-                      {tool.name}
-                    </span>
+                    <span className="selfn">{tool.name}</span>
                   )}
                 </th>
-                {FEATURES.map((f) => (
-                  <td key={f.key} className="px-3 py-3 text-center">
-                    <ComparisonCellIcon value={tool.cells[f.key]} />
+                {FEATURES.map((feature) => (
+                  <td key={feature.key}>
+                    <CellMark value={tool.cells[feature.key]} />
                   </td>
                 ))}
               </tr>
@@ -187,25 +55,7 @@ export function CompareMatrix() {
           </tbody>
         </table>
       </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-neutral-200 px-4 py-3 text-xs text-neutral-500 dark:border-neutral-800 dark:text-neutral-500">
-        <span className="inline-flex items-center gap-1.5">
-          <Check className="h-3 w-3 text-violet-500" /> Yes
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <Minus className="h-3 w-3 text-fuchsia-400" /> Partial
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <X className="h-3 w-3 text-neutral-300 dark:text-neutral-600" /> No
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <CircleQuestionMark className="h-3 w-3 text-neutral-400 dark:text-neutral-500" /> Not
-          documented
-        </span>
-        <span className="text-neutral-400 dark:text-neutral-600">
-          · Click a tool for the full breakdown
-        </span>
-      </div>
+      <MarkLegend extra="· Click a tool for the full breakdown" />
     </div>
   );
 }

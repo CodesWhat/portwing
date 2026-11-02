@@ -25,7 +25,7 @@
 # re-pin would not have matched either. verify-scanner-exclusions.sh still
 # checks the shipped Compose binary for openpgp, so linkage stays guarded
 # without a suppression. Of the two portwing-owned GO-2026-5932 entries that
-# stay (x/crypto v0.57.0), /go.mod matches in a source scan; the
+# stay (x/crypto v0.58.0), /go.mod matches in a source scan; the
 # **/usr/bin/portwing one matched nothing in this audit and is kept because
 # Grype's handling of stripped Go binaries has flipped before. The
 # arm/v7 image builds Compose from source and carried containerd v2.3.5; that
