@@ -9,6 +9,10 @@ import { getSlugs } from "fumadocs-core/source";
 // Archived versions keep their segment: vX.Y/<page> serves at /docs/vX.Y/<page>.
 const CURRENT_DIR = "current";
 const ARCHIVE_DIR = /^v\d+\.\d+$/u;
+// The label the current docs wear. It matches the title of content/docs/current/meta.json, which
+// is what the sidebar version switcher shows.
+export const CURRENT_DOCS_VERSION = "v1.0";
+
 const CONTENT_MARKER = "/content/docs/";
 
 /**
