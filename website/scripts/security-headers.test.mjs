@@ -139,11 +139,21 @@ test("build output serves the not-found page from the error phase with its own C
 
     const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
     assert.deepEqual(config.overrides["404.html"], { path: "404" });
+    const phases = config.routes.filter((route) => route.handle).map((route) => route.handle);
+    assert.deepEqual(phases, ["filesystem", "error"]);
+    const filesystemAt = config.routes.findIndex((route) => route.handle === "filesystem");
     const errorAt = config.routes.findIndex((route) => route.handle === "error");
-    assert.ok(errorAt > 0, "an error phase must follow the normal routes");
+    assert.ok(filesystemAt > 0, "header routes must come before the filesystem phase");
+    assert.ok(
+      config.routes.slice(0, filesystemAt).every((route) => route.continue === true),
+      "everything before the filesystem phase only attaches headers",
+    );
+    assert.equal(errorAt, filesystemAt + 1, "the error phase follows the filesystem phase");
+    assert.equal(errorAt, config.routes.length - 2, "the 404 route is last");
     const notFound = config.routes[errorAt + 1];
     assert.equal(notFound.status, 404);
     assert.equal(notFound.dest, "/404");
+    assert.equal(notFound.headers["X-Content-Type-Options"], "nosniff");
     assert.match(notFound.headers["Content-Security-Policy"], /script-src[^;]*'sha256-/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
