@@ -43,8 +43,20 @@
 # this script is the one human-applied step. Idempotent: creates the ruleset if
 # absent, updates it in place if a ruleset of this name already exists.
 #
+# The payload must reproduce EVERY field the live ruleset sets, not only the
+# ones this script cares about: a PUT replaces the rule parameters, so an
+# omitted field resets to its default (for example
+# require_extra_approval_for_unattributed_changes).
+# Dry run: --print-payload prints the JSON body without calling the API, so it
+# can be diffed against live with no side effects:
+#   diff <(bash scripts/apply-branch-protection.sh --print-payload | jq -S .) \
+#        <(gh api repos/CodesWhat/portwing/rulesets/17620625 |
+#          jq -S '{name,target,enforcement,conditions,bypass_actors,rules}')
+# The only difference should be a context this script adds that live lacks.
+#
 # Usage:
 #   bash scripts/apply-branch-protection.sh            # CodesWhat/portwing
+#   bash scripts/apply-branch-protection.sh --print-payload   # dry run, no API
 #   REPO=owner/name bash scripts/apply-branch-protection.sh
 set -euo pipefail
 
@@ -67,9 +79,12 @@ RULESET="$(
       "parameters": {
         "required_approving_review_count": 2,
         "dismiss_stale_reviews_on_push": true,
+        "required_reviewers": [],
         "require_code_owner_review": true,
+        "dismissal_restriction": { "enabled": false, "allowed_actors": [] },
         "require_last_push_approval": true,
         "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
         "allowed_merge_methods": ["merge", "squash", "rebase"]
       }
     },
@@ -77,6 +92,7 @@ RULESET="$(
       "type": "required_status_checks",
       "parameters": {
         "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
         "required_status_checks": [
           { "context": "Go CI / Build & Test",      "integration_id": 15368 },
           { "context": "Go CI / Lint",              "integration_id": 15368 },
@@ -108,6 +124,11 @@ RULESET="$(
 }
 JSON
 )"
+
+if [ "${1:-}" = "--print-payload" ]; then
+	printf '%s\n' "$RULESET"
+	exit 0
+fi
 
 existing_id="$(gh api "repos/$REPO/rulesets" \
 	--jq ".[] | select(.name == \"$NAME\") | .id" 2>/dev/null || true)"
