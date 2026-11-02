@@ -562,6 +562,7 @@ ol.rows.sub{padding:0}
 .pstats .sp a{color:var(--tx-primary);font-size:12px;font-weight:600;gap:6px}
 .pstats .sp a:hover{text-decoration:underline;text-underline-offset:3px}
 .pstats .sp .ic{width:14px;height:14px;align-self:center}
+.proof2 .starcard{width:min(100%,640px);aspect-ratio:800/533}
 .pbadges{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
 .pbadges li{line-height:0}
 .pbadges img{display:block;height:20px;width:auto}

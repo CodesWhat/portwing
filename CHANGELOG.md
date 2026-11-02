@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The star chart is now the hosted Star History embed in the README and on the
+  website home page, following the site's light/dark toggle, instead of committed
+  SVGs refreshed by a workflow. The refresh workflow and its checks are removed.
+  The home page now loads the chart image from `api.star-history.com`, which the
+  page's CSP allows for that route only.
+
 ## [v1.0.2] - 2026-10-31
 
 ### Fixed

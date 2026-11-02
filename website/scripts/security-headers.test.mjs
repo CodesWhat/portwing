@@ -191,3 +191,60 @@ test("build output packages the exact rendered files and per-page CSP", () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+function imgSources(csp) {
+  const directive = csp.split("; ").find((part) => part.startsWith("img-src "));
+  return directive ? directive.split(" ").slice(1) : [];
+}
+
+test("the Star History chart origin lands only on the page that renders it", () => {
+  const cspFor = (html) =>
+    headersForHTML(html).find((header) => header.key === "Content-Security-Policy")?.value ?? "";
+  const chart =
+    '<a href="https://www.star-history.com/?repos=CodesWhat%2Fportwing"><img src="https://api.star-history.com/chart?repos=CodesWhat/portwing&amp;type=date&amp;legend=top-left" alt="Star history"><img src="https://api.star-history.com/chart?repos=CodesWhat/portwing&amp;type=date&amp;legend=top-left&amp;theme=dark" alt=""></a>';
+
+  const withChart = cspFor(chart);
+  assert.deepEqual(imgSources(withChart), ["'self'", "data:", "https://api.star-history.com"]);
+  // The chart page link is navigation, not a fetch, so www.star-history.com gets no grant.
+  assert.deepEqual(cspOrigins(withChart), [
+    "https://api.star-history.com",
+    "https://e.codeswhat.com",
+  ]);
+  assert.deepEqual(imgSources(cspFor("<p>no chart</p>")), ["'self'", "data:"]);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-bop-star-"));
+  const target = path.join(root, ".vercel", "output");
+  try {
+    const source = path.join(root, "source");
+    fs.mkdirSync(path.join(source, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(source, "index.html"), chart);
+    fs.writeFileSync(path.join(source, "docs", "guide.html"), "<p>guide</p>");
+    generateBuildOutput(source, target);
+    const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
+    const csp = (src) =>
+      config.routes.find((route) => route.src === src).headers["Content-Security-Policy"];
+    assert.deepEqual(imgSources(csp("^/$")), ["'self'", "data:", "https://api.star-history.com"]);
+    assert.deepEqual(imgSources(csp("^/docs/guide/?$")), ["'self'", "data:"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("only the home page source references Star History", () => {
+  const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
+  const hits = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const target = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(target);
+      else if (
+        /\.(tsx?|css|mdx?)$/u.test(entry.name) &&
+        /star-history/iu.test(fs.readFileSync(target, "utf8"))
+      ) {
+        hits.push(path.relative(srcDir, target));
+      }
+    }
+  };
+  walk(srcDir);
+  assert.deepEqual(hits, [path.join("app", "page.tsx")]);
+});

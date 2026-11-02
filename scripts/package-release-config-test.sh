@@ -704,54 +704,13 @@ if [ "${actual_grype_gates}" != "${expected_grype_gates}" ]; then
 	failures=$((failures + 1))
 fi
 
-# The star-history chart is a committed artifact, not a third-party embed.
-# Both retired services are rejected by name because both were, at some
-# point, the prescribed answer: star-history.com until it stopped rendering
-# for our repos, and warpchart.dev for three days after that. A future sweep
-# working from a stale registry read would happily reinstate either one, and
-# the failure mode is quiet — a live route serves a plausible card at HTTP
-# 200 whether or not it has data, so nothing goes visibly red. A committed
-# SVG fails loudly instead: stale is readable, missing is a broken image.
-# Rejecting the hostnames also keeps visitor IPs off a third party, which is
-# what the cookieless analytics posture requires.
-reject_text_ci "README.md" "star-history.com" \
-	"the README must not embed a third-party star-history chart; the chart is committed at docs/assets/star-history.svg"
+# The star chart is the hosted Star History embed (api.star-history.com/chart),
+# anonymous, so there is no credential to manage and nothing to refresh. The
+# warpchart.dev rejection stays: it was the prescribed replacement for three
+# days and is retired org-wide, and a stale registry read could reinstate it.
 reject_text_ci "README.md" "warpchart.dev" \
-	"the README must not embed a third-party star-history chart; warpchart.dev was the prescribed replacement for three days and is retired org-wide"
-# The refresh has to actually be reachable, which is a separate question from the
-# chart being correct, and it is the half that fails silently. GitHub suppresses
-# workflow runs for events emitted by GITHUB_TOKEN, so a `release:` trigger on
-# starchart.yml fires and starts nothing: release.yml publishes via GoReleaser
-# with exactly that credential. The workflow reads as correctly wired and never
-# runs, and the only symptom is a chart that quietly stops updating, which is
-# what choosing a committed artifact over a live embed was meant to prevent.
-#
-# The v* tag push is the trigger that works, because release-cut.yml pushes the
-# tag with RELEASE_PAT specifically so downstream workflows fire; release.yml
-# has always depended on that. Asserting the working trigger is present AND the
-# broken one is absent, because each is satisfiable while the other is wrong.
-if ! awk '/^on:/{c=1;next} c&&/^[^[:space:]#]/{exit} c' .github/workflows/starchart.yml |
-	grep -Eq '^[[:space:]]*tags:[[:space:]]*$'; then
-	echo "FAIL: starchart.yml must be triggered by the v* tag push (release-cut.yml pushes the tag with RELEASE_PAT so downstream workflows fire; a release: trigger or a GITHUB_TOKEN dispatch would create no run at all)" >&2
-	failures=$((failures + 1))
-fi
-if awk '/^on:/{c=1;next} c&&/^[^[:space:]#]/{exit} c' .github/workflows/starchart.yml |
-	grep -Eq '^[[:space:]]*release:[[:space:]]*$'; then
-	echo "FAIL: starchart.yml must not use a release: trigger (GitHub suppresses runs for events emitted by GITHUB_TOKEN, and release.yml publishes with GITHUB_TOKEN, so it would read as wired and never run)" >&2
-	failures=$((failures + 1))
-fi
+	"the README must not embed warpchart.dev; it was the prescribed replacement for three days and is retired org-wide"
 
-require_file "docs/assets/star-history.svg" \
-	"the committed star-history chart must exist; the README references it by relative path and a missing file renders as a broken image"
-require_file "docs/assets/star-history-dark.svg" \
-	"the dark-theme chart must exist; the README's <picture> names it and a missing srcset target renders as a broken image for every dark-mode reader"
-
-# Rejecting the two retired hosts is only half the contract: it stays satisfied
-# if the chart is dropped from the README entirely, or repointed at some third
-# host nobody has thought to name yet. Extract the chart section and assert
-# inside it, the same way the grype invocation above is extracted — a file-wide
-# grep for the img tag would be satisfied by any other occurrence in the README,
-# and naming hosts one at a time only ever catches the ones already known.
 star_section="$(awk '
 	/id="star-history"/ { collecting = 1 }
 	collecting { print; if ($0 == "---") exit }
@@ -760,110 +719,40 @@ if [ -z "${star_section}" ]; then
 	echo 'FAIL: the README must keep the star-history section (no id="star-history" heading found in README.md)' >&2
 	failures=$((failures + 1))
 fi
-# The whitespace before src is load-bearing: "src=" as a bare substring is also
-# inside data-src, and <img data-src="docs/assets/star-history.svg"> renders
-# nothing while satisfying the naive pattern.
-if ! printf '%s\n' "${star_section}" | grep -Eq '<img([[:space:]][^>]*)?[[:space:]]src="docs/assets/star-history\.svg"'; then
-	echo "FAIL: the star-history section must render the committed SVG (it needs an <img> whose src attribute is docs/assets/star-history.svg)" >&2
-	failures=$((failures + 1))
-fi
-# The theme pair has to be selected by <picture>, never by a media query inside
-# a single self-theming SVG. A media query in an <img>-embedded SVG resolves
-# against the reader's OS preference, not GitHub's own theme toggle, so one
-# file shows a white card to anyone reading GitHub in dark mode on a light OS.
-# <picture> follows the toggle because GitHub sets color-scheme on the page.
-# That failure is invisible to whoever ships it, since it only appears in the
-# theme combination they are not using.
-#
-# Asserted as ONE <source> tag inside the <picture>, carrying BOTH attributes,
-# rather than as three independent checks for a <picture>, a dark media query and
-# a dark srcset. Three independent checks are all satisfied by markup that
-# renders the light chart to everyone: the media query on one element and the
-# srcset on another, or a correct-looking <source> sitting outside the <picture>
-# where the browser ignores it. Each part being present somewhere in the section
-# is not the same as the parts being wired together, which is the same defect
-# this file has now been bitten by three times in different places.
-#
-# The section is flattened to a single line first so the extraction survives the
-# block being reformatted across lines, and the two attribute orders are matched
-# explicitly because ERE has no lookahead to do it order-independently.
-picture_block="$(printf '%s\n' "${star_section}" | tr '\n' ' ' |
-	sed -n 's/.*<picture>\(.*\)<\/picture>.*/\1/p')"
+# One <picture> carrying a dark <source>, a light <source> and an <img> fallback,
+# all on the hosted chart endpoint for this repository. Flattened to one line so
+# the check survives reformatting; a <source> outside a <picture> is inert.
+star_flat="$(printf '%s\n' "${star_section}" | tr '\n' ' ')"
+picture_block="$(printf '%s\n' "${star_flat}" | sed -n 's/.*<picture>\(.*\)<\/picture>.*/\1/p')"
 if [ -z "${picture_block}" ]; then
-	echo "FAIL: the star-history section must wrap the chart in a <picture> element (a <source> outside a <picture> is inert, and every reader silently gets the light chart)" >&2
+	echo "FAIL: the star-history section must wrap the chart in a <picture> element" >&2
 	failures=$((failures + 1))
 fi
-dark_source_pattern='<source[^>]*[[:space:]]media="\(prefers-color-scheme:[[:space:]]*dark\)"[^>]*[[:space:]]srcset="docs/assets/star-history-dark\.svg"'
-dark_source_pattern_swapped='<source[^>]*[[:space:]]srcset="docs/assets/star-history-dark\.svg"[^>]*[[:space:]]media="\(prefers-color-scheme:[[:space:]]*dark\)"'
-if ! printf '%s\n' "${picture_block}" |
-	grep -Eq "${dark_source_pattern}|${dark_source_pattern_swapped}"; then
-	echo 'FAIL: the star-history section needs a single <source> inside its <picture> carrying both media="(prefers-color-scheme: dark)" and srcset="docs/assets/star-history-dark.svg" (split across two elements, or placed outside the <picture>, the browser ignores it and every reader gets the light chart)' >&2
+chart_url='https://api\.star-history\.com/chart\?repos=CodesWhat/portwing&type=date&legend=top-left'
+dark_source_pattern="<source[^>]*[[:space:]]media=\"\(prefers-color-scheme:[[:space:]]*dark\)\"[^>]*[[:space:]]srcset=\"${chart_url}&theme=dark\""
+light_source_pattern="<source[^>]*[[:space:]]media=\"\(prefers-color-scheme:[[:space:]]*light\)\"[^>]*[[:space:]]srcset=\"${chart_url}\""
+img_pattern="<img([[:space:]][^>]*)?[[:space:]]src=\"${chart_url}\""
+if ! printf '%s\n' "${picture_block}" | grep -Eq "${dark_source_pattern}"; then
+	echo "FAIL: the star-history <picture> needs a dark <source> (media prefers-color-scheme: dark) whose srcset is the api.star-history.com/chart URL for CodesWhat/portwing with theme=dark" >&2
 	failures=$((failures + 1))
 fi
-# Catches the next replacement service without having to know its name. This is
-# a regression guard, not an adversary control: it reads the markup literally,
-# so a deliberately entity-encoded host (warpchart&#46;dev) would slip past it.
-# Worth knowing, not worth an HTML decoder in shell.
-#
-# Deliberately not restricted to <img src>, and deliberately not a list of
-# attribute names either. Any attribute pointing at an external host is a
-# third-party request from this section — data-src is fetched by lazy-loaders,
-# <object data=> and <use href=> load too — and enumerating the attributes
-# worth checking is the same mistake as enumerating the hosts worth rejecting:
-# it only ever covers the ones already thought of. A reject is the one place
-# where matching too much is the safe direction, so this matches any attribute
-# whose value is an external URL. The quote handling covers the three legal
-# forms (double, single, bare) and the optional scheme covers protocol-relative
-# //host references. Prose URLs in this section are unaffected: they have no
-# preceding `=`.
-#
-# One carve-out, and it is a distinction rather than an exception: the shape
-# wraps the chart in a link to the stargazers page, so an <a href> to an
-# external host is expected here. A link is navigation the reader chooses, not
-# a resource the browser fetches on render, so it leaks no visitor IP and is
-# not what this check is about. Neutralising href only on <a> open tags keeps
-# every other element in scope, so <use href>, <object data> and data-src are
-# still caught. Exempting the stargazers URL by name instead would have been an
-# allow-list of one, which is the enumeration mistake described above.
-#
-# The url(...) alternation is not decoration: an external reference inside a CSS
-# value is not preceded by `=`, so style="background:url(//host/x.png)" slipped
-# the attribute pattern entirely. Found by mutation, not by reading it back —
-# the comment here previously claimed that case was covered when it was not.
-external_src_pattern="(=|url\()[[:space:]]*[\"']?(https?:)?//"
-scrubbed_section="$(printf '%s\n' "${star_section}" |
-	sed -E 's@<a[[:space:]]([^>]*[[:space:]])?href="[^"]*"@<a \1href="#"@g')"
-if printf '%s\n' "${scrubbed_section}" | grep -Eiq "${external_src_pattern}"; then
-	echo "FAIL: the star-history section must not load an image from a third party (the chart is committed at docs/assets/star-history.svg)" >&2
+if ! printf '%s\n' "${picture_block}" | grep -Eq "${light_source_pattern}"; then
+	echo "FAIL: the star-history <picture> needs a light <source> (media prefers-color-scheme: light) whose srcset is the api.star-history.com/chart URL for CodesWhat/portwing" >&2
 	failures=$((failures + 1))
 fi
-
-# And existence is not content: the refresh workflow commits these files back at
-# every release cut, so a generator that fails halfway can leave a truncated or
-# wrong-repo SVG in place. The title carries the repo slug, so requiring it
-# proves the file is both a closed SVG document and this repo's chart. Matched
-# as a prefix because the title also carries the live star count, which changes
-# on every refresh; pinning the whole string would fail on the next real one.
-#
-# Both files get the same three checks. Asserting only the light one would let a
-# half-finished generator run ship a broken dark chart, and dark is the half
-# nobody reviewing on a light screen would ever see.
-for chart in docs/assets/star-history.svg docs/assets/star-history-dark.svg; do
-	require_text "$chart" "<title>Star history for CodesWhat/portwing" \
-		"the committed chart must be this repository's chart, not a placeholder or another repo's"
-	require_text "$chart" "<path" \
-		"the committed chart must actually plot the series; a titled but empty <svg> renders as blank space, not a broken image"
-	require_last_line "$chart" "</svg>" \
-		"the committed chart must be a complete SVG document; a truncated generator run renders as a broken image"
-done
-
-# The one failure every check above passes: a renderer that writes the light
-# chart to both paths. Each file is then individually valid, titled, plotted and
-# closed, the <picture> resolves, nothing 404s, and dark-mode readers get a white
-# card anyway. That is the exact defect this whole theme pair exists to prevent,
-# so it is worth asserting directly rather than inferring from the parts.
-if cmp -s docs/assets/star-history.svg docs/assets/star-history-dark.svg; then
-	echo "FAIL: the light and dark charts are byte-identical, so the <picture> selects the same image for both themes (the dark variant should be drawn on the dark canvas with the derived accent)" >&2
+if ! printf '%s\n' "${picture_block}" | grep -Eq "${img_pattern}"; then
+	echo "FAIL: the star-history <picture> needs an <img> whose src is the api.star-history.com/chart URL for CodesWhat/portwing" >&2
+	failures=$((failures + 1))
+fi
+if ! printf '%s\n' "${star_flat}" | grep -Eq '<a[[:space:]][^>]*href="https://www\.star-history\.com/\?repos=CodesWhat%2Fportwing[^"]*"'; then
+	echo "FAIL: the star-history chart must link to its star-history.com chart page" >&2
+	failures=$((failures + 1))
+fi
+# A chart snippet generated for a private or authenticated setup carries a sealed
+# or raw credential parameter; the anonymous form needs none, and a README is
+# public. Matched on the parameter names rather than any one value.
+if printf '%s\n' "${star_section}" | grep -Eiq '(sealed_token|[?&](access_)?token|github_pat_|ghp_|gho_)'; then
+	echo "FAIL: the star-history section must not carry a credential parameter (the anonymous /chart URL needs none)" >&2
 	failures=$((failures + 1))
 fi
 

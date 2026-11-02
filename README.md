@@ -476,10 +476,11 @@ SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release
 <h2 align="center" id="star-history">Star History</h2>
 
 <div align="center">
-  <a href="https://github.com/CodesWhat/portwing/stargazers">
+  <a href="https://www.star-history.com/?repos=CodesWhat%2Fportwing&type=date&legend=top-left">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history-dark.svg" />
-      <img src="docs/assets/star-history.svg" alt="Star history for CodesWhat/portwing" width="900" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=CodesWhat/portwing&type=date&legend=top-left&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=CodesWhat/portwing&type=date&legend=top-left" />
+      <img alt="Star history chart for CodesWhat/portwing" src="https://api.star-history.com/chart?repos=CodesWhat/portwing&type=date&legend=top-left" width="900" />
     </picture>
   </a>
 </div>
