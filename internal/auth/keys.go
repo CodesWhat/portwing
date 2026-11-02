@@ -35,6 +35,7 @@ type KeyRegistry struct {
 	filePath string
 	roots    map[string]*AuthorizedKey
 	rotation *rotationStore
+	policy   SignaturePolicy
 }
 
 // NewKeyRegistry creates a KeyRegistry that will load keys from filePath.

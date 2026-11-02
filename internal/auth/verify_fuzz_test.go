@@ -23,6 +23,8 @@ func FuzzVerifyRequest(f *testing.F) {
 	keyID := hex.EncodeToString(keyHash[:8])
 	registry := NewKeyRegistry("")
 	registry.keys[keyID] = &AuthorizedKey{KeyID: keyID, PubKey: publicKey}
+	const fuzzAgentID = "fuzz-agent-0001"
+	registry.SetSignaturePolicy(SignaturePolicy{AgentID: fuzzAgentID})
 
 	seedTarget := "/v1.44/containers/a%2Fb/logs?tail=10&stdout=1"
 	seedBody := []byte(`{"follow":true}`)
@@ -44,6 +46,24 @@ func FuzzVerifyRequest(f *testing.F) {
 		seedNonce,
 		base64.RawURLEncoding.EncodeToString(seedSignature),
 		SignatureVersion2,
+	)
+	seedV3Signature := ed25519.Sign(privateKey, CanonicalMessageV3(
+		fuzzAgentID,
+		http.MethodGet,
+		seedTarget,
+		BodyHashHex(seedBody),
+		seedTimestamp,
+		seedNonce,
+	))
+	f.Add(
+		http.MethodGet,
+		seedTarget,
+		seedBody,
+		keyID,
+		strconv.FormatInt(seedTimestamp, 10),
+		seedNonce,
+		base64.RawURLEncoding.EncodeToString(seedV3Signature),
+		SignatureVersion3,
 	)
 	f.Add("", "/", []byte(nil), "", "", "", "", "")
 	f.Add("DELETE", "/containers/id?force=1", []byte("body"), "unknown", "not-a-time", "not-a-nonce", "%%%", "99")
@@ -94,13 +114,20 @@ func FuzzVerifyRequest(f *testing.F) {
 			if err != nil {
 				t.Fatalf("VerifyRequest accepted invalid signature encoding %q", fuzzSignature)
 			}
-			signedTarget := parsedURL.Path
-			if fuzzVersion == SignatureVersion2 {
-				signedTarget = CanonicalRequestTarget(parsedURL)
-			} else if fuzzVersion != "" || parsedURL.RawQuery != "" || parsedURL.ForceQuery {
+			var message []byte
+			switch fuzzVersion {
+			case SignatureVersion3:
+				message = CanonicalMessageV3(fuzzAgentID, method, CanonicalRequestTarget(parsedURL), BodyHashHex(body), tsUnix, fuzzNonce)
+			case SignatureVersion2:
+				message = CanonicalMessage(method, CanonicalRequestTarget(parsedURL), BodyHashHex(body), tsUnix, fuzzNonce)
+			case "":
+				if parsedURL.RawQuery != "" || parsedURL.ForceQuery {
+					t.Fatalf("VerifyRequest accepted a legacy signature for target %q", requestTarget)
+				}
+				message = CanonicalMessage(method, parsedURL.Path, BodyHashHex(body), tsUnix, fuzzNonce)
+			default:
 				t.Fatalf("VerifyRequest accepted signature version %q for target %q", fuzzVersion, requestTarget)
 			}
-			message := CanonicalMessage(method, signedTarget, BodyHashHex(body), tsUnix, fuzzNonce)
 			if !ed25519.Verify(publicKey, message, signature) {
 				t.Fatal("VerifyRequest accepted a signature that does not match the canonical request")
 			}
@@ -145,6 +172,30 @@ func FuzzVerifyRequest(f *testing.F) {
 		mutatedLRU.Close()
 		if _, err := VerifyRequest(mutatedReq, body, registry, mutatedLRU, 60); !errors.Is(err, ErrBadSignature) {
 			t.Fatalf("mutated canonical target %q returned %v, want ErrBadSignature", CanonicalRequestTarget(&mutatedURL), err)
+		}
+
+		v3Signature := ed25519.Sign(privateKey, CanonicalMessageV3(
+			fuzzAgentID,
+			method,
+			canonicalTarget,
+			BodyHashHex(body),
+			validTimestamp,
+			validNonce,
+		))
+		for version, wantOK := range map[string]bool{SignatureVersion3: true, SignatureVersion2: false} {
+			v3Req := &http.Request{Method: method, URL: parsedURL, Header: make(http.Header)}
+			setValidHeaders(v3Req.Header)
+			v3Req.Header.Set(HeaderSignature, base64.RawURLEncoding.EncodeToString(v3Signature))
+			v3Req.Header.Set(HeaderSignatureVersion, version)
+			v3LRU := NewNonceLRU(1, 60)
+			v3LRU.Close()
+			got, err := VerifyRequest(v3Req, body, registry, v3LRU, 60)
+			if wantOK && (err != nil || got != keyID) {
+				t.Fatalf("exact v3 canonical target %q did not verify: key ID %q, error %v", canonicalTarget, got, err)
+			}
+			if !wantOK && !errors.Is(err, ErrBadSignature) {
+				t.Fatalf("v3 signature presented as version %s returned %v, want ErrBadSignature", version, err)
+			}
 		}
 	})
 }
