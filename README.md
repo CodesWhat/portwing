@@ -214,6 +214,8 @@ sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.
 export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 ```
 
+The last line of keygen's stdout is the `authorized_keys` line to register with Drydock. To re-derive it later from the private key, run `portwing keygen -pub-from portwing_ed25519.pem`.
+
 The image runs as UID 65532, so `group_add` with the Docker socket's group ID is what lets it reach the socket.
 
 ```yaml
