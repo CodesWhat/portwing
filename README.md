@@ -211,7 +211,10 @@ Edge mode is Ed25519-only — generate a keypair first and register the public k
 ```bash
 portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
 sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 ```
+
+The image runs as UID 65532, so `group_add` with the Docker socket's group ID is what lets it reach the socket.
 
 ```yaml
 services:
@@ -225,6 +228,9 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
+    user: "65532:65532"
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
