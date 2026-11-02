@@ -7,13 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.3] - 2026-11-02
+
+This release updates the website and documentation only. The agent binary and
+container images have no functional changes since v1.0.2.
+
 ### Changed
 
+- The website home and compare pages have a new design, and the site has a
+  proper 404 page. The page follows your system light or dark setting until you
+  pick one yourself.
+- The documentation site has a new look, including a mobile-friendly sidebar.
+  Archived version pages now point their canonical links at the current docs.
 - The star chart is now the hosted Star History embed in the README and on the
   website home page, following the site's light/dark toggle, instead of committed
   SVGs refreshed by a workflow. The refresh workflow and its checks are removed.
   The home page now loads the chart image from `api.star-history.com`, which the
   page's CSP allows for that route only.
+- Roadmap and internal audit notes now match the v1.0.2 release wording.
+
+### Added
+
+- The website publishes a `security.txt` file under `/.well-known/` with the
+  security contact.
 
 ## [v1.0.2] - 2026-10-31
 
