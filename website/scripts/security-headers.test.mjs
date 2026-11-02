@@ -223,7 +223,7 @@ test("the Star History chart origin lands only on the page that renders it", () 
     const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
     const csp = (src) =>
       config.routes.find((route) => route.src === src).headers["Content-Security-Policy"];
-    assert.ok(imgSources(csp("^/$")).includes("https://api.star-history.com"));
+    assert.deepEqual(imgSources(csp("^/$")), ["'self'", "data:", "https://api.star-history.com"]);
     assert.deepEqual(imgSources(csp("^/docs/guide/?$")), ["'self'", "data:"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
