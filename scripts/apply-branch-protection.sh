@@ -23,6 +23,10 @@
 #   v1.7.0 upstream, so it was deleted rather than left excluded. govulncheck
 #   now has exactly one gate.)
 #
+# "Website Browser Checks" (ci-verify.yml, the job posts under its own name) is
+# required too. It is safe because ci-verify.yml has no `paths:` filter on its
+# pull_request trigger and the job only skips on `schedule`, never on a PR.
+#
 # The two security-grype.yml jobs that ARE required below only became safe to
 # require once that workflow lost its `paths:` filter. A required check must
 # report on every PR shape; a path-filtered workflow produces no check run at
@@ -32,7 +36,8 @@
 #
 # This list MUST match the live ruleset. The script updates the ruleset in
 # place, so a stale list here silently REMOVES required checks the next time
-# anyone runs it. Verified against ruleset 17620625 on 2026-08-19.
+# anyone runs it. Verified against ruleset 17620625 on 2026-11-02
+# (14 live contexts matched the prior list; Website Browser Checks added as the 15th).
 #
 # Modifying repo security settings is intentionally NOT automated by the agent —
 # this script is the one human-applied step. Idempotent: creates the ruleset if
@@ -86,6 +91,7 @@ RULESET="$(
           { "context": "Security: Gosec SAST",      "integration_id": 15368 },
           { "context": "Security: Grype Dependency Scan (Go + npm)", "integration_id": 15368 },
           { "context": "Release Contract",          "integration_id": 15368 },
+          { "context": "Website Browser Checks",    "integration_id": 15368 },
           { "context": "codecov/patch",             "integration_id": 254 }
         ]
       }

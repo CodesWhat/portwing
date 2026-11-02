@@ -802,6 +802,8 @@ required_ci_contexts=(
 	"CodeQL Analysis"
 	"Security: Gosec SAST"
 	"Security: Grype Dependency Scan (Go + npm)"
+	"Release Contract"
+	"Website Browser Checks"
 )
 
 for context in "${required_ci_contexts[@]}"; do
@@ -953,6 +955,19 @@ if [ -n "$grype_pr_paths" ]; then
 	echo "FAIL: security-grype.yml must not path-filter its pull_request trigger; its jobs are required contexts" >&2
 	failures=$((failures + 1))
 fi
+
+# "Website Browser Checks" is a required context too, so ci-verify.yml must
+# fire on every PR: no `paths:` filter under pull_request, and the job may skip
+# only on schedule.
+ci_verify_pr_paths="$(
+	perl -0777 -ne 'print "path-filtered" if /^  pull_request:.*?^    paths:/ms' \
+		.github/workflows/ci-verify.yml
+)"
+if [ -n "$ci_verify_pr_paths" ]; then
+	echo "FAIL: ci-verify.yml must not path-filter its pull_request trigger; Website Browser Checks is a required context" >&2
+	failures=$((failures + 1))
+fi
+require_text ".github/workflows/ci-verify.yml" "if: github.event_name != 'schedule'" "Website Browser Checks may skip only on schedule"
 
 # A .gitleaksignore entry pinned to a working-tree fingerprint (file:rule:line)
 # addresses a line number in the current tree. The PR Secrets check restores

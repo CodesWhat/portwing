@@ -50,12 +50,13 @@
 
 ## Required checks and the promotion order
 
-`main` requires 14 check contexts, declared in
+`main` requires 15 check contexts, declared in
 `scripts/apply-branch-protection.sh`. Seven are `Go CI / ...`, produced by
 the caller job's name in `ci-verify.yml` plus a job name inside the upstream
-reusable workflow. Six are this repo's own jobs: `Security: Secrets`,
+reusable workflow. Seven are this repo's own jobs: `Security: Secrets`,
 `Dependency Review`, `CodeQL Analysis`, `Security: Gosec SAST`,
-`Security: Grype Dependency Scan (Go + npm)`, and `Release Contract`.
+`Security: Grype Dependency Scan (Go + npm)`, `Release Contract`, and
+`Website Browser Checks`.
 The remaining context is Codecov's `codecov/patch`.
 
 Two rules keep this from wedging the repo:
