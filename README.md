@@ -32,7 +32,7 @@
 <hr>
 
 > [!NOTE]
-> **The current release line is `v1.0.4`; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published.** The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1.0 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **The current release line is `v1.1.0`; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published.** The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1.0 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
 Controller-assisted two-key rotation requires Portwing `v1.0` or later
 and Drydock `v1.8.0-rc.1` or later on the v1.8 line. Both sides require explicit
@@ -161,7 +161,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.4
+    image: ghcr.io/codeswhat/portwing:1.1.0
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -223,7 +223,7 @@ The image runs as UID 65532, so `group_add` with the Docker socket's group ID is
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.4
+    image: ghcr.io/codeswhat/portwing:1.1.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -268,10 +268,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_1.0.4_linux_amd64.deb
+sudo apt install ./portwing_1.1.0_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_1.0.4_linux_amd64.rpm
+sudo rpm --install ./portwing_1.1.0_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -295,7 +295,7 @@ docker run -d \
   -v portwing-state:/data/credentials \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.0.4
+  ghcr.io/codeswhat/portwing:1.1.0
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -478,6 +478,8 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.8.x** ✅ | Operations & Distribution | Mode-aware `/health` and `/ready`, cursor-based NDJSON audit export, runnable Compose and Kubernetes observability examples, continuous edge logs, Homebrew cask and signed `deb`/`rpm` packages, published stability policy, edge mode production supported |
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks |
 | **v1.0** ✅ | Binding Stability | `STABILITY.md` guarantees are binding semver commitments, opt-in controller-assisted two-key rotation (first available in rc.2, Drydock `v1.8.0-rc.1+`), competitive review refreshed against primary sources, final v0.9 docs archived from its release tag |
+| **v1.1** ✅ | Audience-Bound Signatures | Ed25519 signature version 3 binds each request to one agent (Drydock 1.9+), stable persistent agent ID under `/data/credentials`, `SIGNATURE_MIN_VERSION`, `portwing signature-lock` for downgrade locks |
+| **Planned** | Enrollment Over TLS | Enrollment requires TLS unless `ALLOW_INSECURE_ENROLLMENT` opts in. Not shipped in v1.1; the agent only warns at startup |
 | **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.

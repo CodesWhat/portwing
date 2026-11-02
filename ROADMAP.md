@@ -1,7 +1,7 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.0.4`,
-> a custom 404 page on Vercel and Sockguard 2.4.2 example pins, with no change to the agent or images.
+> Portwing is stable software. The current release line is `v1.1.0`,
+> which adds audience-bound v3 request signatures.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
@@ -133,11 +133,16 @@ additive feature support. Follow
 [RELEASING.md](RELEASING.md#release-documentation-and-compatibility).
 Legacy query-free HTTP signatures have no scheduled removal.
 
-**Planned for v1.1: enrollment requires TLS.** Plaintext HTTP enrollment is
-deprecated. Starting in v1.1, enrollment will require TLS, either directly or
+**Shipped in v1.1: audience-bound signatures.** Ed25519 signature version 3
+binds a request to one agent, with a stable agent ID kept under
+`/data/credentials`. It needs Drydock 1.9 or later; version 2 and legacy
+signatures stay accepted. See [COMPATIBILITY.md](COMPATIBILITY.md#http-signature-compatibility).
+
+**Planned: enrollment requires TLS.** Plaintext HTTP enrollment is
+deprecated. Enrollment will require TLS, either directly or
 through a trusted proxy reporting HTTPS, unless `ALLOW_INSECURE_ENROLLMENT`
-explicitly opts in. v1.0.2 only warns at startup; the opt-in setting is planned
-for v1.1 and is not available yet.
+explicitly opts in. This did not ship in v1.1. The agent only warns at
+startup, and the opt-in setting is not available yet.
 
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,

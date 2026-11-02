@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.0] - 2026-11-02
+
+This release adds audience-bound Ed25519 request signatures (version 3).
+Version 3 needs Drydock 1.9 or later on the controller side. To get it, mount
+a writable `/data/credentials` volume on the agent. The shipped Compose and
+Kubernetes examples already do. Nothing else is required, and an agent
+without that volume keeps accepting version 2 and legacy signatures as before.
+The wire protocol is unchanged (`portwing/1.0`, `DrydockCompat` 1.4.0). The
+planned TLS-only enrollment is not part of this release.
+
 ### Added
 
 - Ed25519 request signature version 3 binds a signature to one agent. The
@@ -49,6 +59,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still accepted.
 - The controller-assisted rotation endpoints accept signature version 3 as
   well as version 2.
+
+### Fixed
+
+- Missing website paths on Vercel now reach the site's 404 page. The generated
+  routing config now has the resource phase with a bare 404 route between the
+  filesystem phase and the error route, which the v1.0.4 change missed.
+
+### Documentation
+
+- The README edge Compose snippet includes `group_add` and `DOCKER_SOCK_GID`.
+- The authentication docs cover `keygen -pub-from` and where the
+  `authorized_keys` line ends up, and the audit docs describe the
+  `key_rotation` event.
+- The website roadmap credits the v0.1 to v0.5 items to the releases that
+  shipped them, and Arcane's agent Prometheus support is marked in the
+  comparison matrix.
+- Release wording in the README, roadmap, compatibility page and website now
+  holds both before and after a release is published.
+- The docs for the v1.0 line are archived at `/docs/v1.0/...`, and the
+  unversioned docs now describe v1.1.
 
 ### Security
 

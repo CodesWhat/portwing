@@ -2,12 +2,16 @@
 
 ## Supported Versions
 
-Security fixes are shipped on the **latest stable release line**. The 0.9
-line became unsupported when v1.0 shipped.
+Security fixes are shipped on the **latest stable release line**. The 1.0
+line became unsupported when v1.1 shipped, and the 0.9 line became
+unsupported when v1.0 shipped. Upgrade from 1.0.x to 1.1.x; the 1.1 line keeps
+the 1.0 wire and stays compatible with existing controllers (see
+[COMPATIBILITY.md](COMPATIBILITY.md)).
 
 | Version        | Supported          |
 | -------------- | ------------------ |
-| 1.0.x (latest stable) | :white_check_mark: |
+| 1.1.x (latest stable) | :white_check_mark: |
+| 1.0.x          | :x:                |
 | < 1.0          | :x:                |
 
 ## Reporting a Vulnerability

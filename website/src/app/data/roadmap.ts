@@ -158,11 +158,22 @@ export const roadmap: Milestone[] = [
   },
   {
     version: "v1.1",
-    title: "Enrollment Over TLS",
+    title: "Audience-Bound Signatures",
     emoji: "🔏",
+    status: "released",
+    items: [
+      "Ed25519 request signature version 3 binds each signature to one agent, so a captured request can't be replayed against another agent that trusts the same key (needs Drydock 1.9 or later)",
+      "Stable agent ID, generated once and kept in the new STATE_DIR (default /data/credentials); mount /data/credentials and v3 works with no other change",
+      "SIGNATURE_MIN_VERSION and the portwing signature-lock command control the downgrade lock on version 2 and legacy signatures",
+    ],
+  },
+  {
+    version: "Planned",
+    title: "Enrollment Over TLS",
+    emoji: "🔐",
     status: "planned",
     items: [
-      "Enrollment requires TLS, either native or through a trusted proxy reporting HTTPS, unless ALLOW_INSECURE_ENROLLMENT explicitly opts in (v1.0.2 only warns)",
+      "Enrollment requires TLS, either native or through a trusted proxy reporting HTTPS, unless ALLOW_INSECURE_ENROLLMENT explicitly opts in. Not in v1.1: the agent still only warns at startup",
     ],
   },
   {
