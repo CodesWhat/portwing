@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/CodesWhat/sockguard",
-  "tag": "v2.4.1",
+  "tag": "v2.4.2",
   "files": {
     "sockguard.yaml": {
       "source": "app/configs/portwing.yaml",

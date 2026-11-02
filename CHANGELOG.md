@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Pin the deployment examples to Sockguard 2.4.2, which tightens exec-session
+  inspection visibility, image environment redaction and Podman engine
+  identification. The bundled presets are unchanged from 2.4.1.
+
 ## [v1.0.3] - 2026-11-02
 
 This release updates the website and documentation only. The agent binary and
