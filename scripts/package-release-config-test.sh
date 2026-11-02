@@ -356,7 +356,7 @@ require_text "README.md" "${public_site}/docs/installation" "the repository land
 require_text "docs/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "documentation metadata must use the public website"
 require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "website metadata must use the public website"
 require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
-require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
+require_text "README.md" "The current release line is \`v${release_version}\`" "the repository landing page must identify the current release"
 release_version_regex="${release_version//./\\.}"
 stale_readme_examples="$(grep -Eo "(VERSION=|portwing_)${release_value_pattern}" README.md |
 	grep -Ev "^(VERSION=|portwing_)${release_version_regex}$" || true)"
@@ -379,7 +379,7 @@ if [ "${release_version}" != "unresolved" ] && [ "${docs_version_title}" != "${e
 	failures=$((failures + 1))
 fi
 require_text "website/public/llms.txt" "Portwing v${release_version} is" "agent discovery metadata must identify the current release"
-require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must identify the current release"
+require_text "ROADMAP.md" "The current release line is \`v${release_version}\`" "the roadmap must identify the current release"
 release_label="release metadata"
 case "${release_version}" in
 *-rc.*) release_label="release candidate" ;;

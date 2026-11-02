@@ -129,6 +129,8 @@ No shared secret is involved. Compromising one client's private key does not aff
 portwing keygen -comment "my-platform:prod"
 ```
 
+The last line of keygen's stdout is the `authorized_keys` line. To re-derive it later from an existing private key, run `portwing keygen -pub-from <private.pem> [-comment <text>]`; it prints only that line.
+
 Copy the `authorized_keys` output line to the agent host:
 
 ```text

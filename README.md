@@ -32,7 +32,7 @@
 <hr>
 
 > [!NOTE]
-> **Release preparation is currently `v1.0.4` on `dev/v1.0`.** Confirm publication in [GitHub Releases](https://github.com/CodesWhat/portwing/releases) before using the version-pinned examples below. The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1.0 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **The current release line is `v1.0.4`; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published.** The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1.0 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
 Controller-assisted two-key rotation requires Portwing `v1.0` or later
 and Drydock `v1.8.0-rc.1` or later on the v1.8 line. Both sides require explicit
@@ -211,7 +211,12 @@ Edge mode is Ed25519-only — generate a keypair first and register the public k
 ```bash
 portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
 sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
+export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 ```
+
+The last line of keygen's stdout is the `authorized_keys` line to register with Drydock. With `keygen > portwing_ed25519.pem` it lands as the last line of the `.pem` file, not on the terminal. To print just that line, run `portwing keygen -pub-from portwing_ed25519.pem`.
+
+The image runs as UID 65532, so `group_add` with the Docker socket's group ID is what lets it reach the socket.
 
 ```yaml
 services:
@@ -225,6 +230,9 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp
+    user: "65532:65532"
+    group_add:
+      - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
