@@ -23,8 +23,8 @@ DrydockCompat bumps.
 v1.0.2 keeps the existing wire and watcher/update contract. The 0.9 line is
 no longer supported; see [SECURITY.md](SECURITY.md) for support boundaries.
 
-The v1.0.2 release metadata is prepared on dev; check [published releases](https://github.com/CodesWhat/portwing/releases) for availability. Its exact published artifacts
-must pass a fresh hosted matrix after the release is cut. The historical runs
+v1.0.2 is the current release; see [published releases](https://github.com/CodesWhat/portwing/releases). Its exact published artifacts
+must pass a fresh hosted matrix. The historical runs
 below do not verify this build.
 
 ### Published candidate evidence
