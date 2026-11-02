@@ -73,7 +73,7 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 | `compose_op` | A Docker Compose lifecycle operation runs |
 | `exec_start` | An exec start is attempted: an interactive tunnel, a detached `docker exec -d`, or an attached start sent without an upgrade. Written for each attempt that reaches the admission decision, before anything reaches Docker. A streamed-body start dropped while its body is still being reassembled (missing or duplicate request ID, bad base64, a byte cap, the idle timeout, a cancel) never gets there and writes none |
 | `enrollment` | An Ed25519 key is enrolled via `/api/portwing/enroll` |
-| `key_rotation` | A key rotation step runs: the controller prepares, commits or aborts a replacement key, or the edge agent confirms it after the controller accepts the replacement |
+| `key_rotation` | A key rotation step runs: the controller prepares, commits or aborts a replacement key (standalone), prepares, activates or aborts it (edge), or the edge agent confirms it after the controller accepts the replacement |
 
 ### Additional fields by event type
 
@@ -105,10 +105,10 @@ If the start then fails, the `exec_start` record stays `allowed` and the failure
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `operation` | string | The rotation step: `prepare`, `commit`, `abort`, or `confirm`. `confirm` is written by the edge client; the others by the standalone rotation endpoint |
+| `operation` | string | The rotation step. The standalone rotation endpoint writes `prepare`, `commit` or `abort`. The edge client writes `prepare`, `activate` or `abort` for the controller's rotation requests, and `confirm` once the controller accepts the replacement |
 | `key_id` | string | The key ID of the caller performing the rotation, or for `confirm` the agent's current key ID |
 
-A rotation request the registry rejects (forbidden, conflicting, invalid, or rotation disabled) records `denied`; any other failure records `error`.
+On the standalone endpoint, a rotation request the registry rejects (forbidden, conflicting, invalid, or rotation disabled) records `denied`; any other failure records `error`. Edge-written records are only `allowed` or `error`, never `denied`.
 
 **`api_request`** stream completion:
 
