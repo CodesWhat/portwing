@@ -178,6 +178,7 @@ services:
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
       - TOKEN_FILE=/run/secrets/portwing_token
@@ -191,6 +192,7 @@ secrets:
 volumes:
   sockguard-socket:
   portwing-stacks:
+  portwing-state:
 ```
 
 The `sockguard.yaml` preset above (a copy of sockguard's `portwing.yaml`) denies all exec. If Drydock's edge exec feature is in play, use [`examples/docker-compose.edge-with-exec.yml`](examples/docker-compose.edge-with-exec.yml) instead, which pairs edge mode with sockguard's `portwing-with-exec.yaml` preset (`examples/sockguard-with-exec.yaml`). See the [Drydock integration](docs/drydock-integration.md) notes for how denial reasons reach the controller.
@@ -236,6 +238,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - DRYDOCK_URL=https://drydock.example.com
       - PRIVATE_KEY_FILE=/run/secrets/portwing_key
@@ -249,6 +252,7 @@ secrets:
 
 volumes:
   portwing-stacks:
+  portwing-state:
 ```
 
 </details>
@@ -288,6 +292,7 @@ docker run -d \
   --name portwing \
   --group-add $(stat -c '%g' /var/run/docker.sock) \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -v portwing-state:/data/credentials \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
   ghcr.io/codeswhat/portwing:1.0.4

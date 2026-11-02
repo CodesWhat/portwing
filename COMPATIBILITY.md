@@ -131,6 +131,21 @@ only for query-free requests. This does not change `DrydockCompat`: it affects
 the Standard Mode HTTP authentication contract, not the edge WebSocket wire
 protocol.
 
+Portwing v1.1 adds Ed25519 HTTP signature version 3, which binds a signature
+to one agent. Clients set `X-Portwing-Signature-Version: 3`, read the audience
+from `agentId` in `GET /_portwing/info`, and sign
+`portwing-sig-v3\n<agentId>\nMETHOD\nTARGET\nBODY_SHA256\nTIMESTAMP\nNONCE`
+with the same query-inclusive target as version 2. Version 3 needs Drydock 1.9
+or later on the controller side. Version 2 and legacy signatures stay accepted
+for a key until that key signs its first version 3 request, which locks it to
+version 3, or until `SIGNATURE_MIN_VERSION` is set. Rolling a controller back
+to Drydock 1.8 after its keys locked requires
+`portwing signature-lock clear <keyID>` on each agent. The agent refuses version 3 (and keeps accepting
+version 2 and legacy) when it has no persistent agent ID or no writable state directory:
+mount a writable state directory (setting `AGENT_ID` is optional); `GET /_portwing/info` reports `v3` and `v3Reason`.
+The downgrade lock is per key ID and does not carry over a key rotation.
+Rotation endpoints accept version 2 or 3. This does not change `DrydockCompat`.
+
 ## Sockguard preset compatibility
 
 The presets below are sockguard's Portwing-targeted presets as of sockguard

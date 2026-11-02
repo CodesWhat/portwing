@@ -141,7 +141,7 @@ components:
         is present the agent verifies the request via Ed25519 instead of the
         shared token.
 
-        Signature version 2 requires five headers together:
+        Signature versions 2 and 3 require five headers together:
 
         | Header | Format | Example |
         |--------|--------|---------|
@@ -149,19 +149,36 @@ components:
         | `X-Portwing-Timestamp` | Unix epoch, seconds, decimal | `1749600000` |
         | `X-Portwing-Nonce` | 32 random hex chars (128-bit) | `a1b2c3d4e5f6...` |
         | `X-Portwing-Signature` | base64url (no padding) Ed25519 signature | `d2hh...` |
-        | `X-Portwing-Signature-Version` | canonical format version | `2` |
+        | `X-Portwing-Signature-Version` | canonical format version | `2` or `3` |
 
-        The signed canonical string is:
+        The version 2 signed canonical string is:
         ```
         METHOD\nREQUEST-TARGET\nbody-sha256-hex\nunix-timestamp\nnonce
         ```
         `REQUEST-TARGET` is the escaped path plus the exact raw query string.
         Unversioned legacy signatures are accepted only on query-free requests.
+
+        Version 3 (Portwing 1.1 and later, Drydock 1.9 and later) binds the
+        signature to one agent. The canonical string is:
+        ```
+        portwing-sig-v3\nAGENT-ID\nMETHOD\nREQUEST-TARGET\nbody-sha256-hex\nunix-timestamp\nnonce
+        ```
+        `AGENT-ID` is the `agentId` from `GET /_portwing/info`. An optional
+        `X-Portwing-Audience` header naming the agent ID makes a mismatch
+        report `audience-mismatch`. Once a key verifies a version 3 request,
+        its version 2 and legacy signatures are refused with
+        `signature-locked` (`portwing signature-lock clear` removes the lock),
+        and `SIGNATURE_MIN_VERSION` can require a minimum for every key.
         For an empty body, `body-sha256-hex` is the full SHA-256 of the empty
         string: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
 
         On failure, the response includes `X-Portwing-Reason` with one of:
-        `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`.
+        `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`,
+        `nonce-capacity`, `audience-mismatch`, `signature-locked`,
+        `signature-version-too-low`, `agent-id-not-v3-compatible`,
+        `agent-id-not-persistent`, `state-not-writable`. The v3-specific reasons
+        are returned only when the signature verified; a forged signature
+        always gets `invalid-signature`.
 
   schemas:
     HealthResponse:
@@ -200,7 +217,7 @@ components:
 
     InfoResponse:
       type: object
-      required: [version, dockerVersion, mode, uptime, hostname, agentId, agentName, capabilities]
+      required: [version, dockerVersion, mode, uptime, hostname, agentId, agentName, capabilities, v3]
       properties:
         version:
           type: string
@@ -223,11 +240,31 @@ components:
           example: "my-server"
         agentId:
           type: string
-          format: uuid
-          example: "550e8400-e29b-41d4-a716-446655440000"
+          minLength: 1
+          description: >
+            Stable agent ID and the audience of version 3 signatures.
+            Generated once as 32 lowercase hex characters and persisted, or
+            set with AGENT_ID. Matches `^[a-z0-9-]{1,64}$` whenever `v3` is
+            true; an AGENT_ID from an earlier release outside that rule is
+            still reported here, with `v3` false.
+          example: "0123456789abcdef0123456789abcdef"
         agentName:
           type: string
           example: "my-server"
+        v3:
+          type: boolean
+          description: >
+            Whether the agent accepts signature version 3. Version 2 and
+            legacy signatures are unaffected. A controller should sign
+            version 3 only when this is true.
+        v3Reason:
+          type: string
+          enum: [agent-id-not-v3-compatible, agent-id-not-persistent, state-not-writable]
+          description: >
+            Present only when `v3` is false. `agent-id-not-v3-compatible`:
+            AGENT_ID is outside `^[a-z0-9-]{1,64}$`. `agent-id-not-persistent`:
+            no AGENT_ID and no persistent state directory. `state-not-writable`:
+            the state directory cannot hold the downgrade locks.
         capabilities:
           type: array
           description: >
@@ -648,7 +685,9 @@ components:
           description: Event timestamp (RFC3339 UTC).
         event:
           type: string
-          description: Event type.
+          description: >
+            Event type, for example `api_request`, `auth_failure`,
+            `exec_start`, `key_rotation` or `signature_lock`.
           example: "exec_start"
         actor:
           type: string
@@ -976,11 +1015,14 @@ paths:
       summary: Agent metadata
       description: >
         Returns agent version, Docker version, connection mode, uptime,
-        hostname, and capability list. Bearer auth required.
+        hostname, agent ID, and capability list. Bearer or Ed25519 auth
+        required. Version 2 and 3 signatures are accepted, so a controller
+        can read `agentId` (the version 3 audience) before it signs version 3.
       tags: [Agent]
       security:
         - bearerToken: []
         - portwingToken: []
+        - ed25519Signature: []
       responses:
         "200":
           description: Agent metadata.

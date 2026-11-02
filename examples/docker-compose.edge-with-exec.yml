@@ -78,6 +78,7 @@ services:
     volumes:
       - sockguard-socket:/var/run/sockguard:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - DOCKER_SOCKET=/var/run/sockguard/sockguard.sock
       - DRYDOCK_URL=https://drydock.example.com
@@ -93,3 +94,4 @@ secrets:
 volumes:
   sockguard-socket:
   portwing-stacks:
+  portwing-state:

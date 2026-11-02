@@ -3,6 +3,8 @@
 
 Ready-to-run Docker Compose and Kubernetes examples, hardened by default (`read_only`/`readOnlyRootFilesystem`, `cap_drop: [ALL]`, `no-new-privileges`/`allowPrivilegeEscalation: false`, secrets instead of inline tokens).
 
+Every example persists `/data/credentials` (a `portwing-state` volume in Compose, a hostPath in Kubernetes). It holds the agent ID and the signature version locks, and without it, or an explicit `AGENT_ID`, the agent refuses Ed25519 signature version 3 and serves only version 2 and legacy signatures. In Kubernetes, pre-create the hostPath directory like the stacks one: `sudo install -d -m 0700 -o 65532 -g 65532 /var/lib/portwing/credentials`.
+
 | File | Mode | When to use |
 | ---- | ---- | ----------- |
 | [`docker-compose.standard.yml`](docker-compose.standard.yml) | Standard (inbound HTTP on :3000) | Drydock or any client can reach the host directly |
