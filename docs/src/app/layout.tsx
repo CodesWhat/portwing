@@ -3,26 +3,22 @@
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { AnalyticsRuntime } from "@/components/analytics-runtime";
 import { Footer } from "@/components/footer";
-import { SiteBackground } from "@/components/site-background";
+import { IconSprite } from "@/components/icons";
 import { SiteHeader } from "@/components/site-header";
 import { versionTabsOption } from "@/lib/docs-versions";
 import { BASE_URL, SITE_CONFIG } from "@/lib/site-config";
 import { source } from "@/lib/source";
+import "./skin-portwing.css";
 import "./globals.css";
 
-const ibmPlexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
+const SHARE_IMAGE = {
+  url: new URL("/og-image.png", BASE_URL).toString(),
+  width: 1200,
+  height: 630,
+  alt: `${SITE_CONFIG.name} Docs`,
+};
 
 export const metadata: Metadata = {
   title: {
@@ -31,12 +27,22 @@ export const metadata: Metadata = {
   },
   description: SITE_CONFIG.description,
   metadataBase: new URL(BASE_URL),
+  // summary_large_image needs an image, so the card and the image are declared together.
+  openGraph: {
+    siteName: `${SITE_CONFIG.name} Docs`,
+    type: "website",
+    images: [SHARE_IMAGE],
+  },
+  twitter: {
+    card: "summary_large_image",
+    images: [SHARE_IMAGE.url],
+  },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0c0a10" },
+    { media: "(prefers-color-scheme: light)", color: "#f1f4f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#12151c" },
   ],
 };
 
@@ -46,47 +52,60 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${ibmPlexSans.className} ${ibmPlexMono.variable}`}>
+    <html
+      lang="en"
+      data-product="portwing"
+      data-family="one-dark"
+      data-mode="dark"
+      suppressHydrationWarning
+    >
+      <body>
+        <a className="skip" href="#main-content">
+          Skip to content
+        </a>
+        <IconSprite />
         {/*
-         * RootProvider (fumadocs-ui/provider/next) already initialises next-themes
-         * with attribute="class". ThemeToggle uses useTheme() from the same
-         * next-themes instance — no separate ThemeProvider needed.
+         * RootProvider (fumadocs-ui/provider/next) initialises next-themes. The mode is mirrored
+         * onto <html data-mode> for the shared skin and onto the `dark` class for Fumadocs. With
+         * no saved choice it follows the system scheme, as website/ does. Search is not part of
+         * these docs, so its dialog and hotkey are off.
          */}
-        <RootProvider>
-          <div
-            data-bg={SITE_CONFIG.aurora}
-            data-aurora-motion="true"
-            className="relative min-h-screen"
-          >
-            <SiteBackground />
-            <a
-              href="#main-content"
-              className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-neutral-900 focus:shadow-lg dark:focus:bg-neutral-900 dark:focus:text-neutral-100"
+        <RootProvider
+          theme={{
+            attribute: ["class", "data-mode"],
+            defaultTheme: "system",
+            enableSystem: true,
+          }}
+          search={{ enabled: false }}
+        >
+          <SiteHeader />
+          <main id="main-content">
+            {/*
+             * DocsLayout owns the sidebar. The built-in theme switch and search toggle are
+             * disabled so SiteHeader above is the sole chrome.
+             */}
+            <DocsLayout
+              tree={source.pageTree}
+              tabs={versionTabsOption(source.pageTree)}
+              nav={{
+                // Only the sub-header is shown, and only below md: it carries the button that opens
+                // the docs sidebar as a drawer. The brand it would repeat is hidden in CSS.
+                title: (
+                  <>
+                    {/* biome-ignore lint/performance/noImgElement: basePath="/docs" makes next/image prepend /docs to root-relative src; this asset lives at the marketing-site origin root, so a plain <img> is required. */}
+                    <img src="/brand/pigeon-64.webp" alt="" width={36} height={36} />
+                    <span>{SITE_CONFIG.name} docs</span>
+                  </>
+                ),
+                children: <span className="subnav-label">Docs navigation</span>,
+              }}
+              themeSwitch={{ enabled: false }}
+              searchToggle={{ enabled: false }}
             >
-              Skip to content
-            </a>
-            <div className="relative z-10 flex min-h-screen flex-col">
-              <SiteHeader />
-              <main id="main-content" className="flex-1">
-                {/*
-                 * DocsLayout owns the sidebar. The built-in fumadocs nav header,
-                 * theme switch, and search toggle are disabled so the SiteHeader
-                 * above is the sole chrome — no double-header.
-                 */}
-                <DocsLayout
-                  tree={source.pageTree}
-                  tabs={versionTabsOption(source.pageTree)}
-                  nav={{ enabled: false }}
-                  themeSwitch={{ enabled: false }}
-                  searchToggle={{ enabled: false }}
-                >
-                  {children}
-                </DocsLayout>
-              </main>
-              <Footer />
-            </div>
-          </div>
+              {children}
+            </DocsLayout>
+          </main>
+          <Footer />
         </RootProvider>
         <AnalyticsRuntime />
       </body>

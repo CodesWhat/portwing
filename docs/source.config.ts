@@ -15,5 +15,7 @@ export const docs = defineDocs({
 export default defineConfig({
   mdxOptions: {
     remarkPlugins: [remarkVersionedLinks],
+    // One Dark in both modes: code blocks are always the dark code surface (see globals.css).
+    rehypeCodeOptions: { themes: { light: "one-dark-pro", dark: "one-dark-pro" } },
   },
 });
