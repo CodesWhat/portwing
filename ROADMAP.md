@@ -133,6 +133,12 @@ additive feature support. Follow
 [RELEASING.md](RELEASING.md#release-documentation-and-compatibility).
 Legacy query-free HTTP signatures have no scheduled removal.
 
+**Planned for v1.1: enrollment requires TLS.** Plaintext HTTP enrollment is
+deprecated. Starting in v1.1, enrollment will require TLS, either directly or
+through a trusted proxy reporting HTTPS, unless `ALLOW_INSECURE_ENROLLMENT`
+explicitly opts in. v1.0.2 only warns at startup; the opt-in setting is planned
+for v1.1 and is not available yet.
+
 Post-v1 candidates are intentionally demand-driven: controller-managed
 Portwing upgrade/rollback waves, optional client-certificate authentication,
 and polling/intermittent edge transport.
