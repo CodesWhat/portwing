@@ -7,7 +7,7 @@ import { TrackedLink } from "@/components/tracked-link";
 import { GITHUB_URL, SITE_CONFIG } from "@/lib/site-config";
 
 // The docs app runs under basePath="/docs". Next <Link> prefixes every href with /docs, which
-// would send the logo and Compare to the wrong place. All cross-app navigation uses plain <a>
+// would send the logo to the wrong place. All cross-app navigation uses plain <a>
 // anchors that ignore basePath and resolve at the origin root.
 export function SiteHeader() {
   return (
@@ -23,10 +23,6 @@ export function SiteHeader() {
             <Ic name="book-open" />
             Docs
           </TrackedLink>
-          <a href="/compare">
-            <Ic name="arrows-clockwise" />
-            Compare
-          </a>
           <TrackedLink
             href={GITHUB_URL}
             target="_blank"
@@ -49,10 +45,6 @@ export function SiteHeader() {
             <a href="/docs">
               <Ic name="book-open" />
               Docs
-            </a>
-            <a href="/compare">
-              <Ic name="arrows-clockwise" />
-              Compare
             </a>
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
               <Ic name="github-logo" />

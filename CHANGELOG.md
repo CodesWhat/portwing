@@ -25,6 +25,8 @@ changes since v1.0.3.
   every pull request.
 - The docs use more of wide screens: the layout is 1600px wide instead of 1240px
   and the article column can grow to 900px.
+- The docs header no longer carries Compare. It stays in the docs footer and
+  on the website.
 
 ### Security
 
