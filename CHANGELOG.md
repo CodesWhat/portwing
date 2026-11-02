@@ -23,6 +23,8 @@ changes since v1.0.3.
 
 - The website now gets browser checks in Chromium, Firefox and WebKit on
   every pull request.
+- The docs use more of wide screens: the layout is 1600px wide instead of 1240px
+  and the article column can grow to 900px.
 
 ### Security
 

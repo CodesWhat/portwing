@@ -70,7 +70,7 @@ html[data-product="portwing"] #nd-sidebar {
    Layout: the mock's 272px sidebar, fluid column, 224px "on this page" rail
 --------------------------------------------------------------------------- */
 #nd-docs-layout {
-  --fd-layout-width: 1240px;
+  --fd-layout-width: 1600px;
 }
 @media (min-width: 768px) {
   #nd-docs-layout {
@@ -141,7 +141,7 @@ html[data-product="portwing"] #nd-sidebar {
    Page header
 --------------------------------------------------------------------------- */
 #nd-page {
-  max-width: 780px;
+  max-width: 900px;
   font-size: 13.5px;
 }
 .ph {
