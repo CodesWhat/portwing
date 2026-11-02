@@ -52,6 +52,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runKeygen(args[2:], stdout, stderr)
 	}
 
+	if len(args) >= 2 && args[1] == "signature-lock" {
+		return runSignatureLock(args[2:], stdout, stderr)
+	}
+
 	if len(args) >= 2 && (args[1] == "version" || args[1] == "--version" || args[1] == "-V") {
 		fmt.Fprintln(stdout, protocol.AgentVersion)
 		return 0
@@ -179,6 +183,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  healthcheck  probe the local health endpoint")
 	fmt.Fprintln(w, "  hash-token   hash a token from stdin for use as TOKEN_HASH")
 	fmt.Fprintln(w, "  keygen       generate an Ed25519 keypair for AUTHORIZED_KEYS auth")
+	fmt.Fprintln(w, "  signature-lock  list or clear per-key v3 downgrade locks")
 	fmt.Fprintln(w, "  version      print the agent version")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags:")
