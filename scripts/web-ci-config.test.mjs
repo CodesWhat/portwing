@@ -115,14 +115,18 @@ test("check:web runs knip so dead-code coverage travels with the same gate", () 
   assert.equal(
     website.ignore,
     undefined,
-    "website workspace must not use a file-level ignore for src/components/ui/** " +
-      "(it exempts dead files too, not just the shadcn variant exports)",
+    "website workspace must not use a file-level ignore (it exempts dead files too)",
   );
-  assert.ok(
-    Object.hasOwn(website.ignoreIssues ?? {}, "src/components/ui/**"),
-    "website workspace must scope the shadcn exemption via ignoreIssues",
+  assert.equal(
+    website.ignoreIssues,
+    undefined,
+    "the shadcn components/ui exemption left with the redesign; no export exemptions remain",
   );
-  assert.deepEqual(website.ignoreIssues["src/components/ui/**"], ["exports", "types"]);
+  assert.deepEqual(
+    website.ignoreDependencies,
+    ["postcss"],
+    "postcss is only referenced by the package.json overrides ($postcss), not by any import",
+  );
 
   assert.deepEqual(
     website.entry,

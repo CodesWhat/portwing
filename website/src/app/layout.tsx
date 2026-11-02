@@ -1,22 +1,12 @@
 // SPDX-License-Identifier: MIT
 
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { AnalyticsRuntime } from "@/components/analytics-runtime";
-import { ThemeProvider } from "@/components/theme-provider";
+import { IconSprite } from "@/components/icons";
 import { BASE_URL, SITE_CONFIG } from "@/lib/site-config";
-import "./globals.css";
-
-const ibmPlexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
+import "./skin-portwing.css";
+import "./suite.css";
+import "./site.css";
 
 // Bump this whenever the favicon/app icons change so browsers re-fetch them.
 const ICON_VERSION = "2";
@@ -63,16 +53,15 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0c0a10" },
+    { media: "(prefers-color-scheme: light)", color: "#f1f4f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#12151c" },
   ],
 };
 
-// Fail-open reveal gate: runs before bundled JS, adds `js` to <html>,
-// and fires a single IntersectionObserver for scroll reveals. If JS is
-// blocked the `.reveal` CSS defaults to visible.
-const REVEAL_BOOTSTRAP =
-  "(function(){var d=document,de=d.documentElement;de.classList.add('js');var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;function all(){var e=d.querySelectorAll('.reveal');for(var i=0;i<e.length;i++)e[i].classList.add('visible');}function arm(){if(reduce||!('IntersectionObserver' in window)){all();return;}var io=new IntersectionObserver(function(en){for(var i=0;i<en.length;i++){if(en[i].isIntersecting){en[i].target.classList.add('visible');io.unobserve(en[i].target);}}},{threshold:0.12,rootMargin:'0px 0px -40px 0px'});var e=d.querySelectorAll('.reveal');for(var i=0;i<e.length;i++)io.observe(e[i]);}if(d.readyState==='loading'){d.addEventListener('DOMContentLoaded',arm);}else{arm();}})();";
+// Runs before first paint so a saved or system light preference never flashes dark. The key
+// matches next-themes, which the docs app uses, so the choice carries across /docs.
+const THEME_INIT =
+  "(function(){var m=null;try{m=localStorage.getItem('theme');}catch(e){}if(m!=='light'&&m!=='dark'){m=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-mode',m);})();";
 
 export default function RootLayout({
   children,
@@ -80,15 +69,24 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      data-product="portwing"
+      data-family="one-dark"
+      data-mode="dark"
+      suppressHydrationWarning
+    >
       <head>
         <meta name="apple-mobile-web-app-title" content={SITE_CONFIG.name} />
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: intentional inline theme bootstrap, hashed into the route CSP */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
       </head>
-      <body className={`${ibmPlexSans.className} ${ibmPlexMono.variable}`}>
-        {/* Reveal bootstrap — inline, runs before anything else. */}
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: intentional inline bootstrap — see comment above */}
-        <script dangerouslySetInnerHTML={{ __html: REVEAL_BOOTSTRAP }} />
-        <ThemeProvider>{children}</ThemeProvider>
+      <body>
+        <a className="skip" href="#main-content">
+          Skip to content
+        </a>
+        <IconSprite />
+        {children}
         <AnalyticsRuntime />
       </body>
     </html>

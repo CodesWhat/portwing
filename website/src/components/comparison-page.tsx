@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 
-import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, Check, Clock, Minus, Terminal, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { CopyButton } from "@/components/copy-button";
 import { CtaButtons } from "@/components/cta-buttons";
-import { MarketingShell } from "@/components/marketing-shell";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Footer } from "@/components/footer";
+import { Ic } from "@/components/icons";
+import { SiteHeader } from "@/components/site-header";
 import { SITE_CONFIG } from "@/lib/site-config";
 
 export type ComparisonRow = {
@@ -16,23 +16,18 @@ export type ComparisonRow = {
 };
 
 export type Highlight = {
-  icon: LucideIcon;
+  /** Phosphor icon id from components/icon-symbols.ts. */
+  icon: string;
   title: string;
   description: string;
-};
-
-type CompetitorBadge = {
-  icon: LucideIcon;
-  label: string;
-  className: string;
 };
 
 type Props = {
   competitorName: string;
   heroTitle: string;
-  heroDescription: React.ReactNode;
-  competitorBadge: CompetitorBadge;
-  selfBadge: CompetitorBadge;
+  heroDescription: ReactNode;
+  competitorBadge: string;
+  selfBadge: string;
   comparisonData: ComparisonRow[];
   highlights: Highlight[];
   migrationTitle: string;
@@ -47,39 +42,47 @@ function JsonLdScript({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-function VerdictIcon({ verdict }: { verdict: ComparisonRow["verdict"] }) {
-  if (verdict === "self" || verdict === "competitor") {
-    return <Check className="h-4 w-4 text-violet-500" />;
-  }
-  return <Minus className="h-4 w-4 text-neutral-400" />;
-}
+type Verdict = { cls: string; icon: string; prefix: string };
 
-function PortwingQuickStart() {
+const GOOD: Verdict = { cls: "good", icon: "check", prefix: "Stronger: " };
+const GAP: Verdict = { cls: "gap", icon: "warning", prefix: "Weaker: " };
+const TIE: Verdict = { cls: "tie", icon: "minus", prefix: "On par: " };
+const NONE: Verdict = { cls: "no", icon: "x", prefix: "Not available: " };
+
+function Cell({ verdict, text }: { verdict: Verdict; text: string }) {
   return (
-    <Card className="border-neutral-200 bg-neutral-950 text-left dark:border-neutral-800">
-      <CardContent className="pt-4 pb-4">
-        <div className="mb-2 flex items-center gap-2 text-neutral-500">
-          <Terminal className="h-3.5 w-3.5" />
-          <span className="text-xs font-medium uppercase tracking-wider">Quick start</span>
-        </div>
-        <pre className="overflow-x-auto text-sm">
-          <code className="text-neutral-300">
-            <span className="text-neutral-500">$</span>{" "}
-            <span className="text-[#a78bfa]">docker run</span> -d \{"\n"}
-            {"  "}--name portwing \{"\n"}
-            {"  "}--read-only --cap-drop=ALL \{"\n"}
-            {"  "}--security-opt no-new-privileges:true \{"\n"}
-            {"  "}-v /var/run/docker.sock:/var/run/docker.sock:ro \{"\n"}
-            {"  "}-e TOKEN_HASH=&quot;$PORTWING_TOKEN_HASH&quot; \{"\n"}
-            {"  "}-p 3000:3000 \{"\n"}
-            {"  "}
-            {SITE_CONFIG.dockerImage}:{SITE_CONFIG.version}
-          </code>
-        </pre>
-      </CardContent>
-    </Card>
+    <td>
+      <span className={`v ${verdict.cls}`}>
+        <Ic name={verdict.icon} />
+        <span className="sr">{verdict.prefix}</span>
+        <span>{text}</span>
+      </span>
+    </td>
   );
 }
+
+function competitorVerdict(row: ComparisonRow): Verdict {
+  if (row.competitor === "No" || row.competitor === "None") return NONE;
+  if (row.verdict === "self") return GAP;
+  if (row.verdict === "competitor") return GOOD;
+  return TIE;
+}
+
+function selfVerdict(row: ComparisonRow): Verdict {
+  if (row.verdict === "self") return GOOD;
+  if (row.verdict === "competitor") return GAP;
+  return TIE;
+}
+
+// The one command every comparison page offers for moving onto Portwing.
+const QUICK_START = `docker run -d \\
+  --name portwing \\
+  --read-only --cap-drop=ALL \\
+  --security-opt no-new-privileges:true \\
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+  -e TOKEN_HASH="$PORTWING_TOKEN_HASH" \\
+  -p 3000:3000 \\
+  ${SITE_CONFIG.dockerImage}:${SITE_CONFIG.version}`;
 
 export function ComparisonPage({
   competitorName,
@@ -93,184 +96,150 @@ export function ComparisonPage({
   migrationDescription,
   jsonLd,
 }: Props) {
+  const name = SITE_CONFIG.name;
   return (
     <>
       <JsonLdScript data={jsonLd} />
-      <MarketingShell>
-        {/* Hero */}
-        <section className="px-4 pt-16 pb-16">
-          <div className="mx-auto max-w-4xl text-center">
-            <h1 className="mb-6 text-4xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 sm:text-5xl lg:text-6xl">
+      <SiteHeader current="compare" />
+      <main id="main-content">
+        <section className="cmp-hero" aria-labelledby="vs-h1">
+          <div className="wrap">
+            <h1 className="cp" id="vs-h1">
               {heroTitle}
             </h1>
-
-            <div className="mx-auto mb-8 max-w-2xl text-lg text-neutral-600 dark:text-neutral-400">
-              {heroDescription}
-            </div>
-
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <Badge className={competitorBadge.className}>
-                <competitorBadge.icon className="mr-1.5 h-3.5 w-3.5" />
-                {competitorBadge.label}
-              </Badge>
-              <Badge className={selfBadge.className}>
-                <selfBadge.icon className="mr-1.5 h-3.5 w-3.5" />
-                {selfBadge.label}
-              </Badge>
+            <div className="cp-sub">{heroDescription}</div>
+            <div className="badges2">
+              <span className="chip t-info nocase">
+                <Ic name="check" />
+                {competitorBadge}
+              </span>
+              <span className="chip t-primary nocase">
+                <Ic name="check" />
+                {selfBadge}
+              </span>
             </div>
           </div>
         </section>
 
-        {/* Comparison Table */}
-        <section className="px-4 py-16">
-          <div className="mx-auto max-w-5xl">
-            <div className="mb-12 text-center">
-              <h2 className="mb-4 text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl dark:text-neutral-50">
+        <section className="cs" aria-labelledby="vs-ft">
+          <div className="wrap">
+            <div className="sec-h">
+              <h2 className="title" id="vs-ft">
                 Feature Comparison
               </h2>
-              <p className="mx-auto max-w-2xl text-neutral-600 dark:text-neutral-400">
-                Here&apos;s how we compare on the features that matter most.
-              </p>
+              <p className="sub">Here's how we compare on the features that matter most.</p>
             </div>
-
-            <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50">
-              <table className="w-full min-w-[600px] text-sm">
-                <thead>
-                  <tr className="border-b border-neutral-200 dark:border-neutral-800">
-                    <th className="px-4 py-3 text-left font-semibold text-neutral-900 sm:px-6 dark:text-neutral-100">
-                      Feature
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-neutral-500 sm:px-6 dark:text-neutral-400">
-                      {competitorName}
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-neutral-900 sm:px-6 dark:text-neutral-100">
-                      {SITE_CONFIG.name}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {comparisonData.map((row, i) => (
-                    <tr
-                      key={row.feature}
-                      className={
-                        i < comparisonData.length - 1
-                          ? "border-b border-neutral-100 dark:border-neutral-800/50"
-                          : ""
-                      }
-                    >
-                      <td className="px-4 py-3 font-medium text-neutral-900 sm:px-6 dark:text-neutral-100">
-                        {row.feature}
-                      </td>
-                      <td className="px-4 py-3 text-neutral-500 sm:px-6 dark:text-neutral-400">
-                        <span className="flex items-center gap-2">
-                          {row.competitor === "No" || row.competitor === "None" ? (
-                            <X className="h-4 w-4 shrink-0 text-neutral-300 dark:text-neutral-600" />
-                          ) : row.verdict === "self" ? (
-                            <AlertTriangle className="h-4 w-4 shrink-0 text-violet-400" />
-                          ) : row.verdict === "competitor" ? (
-                            <Check className="h-4 w-4 shrink-0 text-violet-500" />
-                          ) : (
-                            <VerdictIcon verdict="tie" />
-                          )}
-                          {row.competitor}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 sm:px-6">
-                        <span className="flex items-center gap-2 text-neutral-900 dark:text-neutral-100">
-                          {row.verdict === "self" ? (
-                            <Check className="h-4 w-4 shrink-0 text-violet-500" />
-                          ) : row.verdict === "competitor" ? (
-                            <AlertTriangle className="h-4 w-4 shrink-0 text-violet-400" />
-                          ) : (
-                            <VerdictIcon verdict="tie" />
-                          )}
-                          {row.self}
-                        </span>
-                      </td>
+            <div className="mx">
+              <div
+                className="scroll"
+                tabIndex={0}
+                role="region"
+                aria-label={`${competitorName} vs ${name} feature table. Scroll sideways if it does not fit.`}
+              >
+                <table className="cmp vs mxt">
+                  <caption className="sr">
+                    {competitorName} vs {name}: {comparisonData.length} features
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Feature</th>
+                      <th scope="col">{competitorName}</th>
+                      <th scope="col" className="me">
+                        {name}
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {comparisonData.map((row) => (
+                      <tr key={row.feature}>
+                        <th scope="row">{row.feature}</th>
+                        <Cell verdict={competitorVerdict(row)} text={row.competitor} />
+                        <Cell verdict={selfVerdict(row)} text={row.self} />
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
 
-        {/* Comparison details */}
-        <section className="px-4 py-16">
-          <div className="mx-auto max-w-5xl">
-            <div className="mb-12 text-center">
-              <h2 className="mb-4 text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl dark:text-neutral-50">
+        <section className="cs" aria-labelledby="vs-d">
+          <div className="wrap">
+            <div className="sec-h">
+              <h2 className="title" id="vs-d">
                 Comparison Details
               </h2>
-              <p className="mx-auto max-w-2xl text-neutral-600 dark:text-neutral-400">
+              <p className="sub">
                 Authentication, socket policy, telemetry, release evidence, and controller scope.
               </p>
             </div>
-
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {highlights.map((item) => (
-                <Card
-                  key={item.title}
-                  className="border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50"
-                >
-                  <CardContent className="pt-6">
-                    <div className="mb-4 flex items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/50">
-                        <item.icon className="h-5 w-5 text-violet-500 dark:text-violet-400" />
-                      </div>
-                      <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
-                        {item.title}
-                      </h3>
-                    </div>
-                    <p className="text-sm text-neutral-600 dark:text-neutral-400">
-                      {item.description}
-                    </p>
-                  </CardContent>
-                </Card>
+            <ul className="cards3" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {highlights.map((highlight) => (
+                <li className="hc" key={highlight.title}>
+                  <div className="hh">
+                    <span className="tn">
+                      <Ic name={highlight.icon} />
+                    </span>
+                    <h3>{highlight.title}</h3>
+                  </div>
+                  <p>{highlight.description}</p>
+                </li>
               ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="cs" aria-labelledby="vs-m">
+          <div className="wrap">
+            <div className="mig">
+              <span className="tn">
+                <Ic name="clock-counter-clockwise" />
+              </span>
+              <div className="migc" style={{ flex: 1, minWidth: 0 }}>
+                <div>
+                  <h3 id="vs-m">{migrationTitle}</h3>
+                  <p>{migrationDescription}</p>
+                  <figure className="cb" style={{ margin: 0 }}>
+                    <div className="cb-h">
+                      <span className="cb-lang">
+                        <Ic name="terminal-window" />
+                        Quick start
+                      </span>
+                      <CopyButton
+                        text={QUICK_START}
+                        label={`Copy the ${name} quick start command`}
+                      />
+                    </div>
+                    <pre className="pr" tabIndex={0}>
+                      <code>{`$ ${QUICK_START}`}</code>
+                    </pre>
+                  </figure>
+                  <p className="src">
+                    Needs <code>TOKEN_HASH</code>: an Argon2id hash from{" "}
+                    <code>portwing hash-token</code>. For per-client keys, run{" "}
+                    <code>portwing keygen</code> and set <code>AUTHORIZED_KEYS</code> instead.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </section>
 
-        {/* Migration note */}
-        <section className="px-4 py-16">
-          <div className="mx-auto max-w-3xl">
-            <Card className="border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-900/50">
-                    <Clock className="h-5 w-5 text-violet-500 dark:text-violet-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h2 className="mb-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-                      {migrationTitle}
-                    </h2>
-                    <p className="mb-4 text-sm text-neutral-600 dark:text-neutral-400">
-                      {migrationDescription}
-                    </p>
-                    <PortwingQuickStart />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+        <section className="cs" aria-labelledby="vs-cta" style={{ paddingBottom: 72 }}>
+          <div className="wrap">
+            <div className="cta2">
+              <h2 id="vs-cta">Ready to try {name}?</h2>
+              <p>
+                Security-first, MIT-licensed, no SaaS required. Drop a secure foothold on any Docker
+                host in minutes.
+              </p>
+              <CtaButtons />
+            </div>
           </div>
         </section>
-
-        {/* CTA */}
-        <section className="px-4 py-16">
-          <div className="mx-auto max-w-3xl text-center">
-            <h2 className="mb-4 text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl dark:text-neutral-50">
-              {`Ready to try ${SITE_CONFIG.name}?`}
-            </h2>
-            <p className="mb-8 text-neutral-600 dark:text-neutral-400">
-              Security-first, MIT-licensed, no SaaS required. Drop a secure foothold on any Docker
-              host in minutes.
-            </p>
-
-            <CtaButtons />
-          </div>
-        </section>
-      </MarketingShell>
+      </main>
+      <Footer />
     </>
   );
 }

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-import { Activity, Bot, Gauge, KeyRound, Network, ShieldCheck } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 import { SITE_CONFIG } from "@/lib/site-config";
 
@@ -29,12 +28,12 @@ gauge|Different Metrics Surfaces|Hawser sends host metrics to Dockhand in edge m
 bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container_logs, host_metrics, and container_stats. Hawser does not document an MCP endpoint.
 `,
   highlightIconMap: {
-    network: Network,
-    keyround: KeyRound,
-    shieldcheck: ShieldCheck,
-    activity: Activity,
-    gauge: Gauge,
-    bot: Bot,
+    network: "plugs-connected",
+    keyround: "key",
+    shieldcheck: "shield-check",
+    activity: "heartbeat",
+    gauge: "chart-bar",
+    bot: "cpu",
   },
   metadataTitle: "Hawser vs Portwing — Remote Docker Agent Comparison",
   metadataDescription: `Compare Hawser v0.2.52 and Portwing v${SITE_CONFIG.version}. Both are lightweight Go Docker proxies with standard and edge modes; compare auth, socket policy, auditing, metrics, and release evidence.`,
@@ -56,7 +55,7 @@ bot|Read-Only MCP|Portwing exposes list_containers, inspect_container, container
       Hawser v0.2.52 is Dockhand&apos;s remote Docker agent and the closest Portwing peer in scope.
       Both are lightweight Go binaries with transparent Docker proxying, Compose, metrics, and
       outbound edge transport. Portwing v{SITE_CONFIG.version} emphasizes{" "}
-      <strong className="text-neutral-900 dark:text-neutral-200">
+      <strong>
         signed-key authentication, Sockguard containment, structured audit export, Prometheus, and
         read-only MCP
       </strong>

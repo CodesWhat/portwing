@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-import { Activity, Bot, FileText, Key, PackageCheck, Shield } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 
 export const diunComparisonRouteData = {
@@ -27,12 +26,12 @@ bot|MCP Server (AI-Native)|Portwing ships five read-only MCP tools for container
 activity|Complementary, Not Competing|Diun and Portwing solve different problems and run happily side-by-side. Diun monitors registries and notifies; Portwing gives Drydock secure remote control. You likely want both.
 `,
   highlightIconMap: {
-    key: Key,
-    shield: Shield,
-    filetext: FileText,
-    packagecheck: PackageCheck,
-    bot: Bot,
-    activity: Activity,
+    key: "key",
+    shield: "shield-check",
+    filetext: "scroll",
+    packagecheck: "package",
+    bot: "cpu",
+    activity: "heartbeat",
   },
   metadataTitle: "Diun vs Portwing — Docker Image Monitoring vs Remote Agent Comparison",
   metadataDescription:
@@ -57,11 +56,10 @@ activity|Complementary, Not Competing|Diun and Portwing solve different problems
       Diun v4.33.1 (Docker Image Update Notifier) polls container registries for new tags and fires
       notifications through 17 backends, including Apprise. It is a monitoring/notification agent,
       not a remote Docker control agent — an adjacent product, not a direct general-purpose agent
-      peer. Portwing is a{" "}
-      <strong className="text-neutral-900 dark:text-neutral-200">remote access agent</strong> — it
-      gives the Drydock controller a secure authenticated foothold on a Docker host. These tools are
-      complementary: run Diun for registry monitoring and Portwing for remote Docker control from
-      Drydock. Reviewed October 26, 2026.
+      peer. Portwing is a <strong>remote access agent</strong> — it gives the Drydock controller a
+      secure authenticated foothold on a Docker host. These tools are complementary: run Diun for
+      registry monitoring and Portwing for remote Docker control from Drydock. Reviewed October 26,
+      2026.
     </p>
   ),
   migrationTitle: "Using Diun today?",

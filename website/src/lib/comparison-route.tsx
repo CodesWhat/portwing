@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-import { Check, type LucideIcon } from "lucide-react";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ComparisonPage, type ComparisonRow, type Highlight } from "@/components/comparison-page";
@@ -38,22 +37,7 @@ export type ComparisonRouteConfig = {
   migrationDescription: string;
   jsonLdName: string;
   jsonLdDescription: string;
-  competitorBadge?: {
-    icon: LucideIcon;
-    label: string;
-    className: string;
-  };
-  selfBadge?: {
-    icon: LucideIcon;
-    label: string;
-    className: string;
-  };
 };
-
-const competitorBadgeClassName =
-  "bg-blue-100 px-3 py-1 text-sm text-blue-700 dark:bg-blue-900/50 dark:text-blue-400";
-const selfBadgeClassName =
-  "bg-violet-100 px-3 py-1 text-sm text-violet-700 dark:bg-violet-900/50 dark:text-violet-400";
 
 function buildComparisonMetadata({
   slug,
@@ -141,17 +125,6 @@ function buildComparisonJsonLd({
 }
 
 export function createComparisonRoute(config: ComparisonRouteConfig) {
-  const competitorBadge = config.competitorBadge ?? {
-    icon: Check,
-    label: `${config.competitorName} — Active`,
-    className: competitorBadgeClassName,
-  };
-  const selfBadge = config.selfBadge ?? {
-    icon: Check,
-    label: `${SITE_CONFIG.name}: Stable release`,
-    className: selfBadgeClassName,
-  };
-
   const metadata = buildComparisonMetadata({
     slug: config.slug,
     title: config.metadataTitle,
@@ -168,8 +141,8 @@ export function createComparisonRoute(config: ComparisonRouteConfig) {
         competitorName={config.competitorName}
         heroTitle={config.heroTitle}
         heroDescription={config.heroDescription}
-        competitorBadge={competitorBadge}
-        selfBadge={selfBadge}
+        competitorBadge={config.competitorName}
+        selfBadge={`${SITE_CONFIG.name}: Stable release`}
         comparisonData={config.comparisonData}
         highlights={config.highlights}
         migrationTitle={config.migrationTitle}
@@ -194,7 +167,7 @@ function row(
   return { feature, competitor, self, verdict };
 }
 
-function highlight(icon: LucideIcon, title: string, description: string): Highlight {
+function highlight(icon: string, title: string, description: string): Highlight {
   return { icon, title, description };
 }
 
@@ -223,7 +196,7 @@ export function rowsFromPipeTable(table: string): ComparisonRow[] {
 
 export function highlightsFromPipeTable(
   table: string,
-  iconMap: Record<string, LucideIcon>,
+  iconMap: Record<string, string>,
 ): Highlight[] {
   return parsePipeTableRows(table).map((columns, index) => {
     if (columns.length !== 3) {

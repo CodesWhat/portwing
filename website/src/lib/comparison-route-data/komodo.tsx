@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-import { Activity, Bot, KeyRound, Network, ShieldCheck, Terminal } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 import { SITE_CONFIG } from "@/lib/site-config";
 
@@ -28,12 +27,12 @@ terminal|Komodo Is the Broader Platform|Komodo includes host terminals, builds, 
 bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes five read-only MCP inspection tools. Komodo exposes a strong documented platform API, but not a transparent Docker proxy or documented MCP server.
 `,
   highlightIconMap: {
-    keyround: KeyRound,
-    network: Network,
-    shieldcheck: ShieldCheck,
-    activity: Activity,
-    terminal: Terminal,
-    bot: Bot,
+    keyround: "key",
+    network: "plugs-connected",
+    shieldcheck: "shield-check",
+    activity: "heartbeat",
+    terminal: "terminal-window",
+    bot: "cpu",
   },
   metadataTitle: "Komodo Periphery vs Portwing — Remote Docker Agent Comparison",
   metadataDescription: `Compare Komodo Periphery v2.3.4 and Portwing v${SITE_CONFIG.version} across outbound agents, public-key authentication, Docker API compatibility, socket policy, audit, metrics, and product scope.`,
@@ -55,7 +54,7 @@ bot|Transparent API and MCP|Portwing preserves Docker Engine formats and exposes
       Komodo v2.3.4 is a full build, deployment, automation, and Swarm platform. Its Periphery agent
       now supports outbound WebSockets, public-key authentication, and automatic key rotation.
       Portwing v{SITE_CONFIG.version} is narrower and pairs with Drydock, emphasizing{" "}
-      <strong className="text-neutral-900 dark:text-neutral-200">
+      <strong>
         per-request verification, transparent Docker compatibility, Sockguard containment, and
         agent-level audit export
       </strong>
