@@ -10,10 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v1.1.0] - 2026-11-02
 
 This release adds audience-bound Ed25519 request signatures (version 3).
-Version 3 needs Drydock 1.9 or later on the controller side. To get it, mount
-a writable `/data/credentials` volume on the agent. The shipped Compose and
-Kubernetes examples already do. Nothing else is required, and an agent
-without that volume keeps accepting version 2 and legacy signatures as before.
+Version 3 needs Drydock 1.9 or later on the controller side. The images
+pre-create a writable `/data/credentials`, so v3 works without a volume, but
+the agent ID and downgrade locks don't survive container recreation. Mount a
+volume at `/data/credentials` to make v3 persistent. The shipped Compose and
+Kubernetes examples already do. A `read_only` root without the volume gives
+`state-not-writable`, and a set `AGENT_ID` must match `^[a-z0-9-]{1,64}$` or
+the agent reports `agent-id-not-v3-compatible`. In both cases it keeps
+accepting version 2 and legacy signatures as before.
 The wire protocol is unchanged (`portwing/1.0`, `DrydockCompat` 1.4.0). The
 planned TLS-only enrollment is not part of this release.
 
