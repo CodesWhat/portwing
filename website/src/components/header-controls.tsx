@@ -2,29 +2,63 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { Ic } from "@/components/icons";
 
 type Mode = "dark" | "light";
 
-/** Light/dark switch. The initial mode is set before paint by the inline script in layout.tsx. */
-export function ModeToggle() {
-  const [mode, setMode] = useState<Mode>("dark");
+// The colour mode lives on <html data-mode>. The inline script in layout.tsx sets it before
+// paint; this store keeps React in step with it and follows the system scheme until the
+// visitor picks a mode themselves.
+const listeners = new Set<() => void>();
+let chosenThisSession = false;
 
-  useEffect(() => {
-    setMode(document.documentElement.getAttribute("data-mode") === "light" ? "light" : "dark");
-  }, []);
+const readMode = (): Mode =>
+  document.documentElement.getAttribute("data-mode") === "light" ? "light" : "dark";
 
-  const toggle = () => {
-    const next: Mode = mode === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-mode", next);
-    try {
-      localStorage.setItem("theme", next);
-    } catch {
-      // Storage can be blocked; the choice still applies for this page view.
-    }
-    setMode(next);
+function hasSavedChoice(): boolean {
+  if (chosenThisSession) return true;
+  try {
+    const saved = localStorage.getItem("theme");
+    return saved === "light" || saved === "dark";
+  } catch {
+    return false;
+  }
+}
+
+function emit() {
+  for (const listener of listeners) listener();
+}
+
+function setMode(next: Mode) {
+  chosenThisSession = true;
+  document.documentElement.setAttribute("data-mode", next);
+  try {
+    localStorage.setItem("theme", next);
+  } catch {
+    // Storage can be blocked; the choice still applies for this page view.
+  }
+  emit();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  const query = window.matchMedia("(prefers-color-scheme: light)");
+  const onSystemChange = (event: MediaQueryListEvent) => {
+    if (hasSavedChoice()) return;
+    document.documentElement.setAttribute("data-mode", event.matches ? "light" : "dark");
+    emit();
   };
+  query.addEventListener("change", onSystemChange);
+  return () => {
+    listeners.delete(listener);
+    query.removeEventListener("change", onSystemChange);
+  };
+}
+
+/** Light/dark switch. */
+export function ModeToggle() {
+  const mode = useSyncExternalStore(subscribe, readMode, () => "dark" as Mode);
 
   return (
     <button
@@ -32,7 +66,7 @@ export function ModeToggle() {
       className="modetog"
       aria-pressed={mode === "dark"}
       aria-label="Dark mode"
-      onClick={toggle}
+      onClick={() => setMode(mode === "dark" ? "light" : "dark")}
     >
       <Ic name="moon" className="i-moon" />
       <Ic name="sun" className="i-sun" />
