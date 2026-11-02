@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is stable software. Release preparation is currently `v1.0.2`,
+> Portwing is stable software. The latest release is currently `v1.0.2`,
 > covering enrollment hardening, rejected requests and an edge reconnect race.
 > Check [published releases](https://github.com/CodesWhat/portwing/releases) for availability. This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
