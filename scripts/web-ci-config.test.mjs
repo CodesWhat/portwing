@@ -151,11 +151,19 @@ test("website browser checks run all three engines in one fail-closed job", () =
   assert.match(job, /egress-policy: block/u);
   assert.match(job, /persist-credentials: false/u);
   assert.match(job, /^ {4}permissions:\n {6}contents: read$/mu);
-  for (const host of ["cdn.playwright.dev:443", "playwright.download.prss.microsoft.com:443"]) {
-    assert.ok(job.includes(host), `browser download host missing from egress: ${host}`);
-  }
-  assert.match(job, /npx playwright install --with-deps chromium firefox webkit/u);
-  assert.match(job, /run: npm run test:browser$/mu);
+  // Browsers come from the official image, pinned by digest to the exact @playwright/test
+  // version, so the job never downloads them from the Playwright CDN.
+  const version = packageJson.devDependencies["@playwright/test"];
+  assert.match(
+    job,
+    new RegExp(
+      `PLAYWRIGHT_IMAGE: mcr\\.microsoft\\.com/playwright:v${version.replaceAll(".", "\\.")}-noble@sha256:[0-9a-f]{64}$`,
+      "mu",
+    ),
+  );
+  assert.doesNotMatch(job, /^\s+(?:npx playwright install|cdn\.playwright\.dev:443)/mu);
+  assert.match(job, /node scripts\/node-version-contract\.mjs/u);
+  assert.match(job, /^\s+npm run test:browser$/mu);
   assert.match(job, /if: failure\(\)\n\s+uses: actions\/upload-artifact@[0-9a-f]{40}/u);
   assert.match(job, /timeout-minutes: (?:[1-9]|1[0-2])$/mu);
   for (const use of job.matchAll(/uses: (\S+)@(\S+)/gu)) {

@@ -166,32 +166,33 @@ jobs:
     name: "Website Browser Checks"
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    # The suite itself is about a minute. The rest is npm ci, the site build and the browser
-    # downloads. Kept short on purpose: hosted runners kill sustained-CPU jobs past ~14 minutes.
+    # The suite itself is about a minute. The rest is the image pull, npm ci and the site build.
+    # Kept short on purpose: hosted runners kill sustained-CPU jobs past ~14 minutes.
     timeout-minutes: 12
     permissions:
       contents: read
+    env:
+      # The browsers ship in this image, so nothing downloads them from cdn.playwright.dev (whose
+      # block-mode DNS answers disagree with harden-runner, upstream harden-runner#708). The tag
+      # must match the exact @playwright/test version; the digest pins the linux/amd64 index.
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
 
     steps:
+      # The image runs through `docker run` on the host rather than a job-level `container:`,
+      # because Harden Runner hardens the VM it is started on and its steps would otherwise
+      # run inside the container, outside what it can enforce.
       - name: Harden Runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
         with:
           egress-policy: block
-          # registry.npmjs.org: npm ci. cdn.playwright.dev and
-          # playwright.download.prss.microsoft.com: the Chromium, Firefox and WebKit builds.
-          # The Ubuntu and Microsoft package hosts are `playwright install --with-deps` pulling
-          # the WebKit system libraries through apt. The last three are artifact upload on failure.
+          # mcr.microsoft.com and its data host: the image pull. registry.npmjs.org: npm ci inside
+          # the container. The last three are artifact upload on failure.
           allowed-endpoints: >
             api.github.com:443
-            archive.ubuntu.com:80
-            azure.archive.ubuntu.com:80
-            cdn.playwright.dev:443
             github.com:443
-            packages.microsoft.com:443
-            playwright.download.prss.microsoft.com:443
+            mcr.microsoft.com:443
+            *.data.mcr.microsoft.com:443
             registry.npmjs.org:443
-            release-assets.githubusercontent.com:443
-            security.ubuntu.com:80
             results-receiver.actions.githubusercontent.com:443
             *.actions.githubusercontent.com:443
             *.blob.core.windows.net:443
@@ -201,27 +202,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
-        with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      # The tests serve website/out, so this is the same static export the other web gates build.
-      - name: Build the site
-        run: npm run build
-
-      # Browsers are not cached: three downloads are cheap next to the build, and a restore
-      # that goes stale against the pinned @playwright/test is a worse failure than a download.
-      - name: Install browsers
-        run: npx playwright install --with-deps chromium firefox webkit
-
+      # npm ci, the site build (the tests serve website/out) and the suite, all inside the image.
+      # The Node check keeps the image honest against the repo's pin in .node-version.
       - name: Run browser checks
-        run: npm run test:browser
+        run: |
+          docker run --rm --ipc=host --user "$(id -u):$(id -g)" \
+            --env CI=true --env HOME=/tmp/home \
+            --volume "$GITHUB_WORKSPACE:/work" --workdir /work \
+            "$PLAYWRIGHT_IMAGE" \
+            bash -euo pipefail -c '
+              mkdir -p "$HOME"
+              node -v
+              node scripts/node-version-contract.mjs
+              npm ci
+              npm run build
+              npm run test:browser
+            '
 
       - name: Upload Playwright report and traces
         if: failure()
