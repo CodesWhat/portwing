@@ -71,6 +71,9 @@ const BADGES: Badge[] = [
   },
 ];
 
+const STAR_CHART_URL = `https://api.star-history.com/chart?repos=${REPO_SLUG}&type=date&legend=top-left`;
+const STAR_CHART_PAGE = `https://www.star-history.com/?repos=${encodeURIComponent(REPO_SLUG)}&type=date&legend=top-left`;
+
 function JsonLd({ data }: { data: Record<string, unknown> }) {
   return (
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />
@@ -203,6 +206,26 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
+              <a className="starcard" href={STAR_CHART_PAGE}>
+                <img
+                  className="sl"
+                  src={STAR_CHART_URL}
+                  alt={`Star history chart for ${REPO_SLUG}`}
+                  width={800}
+                  height={533}
+                  loading="lazy"
+                  decoding="async"
+                />
+                <img
+                  className="sd"
+                  src={`${STAR_CHART_URL}&theme=dark`}
+                  alt=""
+                  width={800}
+                  height={533}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
             </div>
           </div>
         </section>
