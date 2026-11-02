@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-import { Activity, Bot, FileText, KeyRound, Network, ShieldCheck } from "lucide-react";
 import type { ComparisonRouteRawConfig } from "@/lib/comparison-route-data/types";
 import { SITE_CONFIG } from "@/lib/site-config";
 
@@ -28,12 +27,12 @@ filetext|Host Access Is a Tradeoff|Portainer exposes file-browse APIs and Swarm-
 bot|Prometheus and Read-Only MCP|Portwing exposes Docker mediation metrics and five read-only MCP inspection tools. Portainer has a localhost-only Prometheus endpoint populated for Kubernetes Edge. Equivalent Docker mediation scraping and an MCP endpoint were not documented in the reviewed material. Portainer's separate portainer/portainer-mcp server targets the controller API and is marked unsupported for production.
 `,
   highlightIconMap: {
-    network: Network,
-    keyround: KeyRound,
-    shieldcheck: ShieldCheck,
-    activity: Activity,
-    filetext: FileText,
-    bot: Bot,
+    network: "plugs-connected",
+    keyround: "key",
+    shieldcheck: "shield-check",
+    activity: "heartbeat",
+    filetext: "scroll",
+    bot: "cpu",
   },
   metadataTitle: "Portainer Agent vs Portwing — Remote Docker Agent Comparison",
   metadataDescription: `Compare Portainer 2.45.3 Agent/Edge Agent and Portwing v${SITE_CONFIG.version} across transport, authentication, socket policy, audit, fleet upgrades, host access, metrics, and MCP.`,
@@ -55,7 +54,7 @@ bot|Prometheus and Read-Only MCP|Portwing exposes Docker mediation metrics and f
       Portainer 2.45.3 offers classic and Edge agents, Business Edition Async Edge, and Swarm. Its
       built-in agent update/rollback is Business Edition beta for Edge Agents on Docker Standalone
       environments. Portwing v{SITE_CONFIG.version} is a narrower Drydock agent focused on{" "}
-      <strong className="text-neutral-900 dark:text-neutral-200">
+      <strong>
         signed requests, replay defense, Sockguard policy, agent-level audit, Prometheus, and MCP
       </strong>{" "}
       in the MIT-licensed build. Choose the controller workflows and supported platforms that fit

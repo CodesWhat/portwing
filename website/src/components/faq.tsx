@@ -1,43 +1,31 @@
 // SPDX-License-Identifier: MIT
 
 import { faqItems } from "@/app/data/faq";
-import { SectionHeading } from "@/components/section-heading";
+import { Section } from "@/components/section";
 
 export function FAQ() {
   return (
-    <section className="border-t border-border/60 py-16">
-      <div className="mx-auto max-w-3xl px-4">
-        <SectionHeading
-          eyebrow="FAQ"
-          title="Frequently asked questions"
-          subtitle="Common questions about how Portwing works and how to deploy it securely."
-        />
-
-        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white/50 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/50">
-          {faqItems.map((item, i) => (
-            <details
-              key={item.question}
-              className={[
-                "group border-b border-neutral-100 last:border-0 dark:border-neutral-800/60",
-                i % 2 === 1 ? "bg-neutral-50/30 dark:bg-neutral-800/10" : "",
-              ].join(" ")}
-            >
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-4 text-sm font-medium text-neutral-900 marker:hidden hover:bg-neutral-50 dark:text-neutral-100 dark:hover:bg-neutral-900/50 [&::-webkit-details-marker]:hidden">
-                <span>{item.question}</span>
-                <span
-                  aria-hidden="true"
-                  className="ml-2 shrink-0 font-mono text-lg font-light text-neutral-400 transition-transform group-open:rotate-45 dark:text-neutral-500"
-                >
-                  +
-                </span>
-              </summary>
-              <p className="px-6 pb-5 pt-1 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
-                {item.answer}
-              </p>
-            </details>
-          ))}
-        </div>
+    <Section
+      id="faq"
+      headingId="faq-h"
+      eyebrow="FAQ"
+      title="Frequently asked questions"
+      subtitle="Common questions about how Portwing works and how to deploy it securely."
+      split
+    >
+      <div className="faq">
+        {faqItems.map((item) => (
+          <details className="fq" name="faq" key={item.question}>
+            <summary>
+              <span className="q">{item.question}</span>
+              <span className="pm" aria-hidden="true" />
+            </summary>
+            <div className="a">
+              <p>{item.answer}</p>
+            </div>
+          </details>
+        ))}
       </div>
-    </section>
+    </Section>
   );
 }

@@ -1,0 +1,7 @@
+.nf-wrap{max-width:720px;margin:0 auto;padding:56px 24px 80px}
+.nf{display:grid;gap:14px;justify-items:start}
+.nf-m{display:block;height:auto}
+.nf-c{margin:0}
+.nf h1{font-family:var(--serif);font-weight:var(--display-w,400);font-size:calc(clamp(40px,7vw,76px) * var(--disp-k,1));line-height:1;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere}
+.nf-p{margin:0;font-size:14.5px;line-height:1.7;max-width:34em}
+.nf-l{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
