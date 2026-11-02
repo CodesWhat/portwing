@@ -140,7 +140,7 @@ test("build output serves the not-found page from the error phase with its own C
     const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
     assert.deepEqual(config.overrides["404.html"], { path: "404" });
     const phases = config.routes.filter((route) => route.handle).map((route) => route.handle);
-    assert.deepEqual(phases, ["filesystem", "error"]);
+    assert.deepEqual(phases, ["filesystem", "resource", "error"]);
     const filesystemAt = config.routes.findIndex((route) => route.handle === "filesystem");
     const errorAt = config.routes.findIndex((route) => route.handle === "error");
     assert.ok(filesystemAt > 0, "header routes must come before the filesystem phase");
@@ -148,7 +148,14 @@ test("build output serves the not-found page from the error phase with its own C
       config.routes.slice(0, filesystemAt).every((route) => route.continue === true),
       "everything before the filesystem phase only attaches headers",
     );
-    assert.equal(errorAt, filesystemAt + 1, "the error phase follows the filesystem phase");
+    const resourceAt = config.routes.findIndex((route) => route.handle === "resource");
+    assert.equal(resourceAt, filesystemAt + 1, "the resource phase follows the filesystem phase");
+    assert.deepEqual(
+      config.routes[resourceAt + 1],
+      { src: "^/.*$", status: 404 },
+      "a bare 404 route turns a filesystem miss into an error-phase 404, as @vercel/next does",
+    );
+    assert.equal(errorAt, resourceAt + 2, "the error phase follows the resource 404 route");
     assert.equal(errorAt, config.routes.length - 2, "the 404 route is last");
     const notFound = config.routes[errorAt + 1];
     assert.equal(notFound.status, 404);
