@@ -165,7 +165,7 @@ docker run -d --name portwing \
   ghcr.io/codeswhat/portwing:1.1.0
 ```
 
-The `portwing-state` volume keeps the agent ID and the signature version locks across restarts. Without it (and without `AGENT_ID`) the agent serves version 2 and legacy signatures only. See [Signature version 3](#signature-version-3-audience-bound).
+The `portwing-state` volume keeps the agent ID and the signature version locks across restarts. The image pre-creates a writable `/data/credentials`, so without the volume version 3 is still enabled for the life of the container, but the agent ID and the downgrade locks are lost when the container is replaced. Mount the volume so they survive. See [Signature version 3](#signature-version-3-audience-bound).
 
 ### Request signing headers
 
@@ -239,7 +239,10 @@ test-only key.
 **Finding the audience.** `GET /_portwing/info` returns the agent ID as
 `agentId` and `v3` (`true` or `false`, with a `v3Reason` when `false`). It
 accepts version 2 signatures, so a controller can fetch it before it knows the
-audience, and should sign version 3 only when `v3` is `true`. The ID is
+audience (until `SIGNATURE_MIN_VERSION=3` is set: the minimum applies after the
+signature verifies, so this path then needs a version 3 signature too and the
+controller must already have the agent ID). It should sign version 3 only when
+`v3` is `true`. The ID is
 generated on first start (32 lowercase hex characters) and stored in `agent-id`
 under `STATE_DIR`; it survives restarts. `AGENT_ID` overrides it. The rule,
 which controllers should validate against: 1 to 64 characters from `a-z`,
@@ -247,7 +250,8 @@ which controllers should validate against: 1 to 64 characters from `a-z`,
 the same value.
 
 **When v3 is unavailable.** Three situations make the agent refuse version 3
-while version 2 and legacy keep working. Each is logged at startup, shown in
+while version 2 and legacy keep working (unless `SIGNATURE_MIN_VERSION=3` refuses
+them). Each is logged at startup, shown in
 `/_portwing/info` as `"v3": false` with a `v3Reason`, and returned as the
 `X-Portwing-Reason` of a refused v3 request:
 
@@ -255,7 +259,7 @@ while version 2 and legacy keep working. Each is logged at startup, shown in
 |---|---|---|
 | `agent-id-not-v3-compatible` | `AGENT_ID` is set to a value outside `^[a-z0-9-]{1,64}$`. Earlier releases accepted any value, so the agent still starts. | Set `AGENT_ID` to 1 to 64 characters from `a-z`, `0-9` and `-`, or unset it. |
 | `agent-id-not-persistent` | `AGENT_ID` is not set and there is no usable state directory, so the generated ID would change on every restart and the downgrade locks would not survive. | Set `AGENT_ID`, or mount a writable volume at `/data/credentials` (or set `STATE_DIR`). |
-| `state-not-writable` | `AGENT_ID` is set, but the state directory is missing, not a directory, world-writable or not writable. The downgrade locks could not be stored, and locks that vanish on restart would reopen the downgrade. | Mount a writable volume at `/data/credentials` (or set `STATE_DIR`). |
+| `state-not-writable` | The agent has a usable ID, from `AGENT_ID` or an existing readable `agent-id` file, but the state directory is missing, not a directory, world-writable or not writable. The downgrade locks could not be stored, and locks that vanish on restart would reopen the downgrade. | Mount a writable volume at `/data/credentials` (or set `STATE_DIR`). |
 
 These reasons are only returned to a caller whose signature verified. A forged
 signature always gets `invalid-signature` and a body of `unauthorized`. A
@@ -312,10 +316,13 @@ reported after the signature verified.
 there, or set `STATE_DIR`. It defaults to `KEY_ROTATION_DIR` when that is set.
 The directory must be writable by the agent and not world-writable; group write
 is fine, so a Kubernetes `fsGroup` volume works. The shipped Compose and
-Kubernetes examples mount it. Without a usable directory and without
-`AGENT_ID`, the agent refuses v3 (`agent-id-not-persistent`) rather than serve
-it on an identity that changes on restart. If you set `AGENT_ID` but the state
-directory is not writable, v3 is refused too (`state-not-writable`), because
+Kubernetes examples mount it. The agent checks that the directory is writable,
+not that it survives the container being replaced, so an unmounted image
+directory enables v3 but loses the agent ID and locks on replacement. Without a
+usable directory and without `AGENT_ID`, the agent refuses v3
+(`agent-id-not-persistent`) rather than serve it on an identity that changes on
+restart. If the agent has an ID (`AGENT_ID` or an existing `agent-id` file) but
+the state directory is not writable, v3 is refused too (`state-not-writable`), because
 locks that reset on restart would reopen the downgrade. If a lock cannot be
 written at the moment it is created (the disk fills, say), it still holds in
 memory and the agent retries the write on every later request until it

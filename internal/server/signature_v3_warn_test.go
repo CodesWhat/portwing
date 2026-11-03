@@ -18,10 +18,14 @@ func TestNewServerWarnsWhenV3UnavailableWithPersistedLocks(t *testing.T) {
 		reason   string
 		locked   int
 		wantWarn bool
+		remedy   string
 	}{
-		{"unavailable with locks", "state-not-writable", 2, true},
-		{"unavailable without locks", "state-not-writable", 0, false},
-		{"available with locks", "", 2, false},
+		{"unavailable with locks", "state-not-writable", 2, true, "restore a writable state directory"},
+		{"unavailable without locks", "state-not-writable", 0, false, ""},
+		{"available with locks", "", 2, false, ""},
+		{"agent id not v3 compatible", "agent-id-not-v3-compatible", 2, true, "fix AGENT_ID"},
+		{"agent id not persistent", "agent-id-not-persistent", 2, true, "mount a writable persistent state directory"},
+		{"unknown reason", "something-else", 2, true, "resolve the cause named in"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -45,6 +49,17 @@ func TestNewServerWarnsWhenV3UnavailableWithPersistedLocks(t *testing.T) {
 			}
 			if tc.wantWarn && !h.has("2 key(s) are locked") {
 				t.Fatal("warning must name the locked key count")
+			}
+			if tc.wantWarn {
+				if !h.has(tc.remedy) {
+					t.Fatalf("warning must carry the %q remedy", tc.remedy)
+				}
+				if !h.has("reopens the downgrade") {
+					t.Fatal("warning must say clearing a lock reopens the downgrade")
+				}
+				if tc.reason != "state-not-writable" && h.has("restore a writable state directory") {
+					t.Fatalf("reason %q must not get the state-directory remedy", tc.reason)
+				}
 			}
 		})
 	}
