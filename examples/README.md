@@ -3,7 +3,7 @@
 
 Ready-to-run Docker Compose and Kubernetes examples, hardened by default (`read_only`/`readOnlyRootFilesystem`, `cap_drop: [ALL]`, `no-new-privileges`/`allowPrivilegeEscalation: false`, secrets instead of inline tokens).
 
-Every example persists `/data/credentials` (a `portwing-state` volume in Compose, a hostPath in Kubernetes). It holds the agent ID and the signature version locks, and without it, or an explicit `AGENT_ID`, the agent refuses Ed25519 signature version 3 and serves only version 2 and legacy signatures. In Kubernetes, pre-create the hostPath directory like the stacks one: `sudo install -d -m 0700 -o 65532 -g 65532 /var/lib/portwing/credentials`.
+Every example persists `/data/credentials` (a `portwing-state` volume in Compose, a hostPath in Kubernetes). It holds the agent ID and the signature version locks, and without a writable, persistent state directory the agent refuses Ed25519 signature version 3 and serves only version 2 and legacy signatures. Setting `AGENT_ID` does not replace it: the downgrade locks still need the storage (`state-not-writable`). In Kubernetes, pre-create the hostPath directory like the stacks one: `sudo install -d -m 0700 -o 65532 -g 65532 /var/lib/portwing/credentials`.
 
 | File | Mode | When to use |
 | ---- | ---- | ----------- |

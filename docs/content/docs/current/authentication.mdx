@@ -258,9 +258,10 @@ while version 2 and legacy keep working. Each is logged at startup, shown in
 | `state-not-writable` | `AGENT_ID` is set, but the state directory is missing, not a directory, world-writable or not writable. The downgrade locks could not be stored, and locks that vanish on restart would reopen the downgrade. | Mount a writable volume at `/data/credentials` (or set `STATE_DIR`). |
 
 These reasons are only returned to a caller whose signature verified. A forged
-or unsigned request always gets `invalid-signature` and a body of
-`unauthorized`, so the agent's ID and v3 state are not exposed to anyone
-without a key. `GET /_portwing/info` (authenticated) reports the same state.
+signature always gets `invalid-signature` and a body of `unauthorized`. A
+request with no `X-Portwing-Signature` header falls through to token
+authentication and gets a plain 401 without that reason header. Either way the
+agent's ID and v3 state are not exposed to anyone without a key. `GET /_portwing/info` (authenticated) reports the same state.
 
 **Wrong audience.** A signature made for another agent fails verification and
 is reported as `invalid-signature`. A client may also send

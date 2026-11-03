@@ -242,6 +242,15 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 			V3Unavailable: cfg.SignatureV3Unavailable,
 			Locks:         locks,
 		})
+		// The locks stay enforced for v2 and legacy even while v3 is refused,
+		// so a key locked to v3 has no working signature version until v3 is
+		// restored or its lock is cleared.
+		if cfg.SignatureV3Unavailable != "" {
+			if held := locks.List(); len(held) > 0 {
+				slog.Warn(fmt.Sprintf("signature version 3 is unavailable but %d key(s) are locked to it and cannot authenticate: restore a writable state directory, or run `portwing signature-lock clear` once it is writable", len(held)),
+					"reason", cfg.SignatureV3Unavailable, "locked_keys", len(held))
+			}
+		}
 		ed25519Cfg = Ed25519Config{
 			Registry:       reg,
 			Nonces:         auth.NewNonceLRU(cfg.NonceLRUSize, cfg.MaxClockSkewSeconds),

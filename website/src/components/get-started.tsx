@@ -58,6 +58,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - TOKEN_FILE=/run/secrets/portwing_token
     secrets:
@@ -68,7 +69,8 @@ secrets:
     file: ./portwing_token.txt
 
 volumes:
-  portwing-stacks:`;
+  portwing-stacks:
+  portwing-state:`;
 
 export function GetStarted() {
   const [tab, setTab] = useState<Tab>("quick");

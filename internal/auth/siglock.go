@@ -32,7 +32,9 @@ type signatureLockFile struct {
 //
 // The file is shared with the `portwing signature-lock` command, which only
 // ever removes locks. A running agent notices a changed file on its next check
-// (one stat), so a clear takes effect without a restart or signal.
+// (one stat), so a clear takes effect without a restart or signal. Mutations
+// from either process hold an exclusive flock on a sidecar file (the lock file
+// name plus ".lock") around the whole read-modify-write.
 type SignatureLocks struct {
 	mu    sync.Mutex
 	path  string // empty means memory only
@@ -123,13 +125,17 @@ func readSignatureLocks(path string) (map[string]time.Time, os.FileInfo, error) 
 
 // refreshLocked re-reads the file when it changed since the last sync. A file
 // that cannot be read keeps the in-memory locks, so corruption never unlocks.
+// Read-only callers use it, so it stays lock-free: one stat.
 func (l *SignatureLocks) refreshLocked() {
 	if l.path == "" {
 		return
 	}
 	if l.dirty {
-		// Unpersisted locks win over whatever the file says; retry the write.
-		_ = l.persistLocked()
+		// Unpersisted locks win over whatever the file says; retry the write
+		// under the file lock, merged with what is on disk.
+		if release, err := l.acquireLocked(); err == nil {
+			release()
+		}
 		return
 	}
 	info, err := os.Stat(l.path)
@@ -146,12 +152,46 @@ func (l *SignatureLocks) refreshLocked() {
 	if l.seen != nil && os.SameFile(l.seen, info) && l.seen.ModTime().Equal(info.ModTime()) && l.seen.Size() == info.Size() {
 		return
 	}
+	l.reloadLocked()
+}
+
+// reloadLocked unconditionally re-reads the file. Unpersisted in-memory locks
+// are unioned in, so none is lost. A file that cannot be read keeps the
+// in-memory locks.
+func (l *SignatureLocks) reloadLocked() {
 	locks, fresh, err := readSignatureLocks(l.path)
 	if err != nil {
 		slog.Error("signature lock file unreadable; keeping in-memory locks", "error", err)
 		return
 	}
+	if l.dirty {
+		for id, since := range l.locks {
+			if _, ok := locks[id]; !ok {
+				locks[id] = since
+			}
+		}
+	}
 	l.locks, l.seen = locks, fresh
+}
+
+// acquireLocked takes the cross-process file lock and re-reads the file so the
+// caller mutates the latest contents; the caller must release before it
+// returns. Without it, two processes doing read-modify-write could overwrite
+// each other's change. Memory-only locks take no file lock. If the lock cannot
+// be taken the error is returned and the in-memory state is left as it was.
+func (l *SignatureLocks) acquireLocked() (func(), error) {
+	if l.path == "" {
+		return func() {}, nil
+	}
+	release, err := flockExclusive(l.path + ".lock")
+	if err != nil {
+		return nil, fmt.Errorf("locking signature locks: %w", err)
+	}
+	l.reloadLocked()
+	if l.dirty {
+		_ = l.persistLocked()
+	}
+	return release, nil
 }
 
 func (l *SignatureLocks) persistLocked() error {
@@ -188,22 +228,39 @@ func (l *SignatureLocks) LockedSince(keyID string) (time.Time, bool) {
 // is new. When persisting fails the lock still holds in memory and the error is
 // returned so the caller can log it; every later check or Lock retries the
 // write, and Lock keeps returning the error until it succeeds.
+//
+// The whole read-modify-write runs under an exclusive file lock, so a
+// concurrent Clear from the CLI cannot drop this lock or be undone by it.
 func (l *SignatureLocks) Lock(keyID string, at time.Time) (newly bool, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.refreshLocked()
+	release, lockErr := l.acquireLocked()
+	if lockErr == nil {
+		defer release()
+	}
 	if _, ok := l.locks[keyID]; ok {
 		return false, l.pendingErr
 	}
 	l.locks[keyID] = at.UTC().Truncate(time.Second)
+	if lockErr != nil {
+		// Keep the lock in memory; a later check retries the write.
+		l.dirty, l.pendingErr = true, lockErr
+		return true, lockErr
+	}
 	return true, l.persistLocked()
 }
 
-// Clear removes the lock for keyID and reports whether one existed.
+// Clear removes the lock for keyID and reports whether one existed. A lock the
+// running agent has not managed to persist yet is merged back in, so a Clear
+// that races an unwritten lock is undone; that fails closed.
 func (l *SignatureLocks) Clear(keyID string) (bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.refreshLocked()
+	release, err := l.acquireLocked()
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	if _, ok := l.locks[keyID]; !ok {
 		return false, nil
 	}
@@ -215,7 +272,11 @@ func (l *SignatureLocks) Clear(keyID string) (bool, error) {
 func (l *SignatureLocks) ClearAll() (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.refreshLocked()
+	release, err := l.acquireLocked()
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 	n := len(l.locks)
 	if n == 0 {
 		return 0, nil
