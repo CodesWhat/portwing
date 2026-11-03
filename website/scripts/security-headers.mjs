@@ -132,24 +132,22 @@ export function buildOutputConfig(outputDir) {
   }
 
   routes.push({ src: "^/.*$", headers: headerMap(COMMON_HEADERS), continue: true });
-  // Phase order and the resource-phase 404 mirror what @vercel/next emits
-  // (packages/next/src/index.ts in vercel/vercel): header routes (continue), then
-  // handle:filesystem, then handle:resource with a bare `status: 404` route, then
-  // handle:error with the 404 page. The bare 404 route turns a filesystem miss into
-  // an explicit 404 that enters the error phase. Without it the platform answers a
-  // miss with its own text/plain NOT_FOUND and never runs the error routes, even
-  // though the error route and /404 are both valid. The error response is a new
-  // response, so it carries the 404 page's CSP plus the common headers itself.
+  // Follows the Vercel Build Output API v3 routes spec
+  // (https://vercel.com/docs/build-output-api/configuration#routes: "filesystem" is
+  // "check matches after the filesystem misses") and the classic static-build shape:
+  // header routes (continue), then handle:filesystem, then a catch-all `status: 404`
+  // route with dest /404. A route in that position only runs when the filesystem
+  // lookup misses. The /404 route before the filesystem phase mirrors what @vercel/next
+  // emits so a direct hit on /404 answers 404 instead of a soft 200. The miss route is
+  // a new response, so it carries the 404 page's CSP plus the common headers itself.
+  if (notFoundCsp) routes.push({ src: "^/404/?$", status: 404, continue: true });
   routes.push({ handle: "filesystem" });
   if (notFoundCsp) {
-    routes.push({ handle: "resource" });
-    routes.push({ src: "^/.*$", status: 404 });
-    routes.push({ handle: "error" });
     routes.push({
-      status: 404,
       src: "^/.*$",
-      headers: { ...headerMap(COMMON_HEADERS), "Content-Security-Policy": notFoundCsp },
+      status: 404,
       dest: "/404",
+      headers: { ...headerMap(COMMON_HEADERS), "Content-Security-Policy": notFoundCsp },
     });
   }
   return {

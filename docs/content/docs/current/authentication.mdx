@@ -250,8 +250,8 @@ which controllers should validate against: 1 to 64 characters from `a-z`,
 the same value.
 
 **When v3 is unavailable.** Three situations make the agent refuse version 3
-while version 2 and legacy keep working (unless `SIGNATURE_MIN_VERSION=3` refuses
-them). Each is logged at startup, shown in
+while version 2 and legacy keep working, unless `SIGNATURE_MIN_VERSION` or a
+downgrade lock refuses them. Each is logged at startup, shown in
 `/_portwing/info` as `"v3": false` with a `v3Reason`, and returned as the
 `X-Portwing-Reason` of a refused v3 request:
 

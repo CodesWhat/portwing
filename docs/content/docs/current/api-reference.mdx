@@ -100,8 +100,12 @@ generated once and persisted, unless `AGENT_ID` overrides it, and matches
 `v3Reason` is `agent-id-not-v3-compatible` (the configured `AGENT_ID` is outside
 the rule), `agent-id-not-persistent` (no `AGENT_ID` and no persistent state
 directory) or `state-not-writable` (the state directory cannot hold the
-downgrade locks). Version 2 and legacy signatures keep working either way; sign
-version 3 only when `v3` is `true`. See
+downgrade locks). Version 2 and legacy signatures work only while
+`SIGNATURE_MIN_VERSION` is unset or `1` and the key has no downgrade lock.
+`SIGNATURE_MIN_VERSION=2` rejects legacy, `SIGNATURE_MIN_VERSION=3` rejects
+version 2 and legacy, and a locked key's version 2 and legacy signatures are
+rejected with `signature-locked` (`signature-version-too-low` for the minimum).
+Sign version 3 only when `v3` is `true`. See
 [Authentication](/authentication#signature-version-3-audience-bound).
 
 Unsupported legacy `dd:watch` and `dd:trigger` capabilities are absent. The
