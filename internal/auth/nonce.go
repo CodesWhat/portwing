@@ -29,14 +29,15 @@ type NonceLRU struct {
 	// evicted nonce lets a still-valid signature replay. See NewNonceLRU.
 	ttl  time.Duration
 	done chan struct{}
-	// now is the clock for recording and evicting. It returns wall time with
-	// the monotonic reading stripped, so eviction runs on the same clock as the
-	// verifier's timestamp window. Tests replace it.
+	// now is the clock for recording and evicting. It keeps the monotonic
+	// reading, so expiry can be judged on both the wall and monotonic clocks.
+	// Tests replace it.
 	now func() time.Time
+	// elapsed reports how long ago seen was recorded, as of now. nil means
+	// now.Sub(seen), which is monotonic when both readings carry one. Tests
+	// replace it to simulate a wall-clock step with little monotonic elapsed.
+	elapsed func(seen, now time.Time) time.Duration
 }
-
-// wallNow returns the current wall-clock time without a monotonic reading.
-func wallNow() time.Time { return time.Now().Round(0) }
 
 // NewNonceLRU returns a NonceLRU with the given capacity. windowSeconds is
 // the caller's clock-skew window (verify.go's maxSkewSeconds). The TTL is
@@ -59,7 +60,7 @@ func NewNonceLRU(maxSize int, windowSeconds int) *NonceLRU {
 		maxSize: maxSize,
 		ttl:     2 * time.Duration(windowSeconds) * time.Second,
 		done:    make(chan struct{}),
-		now:     wallNow,
+		now:     time.Now,
 	}
 	go lru.cleanup()
 	return lru
@@ -96,13 +97,29 @@ func (l *NonceLRU) Add(nonce string) error {
 	return nil
 }
 
-// clock returns the cache's current wall time. Hand-built caches in tests may
-// leave now unset.
+// clock returns the cache's current time, monotonic reading included.
+// Hand-built caches in tests may leave now unset.
 func (l *NonceLRU) clock() time.Time {
 	if l.now == nil {
-		return wallNow()
+		return time.Now()
 	}
 	return l.now()
+}
+
+// expired reports whether a nonce recorded at seen may be evicted at now. It
+// must have expired on BOTH clocks: wall time past seen+ttl, and monotonic
+// elapsed past ttl. Either clock alone can lie. A forward wall step past the
+// TTL would evict a nonce whose signed timestamp is still valid once the
+// clock steps back; a monotonic-only rule would ignore the wall window the
+// verifier checks timestamps against.
+func (l *NonceLRU) expired(seen, now time.Time) bool {
+	if !now.Round(0).After(seen.Round(0).Add(l.ttl)) {
+		return false
+	}
+	if l.elapsed != nil {
+		return l.elapsed(seen, now) > l.ttl
+	}
+	return now.Sub(seen) > l.ttl
 }
 
 // Seen reports whether the nonce has been recorded in the cache.
@@ -149,14 +166,13 @@ func (l *NonceLRU) evictExpired() {
 	l.evictExpiredLocked(l.clock())
 }
 
-// evictExpiredLocked drops every nonce recorded more than ttl before now. The
+// evictExpiredLocked drops every nonce that has expired on both clocks. The
 // caller must hold l.mu. Add calls it to reclaim space at capacity rather than
 // waiting for the cleanup ticker.
 func (l *NonceLRU) evictExpiredLocked(now time.Time) {
-	cutoff := now.Add(-l.ttl)
 	for entry := l.order.Front(); entry != nil; entry = l.order.Front() {
 		nonce := entry.Value.(string)
-		if !l.seen[nonce].Before(cutoff) {
+		if !l.expired(l.seen[nonce], now) {
 			break
 		}
 		delete(l.seen, nonce)
