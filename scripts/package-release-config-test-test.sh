@@ -478,11 +478,20 @@ done
 mount_example="examples/docker-compose.with-sockguard.yml"
 mount_backup="${fixture}/${mount_example}.mount-backup"
 cp "${fixture}/${mount_example}" "${mount_backup}"
+if [ "$(grep -c '^      - sockguard-socket:/var/run/sockguard$' "${fixture}/${mount_example}")" -ne 1 ]; then
+	echo "FAIL: expected exactly one sockguard-socket anchor line in ${mount_example}" >&2
+	exit 1
+fi
 sed -i.bak \
 	-e '/portwing-state:\/data\/credentials/d' \
-	-e 's#^\(      - sockguard-socket:/var/run/sockguard\)$#\1\n      - portwing-state:/data/credentials#' \
+	-e '/^      - sockguard-socket:\/var\/run\/sockguard$/a\
+      - portwing-state:/data/credentials' \
 	"${fixture}/${mount_example}"
 rm -f "${fixture}/${mount_example}.bak"
+if [ "$(grep -Fc 'portwing-state:/data/credentials' "${fixture}/${mount_example}")" -ne 1 ]; then
+	echo "FAIL: could not move the credentials mount to the sockguard service (${mount_example})" >&2
+	exit 1
+fi
 expect_release_contract_failure \
 	"FAIL: every Portwing service in ${mount_example} must mount /data/credentials (missing on: portwing)" \
 	"the package release contract must reject a credentials mount that sits on another service (${mount_example})"
