@@ -240,7 +240,7 @@ func TestNonceLRU_EvictsOnWallClock(t *testing.T) {
 	}
 }
 
-func TestNonceLRU_RecordsWithoutMonotonicReading(t *testing.T) {
+func TestNonceLRU_RecordsMonotonicReading(t *testing.T) {
 	t.Parallel()
 	lru := NewNonceLRU(10, 60)
 	t.Cleanup(lru.Close)
@@ -250,12 +250,66 @@ func TestNonceLRU_RecordsWithoutMonotonicReading(t *testing.T) {
 	lru.mu.Lock()
 	got := lru.seen["n1"]
 	lru.mu.Unlock()
-	if strings.Contains(got.String(), "m=") {
-		t.Fatalf("recorded time %q carries a monotonic reading", got)
+	if !strings.Contains(got.String(), "m=") {
+		t.Fatalf("recorded time %q lost its monotonic reading", got)
 	}
 	lru.now = nil
-	if strings.Contains(lru.clock().String(), "m=") {
-		t.Fatal("fallback clock carries a monotonic reading")
+	if !strings.Contains(lru.clock().String(), "m=") {
+		t.Fatal("fallback clock lacks a monotonic reading")
+	}
+}
+
+// A forward wall step past the TTL must not evict while monotonic elapsed is
+// still under it, or a step back would let a valid signature replay.
+func TestNonceLRU_ForwardWallStepKeepsNonce(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(10, 60)
+	t.Cleanup(lru.Close)
+	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	cur := base
+	lru.now = func() time.Time { return cur }
+	mono := time.Second
+	lru.elapsed = func(_, _ time.Time) time.Duration { return mono }
+
+	if err := lru.Add("n1"); err != nil {
+		t.Fatal(err)
+	}
+	cur = base.Add(time.Hour)
+	lru.evictExpired()
+	if !lru.Seen("n1") {
+		t.Fatal("nonce evicted by a forward wall step with little monotonic elapsed")
+	}
+	cur = base
+	if err := lru.Add("n1"); !errors.Is(err, ErrNonceReplay) {
+		t.Fatalf("replay after wall step back = %v", err)
+	}
+	// Monotonic past the TTL but wall time not: still kept.
+	mono = 3 * time.Minute
+	lru.evictExpired()
+	if !lru.Seen("n1") {
+		t.Fatal("nonce evicted on monotonic expiry alone")
+	}
+	// Both clocks past the TTL: evicted.
+	cur = base.Add(time.Hour)
+	lru.evictExpired()
+	if lru.Seen("n1") {
+		t.Fatal("nonce kept after both clocks passed the TTL")
+	}
+}
+
+func TestNonceLRU_ExpiredOnBothClocksEvicts(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(10, 60)
+	t.Cleanup(lru.Close)
+	if err := lru.Add("n1"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(2*lru.ttl + time.Second)
+	lru.mu.Lock()
+	lru.evictExpiredLocked(now)
+	lru.mu.Unlock()
+	if lru.Seen("n1") {
+		t.Fatal("nonce past TTL on both clocks was kept")
 	}
 }
 
