@@ -247,7 +247,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		// restored or its lock is cleared.
 		if cfg.SignatureV3Unavailable != "" {
 			if held := locks.List(); len(held) > 0 {
-				slog.Warn(fmt.Sprintf("signature version 3 is unavailable but %d key(s) are locked to it and cannot authenticate: restore a writable state directory, or run `portwing signature-lock clear` once it is writable", len(held)),
+				slog.Warn(fmt.Sprintf("signature version 3 is unavailable but %d key(s) are locked to it and cannot authenticate: %s, or accept the downgrade for those keys with `portwing signature-lock clear` (needs a writable state directory; clearing a lock reopens the downgrade for that key)", len(held), signatureV3Remedy(cfg.SignatureV3Unavailable)),
 					"reason", cfg.SignatureV3Unavailable, "locked_keys", len(held))
 			}
 		}
@@ -1142,5 +1142,20 @@ func (s *Server) pollContainers(ctx context.Context) {
 				slog.Error("container refresh notify failed", "error", err)
 			}
 		}
+	}
+}
+
+// signatureV3Remedy names the fix that matches why v3 is unavailable, so the
+// startup warning does not send the operator to the wrong place.
+func signatureV3Remedy(reason string) string {
+	switch reason {
+	case config.ReasonStateNotWritable:
+		return "restore a writable state directory (mount a volume at /data/credentials or fix STATE_DIR)"
+	case config.ReasonAgentIDNotV3Compatible:
+		return "fix AGENT_ID (1 to 64 characters from a-z, 0-9 and '-') or unset it"
+	case config.ReasonAgentIDNotPersistent:
+		return "mount a writable persistent state directory at /data/credentials (STATE_DIR) so the agent ID survives restarts"
+	default:
+		return "resolve the cause named in \"reason\""
 	}
 }
