@@ -234,6 +234,10 @@ func (l *SignatureLocks) LockedSince(keyID string) (time.Time, bool) {
 func (l *SignatureLocks) Lock(keyID string, at time.Time) (newly bool, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.refreshLocked()
+	if _, ok := l.locks[keyID]; ok && !l.dirty {
+		return false, l.pendingErr
+	}
 	release, lockErr := l.acquireLocked()
 	if lockErr == nil {
 		defer release()

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -807,7 +808,6 @@ func (c *Client) sendHello(ctx context.Context) error {
 	return c.sendTypedMessage(protocol.TypeHello, hello)
 }
 
-// setTokenHash sets the TokenHash field from cfg.Token.
 // hasControllerCap reports whether the controller advertised the given
 // capability token in its welcome frame for the current connection. An older
 // controller's welcome omits the capabilities field entirely, which parses
@@ -816,14 +816,10 @@ func (c *Client) sendHello(ctx context.Context) error {
 func (c *Client) hasControllerCap(token string) bool {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
-	for _, got := range c.controllerCaps {
-		if got == token {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.controllerCaps, token)
 }
 
+// setTokenHash sets the TokenHash field from cfg.Token.
 func (c *Client) setTokenHash(hello *protocol.HelloMessage) {
 	if c.cfg.Token != "" {
 		hash := sha256.Sum256([]byte(c.cfg.Token))
