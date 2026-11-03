@@ -19,8 +19,9 @@ and fixes the website 404 page. The wire protocol is unchanged (`portwing/1.0`,
   verification still accepts version 2 and legacy signatures until a key signs
   version 3, so a controller that doesn't pin leaves that downgrade window
   open. The docs and the test vectors' contract note now say so.
-- Nonces now expire on wall time, the same clock as the timestamp window, so a
-  backward clock step can't drop a nonce while its timestamp is still valid.
+- A nonce is only forgotten once both the wall clock and the monotonic clock
+  have passed the replay window, so a clock step in either direction can't
+  drop it while its timestamp is still valid.
 - Deleting `signature-locks.json` while the agent is running no longer drops
   the downgrade locks. The agent keeps the locks it already loaded.
 - Timestamp skew and replay are now checked after the signature verifies, so
