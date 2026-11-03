@@ -440,6 +440,35 @@ func TestVerifyRequest_ReplayedNonce(t *testing.T) {
 	}
 }
 
+// A caller without the key must not be able to tell a stale timestamp or a
+// used nonce from a bad signature: skew and replay are decided after the
+// signature verifies.
+func TestVerifyRequest_ForgedSignatureHidesSkewAndReplay(t *testing.T) {
+	t.Parallel()
+	reg, lru, pub, priv := testSetup(t)
+	forged := base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+
+	stale := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
+	signRequest(t, stale, nil, priv, pub, time.Now().Unix()-120, randomNonce(t))
+	stale.Header.Set(HeaderSignature, forged)
+	if _, err := VerifyRequest(stale, nil, reg, lru, 60); !errors.Is(err, ErrBadSignature) {
+		t.Errorf("forged stale request: expected ErrBadSignature, got: %v", err)
+	}
+
+	nonce := randomNonce(t)
+	first := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
+	signRequest(t, first, nil, priv, pub, time.Now().Unix(), nonce)
+	if _, err := VerifyRequest(first, nil, reg, lru, 60); err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+	replay := httptest.NewRequest(http.MethodGet, "/api/portwing/health", nil)
+	signRequest(t, replay, nil, priv, pub, time.Now().Unix(), nonce)
+	replay.Header.Set(HeaderSignature, forged)
+	if _, err := VerifyRequest(replay, nil, reg, lru, 60); !errors.Is(err, ErrBadSignature) {
+		t.Errorf("forged replay: expected ErrBadSignature, got: %v", err)
+	}
+}
+
 // TestVerifyRequest_NonceOutlivesTimestampWindow is a regression test for the
 // nonce-replay window: a request signed with a clock that runs fast stays
 // timestamp-valid until nearly 2×maxSkew after it was first seen (skew is

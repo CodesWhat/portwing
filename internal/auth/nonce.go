@@ -29,7 +29,14 @@ type NonceLRU struct {
 	// evicted nonce lets a still-valid signature replay. See NewNonceLRU.
 	ttl  time.Duration
 	done chan struct{}
+	// now is the clock for recording and evicting. It returns wall time with
+	// the monotonic reading stripped, so eviction runs on the same clock as the
+	// verifier's timestamp window. Tests replace it.
+	now func() time.Time
 }
+
+// wallNow returns the current wall-clock time without a monotonic reading.
+func wallNow() time.Time { return time.Now().Round(0) }
 
 // NewNonceLRU returns a NonceLRU with the given capacity. windowSeconds is
 // the caller's clock-skew window (verify.go's maxSkewSeconds). The TTL is
@@ -52,6 +59,7 @@ func NewNonceLRU(maxSize int, windowSeconds int) *NonceLRU {
 		maxSize: maxSize,
 		ttl:     2 * time.Duration(windowSeconds) * time.Second,
 		done:    make(chan struct{}),
+		now:     wallNow,
 	}
 	go lru.cleanup()
 	return lru
@@ -77,15 +85,24 @@ func (l *NonceLRU) Add(nonce string) error {
 	}
 
 	if len(l.seen) >= l.maxSize {
-		l.evictExpiredLocked(time.Now())
+		l.evictExpiredLocked(l.clock())
 	}
 	if len(l.seen) >= l.maxSize {
 		return ErrNonceCapacity
 	}
 
-	l.seen[nonce] = time.Now()
+	l.seen[nonce] = l.clock()
 	l.order.PushBack(nonce)
 	return nil
+}
+
+// clock returns the cache's current wall time. Hand-built caches in tests may
+// leave now unset.
+func (l *NonceLRU) clock() time.Time {
+	if l.now == nil {
+		return wallNow()
+	}
+	return l.now()
 }
 
 // Seen reports whether the nonce has been recorded in the cache.
@@ -129,7 +146,7 @@ func (l *NonceLRU) cleanup() {
 func (l *NonceLRU) evictExpired() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.evictExpiredLocked(time.Now())
+	l.evictExpiredLocked(l.clock())
 }
 
 // evictExpiredLocked drops every nonce recorded more than ttl before now. The

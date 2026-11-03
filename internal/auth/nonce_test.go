@@ -5,6 +5,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -206,6 +207,55 @@ func TestNonceLRU_ReplayConcurrent(t *testing.T) {
 	// see the nonce already and fail).
 	if count != 1 {
 		t.Errorf("expected exactly one goroutine to win the nonce Add race, got %d", count)
+	}
+}
+
+func TestNonceLRU_EvictsOnWallClock(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(10, 60)
+	t.Cleanup(lru.Close)
+	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	cur := base
+	lru.now = func() time.Time { return cur }
+
+	if err := lru.Add("n1"); err != nil {
+		t.Fatal(err)
+	}
+	// After a backward wall-clock step the signed timestamp can still be valid
+	// for up to 2W, so the nonce must survive until then.
+	cur = base.Add(-30 * time.Second)
+	lru.evictExpired()
+	if !lru.Seen("n1") {
+		t.Fatal("nonce evicted after a backward wall-clock step")
+	}
+	cur = base.Add(2*time.Minute - time.Second)
+	lru.evictExpired()
+	if !lru.Seen("n1") {
+		t.Fatal("nonce evicted before 2W elapsed")
+	}
+	cur = base.Add(2*time.Minute + time.Second)
+	lru.evictExpired()
+	if lru.Seen("n1") {
+		t.Fatal("nonce kept past 2W")
+	}
+}
+
+func TestNonceLRU_RecordsWithoutMonotonicReading(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(10, 60)
+	t.Cleanup(lru.Close)
+	if err := lru.Add("n1"); err != nil {
+		t.Fatal(err)
+	}
+	lru.mu.Lock()
+	got := lru.seen["n1"]
+	lru.mu.Unlock()
+	if strings.Contains(got.String(), "m=") {
+		t.Fatalf("recorded time %q carries a monotonic reading", got)
+	}
+	lru.now = nil
+	if strings.Contains(lru.clock().String(), "m=") {
+		t.Fatal("fallback clock carries a monotonic reading")
 	}
 }
 

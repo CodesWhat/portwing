@@ -124,7 +124,8 @@ func readSignatureLocks(path string) (map[string]time.Time, os.FileInfo, error) 
 }
 
 // refreshLocked re-reads the file when it changed since the last sync. A file
-// that cannot be read keeps the in-memory locks, so corruption never unlocks.
+// that cannot be read or has vanished keeps the in-memory locks, so neither
+// corruption nor deletion unlocks.
 // Read-only callers use it, so it stays lock-free: one stat.
 func (l *SignatureLocks) refreshLocked() {
 	if l.path == "" {
@@ -142,8 +143,15 @@ func (l *SignatureLocks) refreshLocked() {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		if l.seen != nil {
-			l.locks = make(map[string]time.Time)
+			// The file existed and is gone. Nothing in the product deletes it
+			// (ClearAll writes an empty map), so keep the locks and write them
+			// back instead of failing open.
+			slog.Error("signature lock file vanished; keeping in-memory locks and re-persisting", "path", l.path)
 			l.seen = nil
+			l.dirty = true
+			if release, err := l.acquireLocked(); err == nil {
+				release()
+			}
 		}
 		return
 	case err != nil:
