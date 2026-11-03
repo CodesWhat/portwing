@@ -324,30 +324,13 @@ func VerifyRequestDetailed(
 		return VerifyResult{}, ErrUnknownKey
 	}
 
-	// Parse and check timestamp.
+	// Parse the timestamp. Skew and replay are decided only after the
+	// signature verifies, so a caller without the key cannot probe either. A
+	// header that is not a number cannot have been signed, so it is just a bad
+	// signature.
 	tsUnix, err := strconv.ParseInt(tsHeader, 10, 64)
 	if err != nil {
-		return VerifyResult{}, ErrTimestampSkew
-	}
-	skew := timeNow().Sub(time.Unix(tsUnix, 0))
-	maxSkew := time.Duration(maxSkewSeconds) * time.Second
-	if skew < -maxSkew || skew > maxSkew {
-		return VerifyResult{}, ErrTimestampSkew
-	}
-	if skew < 0 {
-		skew = -skew
-	}
-
-	// Warn on large but still-acceptable skew.
-	if skew > 30*time.Second {
-		slog.Warn("clock skew warning",
-			"skew_seconds", int(skew.Seconds()),
-			"key_id", applog.Sanitize(kidHeader))
-	}
-
-	// Replay check.
-	if lru.Seen(nonceHeader) {
-		return VerifyResult{}, ErrNonceReplay
+		return VerifyResult{}, ErrBadSignature
 	}
 
 	// Decode signature (base64url, no padding).
@@ -395,6 +378,28 @@ func VerifyRequestDetailed(
 	// Verify signature.
 	if !ed25519.Verify(ed25519.PublicKey(key.PubKey), msg, sig) {
 		return VerifyResult{}, ErrBadSignature
+	}
+
+	// Timestamp and replay, now that the caller has proved it holds the key.
+	skew := timeNow().Sub(time.Unix(tsUnix, 0))
+	maxSkew := time.Duration(maxSkewSeconds) * time.Second
+	if skew < -maxSkew || skew > maxSkew {
+		return VerifyResult{}, ErrTimestampSkew
+	}
+	if skew < 0 {
+		skew = -skew
+	}
+
+	// Warn on large but still-acceptable skew.
+	if skew > 30*time.Second {
+		slog.Warn("clock skew warning",
+			"skew_seconds", int(skew.Seconds()),
+			"key_id", applog.Sanitize(kidHeader))
+	}
+
+	// Replay check.
+	if lru.Seen(nonceHeader) {
+		return VerifyResult{}, ErrNonceReplay
 	}
 
 	// Policy, after the signature so a caller without the key learns nothing

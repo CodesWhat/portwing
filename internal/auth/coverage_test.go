@@ -423,8 +423,8 @@ func TestVerifyRequest_TimestampParseError(t *testing.T) {
 	req.Header.Set(HeaderTimestamp, "notanumber")
 
 	_, err := VerifyRequest(req, nil, reg, lru, 60)
-	if !errors.Is(err, ErrTimestampSkew) {
-		t.Errorf("expected ErrTimestampSkew for unparseable timestamp, got: %v", err)
+	if !errors.Is(err, ErrBadSignature) {
+		t.Errorf("expected ErrBadSignature for unparseable timestamp, got: %v", err)
 	}
 }
 
