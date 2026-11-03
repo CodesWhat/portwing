@@ -10,16 +10,21 @@ import (
 	"syscall"
 )
 
+// flockCall is syscall.Flock; tests replace it to reach the retry and failure
+// paths.
+var flockCall = syscall.Flock
+
 // flockExclusive takes an exclusive advisory lock on path, creating it with
 // 0600 if needed, and blocks until it is held. The returned func releases the
 // lock. The lock dies with the process, so a crash cannot leave it held.
 func flockExclusive(path string) (func(), error) {
+	// #nosec G304 -- path is the package-built sidecar next to the signature locks file in the agent's state directory.
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		err = flockCall(int(f.Fd()), syscall.LOCK_EX)
 		if !errors.Is(err, syscall.EINTR) {
 			break
 		}
@@ -29,7 +34,7 @@ func flockExclusive(path string) (func(), error) {
 		return nil, err
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = flockCall(int(f.Fd()), syscall.LOCK_UN)
 		_ = f.Close()
 	}, nil
 }

@@ -5,8 +5,10 @@
 package auth
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -63,5 +65,35 @@ func TestFlockExclusive_OpenFailure(t *testing.T) {
 	t.Parallel()
 	if _, err := flockExclusive(filepath.Join(t.TempDir(), "missing", "x.lock")); err == nil {
 		t.Fatal("want an error when the lock file cannot be opened")
+	}
+}
+
+// Not parallel: it swaps flockCall, and sequential tests finish before any
+// parallel test in the package resumes.
+func TestFlockExclusive_RetriesInterruptAndReportsFailure(t *testing.T) {
+	orig := flockCall
+	t.Cleanup(func() { flockCall = orig })
+	path := filepath.Join(t.TempDir(), "x.lock")
+
+	calls := 0
+	flockCall = func(fd, how int) error {
+		calls++
+		if how == syscall.LOCK_EX && calls == 1 {
+			return syscall.EINTR
+		}
+		return orig(fd, how)
+	}
+	release, err := flockExclusive(path)
+	if err != nil {
+		t.Fatalf("flockExclusive after EINTR: %v", err)
+	}
+	release()
+	if calls < 2 {
+		t.Fatalf("flock called %d times; want a retry after EINTR", calls)
+	}
+
+	flockCall = func(int, int) error { return syscall.EIO }
+	if _, err := flockExclusive(path); !errors.Is(err, syscall.EIO) {
+		t.Fatalf("flockExclusive error = %v; want EIO", err)
 	}
 }
