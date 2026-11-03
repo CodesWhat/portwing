@@ -182,6 +182,141 @@ func TestSignatureLocks_PersistFailureStillLocksInMemory(t *testing.T) {
 	}
 }
 
+func TestSignatureLocks_InterleavedLockAndClearBothSurvive(t *testing.T) {
+	t.Parallel()
+	const a, b, c = "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc"
+	dir := t.TempDir()
+	agent, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.Lock(b, lockTestTime); err != nil {
+		t.Fatal(err)
+	}
+	cli, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The CLI has b in its view. The agent locks a behind its back, then the
+	// CLI clears b. The stale CLI map must not drop a.
+	if _, err := agent.Lock(a, lockTestTime); err != nil {
+		t.Fatal(err)
+	}
+	if cleared, err := cli.Clear(b); err != nil || !cleared {
+		t.Fatalf("Clear = %v, %v", cleared, err)
+	}
+	// Opposite order: the CLI cleared b, so the agent's stale view (still
+	// holding b) must not re-add it when it locks c.
+	if _, err := agent.Lock(c, lockTestTime); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.List()
+	if len(got) != 2 || got[0].KeyID != a || got[1].KeyID != c {
+		t.Fatalf("locks = %v; want a and c only", got)
+	}
+}
+
+func TestSignatureLocks_UnpersistedLockMergesWithFile(t *testing.T) {
+	t.Parallel()
+	const x, y, z = "1111111111111111", "2222222222222222", "3333333333333333"
+	dir := t.TempDir()
+	agent, _ := OpenSignatureLocks(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.Lock(x, lockTestTime); err == nil {
+		t.Fatal("Lock into a missing dir must report a persistence error")
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cli, _ := OpenSignatureLocks(dir)
+	if _, err := cli.Lock(y, lockTestTime); err != nil {
+		t.Fatal(err)
+	}
+	// The agent is dirty (holds x unwritten). Locking z merges x, y and z. A
+	// Clear issued by the CLI while the agent was dirty would be undone the
+	// same way, which fails closed.
+	if newly, err := agent.Lock(z, lockTestTime); err != nil || !newly {
+		t.Fatalf("Lock = %v, %v", newly, err)
+	}
+	reopened, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.List(); len(got) != 3 {
+		t.Fatalf("locks = %v; want x, y and z", got)
+	}
+}
+
+func TestSignatureLocks_CheckRetriesDirtyWriteUnderLock(t *testing.T) {
+	t.Parallel()
+	const x = "1111111111111111"
+	dir := t.TempDir()
+	agent, _ := OpenSignatureLocks(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = agent.Lock(x, lockTestTime)
+	if _, locked := agent.LockedSince(x); !locked {
+		t.Fatal("dirty lock must still hold")
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, locked := agent.LockedSince(x); !locked {
+		t.Fatal("dirty lock must still hold")
+	}
+	reopened, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, locked := reopened.LockedSince(x); !locked {
+		t.Fatal("the retry must have persisted the lock")
+	}
+	if newly, err := agent.Lock(x, lockTestTime); err != nil || newly {
+		t.Fatalf("Lock = %v, %v; want existing", newly, err)
+	}
+}
+
+func TestSignatureLocks_SidecarLockUnavailable(t *testing.T) {
+	t.Parallel()
+	const a, b = "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"
+	dir := t.TempDir()
+	locks, _ := OpenSignatureLocks(dir)
+	if _, err := locks.Lock(a, lockTestTime); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the sidecar file belongs cannot be opened as a lock.
+	sidecar := filepath.Join(dir, SignatureLocksFileName+".lock")
+	if err := os.Remove(sidecar); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(sidecar, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := locks.Clear(a); err == nil {
+		t.Fatal("Clear must fail when the lock cannot be taken")
+	}
+	if _, err := locks.ClearAll(); err == nil {
+		t.Fatal("ClearAll must fail when the lock cannot be taken")
+	}
+	newly, err := locks.Lock(b, lockTestTime)
+	if err == nil || !newly {
+		t.Fatalf("Lock = %v, %v; want newly locked with an error", newly, err)
+	}
+	if _, locked := locks.LockedSince(b); !locked {
+		t.Fatal("Lock must keep the lock in memory")
+	}
+	if _, locked := locks.LockedSince(a); !locked {
+		t.Fatal("a failed Clear must not drop the lock")
+	}
+}
+
 func TestValidKeyID(t *testing.T) {
 	t.Parallel()
 	for _, id := range []string{"0123456789abcdef", "ffffffffffffffff"} {
