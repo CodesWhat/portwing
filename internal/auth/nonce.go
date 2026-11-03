@@ -170,12 +170,16 @@ func (l *NonceLRU) evictExpired() {
 // caller must hold l.mu. Add calls it to reclaim space at capacity rather than
 // waiting for the cleanup ticker.
 func (l *NonceLRU) evictExpiredLocked(now time.Time) {
-	for entry := l.order.Front(); entry != nil; entry = l.order.Front() {
+	// Scan the whole list: after a backward wall-clock step, insertion order no
+	// longer matches expiry order, so an unexpired entry can sit in front of
+	// expired ones.
+	for entry := l.order.Front(); entry != nil; {
+		next := entry.Next()
 		nonce := entry.Value.(string)
-		if !l.expired(l.seen[nonce], now) {
-			break
+		if l.expired(l.seen[nonce], now) {
+			delete(l.seen, nonce)
+			l.order.Remove(entry)
 		}
-		delete(l.seen, nonce)
-		l.order.Remove(entry)
+		entry = next
 	}
 }
