@@ -5,6 +5,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -209,6 +210,109 @@ func TestNonceLRU_ReplayConcurrent(t *testing.T) {
 	}
 }
 
+func TestNonceLRU_EvictsOnWallClock(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(10, 60)
+	t.Cleanup(lru.Close)
+	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	cur := base
+	lru.now = func() time.Time { return cur }
+
+	if err := lru.Add("n1"); err != nil {
+		t.Fatal(err)
+	}
+	// After a backward wall-clock step the signed timestamp can still be valid
+	// for up to 2W, so the nonce must survive until then.
+	cur = base.Add(-30 * time.Second)
+	lru.evictExpired()
+	if !lru.Seen("n1") {
+		t.Fatal("nonce evicted after a backward wall-clock step")
+	}
+	cur = base.Add(2*time.Minute - time.Second)
+	lru.evictExpired()
+	if !lru.Seen("n1") {
+		t.Fatal("nonce evicted before 2W elapsed")
+	}
+	cur = base.Add(2*time.Minute + time.Second)
+	lru.evictExpired()
+	if lru.Seen("n1") {
+		t.Fatal("nonce kept past 2W")
+	}
+}
+
+func TestNonceLRU_RecordsMonotonicReading(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(10, 60)
+	t.Cleanup(lru.Close)
+	if err := lru.Add("n1"); err != nil {
+		t.Fatal(err)
+	}
+	lru.mu.Lock()
+	got := lru.seen["n1"]
+	lru.mu.Unlock()
+	if !strings.Contains(got.String(), "m=") {
+		t.Fatalf("recorded time %q lost its monotonic reading", got)
+	}
+	lru.now = nil
+	if !strings.Contains(lru.clock().String(), "m=") {
+		t.Fatal("fallback clock lacks a monotonic reading")
+	}
+}
+
+// A forward wall step past the TTL must not evict while monotonic elapsed is
+// still under it, or a step back would let a valid signature replay.
+func TestNonceLRU_ForwardWallStepKeepsNonce(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(10, 60)
+	t.Cleanup(lru.Close)
+	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	cur := base
+	lru.now = func() time.Time { return cur }
+	mono := time.Second
+	lru.elapsed = func(_, _ time.Time) time.Duration { return mono }
+
+	if err := lru.Add("n1"); err != nil {
+		t.Fatal(err)
+	}
+	cur = base.Add(time.Hour)
+	lru.evictExpired()
+	if !lru.Seen("n1") {
+		t.Fatal("nonce evicted by a forward wall step with little monotonic elapsed")
+	}
+	cur = base
+	if err := lru.Add("n1"); !errors.Is(err, ErrNonceReplay) {
+		t.Fatalf("replay after wall step back = %v", err)
+	}
+	// Monotonic past the TTL but wall time not: still kept.
+	mono = 3 * time.Minute
+	lru.evictExpired()
+	if !lru.Seen("n1") {
+		t.Fatal("nonce evicted on monotonic expiry alone")
+	}
+	// Both clocks past the TTL: evicted.
+	cur = base.Add(time.Hour)
+	lru.evictExpired()
+	if lru.Seen("n1") {
+		t.Fatal("nonce kept after both clocks passed the TTL")
+	}
+}
+
+func TestNonceLRU_ExpiredOnBothClocksEvicts(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(10, 60)
+	t.Cleanup(lru.Close)
+	if err := lru.Add("n1"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(2*lru.ttl + time.Second)
+	lru.mu.Lock()
+	lru.evictExpiredLocked(now)
+	lru.mu.Unlock()
+	if lru.Seen("n1") {
+		t.Fatal("nonce past TTL on both clocks was kept")
+	}
+}
+
 func BenchmarkNonceCapacityRefusal(b *testing.B) {
 	for _, size := range []int{100, 10000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
@@ -222,5 +326,36 @@ func BenchmarkNonceCapacityRefusal(b *testing.B) {
 				_ = lru.Add("overflow")
 			}
 		})
+	}
+}
+
+// After a backward wall step, a later nonce can expire before an earlier one.
+// Eviction must reclaim it rather than stop at the first unexpired entry.
+func TestNonceLRU_EvictsExpiredBehindUnexpired(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(2, 60)
+	t.Cleanup(lru.Close)
+	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	cur := base
+	lru.now = func() time.Time { return cur }
+	lru.elapsed = func(seen, now time.Time) time.Duration { return now.Sub(seen) }
+
+	if err := lru.Add("first"); err != nil {
+		t.Fatal(err)
+	}
+	cur = base.Add(-10 * time.Minute) // wall clock steps back
+	if err := lru.Add("second"); err != nil {
+		t.Fatal(err)
+	}
+	// Past the TTL for "second" but not for "first".
+	cur = base.Add(-10*time.Minute + 3*time.Minute)
+	if err := lru.Add("third"); err != nil {
+		t.Fatalf("at capacity with an expired entry behind an unexpired one: %v", err)
+	}
+	if lru.Seen("second") {
+		t.Fatal("expired nonce behind an unexpired one was not evicted")
+	}
+	if !lru.Seen("first") || !lru.Seen("third") {
+		t.Fatal("unexpired nonces were evicted")
 	}
 }

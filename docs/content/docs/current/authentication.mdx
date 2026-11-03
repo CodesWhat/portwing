@@ -32,7 +32,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.1.0
+  ghcr.io/codeswhat/portwing:1.1.1
 ```
 
 <Callout type="warn">
@@ -56,7 +56,7 @@ docker run -d --name portwing \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
   -e TOKEN_FILE=/run/secrets/portwing-token \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.1.0
+  ghcr.io/codeswhat/portwing:1.1.1
 ```
 
 This is appropriate for Docker secrets, Kubernetes secret volumes, or any orchestrator that can inject files but not env vars safely.
@@ -81,7 +81,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN_HASH="$HASH" \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.1.0
+  ghcr.io/codeswhat/portwing:1.1.1
 ```
 
 To keep the hash out of the environment entirely, write it to a file and use `TOKEN_HASH_FILE`:
@@ -108,7 +108,8 @@ Ed25519 keypairs give each client a distinct cryptographic identity. Every
 version 2 request carries a detached signature over the HTTP method, complete
 origin-form request target, a SHA-256 body hash, a Unix timestamp, and a
 128-bit random nonce. The agent verifies the signature, rejects requests with
-a timestamp skew greater than 60 seconds, and tracks nonces in an in-memory
+a timestamp skew greater than the allowed window (60 seconds by default, set by
+`MAX_CLOCK_SKEW_SECONDS`), and tracks nonces in an in-memory
 LRU to prevent replay. Each nonce is retained for at least twice the skew
 window before it can be evicted, so a nonce stays blocked for as long as its
 timestamp could still verify.
@@ -162,7 +163,7 @@ docker run -d --name portwing \
   -v portwing-state:/data/credentials \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.1.0
+  ghcr.io/codeswhat/portwing:1.1.1
 ```
 
 The `portwing-state` volume keeps the agent ID and the signature version locks across restarts. The image pre-creates a writable `/data/credentials`, so without the volume version 3 is still enabled for the life of the container, but the agent ID and the downgrade locks are lost when the container is replaced. Mount the volume so they survive. See [Signature version 3](#signature-version-3-audience-bound).
@@ -178,6 +179,12 @@ Signature version 2 clients must send five headers on every request:
 | `X-Portwing-Nonce` | 32 random hex characters (128-bit) |
 | `X-Portwing-Signature` | Base64url (no padding) Ed25519 signature over the canonical message |
 | `X-Portwing-Signature-Version` | Must be `2` for the full request-target format |
+
+The agent checks the signature first. Timestamp skew and replay are decided only
+after it verifies, so a caller without the key gets `invalid-signature` for a
+stale timestamp or a used nonce. `unknown-key` is the exception and is returned
+as soon as the key ID isn't found, because key IDs aren't secret and operators
+need it to debug.
 
 Rejected Ed25519 requests return `401` with an `X-Portwing-Reason` response
 header set to `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`,
@@ -238,7 +245,7 @@ test-only key.
 
 **Finding the audience.** `GET /_portwing/info` returns the agent ID as
 `agentId` and `v3` (`true` or `false`, with a `v3Reason` when `false`). It
-accepts version 2 signatures, so a controller can fetch it before it knows the
+accepts version 1, 2 and 3 signatures, so a controller can fetch it before it knows the
 audience (until `SIGNATURE_MIN_VERSION=3` is set: the minimum applies after the
 signature verifies, so this path then needs a version 3 signature too and the
 controller must already have the agent ID). It should sign version 3 only when
@@ -250,8 +257,8 @@ which controllers should validate against: 1 to 64 characters from `a-z`,
 the same value.
 
 **When v3 is unavailable.** Three situations make the agent refuse version 3
-while version 2 and legacy keep working (unless `SIGNATURE_MIN_VERSION=3` refuses
-them). Each is logged at startup, shown in
+while version 2 and legacy keep working, unless `SIGNATURE_MIN_VERSION` or a
+downgrade lock refuses them. Each is logged at startup, shown in
 `/_portwing/info` as `"v3": false` with a `v3Reason`, and returned as the
 `X-Portwing-Reason` of a refused v3 request:
 
@@ -327,11 +334,28 @@ locks that reset on restart would reopen the downgrade. If a lock cannot be
 written at the moment it is created (the disk fills, say), it still holds in
 memory and the agent retries the write on every later request until it
 succeeds, logging an error each time. A lock file that exists but cannot be read
-stops startup rather than dropping locks.
+stops startup rather than dropping locks. If the file is deleted while the agent
+is running, the agent keeps the locks in memory, logs an error, and writes the
+file back on the next check. Clearing locks with `portwing signature-lock`
+writes an empty file rather than deleting it.
 
 **Rotation.** The controller-assisted rotation endpoints accept version 2 or 3.
 The lock is per key ID and does not carry over a key rotation: the replacement
 key starts unlocked and locks when it first signs version 3.
+
+**Pin v3 per agent.** Once a controller has had one v3 request accepted by an
+agent, it must keep signing v3 for that agent. It must not fall back to v2 or
+legacy after an `invalid-signature` or because a later `/_portwing/info`
+response says `"v3": false` without operator action. The info response isn't
+signed and a 401 reason can be forged by anything that terminates TLS in
+between, so neither is a safe reason to downgrade. Don't re-fetch info to
+recover from an `invalid-signature`.
+
+**The lock is first-contact trust.** The per-key lock only engages after the
+agent has accepted a first v3 request from that key. A request path that
+tampers with traffic before then can still hold a controller on v2. The locks
+live in the state directory, so mount a durable volume at `/data/credentials`
+(or set `STATE_DIR`). Without one, a replaced container starts with no locks.
 
 **Migration.**
 
@@ -340,8 +364,9 @@ key starts unlocked and locks when it first signs version 3.
 2. Upgrade the controller to one that signs version 3 (Drydock 1.9 or later).
    It reads `agentId` from `/_portwing/info` and signs version 3 from then on.
    Each key locks the first time it does.
-3. Optionally set `SIGNATURE_MIN_VERSION=3` once every client signs version 3,
-   to close the downgrade for keys that have not signed yet.
+3. Set `SIGNATURE_MIN_VERSION=3` once every client signs version 3. This is
+   the recommended end state: it closes the downgrade for keys that have not
+   signed yet and doesn't depend on the lock file.
 
 ### Key rotation (zero-downtime)
 
@@ -380,7 +405,7 @@ Ed25519-authenticated API is:
 | POST | `/_portwing/auth/rotation/commit` | Pending signer; `{}` |
 | POST | `/_portwing/auth/rotation/abort` | Current signer; `{}` |
 
-Use signature version 2 without query parameters. A bearer credential cannot
+Use signature version 2 or 3 without query parameters. A bearer credential cannot
 manage keys. Each signer can replace only its own identity. Preparation retains
 both keys; only a request signed by the replacement can retire its predecessor.
 Drydock stages its replacement private key before preparation, proves it through

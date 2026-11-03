@@ -100,16 +100,40 @@ func TestSignatureLocks_ClearAll(t *testing.T) {
 	}
 }
 
-func TestSignatureLocks_FileRemovedUnlocks(t *testing.T) {
+func TestSignatureLocks_FileRemovedKeepsLocksAndRewrites(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, SignatureLocksFileName)
+	locks, _ := OpenSignatureLocks(dir)
+	_, _ = locks.Lock("aaaaaaaaaaaaaaaa", lockTestTime)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, locked := locks.LockedSince("aaaaaaaaaaaaaaaa"); !locked {
+		t.Fatal("deleting the lock file must not unlock a key")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("lock file was not re-created: %v", err)
+	}
+	reopened, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, locked := reopened.LockedSince("aaaaaaaaaaaaaaaa"); !locked {
+		t.Fatal("re-created lock file lost the lock")
+	}
+}
+
+func TestSignatureLocks_FileAndDirRemovedKeepsLocks(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	locks, _ := OpenSignatureLocks(dir)
 	_, _ = locks.Lock("aaaaaaaaaaaaaaaa", lockTestTime)
-	if err := os.Remove(filepath.Join(dir, SignatureLocksFileName)); err != nil {
+	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
-	if _, locked := locks.LockedSince("aaaaaaaaaaaaaaaa"); locked {
-		t.Fatal("operator deleting the lock file must clear the lock")
+	if _, locked := locks.LockedSince("aaaaaaaaaaaaaaaa"); !locked {
+		t.Fatal("a failed re-persist must not drop the in-memory lock")
 	}
 }
 

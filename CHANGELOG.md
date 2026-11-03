@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.1] - 2026-11-03
+
+This patch release hardens version 3 signature handling after a security review
+and fixes the website 404 page. The wire protocol is unchanged (`portwing/1.0`,
+`DrydockCompat` 1.4.0).
+
+### Security
+
+- Controllers should pin version 3 per agent once it works. Signature
+  verification still accepts version 2 and legacy signatures until a key signs
+  version 3, so a controller that doesn't pin leaves that downgrade window
+  open. The docs and the test vectors' contract note now say so.
+- A nonce is only forgotten once both the wall clock and the monotonic clock
+  have passed the replay window, so a clock step in either direction can't
+  drop it while its timestamp is still valid.
+- Deleting `signature-locks.json` while the agent is running no longer drops
+  the downgrade locks. The agent keeps the locks it already loaded.
+- Timestamp skew and replay are now checked after the signature verifies, so
+  an unsigned request can't probe them. A non-numeric timestamp now returns
+  `invalid-signature` instead of a timestamp error.
+- `docker login` through the agent refuses a registry server that starts with
+  `-` and passes `--` before it, so the value can't be read as a flag.
+
+### Fixed
+
+- The website serves its 404 page for missing paths on the filesystem, and
+  `/404` itself now answers with a 404 status.
+- Version 3 requests from a key that's already locked no longer take the file
+  lock and re-read `signature-locks.json` on every request.
+
+### Changed
+
+- Non-major npm dependency updates.
+- CI egress now allows the Docker Hub blob hosts on S3 so image pulls in
+  workflows don't get blocked.
+- Small standard library cleanups in the Go code.
+
 ## [v1.1.0] - 2026-11-02
 
 This release adds audience-bound Ed25519 request signatures (version 3).

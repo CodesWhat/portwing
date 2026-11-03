@@ -422,6 +422,9 @@ func validateRegistryServer(server string) error {
 	if server == "" {
 		return fmt.Errorf("registryAuth.server is required and must be an https URI or bare registry host")
 	}
+	if strings.HasPrefix(server, "-") {
+		return fmt.Errorf("registryAuth.server must not start with '-'")
+	}
 
 	effectiveURI := server
 	if !strings.Contains(server, "://") {
@@ -724,7 +727,7 @@ func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) 
 // registryLogin performs a docker login using --password-stdin.
 func (cm *ComposeManager) registryLogin(ctx context.Context, auth *RegistryAuth) error {
 	// #nosec G204 -- arguments are passed directly to docker without a shell; password is sent on stdin.
-	cmd := exec.CommandContext(ctx, "docker", "login", "--username", auth.Username, "--password-stdin", auth.Server)
+	cmd := exec.CommandContext(ctx, "docker", "login", "--username", auth.Username, "--password-stdin", "--", auth.Server)
 	cmd.Stdin = strings.NewReader(auth.Password)
 	cmd.Env = cm.buildEnv()
 

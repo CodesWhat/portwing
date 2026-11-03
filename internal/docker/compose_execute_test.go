@@ -771,7 +771,7 @@ func TestExecuteRegistryLoginPreservesBareHostname(t *testing.T) {
 	if len(lines) < 1 {
 		t.Fatal("Docker invocation record is empty")
 	}
-	const wantLogin = "login --username alice --password-stdin registry.example.com:5443"
+	const wantLogin = "login --username alice --password-stdin -- registry.example.com:5443"
 	if lines[0] != wantLogin {
 		t.Fatalf("Docker login invocation = %q, want %q", lines[0], wantLogin)
 	}

@@ -4,8 +4,9 @@ package metrics
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -210,18 +211,10 @@ func (reg *Registry) WritePrometheus(b *strings.Builder, escapeLabel func(string
 	fmt.Fprintf(b, "# TYPE portwing_http_requests_total counter\n")
 
 	reg.requestsMu.Lock()
-	reqKeys := make([]string, 0, len(reg.requestsTotal))
-	for k := range reg.requestsTotal {
-		reqKeys = append(reqKeys, k)
-	}
-	reqCopy := make(map[string]uint64, len(reg.requestsTotal))
-	for k, v := range reg.requestsTotal {
-		reqCopy[k] = v
-	}
+	reqCopy := maps.Clone(reg.requestsTotal)
 	reg.requestsMu.Unlock()
 
-	sort.Strings(reqKeys)
-	for _, key := range reqKeys {
+	for _, key := range slices.Sorted(maps.Keys(reqCopy)) {
 		parts := strings.SplitN(key, "\x00", 2)
 		method, code := parts[0], parts[1]
 		fmt.Fprintf(b, "portwing_http_requests_total{method=\"%s\",code=\"%s\"} %d\n",
@@ -258,18 +251,10 @@ func (reg *Registry) WritePrometheus(b *strings.Builder, escapeLabel func(string
 	fmt.Fprintf(b, "# TYPE portwing_auth_failures_total counter\n")
 
 	reg.authMu.Lock()
-	authKeys := make([]string, 0, len(reg.authFailuresTotal))
-	for k := range reg.authFailuresTotal {
-		authKeys = append(authKeys, k)
-	}
-	authCopy := make(map[string]uint64, len(reg.authFailuresTotal))
-	for k, v := range reg.authFailuresTotal {
-		authCopy[k] = v
-	}
+	authCopy := maps.Clone(reg.authFailuresTotal)
 	reg.authMu.Unlock()
 
-	sort.Strings(authKeys)
-	for _, reason := range authKeys {
+	for _, reason := range slices.Sorted(maps.Keys(authCopy)) {
 		fmt.Fprintf(b, "portwing_auth_failures_total{reason=\"%s\"} %d\n",
 			escapeLabel(reason), authCopy[reason])
 	}

@@ -260,6 +260,15 @@ func TestValidateRequest(t *testing.T) {
 	}
 }
 
+func TestValidateRegistryServerRejectsFlagLookalike(t *testing.T) {
+	t.Parallel()
+	for _, server := range []string{"--config=x", "-H"} {
+		if err := validateRegistryServer(server); err == nil {
+			t.Errorf("validateRegistryServer(%q): want an error", server)
+		}
+	}
+}
+
 func TestValidateRequestRegistryServerForms(t *testing.T) {
 	t.Parallel()
 
