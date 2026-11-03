@@ -102,11 +102,22 @@ Native Linux packages install:
 - `/etc/portwing/` for operator-owned configuration;
 - `/data/stacks/` for Compose stack state.
 
-The package creates no state directory. Without `AGENT_ID` or a writable
-`STATE_DIR` the agent serves version 2 and legacy signatures only and refuses
-signature version 3 (`agent-id-not-persistent`). Set `AGENT_ID` in the
-environment file to use version 3, or add a `STATE_DIR` to the unit's
-`ReadWritePaths`. See [Authentication](/authentication#signature-version-3-audience-bound).
+The package creates no state directory. Signature version 3 needs a writable,
+persistent one for the agent ID and the downgrade locks, and setting `AGENT_ID`
+does not replace it. Without one the agent serves version 2 and legacy
+signatures only and refuses version 3 (`agent-id-not-persistent`, or
+`state-not-writable` when `AGENT_ID` is set). To use version 3, create a
+private directory, point `STATE_DIR` at it in the environment file, and add it
+to the unit's `ReadWritePaths`:
+
+```bash
+sudo install -d -m 0700 /var/lib/portwing
+```
+
+Then set `STATE_DIR=/var/lib/portwing` in `/etc/portwing/config` and add
+`/var/lib/portwing` to `ReadWritePaths` in a `systemctl edit portwing` drop-in.
+The unit sets no `User=`, so it runs as root and root ownership is right; if
+you add a service user, own the directory with it. `AGENT_ID` stays optional. See [Authentication](/authentication#signature-version-3-audience-bound).
 
 The package deliberately does **not** enable or start `portwing.service`.
 Portwing fails closed without authentication, so create the configuration first:

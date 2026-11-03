@@ -59,6 +59,12 @@ Containers **without** `dd.watch=true` appear in the Drydock inventory but are n
 
 Choose the connection mode that fits your network topology. See [Connection Modes](/connection-modes) for a full comparison.
 
+Both examples bind-mount `/data/credentials` for the agent ID and the v3 signature locks. Create it first. If Docker creates the missing bind source it is root-owned, UID 65532 can't write to it, and the agent refuses v3:
+
+```bash
+sudo install -d -m 0700 -o 65532 -g 65532 /data/credentials
+```
+
 ### Standard mode (Drydock connects inbound)
 
 Use this when the Drydock controller can reach your host directly — no NAT.

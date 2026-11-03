@@ -65,6 +65,10 @@ services:
       TOKEN_HASH: "${PORTWING_TOKEN_HASH}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portwing-state:/data/credentials  # agent ID + v3 signature locks
+
+volumes:
+  portwing-state:
 ```
 
 See [Getting Started](/getting-started) for the full Sockguard variant and TLS examples.
@@ -189,6 +193,10 @@ services:
       - portwing_key
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portwing-state:/data/credentials  # agent ID + v3 signature locks
+
+volumes:
+  portwing-state:
 
 secrets:
   portwing_key:
