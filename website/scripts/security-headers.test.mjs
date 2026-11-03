@@ -126,7 +126,7 @@ test("website source and runtime CSP contain no Go Report Card surface", () => {
   assert.deepEqual(cspOrigins(csp), ["https://e.codeswhat.com", "https://pkg.go.dev"]);
 });
 
-test("build output serves the not-found page from the error phase with its own CSP", () => {
+test("build output serves the not-found page on filesystem misses with its own CSP", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "portwing-bop-404-"));
   const source = path.join(root, "source");
   const target = path.join(root, ".vercel", "output");
@@ -140,26 +140,24 @@ test("build output serves the not-found page from the error phase with its own C
     const config = JSON.parse(fs.readFileSync(path.join(target, "config.json"), "utf8"));
     assert.deepEqual(config.overrides["404.html"], { path: "404" });
     const phases = config.routes.filter((route) => route.handle).map((route) => route.handle);
-    assert.deepEqual(phases, ["filesystem", "resource", "error"]);
+    assert.deepEqual(phases, ["filesystem"]);
     const filesystemAt = config.routes.findIndex((route) => route.handle === "filesystem");
-    const errorAt = config.routes.findIndex((route) => route.handle === "error");
     assert.ok(filesystemAt > 0, "header routes must come before the filesystem phase");
     assert.ok(
       config.routes.slice(0, filesystemAt).every((route) => route.continue === true),
-      "everything before the filesystem phase only attaches headers",
+      "everything before the filesystem phase only attaches headers or status",
     );
-    const resourceAt = config.routes.findIndex((route) => route.handle === "resource");
-    assert.equal(resourceAt, filesystemAt + 1, "the resource phase follows the filesystem phase");
     assert.deepEqual(
-      config.routes[resourceAt + 1],
-      { src: "^/.*$", status: 404 },
-      "a bare 404 route turns a filesystem miss into an error-phase 404, as @vercel/next does",
+      config.routes[filesystemAt - 1],
+      { src: "^/404/?$", status: 404, continue: true },
+      "a direct /404 answers 404, as @vercel/next emits",
     );
-    assert.equal(errorAt, resourceAt + 2, "the error phase follows the resource 404 route");
-    assert.equal(errorAt, config.routes.length - 2, "the 404 route is last");
-    const notFound = config.routes[errorAt + 1];
+    assert.equal(filesystemAt, config.routes.length - 2, "the miss route is last");
+    const notFound = config.routes[filesystemAt + 1];
+    assert.equal(notFound.src, "^/.*$");
     assert.equal(notFound.status, 404);
     assert.equal(notFound.dest, "/404");
+    assert.equal(notFound.continue, undefined);
     assert.equal(notFound.headers["X-Content-Type-Options"], "nosniff");
     assert.match(notFound.headers["Content-Security-Policy"], /script-src[^;]*'sha256-/);
   } finally {
