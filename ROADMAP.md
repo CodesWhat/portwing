@@ -1,7 +1,7 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.1.0`,
-> which adds audience-bound v3 request signatures.
+> Portwing is stable software. The current release line is `v1.1.1`,
+> a patch release that hardens v3 signature handling.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
