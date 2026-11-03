@@ -328,3 +328,34 @@ func BenchmarkNonceCapacityRefusal(b *testing.B) {
 		})
 	}
 }
+
+// After a backward wall step, a later nonce can expire before an earlier one.
+// Eviction must reclaim it rather than stop at the first unexpired entry.
+func TestNonceLRU_EvictsExpiredBehindUnexpired(t *testing.T) {
+	t.Parallel()
+	lru := NewNonceLRU(2, 60)
+	t.Cleanup(lru.Close)
+	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	cur := base
+	lru.now = func() time.Time { return cur }
+	lru.elapsed = func(seen, now time.Time) time.Duration { return now.Sub(seen) }
+
+	if err := lru.Add("first"); err != nil {
+		t.Fatal(err)
+	}
+	cur = base.Add(-10 * time.Minute) // wall clock steps back
+	if err := lru.Add("second"); err != nil {
+		t.Fatal(err)
+	}
+	// Past the TTL for "second" but not for "first".
+	cur = base.Add(-10*time.Minute + 3*time.Minute)
+	if err := lru.Add("third"); err != nil {
+		t.Fatalf("at capacity with an expired entry behind an unexpired one: %v", err)
+	}
+	if lru.Seen("second") {
+		t.Fatal("expired nonce behind an unexpired one was not evicted")
+	}
+	if !lru.Seen("first") || !lru.Seen("third") {
+		t.Fatal("unexpired nonces were evicted")
+	}
+}
