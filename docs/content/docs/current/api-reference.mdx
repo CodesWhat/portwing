@@ -40,7 +40,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
 | `GET` | `/health` | None | Process liveness. Always HTTP 200 while the agent is running; does not probe dependencies. |
 | `GET` | `/ready` | None | Readiness. Requires Docker in standard mode and Docker plus the controller in edge mode. |
 | `GET` | `/_portwing/health` | None | Compatibility alias for `/ready`. |
-| `GET` | `/_portwing/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. Accepts bearer credentials and Ed25519 signatures of version 1, 2 or 3, so a controller can read `agentId` before it knows the audience for version 3. |
+| `GET` | `/_portwing/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. Accepts bearer credentials and Ed25519 signatures of version 1, 2 or 3, so a controller can read `agentId` before it knows the audience for version 3 (version 2 and legacy stop working here once `SIGNATURE_MIN_VERSION=3` is set). |
 
 ### Response shapes
 
