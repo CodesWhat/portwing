@@ -460,6 +460,34 @@ for mount_example in examples/docker-compose.standard.yml examples/kubernetes/ed
 	mv "${mount_backup}" "${fixture}/${mount_example}"
 done
 
+# A near-match destination must not satisfy the mount check, in Compose or
+# Kubernetes.
+for mount_example in examples/docker-compose.standard.yml examples/kubernetes/edge.yaml; do
+	mount_backup="${fixture}/${mount_example}.mount-backup"
+	cp "${fixture}/${mount_example}" "${mount_backup}"
+	sed -i.bak 's#/data/credentials#/data/credentials-backup#' "${fixture}/${mount_example}"
+	rm -f "${fixture}/${mount_example}.bak"
+	expect_release_contract_failure \
+		"FAIL: every Portwing service in ${mount_example} must mount /data/credentials" \
+		"the package release contract must reject a /data/credentials-backup mount (${mount_example})"
+	mv "${mount_backup}" "${fixture}/${mount_example}"
+done
+
+# A mount on another service must not satisfy the check for Portwing: move the
+# credentials volume from the portwing service to the sockguard service.
+mount_example="examples/docker-compose.with-sockguard.yml"
+mount_backup="${fixture}/${mount_example}.mount-backup"
+cp "${fixture}/${mount_example}" "${mount_backup}"
+sed -i.bak \
+	-e '/portwing-state:\/data\/credentials/d' \
+	-e 's#^\(      - sockguard-socket:/var/run/sockguard\)$#\1\n      - portwing-state:/data/credentials#' \
+	"${fixture}/${mount_example}"
+rm -f "${fixture}/${mount_example}.bak"
+expect_release_contract_failure \
+	"FAIL: every Portwing service in ${mount_example} must mount /data/credentials (missing on: portwing)" \
+	"the package release contract must reject a credentials mount that sits on another service (${mount_example})"
+mv "${mount_backup}" "${fixture}/${mount_example}"
+
 docs_meta_backup="${fixture}/docs/content/docs/current/meta.json.title-backup"
 cp "${fixture}/docs/content/docs/current/meta.json" "${docs_meta_backup}"
 sed -i.bak 's/"title": "v[0-9.]*"/"title": "v0.0"/' "${fixture}/docs/content/docs/current/meta.json"
