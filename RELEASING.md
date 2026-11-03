@@ -100,6 +100,13 @@ independent target for release-preparation commits.
   assigning its release. README highlights, API descriptions and current docs,
   including comparison tables, must distinguish the published release from
   later development work.
+- Word the current-release statements so they stay true before and after
+  publication, because the prep commit is what gets released. README.md and
+  ROADMAP.md say "The current release line is `vX.Y.Z`" and point to GitHub
+  Releases for what's published; COMPATIBILITY.md, `website/public/llms.txt`
+  and the website FAQ use the same neutral wording. Don't write "currently",
+  "is prepared" or "prepared on dev" there. The package-release contract
+  requires the README and ROADMAP literal.
 - Record feature-specific peer minimums in [COMPATIBILITY.md](COMPATIBILITY.md).
   For managed rotation, replace the matching-development-build requirement
   only when supporting Portwing and Drydock tags exist. An unchanged wire

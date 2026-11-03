@@ -224,6 +224,33 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		if err := reg.Load(); err != nil {
 			return nil, fmt.Errorf("loading authorized_keys: %w", err)
 		}
+		locks := auth.NewMemorySignatureLocks()
+		if cfg.StateDir != "" {
+			locks, err = auth.OpenSignatureLocks(cfg.StateDir)
+			if err != nil {
+				return nil, fmt.Errorf("loading signature locks: %w", err)
+			}
+		} else if cfg.SignatureV3Unavailable == "" {
+			// Locks that cannot survive a restart would reopen the downgrade,
+			// so v3 is not offered without a state directory. /_portwing/info
+			// reads the same field.
+			cfg.SignatureV3Unavailable = "state-not-writable"
+		}
+		reg.SetSignaturePolicy(auth.SignaturePolicy{
+			AgentID:       cfg.AgentID,
+			MinVersion:    cfg.SignatureMinVersion,
+			V3Unavailable: cfg.SignatureV3Unavailable,
+			Locks:         locks,
+		})
+		// The locks stay enforced for v2 and legacy even while v3 is refused,
+		// so a key locked to v3 has no working signature version until v3 is
+		// restored or its lock is cleared.
+		if cfg.SignatureV3Unavailable != "" {
+			if held := locks.List(); len(held) > 0 {
+				slog.Warn(fmt.Sprintf("signature version 3 is unavailable but %d key(s) are locked to it and cannot authenticate: %s, or accept the downgrade for those keys with `portwing signature-lock clear` (needs a writable state directory; clearing a lock reopens the downgrade for that key)", len(held), signatureV3Remedy(cfg.SignatureV3Unavailable)),
+					"reason", cfg.SignatureV3Unavailable, "locked_keys", len(held))
+			}
+		}
 		ed25519Cfg = Ed25519Config{
 			Registry:       reg,
 			Nonces:         auth.NewNonceLRU(cfg.NonceLRUSize, cfg.MaxClockSkewSeconds),
@@ -535,6 +562,10 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"agentId":       s.cfg.AgentID,
 		"agentName":     s.cfg.AgentName,
 		"capabilities":  capabilities,
+		"v3":            s.cfg.SignatureV3Unavailable == "",
+	}
+	if s.cfg.SignatureV3Unavailable != "" {
+		info["v3Reason"] = s.cfg.SignatureV3Unavailable
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1111,5 +1142,20 @@ func (s *Server) pollContainers(ctx context.Context) {
 				slog.Error("container refresh notify failed", "error", err)
 			}
 		}
+	}
+}
+
+// signatureV3Remedy names the fix that matches why v3 is unavailable, so the
+// startup warning does not send the operator to the wrong place.
+func signatureV3Remedy(reason string) string {
+	switch reason {
+	case config.ReasonStateNotWritable:
+		return "restore a writable state directory (mount a volume at /data/credentials or fix STATE_DIR)"
+	case config.ReasonAgentIDNotV3Compatible:
+		return "fix AGENT_ID (1 to 64 characters from a-z, 0-9 and '-') or unset it"
+	case config.ReasonAgentIDNotPersistent:
+		return "mount a writable persistent state directory at /data/credentials (STATE_DIR) so the agent ID survives restarts"
+	default:
+		return "resolve the cause named in \"reason\""
 	}
 }

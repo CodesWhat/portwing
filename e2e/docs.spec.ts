@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { MOBILE, overflowsHorizontally, test } from "./fixtures";
 
 test.describe("docs at 375px", () => {
@@ -79,9 +79,23 @@ test.describe("docs on desktop", () => {
   });
 });
 
+const switcher = (page: Page) =>
+  page.locator('button[aria-haspopup="dialog"]').filter({ hasText: "v1.1" });
+
+test("version switcher labels the current line and reaches the archived v1.0 docs", async ({
+  page,
+}) => {
+  await page.goto("/docs/api-reference");
+  await switcher(page).click();
+  await expect(page.locator('a[href="/docs/v0.9"]')).toBeVisible();
+  await page.locator('a[href="/docs/v1.0"]').click();
+  await expect(page).toHaveURL(/\/docs\/v1\.0$/);
+  await expect(page.getByText("Archived documentation for v1.0").first()).toBeVisible();
+});
+
 test("version switcher reaches the archived v0.9 docs", async ({ page }) => {
   await page.goto("/docs/api-reference");
-  await page.locator('button[aria-haspopup="dialog"]').filter({ hasText: "v1.0" }).click();
+  await switcher(page).click();
   await page.locator('a[href="/docs/v0.9"]').click();
   await expect(page).toHaveURL(/\/docs\/v0\.9$/);
   await expect(page.getByText("Archived documentation for v0.9").first()).toBeVisible();

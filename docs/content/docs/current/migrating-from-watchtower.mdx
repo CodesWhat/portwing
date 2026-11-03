@@ -59,6 +59,12 @@ Containers **without** `dd.watch=true` appear in the Drydock inventory but are n
 
 Choose the connection mode that fits your network topology. See [Connection Modes](/connection-modes) for a full comparison.
 
+Both examples bind-mount `/data/credentials` for the agent ID and the v3 signature locks. Create it first. If Docker creates the missing bind source it is root-owned, UID 65532 can't write to it, and the agent refuses v3:
+
+```bash
+sudo install -d -m 0700 -o 65532 -g 65532 /data/credentials
+```
+
 ### Standard mode (Drydock connects inbound)
 
 Use this when the Drydock controller can reach your host directly — no NAT.
@@ -67,7 +73,7 @@ Use this when the Drydock controller can reach your host directly — no NAT.
 # docker-compose.yml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.4
+    image: ghcr.io/codeswhat/portwing:1.1.0
     restart: unless-stopped
     # The image runs as non-root UID 65532; grant the Docker socket's group:
     #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
@@ -76,6 +82,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /data/stacks:/data/stacks        # Compose stack files (host dir must be writable by UID 65532)
+      - /data/credentials:/data/credentials  # agent ID + v3 signature locks (mode 0700, UID 65532)
     ports:
       - "3000:3000"
     environment:
@@ -102,7 +109,7 @@ Key environment variables for Standard mode:
 | `TLS_CERT` | — | Server TLS certificate path |
 | `TLS_KEY` | — | Server TLS key path |
 | `STACKS_DIR` | `/data/stacks` | Compose stack directory |
-| `AGENT_ID` | UUID v4 | Stable agent identifier |
+| `AGENT_ID` | generated once, kept in `STATE_DIR` | Stable agent identifier; use `^[a-z0-9-]{1,64}$` for v3 |
 | `AGENT_NAME` | hostname | Human-readable name in Drydock UI |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `DD_POLL_INTERVAL` | `300` | Container inventory refresh interval (seconds) |
@@ -120,7 +127,7 @@ Edge mode is production supported under the stable `portwing/1.0` protocol. Dryd
 # docker-compose.yml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.4
+    image: ghcr.io/codeswhat/portwing:1.1.0
     restart: unless-stopped
     # The image runs as non-root UID 65532; grant the Docker socket's group:
     #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
@@ -129,6 +136,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /data/stacks:/data/stacks        # host dir must be writable by UID 65532
+      - /data/credentials:/data/credentials  # agent ID + v3 signature locks (mode 0700, UID 65532)
     environment:
       DRYDOCK_URL: "wss://your-drydock.example.com:3001"
       # Edge requires an Ed25519 key; mount it and set PRIVATE_KEY_FILE

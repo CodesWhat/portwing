@@ -74,6 +74,9 @@ const (
 	EventRateLimited = "rate_limited" // request blocked by rate limiter
 	EventEnrollment  = "enrollment"   // Ed25519 key enrolled via /api/portwing/enroll
 	EventKeyRotation = "key_rotation"
+	// EventSignatureLock records a key being locked to signature version 3
+	// ("lock") or an operator clearing that lock ("clear", "clear_all").
+	EventSignatureLock = "signature_lock"
 )
 
 // Outcome values for the "outcome" field.
@@ -332,6 +335,22 @@ func (l *Logger) KeyRotation(actor, operation, keyID, outcome string) {
 	}
 	if l.ring != nil {
 		l.ring.push(Record{Time: time.Now().UTC(), Event: EventKeyRotation,
+			Actor: actor, Operation: operation, KeyID: keyID, Outcome: outcome})
+	}
+}
+
+// SignatureLock records a downgrade-lock change: operation is "lock" when a key
+// first verifies a v3 request, "clear" or "clear_all" when an operator removes
+// locks. keyID is empty for "clear_all".
+func (l *Logger) SignatureLock(actor, operation, keyID, outcome string) {
+	if l.log != nil {
+		l.log.Info("", slog.String("event", EventSignatureLock),
+			slog.String("actor", applog.Sanitize(actor)),
+			slog.String("operation", applog.Sanitize(operation)),
+			slog.String("key_id", applog.Sanitize(keyID)), slog.String("outcome", outcome))
+	}
+	if l.ring != nil {
+		l.ring.push(Record{Time: time.Now().UTC(), Event: EventSignatureLock,
 			Actor: actor, Operation: operation, KeyID: keyID, Outcome: outcome})
 	}
 }

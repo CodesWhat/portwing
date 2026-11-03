@@ -65,7 +65,7 @@ export const TOOLS: Tool[] = [
   {
     name: "Arcane",
     slug: "arcane",
-    cells: cells("yes", "yes", "partial", "partial", "partial", "no", "partial", "undocumented"),
+    cells: cells("yes", "yes", "partial", "partial", "partial", "no", "yes", "undocumented"),
   },
   {
     name: "Hawser",

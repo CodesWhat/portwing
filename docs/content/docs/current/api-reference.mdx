@@ -40,7 +40,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
 | `GET` | `/health` | None | Process liveness. Always HTTP 200 while the agent is running; does not probe dependencies. |
 | `GET` | `/ready` | None | Readiness. Requires Docker in standard mode and Docker plus the controller in edge mode. |
 | `GET` | `/_portwing/health` | None | Compatibility alias for `/ready`. |
-| `GET` | `/_portwing/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. |
+| `GET` | `/_portwing/info` | Required | Returns agent version, Docker version, connection mode, uptime, hostname, agent ID, and capability list. Accepts bearer credentials and Ed25519 signatures of version 1, 2 or 3, so a controller can read `agentId` before it knows the audience for version 3 (version 2 and legacy stop working here once `SIGNATURE_MIN_VERSION=3` is set). |
 
 ### Response shapes
 
@@ -52,7 +52,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
   "live": true,
   "ready": false,
   "mode": "standard",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "uptimeSeconds": 3842.7,
   "docker": "unknown",
   "controller": "not_applicable"
@@ -67,7 +67,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
   "live": true,
   "ready": true,
   "mode": "standard",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "uptimeSeconds": 3842.7,
   "docker": "connected",
   "controller": "not_applicable"
@@ -81,16 +81,28 @@ edge mode, when the controller WebSocket is disconnected.
 
 ```json
 {
-  "version": "1.0.4",
+  "version": "1.1.0",
   "dockerVersion": "27.0.3",
   "mode": "standard",
   "uptime": "2h34m56.789s",
   "hostname": "my-server",
-  "agentId": "550e8400-e29b-41d4-a716-446655440000",
+  "agentId": "0123456789abcdef0123456789abcdef",
   "agentName": "my-server",
-  "capabilities": ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:logs"]
+  "capabilities": ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:logs"],
+  "v3": true
 }
 ```
+
+`agentId` is the audience that Ed25519 signature version 3 binds to. It is
+generated once and persisted, unless `AGENT_ID` overrides it, and matches
+`^[a-z0-9-]{1,64}$` unless an older `AGENT_ID` outside that rule is configured.
+`v3` says whether the agent will accept version 3. When it is `false`,
+`v3Reason` is `agent-id-not-v3-compatible` (the configured `AGENT_ID` is outside
+the rule), `agent-id-not-persistent` (no `AGENT_ID` and no persistent state
+directory) or `state-not-writable` (the state directory cannot hold the
+downgrade locks). Version 2 and legacy signatures keep working either way; sign
+version 3 only when `v3` is `true`. See
+[Authentication](/authentication#signature-version-3-audience-bound).
 
 Unsupported legacy `dd:watch` and `dd:trigger` capabilities are absent. The
 watcher descriptor declares controller ownership and the trigger list remains
@@ -358,7 +370,7 @@ Available when `ADAPTER=generic`. These endpoints expose container management wi
 
 ```json
 {
-  "agentVersion": "1.0.4",
+  "agentVersion": "1.1.0",
   "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"
@@ -548,9 +560,9 @@ This endpoint is only available when `ENROLLMENT_TOKEN` (and `AUTHORIZED_KEYS`) 
 Use HTTPS for enrollment. If native TLS is not configured, keep the listener
 private behind a TLS-terminating proxy. Portwing warns at startup when enrollment
 is armed without native TLS, including behind a proxy. This release still accepts
-HTTP enrollment. Starting in v1.1, enrollment will require native TLS or HTTPS
+HTTP enrollment. A later release is planned to require native TLS or HTTPS
 reported by a trusted proxy, with a planned `ALLOW_INSECURE_ENROLLMENT` opt-in for
-plaintext HTTP. That setting is not available in 1.0.x.
+plaintext HTTP. That setting is not available in 1.1.x.
 
 ### Request body
 

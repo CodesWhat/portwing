@@ -218,6 +218,20 @@ verifies the Ed25519 signature over
 target is the escaped path plus the exact raw query string. Unversioned legacy
 signatures are accepted only for query-free requests. No new dependencies.
 
+**Audience-bound signatures (version 3):** `X-Portwing-Signature-Version: 3`
+signs `portwing-sig-v3\nAGENT-ID\nMETHOD\nREQUEST-TARGET\nbody-sha256-hex\ntimestamp\nnonce`,
+so a request captured for one agent does not verify on another that trusts the
+same key. The agent ID is generated once and persisted under `STATE_DIR` (or
+set with `AGENT_ID`, `^[a-z0-9-]{1,64}$`) and is served by `GET /_portwing/info`.
+After a key first verifies a version 3 request the agent refuses that key's
+version 2 and legacy signatures (`X-Portwing-Reason: signature-locked`), and
+records the lock durably per key ID; `SIGNATURE_MIN_VERSION=3` refuses them for
+every key. Both checks run only after the signature verified, so a caller
+without the key learns nothing about lock state. An operator clears a lock with
+`portwing signature-lock clear <keyID>`, which is audit-logged. A signature for
+another agent reports `invalid-signature`, or `audience-mismatch` when the
+request carries `X-Portwing-Audience`.
+
 **Replay protection:** Two complementary mechanisms:
 
 1. **Timestamp window:** Requests with `|now - timestamp| > MAX_CLOCK_SKEW_SECONDS`
@@ -259,10 +273,10 @@ Enrollment sends its bootstrap credential in the request body, so use HTTPS.
 When enrollment is armed without native TLS, startup logs a warning. A
 TLS-terminating proxy is suitable if Portwing's HTTP listener stays private;
 the warning still appears because TLS is not configured on Portwing itself.
-Plaintext enrollment is deprecated and will be refused by default in v1.1,
-which will accept native TLS or HTTPS reported by a trusted proxy and provide
-an explicit `ALLOW_INSECURE_ENROLLMENT` opt-in. Version 1.0.x only warns and
-does not implement that opt-in yet.
+Plaintext enrollment is deprecated. Version 1.1.x still accepts it and only
+warns at startup. Refusing it by default, accepting native TLS or HTTPS
+reported by a trusted proxy, and an explicit `ALLOW_INSECURE_ENROLLMENT` opt-in
+are planned and not implemented yet.
 
 See `docs/design/ed25519-auth.md` for full threat analysis, key rotation
 procedures, and migration path from token auth.

@@ -220,7 +220,7 @@ continuous tailing uses the `request`/`stream`/`stream_end` path against
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/_portwing/health` | GET | No | `{"status":"healthy"}` + Docker connectivity |
-| `/_portwing/info` | GET | Yes | Agent version, Docker version, mode, uptime, caps |
+| `/_portwing/info` | GET | Yes | Agent version, Docker version, mode, uptime, agent ID (the v3 signature audience), caps |
 | `/_portwing/compose` | POST | Yes | Docker Compose operations |
 | `/_portwing/metrics` | GET | Yes | Prometheus metrics (build/host/container + agent request series) |
 | `/_portwing/audit` | GET | Yes | Recent audit records (JSON, newest-first) |

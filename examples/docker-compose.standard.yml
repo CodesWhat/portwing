@@ -16,7 +16,7 @@
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.4
+    image: ghcr.io/codeswhat/portwing:1.1.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -33,6 +33,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - TOKEN_FILE=/run/secrets/portwing_token
       # Stronger at-rest posture: replace TOKEN_FILE with an Argon2id hash
@@ -47,3 +48,4 @@ secrets:
 
 volumes:
   portwing-stacks:
+  portwing-state:

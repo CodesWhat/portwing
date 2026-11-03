@@ -447,6 +447,56 @@ expect_stale_release_example_failure "docs/content/docs/current/standalone-mode.
 expect_stale_release_example_failure "docs/content/docs/current/observability.mdx" 'portwing_build_info{version="0.0.1"} 1'
 expect_stale_release_example_failure "docs/content/docs/current/security-model.mdx" 'VERSION=0.0.1'
 
+# Every example that runs Portwing must mount /data/credentials for the agent
+# ID and signature locks; a missing or commented-out mount must fail.
+for mount_example in examples/docker-compose.standard.yml examples/kubernetes/edge.yaml; do
+	mount_backup="${fixture}/${mount_example}.mount-backup"
+	cp "${fixture}/${mount_example}" "${mount_backup}"
+	sed -i.bak 's#/data/credentials#/data/other#' "${fixture}/${mount_example}"
+	rm -f "${fixture}/${mount_example}.bak"
+	expect_release_contract_failure \
+		"FAIL: every Portwing service in ${mount_example} must mount /data/credentials" \
+		"the package release contract must reject an example without the /data/credentials mount (${mount_example})"
+	mv "${mount_backup}" "${fixture}/${mount_example}"
+done
+
+# A near-match destination must not satisfy the mount check, in Compose or
+# Kubernetes.
+for mount_example in examples/docker-compose.standard.yml examples/kubernetes/edge.yaml; do
+	mount_backup="${fixture}/${mount_example}.mount-backup"
+	cp "${fixture}/${mount_example}" "${mount_backup}"
+	sed -i.bak 's#/data/credentials#/data/credentials-backup#' "${fixture}/${mount_example}"
+	rm -f "${fixture}/${mount_example}.bak"
+	expect_release_contract_failure \
+		"FAIL: every Portwing service in ${mount_example} must mount /data/credentials" \
+		"the package release contract must reject a /data/credentials-backup mount (${mount_example})"
+	mv "${mount_backup}" "${fixture}/${mount_example}"
+done
+
+# A mount on another service must not satisfy the check for Portwing: move the
+# credentials volume from the portwing service to the sockguard service.
+mount_example="examples/docker-compose.with-sockguard.yml"
+mount_backup="${fixture}/${mount_example}.mount-backup"
+cp "${fixture}/${mount_example}" "${mount_backup}"
+if [ "$(grep -c '^      - sockguard-socket:/var/run/sockguard$' "${fixture}/${mount_example}")" -ne 1 ]; then
+	echo "FAIL: expected exactly one sockguard-socket anchor line in ${mount_example}" >&2
+	exit 1
+fi
+sed -i.bak \
+	-e '/portwing-state:\/data\/credentials/d' \
+	-e '/^      - sockguard-socket:\/var\/run\/sockguard$/a\
+      - portwing-state:/data/credentials' \
+	"${fixture}/${mount_example}"
+rm -f "${fixture}/${mount_example}.bak"
+if [ "$(grep -Fc 'portwing-state:/data/credentials' "${fixture}/${mount_example}")" -ne 1 ]; then
+	echo "FAIL: could not move the credentials mount to the sockguard service (${mount_example})" >&2
+	exit 1
+fi
+expect_release_contract_failure \
+	"FAIL: every Portwing service in ${mount_example} must mount /data/credentials (missing on: portwing)" \
+	"the package release contract must reject a credentials mount that sits on another service (${mount_example})"
+mv "${mount_backup}" "${fixture}/${mount_example}"
+
 docs_meta_backup="${fixture}/docs/content/docs/current/meta.json.title-backup"
 cp "${fixture}/docs/content/docs/current/meta.json" "${docs_meta_backup}"
 sed -i.bak 's/"title": "v[0-9.]*"/"title": "v0.0"/' "${fixture}/docs/content/docs/current/meta.json"

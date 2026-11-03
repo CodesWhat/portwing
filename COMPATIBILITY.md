@@ -17,13 +17,17 @@ DrydockCompat bumps.
 
 | Portwing version | Drydock wire connection | Watcher/update feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|---|
-| v1.0.4 (release metadata) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v1.1.0 (release metadata) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` (wire pairings; HTTP signature v3 needs Drydock 1.9 or later) | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v1.0.x (unsupported) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v0.9.x (unsupported) | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 
-v1.0.4 keeps the existing wire and watcher/update contract. The 0.9 line is
+v1.1.0 keeps the existing wire and watcher/update contract. HTTP signature
+version 3 needs Drydock 1.9 or later; Drydock 1.7 and 1.6 keep working with
+version 2 and legacy signatures, which v1.1 still accepts (see
+[HTTP signature compatibility](#http-signature-compatibility)). The 1.0 and 0.9 lines are
 no longer supported; see [SECURITY.md](SECURITY.md) for support boundaries.
 
-The v1.0.4 release metadata is prepared on dev; check [published releases](https://github.com/CodesWhat/portwing/releases) for availability. Its exact published artifacts
+The current release line is v1.1.0; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. Its exact published artifacts
 must pass a fresh hosted matrix after the release is cut. The historical runs
 below do not verify this build.
 
@@ -130,6 +134,21 @@ query string as the request target. Legacy unversioned signatures remain valid
 only for query-free requests. This does not change `DrydockCompat`: it affects
 the Standard Mode HTTP authentication contract, not the edge WebSocket wire
 protocol.
+
+Portwing v1.1 adds Ed25519 HTTP signature version 3, which binds a signature
+to one agent. Clients set `X-Portwing-Signature-Version: 3`, read the audience
+from `agentId` in `GET /_portwing/info`, and sign
+`portwing-sig-v3\n<agentId>\nMETHOD\nTARGET\nBODY_SHA256\nTIMESTAMP\nNONCE`
+with the same query-inclusive target as version 2. Version 3 needs Drydock 1.9
+or later on the controller side. Version 2 and legacy signatures stay accepted
+for a key until that key signs its first version 3 request, which locks it to
+version 3, or until `SIGNATURE_MIN_VERSION` is set. Rolling a controller back
+to Drydock 1.8 after its keys locked requires
+`portwing signature-lock clear <keyID>` on each agent. The agent refuses version 3 (and keeps accepting
+version 2 and legacy) when it has no persistent agent ID or no writable state directory:
+mount a writable state directory (setting `AGENT_ID` is optional); `GET /_portwing/info` reports `v3` and `v3Reason`.
+The downgrade lock is per key ID and does not carry over a key rotation.
+Rotation endpoints accept version 2 or 3. This does not change `DrydockCompat`.
 
 ## Sockguard preset compatibility
 

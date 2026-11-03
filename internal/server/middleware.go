@@ -561,7 +561,8 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			if skew <= 0 {
 				skew = 60
 			}
-			keyID, err := auth.VerifyRequest(r, body, ed.Registry, ed.Nonces, skew)
+			verified, err := auth.VerifyRequestDetailed(r, body, ed.Registry, ed.Nonces, skew)
+			keyID := verified.KeyID
 			releaseAuthSlot(err == nil)
 			if err != nil {
 				reason := auth.ReasonFor(err)
@@ -573,8 +574,17 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 					reg.IncAuthFailure(reason)
 				}
 				setAuthReason(w.Header(), reason)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				http.Error(w, auth.RejectionDetail(err), http.StatusUnauthorized)
 				return
+			}
+			if verified.NewlyLocked {
+				slog.Info("ed25519 key locked to signature version 3: v2 and legacy signatures are now refused for it",
+					"key_id", applog.Sanitize(keyID))
+				auditor.SignatureLock(clientIP, "lock", keyID, audit.OutcomeAllowed)
+			}
+			if verified.LockErr != nil {
+				slog.Error("persisting signature version lock failed; the lock holds until restart",
+					"key_id", applog.Sanitize(keyID), "error", applog.Sanitize(verified.LockErr.Error()))
 			}
 			slog.Debug("ed25519 authentication succeeded", "key_id", applog.Sanitize(keyID), "ip", applog.Sanitize(clientIP))
 			r = r.WithContext(context.WithValue(r.Context(), verifiedKeyIDContextKey{}, keyID))

@@ -132,13 +132,18 @@ export function buildOutputConfig(outputDir) {
   }
 
   routes.push({ src: "^/.*$", headers: headerMap(COMMON_HEADERS), continue: true });
-  // Phase order matches what @vercel/next emits for a static export: header routes
-  // (continue), then handle:filesystem, then handle:error with the 404 page. A config
-  // with no filesystem phase never reached the error phase, so a missing path got the
-  // platform's generic NOT_FOUND instead of the app's page. The error response is a new
+  // Phase order and the resource-phase 404 mirror what @vercel/next emits
+  // (packages/next/src/index.ts in vercel/vercel): header routes (continue), then
+  // handle:filesystem, then handle:resource with a bare `status: 404` route, then
+  // handle:error with the 404 page. The bare 404 route turns a filesystem miss into
+  // an explicit 404 that enters the error phase. Without it the platform answers a
+  // miss with its own text/plain NOT_FOUND and never runs the error routes, even
+  // though the error route and /404 are both valid. The error response is a new
   // response, so it carries the 404 page's CSP plus the common headers itself.
   routes.push({ handle: "filesystem" });
   if (notFoundCsp) {
+    routes.push({ handle: "resource" });
+    routes.push({ src: "^/.*$", status: 404 });
     routes.push({ handle: "error" });
     routes.push({
       status: 404,

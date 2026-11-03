@@ -27,6 +27,123 @@ active_lines() {
 	grep -vE '^[[:space:]]*#' "$1"
 }
 
+# Print the Portwing services (Compose) or containers (Kubernetes) in a file
+# that do not mount exactly /data/credentials, space separated, or "(none
+# found)" when the file runs no Portwing service at all. Comment lines are
+# ignored. Compose: a service is Portwing when its own block, or a YAML anchor
+# it merges with `<<: *name`, sets the Portwing image, and the mount is read
+# from the same two places. Kubernetes: a container is Portwing when its image
+# is, and only mountPath entries inside that container count.
+portwing_services_missing_credentials() {
+	local file="$1"
+	local mode=compose
+	case "${file}" in
+	*.yaml) mode=kubernetes ;;
+	esac
+	active_lines "${file}" | awk -v mode="${mode}" '
+		function indent(s) { match(s, /^ */); return RLENGTH }
+		function strip(s) {
+			sub(/[[:space:]]+#.*$/, "", s)
+			sub(/^[[:space:]]+/, "", s)
+			sub(/[[:space:]]+$/, "", s)
+			return s
+		}
+		function unquote(s) {
+			gsub(/^["\047]|["\047]$/, "", s)
+			return s
+		}
+		function is_image(s) { return s ~ /^image:[[:space:]]*["\047]?ghcr\.io\/codeswhat\/portwing:/ }
+		# Compose short syntax src:/data/credentials[:opts], or long syntax target:.
+		function is_compose_mount(s,   v) {
+			if (s ~ /^target:/) {
+				v = unquote(strip(substr(s, 8)))
+				return v == "/data/credentials"
+			}
+			if (s !~ /^-[[:space:]]/) return 0
+			v = unquote(strip(substr(s, 2)))
+			return v ~ /^[^:]+:\/data\/credentials(:[a-z,]+)?$/
+		}
+		function is_k8s_mount(s,   v) {
+			if (s !~ /^mountPath:/) return 0
+			v = unquote(strip(substr(s, 11)))
+			return v == "/data/credentials"
+		}
+		{
+			ind = indent($0)
+			line = strip($0)
+			if (line == "") next
+		}
+		mode == "compose" {
+			if (ind == 0) {
+				section = line
+				unit = ""
+				if (line ~ /^x-[^:]*:[[:space:]]*&/) {
+					name = line
+					sub(/^[^&]*&/, "", name)
+					sub(/[[:space:]].*$/, "", name)
+					unit = "&" name
+				}
+				next
+			}
+			if (section ~ /^services:/ && ind == 2 && line ~ /^[A-Za-z0-9_.-]+:$/) {
+				unit = line
+				sub(/:$/, "", unit)
+				order[++n] = unit
+				next
+			}
+			if (unit == "") next
+			if (is_image(line)) img[unit] = 1
+			if (is_compose_mount(line)) mnt[unit] = 1
+			if (line ~ /^<<:[[:space:]]*\*/) {
+				name = line
+				sub(/^<<:[[:space:]]*\*/, "", name)
+				sub(/[[:space:]].*$/, "", name)
+				merge[unit] = merge[unit] " &" name
+			}
+			next
+		}
+		# Kubernetes: every "- name:" list item is a unit, tracked by the
+		# column of its dash so nested items (volumeMounts, env) never replace
+		# the container they sit in. A sibling item clears everything deeper.
+		{
+			if (line == "---") { for (i in cur) delete cur[i]; next }
+			if (line ~ /^-[[:space:]]+name:/) {
+				for (i in cur) if (i + 0 >= ind) delete cur[i]
+				units++
+				cur[ind] = units
+				uname[units] = unquote(strip(substr(line, index(line, "name:") + 5)))
+				next
+			}
+			if (is_image(line) && (ind - 2) in cur) {
+				u = cur[ind - 2]
+				img[u] = 1
+				order[++n] = u
+				next
+			}
+			if (is_k8s_mount(line)) for (i in cur) mnt[cur[i]] = 1
+		}
+		END {
+			found = 0
+			missing = ""
+			for (k = 1; k <= n; k++) {
+				u = order[k]
+				portwing = (u in img)
+				mounted = (u in mnt)
+				count = split(merge[u], parents, " ")
+				for (j = 1; j <= count; j++) {
+					if (parents[j] in img) portwing = 1
+					if (parents[j] in mnt) mounted = 1
+				}
+				if (!portwing) continue
+				found++
+				if (!mounted) missing = missing (missing == "" ? "" : " ") (mode == "kubernetes" ? uname[u] : u)
+			}
+			if (found == 0) print "(none found)"
+			else print missing
+		}
+	'
+}
+
 require_exactly_one_active() {
 	local file="$1"
 	local pattern="$2"
@@ -356,7 +473,7 @@ require_text "README.md" "${public_site}/docs/installation" "the repository land
 require_text "docs/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "documentation metadata must use the public website"
 require_text "website/src/lib/site-config.ts" 'domain: "portwing.codeswhat.com"' "website metadata must use the public website"
 require_text "website/public/llms.txt" "Website: ${public_site}" "agent discovery metadata must use the public website"
-require_text "README.md" "currently \`v${release_version}\`" "the repository landing page must identify the current release"
+require_text "README.md" "The current release line is \`v${release_version}\`" "the repository landing page must identify the current release"
 release_version_regex="${release_version//./\\.}"
 stale_readme_examples="$(grep -Eo "(VERSION=|portwing_)${release_value_pattern}" README.md |
 	grep -Ev "^(VERSION=|portwing_)${release_version_regex}$" || true)"
@@ -379,7 +496,7 @@ if [ "${release_version}" != "unresolved" ] && [ "${docs_version_title}" != "${e
 	failures=$((failures + 1))
 fi
 require_text "website/public/llms.txt" "Portwing v${release_version} is" "agent discovery metadata must identify the current release"
-require_text "ROADMAP.md" "currently \`v${release_version}\`" "the roadmap must identify the current release"
+require_text "ROADMAP.md" "The current release line is \`v${release_version}\`" "the roadmap must identify the current release"
 release_label="release metadata"
 case "${release_version}" in
 *-rc.*) release_label="release candidate" ;;
@@ -399,6 +516,15 @@ for example_file in \
 	validate_current_release_example_values "${example_file}" \
 		"$(grep -E 'ghcr\.io/codeswhat/portwing:' "${example_file}" || true)" \
 		"the example ${example_file} must pin the current release"
+	# Signature version 3 needs a persistent agent ID and persistent downgrade
+	# locks, so every Portwing service or container in an example must mount
+	# exactly /data/credentials. Counting matching lines would let a near-match
+	# such as /data/credentials-backup, or a mount on another service, pass.
+	missing_credential_mounts="$(portwing_services_missing_credentials "${example_file}")"
+	if [ -n "${missing_credential_mounts}" ]; then
+		echo "FAIL: every Portwing service in ${example_file} must mount /data/credentials (missing on: ${missing_credential_mounts})" >&2
+		failures=$((failures + 1))
+	fi
 	image_values="$(awk '
 		/^[[:space:]]*image:[[:space:]]*/ {
 			sub(/^[[:space:]]*image:[[:space:]]*/, "")

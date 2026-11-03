@@ -39,7 +39,7 @@ Download the package for your architecture from the
 [GitHub release](https://github.com/CodesWhat/portwing/releases). For example:
 
 ```bash
-VERSION=1.0.4
+VERSION=1.1.0
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.deb" \
@@ -58,7 +58,7 @@ Use `linux_arm64.deb` on 64-bit Arm or `linux_armv7.deb` on 32-bit Arm.
 Download the matching package and its signature bundle:
 
 ```bash
-VERSION=1.0.4
+VERSION=1.1.0
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.rpm" \
@@ -102,17 +102,33 @@ Native Linux packages install:
 - `/etc/portwing/` for operator-owned configuration;
 - `/data/stacks/` for Compose stack state.
 
+The package creates no state directory. Signature version 3 needs a writable,
+persistent one for the agent ID and the downgrade locks, and setting `AGENT_ID`
+does not replace it. The agent checks only that the directory is writable, so
+persistence is the operator's responsibility. Without a writable directory the
+agent serves version 2 and legacy signatures only and refuses version 3
+(`agent-id-not-persistent`, or `state-not-writable` when it has an ID). The
+configuration commands below create `/var/lib/portwing`, set `STATE_DIR` in
+`/etc/portwing/config` and add the directory to the unit's `ReadWritePaths` in a
+drop-in.
+The unit sets no `User=`, so it runs as root and root ownership is right; if
+you add a service user, own the directory with it. `AGENT_ID` stays optional. See [Authentication](/authentication#signature-version-3-audience-bound).
+
 The package deliberately does **not** enable or start `portwing.service`.
 Portwing fails closed without authentication, so create the configuration first:
 
 ```bash
 sudo install -d -m 0750 /etc/portwing
+sudo install -d -m 0700 /var/lib/portwing
 sudo sh -c 'umask 077; cat > /etc/portwing/config' <<'EOF'
 TOKEN_FILE=/etc/portwing/token
 PORT=3000
 BIND_ADDRESS=127.0.0.1
 LOG_LEVEL=info
+STATE_DIR=/var/lib/portwing
 EOF
+sudo install -d /etc/systemd/system/portwing.service.d
+printf '[Service]\nReadWritePaths=/var/lib/portwing\n' | sudo tee /etc/systemd/system/portwing.service.d/state.conf >/dev/null
 openssl rand -hex 32 | sudo tee /etc/portwing/token >/dev/null
 sudo chmod 0600 /etc/portwing/config /etc/portwing/token
 sudo systemctl enable --now portwing.service

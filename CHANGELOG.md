@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.0] - 2026-11-02
+
+This release adds audience-bound Ed25519 request signatures (version 3).
+Version 3 needs Drydock 1.9 or later on the controller side. The images
+pre-create a writable `/data/credentials`, so v3 works without a volume, but
+the agent ID and downgrade locks don't survive container recreation. Mount a
+volume at `/data/credentials` to make v3 persistent. The shipped Compose and
+Kubernetes examples already do. A `read_only` root without the volume gives
+`state-not-writable`, and a set `AGENT_ID` must match `^[a-z0-9-]{1,64}$` or
+the agent reports `agent-id-not-v3-compatible`. In both cases it keeps
+accepting version 2 and legacy signatures as before.
+The wire protocol is unchanged (`portwing/1.0`, `DrydockCompat` 1.4.0). The
+planned TLS-only enrollment is not part of this release.
+
+### Added
+
+- Ed25519 request signature version 3 binds a signature to one agent. The
+  canonical bytes are `portwing-sig-v3`, the agent ID, then the version 2
+  fields, selected by `X-Portwing-Signature-Version: 3`. A version 3 signature
+  never verifies as version 2 or legacy and the reverse. An optional
+  `X-Portwing-Audience` header makes a wrong audience report
+  `audience-mismatch`. Requires Drydock 1.9 or later; version 2 and legacy
+  stay accepted until a key signs version 3.
+- The agent ID is now stable. It is generated once (32 lowercase hex
+  characters) and stored in `agent-id` under the new `STATE_DIR` (default
+  `KEY_ROTATION_DIR`, then `/data/credentials`). `GET /_portwing/info` returns
+  it as `agentId`, and Edge mode's `hello.agentId` is the same value.
+- `SIGNATURE_MIN_VERSION` (`1`, `2` or `3`, default `1`) refuses lower
+  signature versions for every key.
+- `portwing signature-lock list` and `clear <keyID>|--all` remove a key's
+  downgrade lock, for example after rolling a controller back. Changes are
+  audit-logged as `signature_lock` events and a running agent picks them up
+  without a restart.
+- `GET /_portwing/info` reports `v3` (and a `v3Reason` when false) so a
+  controller knows whether to sign version 3. The agent refuses version 3, and
+  keeps accepting version 2 and legacy, when `AGENT_ID` is outside
+  `^[a-z0-9-]{1,64}$` (`agent-id-not-v3-compatible`) or when there is no
+  `AGENT_ID` and no persistent state directory (`agent-id-not-persistent`), or
+  when the state directory cannot hold the downgrade locks
+  (`state-not-writable`). Each is logged at startup, at info level unless
+  `SIGNATURE_MIN_VERSION=3` is set. These reasons, and `audience-mismatch`, are
+  returned only to a caller whose signature verified; a forged signature always
+  gets `invalid-signature`. A lock that could not be written is retried on
+  every later request.
+- The shipped Compose and Kubernetes examples, the README and the docs
+  snippets mount `/data/credentials` so the default deployment gets version 3.
+- Shared v3 test vectors in `internal/auth/testdata/signature-v3-vectors.json`
+  for controllers to verify against.
+
+### Changed
+
+- Without `AGENT_ID` the agent ID is now generated once and kept, instead of
+  being a new random UUID on every start. Any `AGENT_ID` accepted before is
+  still accepted.
+- The controller-assisted rotation endpoints accept signature version 3 as
+  well as version 2.
+
+### Fixed
+
+- Missing website paths on Vercel now reach the site's 404 page. The generated
+  routing config now has the resource phase with a bare 404 route between the
+  filesystem phase and the error route, which the v1.0.4 change missed.
+
+### Documentation
+
+- The README edge Compose snippet includes `group_add` and `DOCKER_SOCK_GID`.
+- The authentication docs cover `keygen -pub-from` and where the
+  `authorized_keys` line ends up, and the audit docs describe the
+  `key_rotation` event.
+- The website roadmap credits the v0.1 to v0.5 items to the releases that
+  shipped them, and Arcane's agent Prometheus support is marked in the
+  comparison matrix.
+- Release wording in the README, roadmap, compatibility page and website now
+  holds both before and after a release is published.
+- The docs for the v1.0 line are archived at `/docs/v1.0/...`, and the
+  unversioned docs now describe v1.1.
+
+### Security
+
+- Close cross-agent replay of Ed25519-signed requests: a request captured for
+  one agent no longer verifies on another that trusts the same key once the
+  controller signs version 3.
+- Once a key verifies a version 3 request its version 2 and legacy signatures
+  are refused (`signature-locked`), so a captured older-format request cannot
+  be used against it. The lock is stored per key ID and survives restarts. The
+  lock and `SIGNATURE_MIN_VERSION` are only reported after the signature
+  verified.
+
 ## [v1.0.4] - 2026-11-02
 
 This release fixes the website 404 page and pins the deployment examples to

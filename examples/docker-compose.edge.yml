@@ -25,7 +25,7 @@
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.4
+    image: ghcr.io/codeswhat/portwing:1.1.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -40,6 +40,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portwing-stacks:/data/stacks
+      - portwing-state:/data/credentials
     environment:
       - DRYDOCK_URL=https://drydock.example.com
       - PRIVATE_KEY_FILE=/run/secrets/portwing_key
@@ -53,3 +54,4 @@ secrets:
 
 volumes:
   portwing-stacks:
+  portwing-state:

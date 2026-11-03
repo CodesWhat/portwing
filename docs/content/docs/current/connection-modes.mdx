@@ -50,7 +50,7 @@ For the complete variable reference, see [Configuration](/configuration).
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.4
+    image: ghcr.io/codeswhat/portwing:1.1.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -65,6 +65,10 @@ services:
       TOKEN_HASH: "${PORTWING_TOKEN_HASH}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portwing-state:/data/credentials  # agent ID + v3 signature locks
+
+volumes:
+  portwing-state:
 ```
 
 See [Getting Started](/getting-started) for the full Sockguard variant and TLS examples.
@@ -107,7 +111,7 @@ Edge mode's trust in the controller is TLS-only and one-directional. The signed 
 | `TOKEN` | — | Not accepted for edge mode — startup fails if set with `DRYDOCK_URL` and no `PRIVATE_KEY_FILE` |
 | `AUTHORIZED_KEYS` | — | Not accepted for edge mode |
 | `AGENT_NAME` | hostname | Human-readable label sent in the hello message |
-| `AGENT_ID` | random UUID | Stable identity across reconnects (persist this) |
+| `AGENT_ID` | generated once, kept in `STATE_DIR` | Stable identity across restarts. Standard mode signs v3 only for an ID matching `^[a-z0-9-]{1,64}$`. `hello.agentId` is the same value `/_portwing/info` reports |
 | `RECONNECT_DELAY` | `1` | Initial reconnect delay in seconds |
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect delay in seconds |
 | `HEARTBEAT_INTERVAL` | `30` | Ping interval in seconds |
@@ -172,7 +176,7 @@ On `SIGINT` or `SIGTERM` the agent closes all active exec sessions and sends a W
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.0.4
+    image: ghcr.io/codeswhat/portwing:1.1.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -189,6 +193,10 @@ services:
       - portwing_key
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portwing-state:/data/credentials  # agent ID + v3 signature locks
+
+volumes:
+  portwing-state:
 
 secrets:
   portwing_key:
