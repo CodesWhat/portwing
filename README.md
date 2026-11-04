@@ -40,6 +40,10 @@ managed-storage configuration. See [compatibility](COMPATIBILITY.md#controller-a
 and the [rotation guide](docs/content/docs/current/authentication.mdx#controller-assisted-rotation)
 for availability and configuration.
 
+Portwing is self-hosted, MIT-licensed software with no software license fee.
+You provide and operate the Docker hosts, networking, and storage. Sponsorship
+helps fund project upkeep; it doesn't cover your deployment's running costs.
+
 <h2 align="center">Contents</h2>
 
 - [Documentation](#documentation)
@@ -360,7 +364,7 @@ flowchart LR
     DD -- "HTTPS + SSE · X-Dd-Agent-Secret" --> LB
 ```
 
-> The Drydock controller connects **inbound** to each standard-mode Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). Each agent reaches the Docker Engine only through a sockguard socket filter. In production-supported **edge mode**, the agent instead dials Drydock over the stable `portwing/1.0` WebSocket tunnel, so no inbound control port needs publishing. Full v0.9 watcher/update integration requires Drydock `v1.6.0-rc.11+`. Keep the separate unauthenticated operations listener private — see [Connection Modes](https://portwing.codeswhat.com/docs/connection-modes).
+> The Drydock controller connects **inbound** to each standard-mode Portwing agent over HTTP/HTTPS (it initiates; Portwing serves). In the recommended deployment, a separate sockguard socket filter restricts the Docker API operations that reach the daemon. Sockguard is optional; Portwing alone authenticates callers without restricting their Docker API authority. In production-supported **edge mode**, the agent instead dials Drydock over the stable `portwing/1.0` WebSocket tunnel, so no inbound control port needs publishing. Full v0.9 watcher/update integration requires Drydock `v1.6.0-rc.11+`. Keep the separate unauthenticated operations listener private — see [Connection Modes](https://portwing.codeswhat.com/docs/connection-modes).
 
 <hr>
 
@@ -370,9 +374,9 @@ flowchart LR
 |---|---|---|
 | 🔀 | **Connection Modes** | Standard mode lets Drydock connect inbound over HTTP/SSE. Production-supported edge mode lets the agent dial outbound over the stable `portwing/1.0` WebSocket tunnel for NAT/firewalled hosts; full v0.9 watcher/update support requires Drydock `v1.6.0-rc.11+`. |
 | 🔁 | **Transparent Docker API Proxy** | All Docker Engine API paths forwarded to the local daemon — streaming endpoints, exec session hijacking, and long-lived connections included. |
-| 🔑 | **Ed25519 Per-Client Authentication** | Per-request signatures with per-client keys, replay protection via nonce LRU and timestamp window, `authorized_keys`-style rotation via SIGHUP, zero shared secrets. |
+| 🔑 | **Ed25519 Per-Client Authentication** | Standard mode supports Ed25519-signed HTTP requests with per-client keys, nonce and timestamp replay checks, and `authorized_keys` reload via SIGHUP. Shared-secret authentication is another Standard-mode option. Edge requires a signed Ed25519 hello over TLS by default; ALLOW_INSECURE_EDGE_URL=true permits plaintext controller URLs for trusted testing only. Later tunnel messages aren't individually signed. |
 | 🔒 | **Argon2id Token Hashing** | Hash your token at rest with OWASP-recommended Argon2id parameters; `TOKEN_HASH_FILE` for Docker secrets support; SHA-256 success cache keeps per-request overhead flat. |
-| 🤖 | **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol revisions 2026-07-28 and 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Env variable values are never transmitted. |
+| 🤖 | **MCP Server** | AI assistants connect to `/_portwing/mcp` (Streamable HTTP, protocol revisions 2026-07-28 and 2025-11-25). Read-only tools: `list_containers`, `inspect_container`, `container_logs`, `host_metrics`, `container_stats`. Inspection withholds environment variable values; logs may contain secrets. The same credential also authorizes the mutating Docker proxy. There is no native read-only credential scope. See [MCP security boundaries](https://portwing.codeswhat.com/docs/mcp-server#read-only-tools-not-a-read-only-credential). |
 | 📦 | **Container Inventory** | Full container metadata with `dd.*` label parsing and SSE broadcasting. Portwing marks watcher execution as controller-owned so compatible Drydock runs native watcher/update calls through the Standard or Edge Docker proxy. |
 | 📈 | **Prometheus Metrics** | Host and per-container CPU/memory/network in cAdvisor-compatible format at `/_portwing/metrics`. Zero external dependencies. |
 | 📜 | **Audit Logging** | Structured JSON of every authenticated API call, auth event, exec session, and Compose operation. Recent records are retained in memory by default; file/stdout/stderr persistence is opt-in. |

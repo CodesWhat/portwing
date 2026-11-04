@@ -2,6 +2,11 @@
 
 export const faqItems: Array<{ question: string; answer: string }> = [
   {
+    question: "What does Portwing cost to run?",
+    answer:
+      "Portwing is self-hosted, MIT-licensed software with no software license fee. You provide and operate the Docker hosts, networking, and storage. Sponsorship helps fund project upkeep; it doesn't cover your deployment's running costs.",
+  },
+  {
     question: "What is Portwing and how does it relate to Drydock?",
     answer:
       "Portwing is a lightweight Go agent that gives Drydock a secure foothold on a Docker host. Drydock is the orchestrator — it manages container update policies, schedules checks, and sends update actions. Portwing is the agent it talks to on each host: it sits next to the Docker socket, proxies the Docker Engine API to Drydock, and handles container lifecycle actions on request. Without an agent on each host, Drydock can only reach hosts it has a direct network path to. Portwing adds two connection options: standard mode (Drydock connects inbound to the agent's HTTP port) and edge mode (the agent dials out to Drydock over a WebSocket, so NAT and firewalled hosts work too).",
@@ -14,7 +19,7 @@ export const faqItems: Array<{ question: string; answer: string }> = [
   {
     question: "How does Ed25519 authentication work and why use it over a shared token?",
     answer:
-      "Ed25519 gives each client a distinct cryptographic identity. Every version 2 request carries a detached signature over the HTTP method, escaped path plus exact raw query string, a SHA-256 body hash, a Unix timestamp, and a 128-bit random nonce. The agent verifies the signature, rejects requests with a timestamp skew greater than 60 seconds, and tracks nonces in an in-memory LRU to block replays within the window. No shared secret is transmitted. Compromising one client's private key leaves all other enrolled clients unaffected. By contrast, a shared token (TOKEN or TOKEN_HASH) is a single credential — rotate or revoke it and every caller is disrupted at once. Ed25519 is the recommended production option; token auth is still supported for evaluation and staged migration. Portwing ships a keygen subcommand: run portwing keygen to generate a keypair and get the authorized_keys line to drop on the agent host.",
+      "In Standard mode, configure Ed25519 to give each client its own key and sign individual HTTP requests. Version 2 covers the method, escaped path and exact query, body hash, timestamp, and nonce; version 3 also binds the signature to the receiving agent's ID. The agent checks timestamps and nonces for replay protection. Public keys can be reloaded with SIGHUP. Standard mode also supports shared-secret authentication, so deploying Portwing alone does not select request signing. Edge mode requires an Ed25519-signed hello over TLS by default; ALLOW_INSECURE_EDGE_URL=true permits plaintext controller URLs for trusted testing only. Later WebSocket messages use that authenticated connection and aren't individually signed. Neither authentication mode grants narrower Docker permissions. Use a separately configured Sockguard policy to restrict Docker operations.",
   },
   {
     question: "Is it safe to expose Docker control through Portwing? What's the security model?",
