@@ -22,7 +22,7 @@ export const features: Feature[] = [
     icon: "fingerprint",
     title: "Ed25519 Per-Client Auth",
     description:
-      "Configure Ed25519 in Standard mode to sign HTTP requests with per-client keys and nonce-based replay protection. Standard mode also supports shared secrets. Edge requires a signed Ed25519 hello over TLS; later tunnel messages aren't individually signed.",
+      "Configure Ed25519 in Standard mode to sign HTTP requests with per-client keys and nonce-based replay protection. Standard mode also supports shared secrets. Edge requires a signed Ed25519 hello over TLS by default; ALLOW_INSECURE_EDGE_URL=true permits plaintext controller URLs for trusted testing only. Later tunnel messages aren't individually signed.",
     category: "security",
   },
   {

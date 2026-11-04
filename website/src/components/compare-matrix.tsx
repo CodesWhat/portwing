@@ -57,8 +57,9 @@ export function CompareMatrix() {
       </div>
       <MarkLegend extra="· Click a tool for the full breakdown" />
       <p className="sub">
-        Portwing socket policy requires a separate, optional Sockguard deployment. Its MCP tools are
-        read-only; their credentials also authorize the mutating Docker proxy. See the{" "}
+        Sockguard is an optional separate deployment that enforces the configured Docker API
+        allowlist when deployed. Portwing's MCP tools are read-only; their credentials also
+        authorize the mutating Docker proxy. See the{" "}
         <Link href="/docs/security-model">security model</Link> and{" "}
         <Link href="/docs/mcp-server#read-only-tools-not-a-read-only-credential">
           MCP credential boundary
