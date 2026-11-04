@@ -5,6 +5,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,5 +86,22 @@ func TestSignatureLockClearEmptyDoesNotCreateFiles(t *testing.T) {
 				t.Fatalf("empty clear wrote state: %v %v", entries, err)
 			}
 		})
+	}
+}
+
+func TestSignatureLockOwnerCheckUnreadableDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// #nosec G302 -- restore the private test directory for cleanup.
+		_ = os.Chmod(dir, 0o700)
+	})
+	if err := checkSignatureLockOwner(dir, os.Geteuid()); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("want permission error, got %v", err)
 	}
 }

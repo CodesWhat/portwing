@@ -28,10 +28,8 @@ func checkSignatureLockOwner(dir string, uid int) error {
 	if err != nil {
 		return fmt.Errorf("checking ownership of %s: %w", path, err)
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return fmt.Errorf("cannot determine owner of %s", path)
-	}
+	// os.Stat returns syscall.Stat_t on Unix.
+	stat := info.Sys().(*syscall.Stat_t)
 	if int64(stat.Uid) != int64(uid) {
 		return fmt.Errorf("%s is owned by UID %d; run as UID %d to avoid changing signature-lock ownership", path, stat.Uid, stat.Uid)
 	}
