@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Refuse signature-lock clears under a different Unix UID from the state
-  directory or lock file owner, before writing state or opening the audit log.
+- Refuse signature-lock clears under a different Unix UID from the lock file
+  owner, before writing state or opening the audit log. Preserve `fsGroup`
+  volume support and avoid creating sidecars on empty clears.
 
 ### Changed
 

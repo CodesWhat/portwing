@@ -66,3 +66,24 @@ func TestSignatureLockOwnerCheckMissingDirectory(t *testing.T) {
 		t.Fatal("want ownership check to fail for a missing state directory")
 	}
 }
+
+func TestSignatureLockClearEmptyDoesNotCreateFiles(t *testing.T) {
+	for _, target := range []string{lockIDA, "--all"} {
+		t.Run(target, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("STATE_DIR", dir)
+			t.Setenv("AUDIT_LOG", "")
+			original := signatureLockUID
+			signatureLockUID = func() int { return os.Geteuid() + 1 }
+			t.Cleanup(func() { signatureLockUID = original })
+			code, _, stderr := runLockCmd(t, "clear", target)
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, stderr)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("empty clear wrote state: %v %v", entries, err)
+			}
+		})
+	}
+}
