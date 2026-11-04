@@ -22,7 +22,7 @@ export const features: Feature[] = [
     icon: "fingerprint",
     title: "Ed25519 Per-Client Auth",
     description:
-      "Signed requests with nonce-based replay protection and no shared secrets on the wire. Enroll client public keys into an authorized_keys file, rotate with SIGHUP, and every enrollment is audited.",
+      "Configure Ed25519 in Standard mode to sign HTTP requests with per-client keys and nonce-based replay protection. Standard mode also supports shared secrets. Edge requires a signed Ed25519 hello over TLS; later tunnel messages aren't individually signed.",
     category: "security",
   },
   {
@@ -71,7 +71,7 @@ export const features: Feature[] = [
     icon: "cpu",
     title: "Read-Only MCP Server",
     description:
-      "We ship a built-in Model Context Protocol server that exposes host and container state to MCP-aware agents. Read-only by design, so your assistant can see everything and change nothing.",
+      "Five MCP tools inspect host and container state without changing containers. Their credentials also authorize the mutating Docker proxy. Portwing has no native read-only credential scope; enforce narrower access with a separate proxy or socket policy.",
     category: "control",
   },
   {

@@ -8,23 +8,23 @@ export const portainerComparisonRouteData = {
   comparisonTable: `
 Remote Docker API proxy|Yes (Agent)|Yes|tie
 Connection modes|Classic inbound; outbound Edge; Async Edge (Business Edition)|Standard inbound; persistent outbound edge (Drydock v1.6.0-rc.11+)|competitor
-Agent authentication|Non-FIPS controller public key and fixed-message signature headers; optional shared secret; Edge credentials and Business mTLS|Ed25519 per-request HTTP signatures; signed edge hello; token fallback in standard mode|tie
-Docker socket policy|Documented agent mounts the Docker socket; host-root mount is optional|Recommended Sockguard path-and-method policy|self
+Agent authentication|Non-FIPS controller public key and fixed-message signature headers; optional shared secret; Edge credentials and Business mTLS|Standard: configured Ed25519 HTTP signatures or shared credentials; Edge: signed Ed25519 hello over TLS, not individually signed tunnel messages|tie
+Docker socket policy|Documented agent mounts the Docker socket; host-root mount is optional|Optional separate Sockguard deployment enforces the configured Docker API allowlist|self
 Structured audit|Controller activity log in Business Edition|Agent-level structured audit and cursor export in every build|self
 Supply-chain evidence|2.45.3 controller archives have checksums; Agent images have SPDX SBOMs and SLSA v1 provenance; no Cosign signature found in checked discovery paths|Cosign signatures + archive/image CycloneDX SBOMs + SLSA provenance|self
 Fleet agent upgrades and policies|Business Edition beta update/rollback for Edge Agents on Docker Standalone environments|Not shipped; belongs in Drydock plus packaging|competitor
 Host file APIs and Swarm aggregation|Yes|Intentional non-goals|competitor
 Prometheus agent scrape endpoint|Local Kubernetes Edge metrics; equivalent Docker mediation scrape not documented|Yes|tie
-Documented read-only MCP endpoint|Not documented for the agent; separate unsupported controller MCP server|Yes|self
+Documented read-only MCP endpoint|Not documented for the agent; separate unsupported controller MCP server|Five read-only tools; their credentials also authorize the mutating Docker proxy|self
 License|Zlib agent; proprietary Business features|MIT|tie
 `,
   highlightsTable: `
 network|Portainer Fleet Operations|Portainer offers Edge stacks, jobs and configuration, plus Business Edition Async Edge. Its built-in agent update/rollback feature is Business Edition beta for Edge Agents on Docker Standalone environments. Portwing provides a persistent edge tunnel; Drydock owns fleet rollout policy.
-keyround|Different Authentication Layers|Portainer's non-FIPS Agent verifies signature headers on requests, but the signed value is a fixed message or AGENT_SECRET. Portwing's configured Ed25519 path binds method, exact target, body hash, timestamp and nonce, and signs its edge hello. Portainer also offers Edge credentials and optional Business mTLS; these are different mechanisms, not an overall security ranking.
-shieldcheck|Narrow Socket Boundary|Portainer's agent mounts the Docker socket, with optional host-root mounting for host management. Portwing's hardened path puts Sockguard in between and permits only configured HTTP methods and Docker API paths.
+keyround|Different Authentication Layers|Portainer's non-FIPS Agent verifies signature headers on requests, but the signed value is a fixed message or AGENT_SECRET. In Standard mode, Portwing's configured Ed25519 path binds method, exact target, body hash, timestamp and nonce; shared credentials are another option. Edge mode requires a signed Ed25519 hello over TLS, with no individual signatures on later tunnel messages. Portainer also offers Edge credentials and optional Business mTLS; these are different mechanisms, not an overall security ranking.
+shieldcheck|Narrow Socket Boundary|Portainer's agent mounts the Docker socket, with optional host-root mounting for host management. Portwing's recommended hardened deployment adds Sockguard as a separate optional filter. Its configured policy restricts Docker API operations; Portwing authentication alone does not narrow a caller's Docker authority.
 activity|Audit at the Agent|Portainer's controller Activity log is a Business feature. Portwing emits structured authentication and Docker mediation records in every build; Drydock can add user-level context above them.
 filetext|Host Access Is a Tradeoff|Portainer exposes file-browse APIs and Swarm-wide resource aggregation. Portwing intentionally avoids arbitrary host files and controls one Docker host to keep the privileged surface smaller.
-bot|Prometheus and Read-Only MCP|Portwing exposes Docker mediation metrics and five read-only MCP inspection tools. Portainer has a localhost-only Prometheus endpoint populated for Kubernetes Edge. Equivalent Docker mediation scraping and an MCP endpoint were not documented in the reviewed material. Portainer's separate portainer/portainer-mcp server targets the controller API and is marked unsupported for production.
+bot|Prometheus and Read-Only MCP|Portwing exposes Docker mediation metrics and five read-only MCP inspection tools. MCP credentials also authorize its mutating Docker proxy; there is no native read-only credential scope. Portainer has a localhost-only Prometheus endpoint populated for Kubernetes Edge. Equivalent Docker mediation scraping and an MCP endpoint were not documented in the reviewed material. Portainer's separate portainer/portainer-mcp server targets the controller API and is marked unsupported for production.
 `,
   highlightIconMap: {
     network: "plugs-connected",

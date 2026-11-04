@@ -15,7 +15,7 @@ export function CompareSection() {
       headingId="cmp-h"
       eyebrow="Why Portwing"
       title="How we compare"
-      subtitle="A sourced snapshot of the four closest remote-agent peers. Partial marks usually mean the capability exists at the controller layer or is optional."
+      subtitle="A sourced snapshot of the four closest remote-agent peers. Portwing socket policy requires a separate, optional Sockguard deployment. Its MCP tools are read-only; their credentials also authorize the mutating Docker proxy."
       variant="c"
     >
       <div className="scroll" tabIndex={0} role="region" aria-label="Comparison table">
