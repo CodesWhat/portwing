@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Refuse signature-lock clears under a different Unix UID from the state
+  directory or lock file owner, before writing state or opening the audit log.
+
 ### Changed
 
 - Clarify that read-only MCP tools use credentials that also authorize the

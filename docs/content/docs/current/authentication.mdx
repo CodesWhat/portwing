@@ -313,6 +313,12 @@ needed. Each clear is written to the audit log (`AUDIT_LOG`) as a
 `signature_lock` event with the operation `clear` or `clear_all`. The commands
 read `STATE_DIR` the same way the agent does.
 
+Run `clear` as the agent's OS user. On Linux and macOS it refuses to write when
+the effective UID differs from the owner of the state directory or existing
+lock file. For the published container, use its default UID 65532, without
+`docker exec -u root`. A root-run clear could otherwise replace private state
+with root-owned files that the agent cannot read after a restart.
+
 **Requiring v3 everywhere.** `SIGNATURE_MIN_VERSION=3` refuses version 2 and
 legacy signatures for all keys, locked or not, with
 `X-Portwing-Reason: signature-version-too-low`. `2` refuses only legacy. The

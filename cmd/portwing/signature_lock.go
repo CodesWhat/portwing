@@ -13,6 +13,8 @@ import (
 	"github.com/codeswhat/portwing/internal/config"
 )
 
+var signatureLockUID = os.Geteuid
+
 func printSignatureLockUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage: portwing signature-lock list")
 	fmt.Fprintln(w, "       portwing signature-lock clear <keyID>")
@@ -67,6 +69,10 @@ func runSignatureLock(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s locked to v3 since %s\n", l.KeyID, l.Since.UTC().Format(time.RFC3339))
 		}
 		return 0
+	}
+	if err := checkSignatureLockOwner(dir, signatureLockUID()); err != nil {
+		fmt.Fprintf(stderr, "signature-lock: %v\n", err)
+		return 1
 	}
 
 	auditor, closeAudit, err := audit.New(os.Getenv("AUDIT_LOG"), 0)
