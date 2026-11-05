@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Refuse signature-lock clears under a different Unix UID from the lock file
+  owner, before writing state or opening the audit log. Preserve `fsGroup`
+  volume support and avoid creating sidecars on empty clears.
+
 ### Changed
 
 - Clarify that read-only MCP tools use credentials that also authorize the
