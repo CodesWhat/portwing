@@ -32,7 +32,7 @@ for (const file of [
     assert.ok(images?.length, "expected a Sockguard deployment image");
     assert.deepEqual(
       [...new Set(images)],
-      [`ghcr.io/codeswhat/sockguard:${provenance.tag.slice(1)}`],
+      [`ghcr.io/codeswhat/sockguard:${provenance.imageTag.slice(1)}`],
     );
   });
 }

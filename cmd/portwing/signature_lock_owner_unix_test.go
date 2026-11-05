@@ -137,3 +137,34 @@ func TestSignatureLockClearFileVanishesBeforeOwnershipCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestSignatureLockClearAbsentKeyDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	seedLocks(t, dir, lockIDA)
+	path := filepath.Join(dir, "signature-locks.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path + ".lock"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STATE_DIR", dir)
+	t.Setenv("AUDIT_LOG", filepath.Join(dir, "audit.log"))
+	original := signatureLockUID
+	signatureLockUID = func() int { return os.Geteuid() + 1 }
+	t.Cleanup(func() { signatureLockUID = original })
+	code, stdout, stderr := runLockCmd(t, "clear", lockIDB)
+	if code != 0 || !strings.Contains(stdout, "no lock for key "+lockIDB) {
+		t.Fatalf("exit %d stdout %q stderr %q", code, stdout, stderr)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("state changed: %v", err)
+	}
+	for _, p := range []string{path + ".lock", filepath.Join(dir, "audit.log")} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("no-op wrote %s: %v", p, err)
+		}
+	}
+}

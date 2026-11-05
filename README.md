@@ -148,7 +148,7 @@ This runs sockguard and Portwing as separate containers sharing a filtered socke
 
 services:
   sockguard:
-    image: ghcr.io/codeswhat/sockguard:2.4.2
+    image: ghcr.io/codeswhat/sockguard:2.4.5
     restart: unless-stopped
     read_only: true
     cap_drop:
