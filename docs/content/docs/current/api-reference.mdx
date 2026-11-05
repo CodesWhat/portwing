@@ -603,7 +603,7 @@ After enrollment, the key is immediately active. The enrollment token is burned;
 curl -s -X POST \
   -H "Content-Type: application/json" \
   -d "{\"enrollment_token\":\"$ENROLL_TOKEN\",\"public_key\":\"$PUBKEY_B64\"}" \
-  http://localhost:3000/api/portwing/enroll | jq .
+  https://agent.example.com/api/portwing/enroll | jq .
 ```
 
 ---
