@@ -68,6 +68,12 @@ func TestSignatureLockOwnerCheckMissingDirectory(t *testing.T) {
 	}
 }
 
+func TestSignatureLockOwnerCheckMissingFile(t *testing.T) {
+	if err := checkSignatureLockOwner(t.TempDir(), os.Geteuid()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cannot authorize a write without an existing file owner: %v", err)
+	}
+}
+
 func TestSignatureLockClearEmptyDoesNotCreateFiles(t *testing.T) {
 	for _, target := range []string{lockIDA, "--all"} {
 		t.Run(target, func(t *testing.T) {
@@ -103,5 +109,31 @@ func TestSignatureLockOwnerCheckUnreadableDirectory(t *testing.T) {
 	})
 	if err := checkSignatureLockOwner(dir, os.Geteuid()); !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("want permission error, got %v", err)
+	}
+}
+
+func TestSignatureLockClearFileVanishesBeforeOwnershipCheck(t *testing.T) {
+	dir := t.TempDir()
+	seedLocks(t, dir, lockIDA)
+	path := filepath.Join(dir, "signature-locks.json")
+	auditPath := filepath.Join(dir, "audit.log")
+	t.Setenv("STATE_DIR", dir)
+	t.Setenv("AUDIT_LOG", auditPath)
+	original := signatureLockUID
+	signatureLockUID = func() int {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		return os.Geteuid()
+	}
+	t.Cleanup(func() { signatureLockUID = original })
+	code, _, stderr := runLockCmd(t, "clear", "--all")
+	if code != 1 || !strings.Contains(stderr, "checking ownership") {
+		t.Fatalf("exit %d stderr %q; want fail-closed missing-owner error", code, stderr)
+	}
+	for _, p := range []string{path, auditPath} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("clear wrote %s after its owner became unavailable: %v", p, err)
+		}
 	}
 }

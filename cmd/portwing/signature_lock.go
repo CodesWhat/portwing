@@ -70,10 +70,6 @@ func runSignatureLock(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	if err := checkSignatureLockOwner(dir, signatureLockUID()); err != nil {
-		fmt.Fprintf(stderr, "signature-lock: %v\n", err)
-		return 1
-	}
 	// A no-op clear must not create a sidecar under an unrelated operator UID.
 	// This read is the no-op's linearization point if an agent adds a lock later.
 	if len(locks.List()) == 0 {
@@ -83,6 +79,10 @@ func runSignatureLock(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "no lock for key %s\n", args[1])
 		}
 		return 0
+	}
+	if err := checkSignatureLockOwner(dir, signatureLockUID()); err != nil {
+		fmt.Fprintf(stderr, "signature-lock: %v\n", err)
+		return 1
 	}
 
 	auditor, closeAudit, err := audit.New(os.Getenv("AUDIT_LOG"), 0)
