@@ -2,10 +2,10 @@
 
 // Captured output from the real portwing binary, standard mode, against a local stub on a
 // unix socket (see the provenance note rendered under the terminal). Recorded from the
-// v1.0.0 build (commit db6c0b1, 2026-10-29). The code paths shown (keygen, startup banner,
-// Ed25519 verification and its rejection reasons, the info reply) are unchanged through
-// v1.1.2, so the only edit is the version string: "{{version}}" is replaced with
-// SITE_CONFIG.version when rendered.
+// v1.0.0 build (commit db6c0b1, 2026-10-29). Version placeholders render the
+// recording's version, including the historical info reply.
+
+export const TERM_RECORDING_VERSION = "1.0.0";
 //
 // k: "cmd" is a typed command, "out" is an output line, "note" is a caption line.
 

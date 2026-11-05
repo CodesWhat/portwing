@@ -10,5 +10,6 @@
       "source": "app/configs/portwing-with-exec.yaml",
       "sha256": "728cc6ab0ea0703363050fa928bbc623f2408a0ecb0f4b3383fd0f27219c5763"
     }
-  }
+  },
+  "imageTag": "v2.4.5"
 }

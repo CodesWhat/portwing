@@ -72,7 +72,14 @@ func runSignatureLock(args []string, stdout, stderr io.Writer) int {
 	}
 	// A no-op clear must not create a sidecar under an unrelated operator UID.
 	// This read is the no-op's linearization point if an agent adds a lock later.
-	if len(locks.List()) == 0 {
+	var noChange bool
+	if args[1] == "--all" {
+		noChange = len(locks.List()) == 0
+	} else {
+		_, locked := locks.LockedSince(args[1])
+		noChange = !locked
+	}
+	if noChange {
 		if args[1] == "--all" {
 			fmt.Fprintln(stdout, "cleared 0 signature lock(s)")
 		} else {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -85,10 +86,9 @@ func OpenSignatureLocks(dir string) (*SignatureLocks, error) {
 func readSignatureLocks(path string) (map[string]time.Time, os.FileInfo, error) {
 	f, err := openCredentialFile(path, "signature locks")
 	if err != nil {
-		// A path that cannot even be stat'd (missing file, or a parent that
-		// is absent or not a directory) holds no locks. A file that exists
-		// but fails the open checks is an error: ignoring it would drop locks.
-		if _, statErr := os.Lstat(path); statErr != nil {
+		// Only an absent file or non-directory parent means no locks.
+		// Permission and other lookup errors must not silently drop locks.
+		if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) || errors.Is(statErr, syscall.ENOTDIR) {
 			return make(map[string]time.Time), nil, nil
 		}
 		return nil, nil, err
