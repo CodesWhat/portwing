@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.2] - 2026-11-05
+
+This patch release prevents signature-lock CLI ownership changes and clarifies
+MCP credential authority, authentication modes and deployment costs. The wire
+protocol remains `portwing/1.0` and `DrydockCompat` 1.4.0.
+
 ### Fixed
 
 - Refuse signature-lock clears under a different Unix UID from the lock file
