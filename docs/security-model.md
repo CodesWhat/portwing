@@ -269,14 +269,18 @@ and must contain a single JSON value. A caller presents the token and a public k
 the agent appends the key to the authorized_keys file, reloads the registry,
 and burns the token (refusing further enrollment until restart).
 
-Enrollment sends its bootstrap credential in the request body, so use HTTPS.
-When enrollment is armed without native TLS, startup logs a warning. A
-TLS-terminating proxy is suitable if Portwing's HTTP listener stays private;
-the warning still appears because TLS is not configured on Portwing itself.
-Plaintext enrollment is deprecated. Version 1.1.x still accepts it and only
-warns at startup. Refusing it by default, accepting native TLS or HTTPS
-reported by a trusted proxy, and an explicit `ALLOW_INSECURE_ENROLLMENT` opt-in
-are planned and not implemented yet.
+Enrollment sends its bootstrap credential in the request body. Starting in v1.2,
+plaintext enrollment returns HTTP 403 before the body is read and leaves the
+credential armed. Native TLS is accepted. A TLS-terminating proxy is accepted
+only when the direct peer is in `TRUSTED_PROXIES` and reports exactly one
+`X-Forwarded-Proto: https` value. The proxy must overwrite that header, and
+Portwing's backend listener must remain private. Client-supplied headers from
+untrusted peers, protocol lists and duplicate headers do not establish HTTPS.
+
+`ALLOW_INSECURE_ENROLLMENT=true` explicitly restores plaintext enrollment for
+trusted local testing; the default is false. Startup warns when enrollment is
+armed without native TLS, including behind a proxy. Version 1.1.x only warns
+and has no opt-in setting.
 
 See `docs/design/ed25519-auth.md` for full threat analysis, key rotation
 procedures, and migration path from token auth.

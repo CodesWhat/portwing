@@ -2111,6 +2111,12 @@ paths:
         failure limiter; malformed or oversized bodies feed a separate per-IP
         abuse limiter. Request bodies are capped at 64 KiB.
 
+        Since v1.2, enrollment requires native TLS or exactly one
+        `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES`.
+        The proxy must overwrite this header and the backend must stay private.
+        Plaintext requests return 403 without consuming the credential unless
+        `ALLOW_INSECURE_ENROLLMENT=true` explicitly opts in for trusted testing.
+
         On success the public key is appended to the authorized-keys file and
         the key registry is hot-reloaded. The new key is immediately active.
       tags: [Auth]
@@ -2162,7 +2168,7 @@ paths:
         "500":
           description: Could not write to the authorized_keys file.
         "403":
-          $ref: '#/components/responses/ForbiddenOrigin'
+          description: Disallowed browser Origin, or enrollment requires secure transport.
 
 tags:
   - name: Health

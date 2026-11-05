@@ -87,7 +87,8 @@ type Config struct {
 	SignatureMinVersion int
 
 	// Model C enrollment token (consumed on first use)
-	EnrollmentToken string // ENROLLMENT_TOKEN / ENROLLMENT_TOKEN_FILE
+	EnrollmentToken         string // ENROLLMENT_TOKEN / ENROLLMENT_TOKEN_FILE
+	AllowInsecureEnrollment bool
 
 	// Edge-mode private key for signed hello (PRIVATE_KEY_FILE)
 	PrivateKeyFile string
@@ -272,7 +273,8 @@ func Load() (*Config, error) {
 
 		SignatureMinVersion: signatureMinVersion,
 
-		EnrollmentToken: enrollmentToken,
+		EnrollmentToken:         enrollmentToken,
+		AllowInsecureEnrollment: getEnvBool("ALLOW_INSECURE_ENROLLMENT", false),
 
 		PrivateKeyFile: getEnv("PRIVATE_KEY_FILE", ""),
 		KeyRotationDir: keyRotationDir,
