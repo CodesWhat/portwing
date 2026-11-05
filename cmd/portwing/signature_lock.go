@@ -13,6 +13,8 @@ import (
 	"github.com/codeswhat/portwing/internal/config"
 )
 
+var signatureLockUID = os.Geteuid
+
 func printSignatureLockUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage: portwing signature-lock list")
 	fmt.Fprintln(w, "       portwing signature-lock clear <keyID>")
@@ -67,6 +69,27 @@ func runSignatureLock(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s locked to v3 since %s\n", l.KeyID, l.Since.UTC().Format(time.RFC3339))
 		}
 		return 0
+	}
+	// A no-op clear must not create a sidecar under an unrelated operator UID.
+	// This read is the no-op's linearization point if an agent adds a lock later.
+	var noChange bool
+	if args[1] == "--all" {
+		noChange = len(locks.List()) == 0
+	} else {
+		_, locked := locks.LockedSince(args[1])
+		noChange = !locked
+	}
+	if noChange {
+		if args[1] == "--all" {
+			fmt.Fprintln(stdout, "cleared 0 signature lock(s)")
+		} else {
+			fmt.Fprintf(stdout, "no lock for key %s\n", args[1])
+		}
+		return 0
+	}
+	if err := checkSignatureLockOwner(dir, signatureLockUID()); err != nil {
+		fmt.Fprintf(stderr, "signature-lock: %v\n", err)
+		return 1
 	}
 
 	auditor, closeAudit, err := audit.New(os.Getenv("AUDIT_LOG"), 0)

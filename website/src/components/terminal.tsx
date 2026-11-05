@@ -5,11 +5,11 @@
 import { useEffect, useRef } from "react";
 import {
   TERM_AUTOPLAY,
+  TERM_RECORDING_VERSION,
   TERM_SCENES,
   type TermEvent,
   type TermScene,
 } from "@/components/terminal-scenes";
-import { SITE_CONFIG } from "@/lib/site-config";
 
 // Recorded terminal player. Autoplays the startup scenes once with typed commands and instant
 // output lines; each prompt button replays one scene. Reduced motion renders the final state
@@ -32,7 +32,7 @@ function esc(s: string) {
 }
 
 function withVersion(s: string) {
-  return s.replaceAll("{{version}}", SITE_CONFIG.version);
+  return s.replaceAll("{{version}}", TERM_RECORDING_VERSION);
 }
 
 function highlight(raw: string) {
@@ -188,7 +188,7 @@ export function Terminal() {
         const sc = sceneById(b.dataset.scene ?? "");
         if (!sc) return;
         mark(sc.id);
-        setTitle(`portwing ${SITE_CONFIG.version} / ${sc.title}`);
+        setTitle(`portwing ${TERM_RECORDING_VERSION} / ${sc.title}`);
         if (liveRef.current) liveRef.current.textContent = `Playing ${sc.title}`;
         play([sc], true);
       };
@@ -241,7 +241,7 @@ export function Terminal() {
           <i />
         </span>
         <b id="term-title" ref={titleRef}>
-          portwing {SITE_CONFIG.version} · Ed25519 auth
+          portwing {TERM_RECORDING_VERSION} · Ed25519 auth
         </b>
       </div>
       <div
@@ -270,18 +270,17 @@ export function Terminal() {
           </button>
         ))}
       </div>
-      <p className="term-cap">Recorded from portwing v1.0.0 · local stub</p>
+      <p className="term-cap">Recorded from portwing v{TERM_RECORDING_VERSION} · local stub</p>
       <details className="term-more">
         <summary>Provenance and redactions</summary>
         <div>
-          Real output from the binary built from the v1.0.0 tag (commit db6c0b1), recorded
-          2026-10-29, standard mode, against a local stub on a unix socket instead of a Docker
-          daemon. Requests are signed by <code>dswsign</code>, a small Go program that calls
+          Real output from the binary built from the v{TERM_RECORDING_VERSION} tag (commit db6c0b1),
+          recorded 2026-10-29, standard mode, against a local stub on a unix socket instead of a
+          Docker daemon. Requests are signed by <code>dswsign</code>, a small Go program that calls
           portwing's own <code>internal/auth</code> (CanonicalMessage, BodyHashHex, NewNonce), the
           same calls the repo's <code>signRequest</code> test helper makes. Redacted: the private
           key body in the keygen output, and the machine hostname in the agent's info reply. The
-          code paths shown are unchanged through v{SITE_CONFIG.version}; only the version strings
-          were updated.
+          displayed version identifies this recording.
         </div>
       </details>
       <p className="sr" id="term-live" ref={liveRef} aria-live="polite" />

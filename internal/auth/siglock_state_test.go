@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,6 +21,30 @@ func TestSignatureLocks_UnusableDirIsEmptyNotFatal(t *testing.T) {
 	}
 	if len(locks.List()) != 0 {
 		t.Fatal("want no locks")
+	}
+}
+
+func TestSignatureLocks_InaccessibleParentIsFatal(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	dir := t.TempDir()
+	locks, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := locks.Lock("0123456789abcdef", lockTestTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// #nosec G302 -- restore private test directory permissions for cleanup.
+		_ = os.Chmod(dir, 0o700)
+	})
+	if _, err := OpenSignatureLocks(dir); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("want permission error instead of empty state, got %v", err)
 	}
 }
 

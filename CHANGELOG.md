@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.2] - 2026-11-05
+
+This patch release prevents signature-lock CLI ownership changes and clarifies
+MCP credential authority, authentication modes and deployment costs. The wire
+protocol remains `portwing/1.0` and `DrydockCompat` 1.4.0.
+
+### Security
+
+- Pin optional Sockguard images to 2.4.5 while retaining the audited preset
+  allowlist. This fixes the signed-numeric-UID root-policy bypass described in its
+  [release notes](https://github.com/CodesWhat/sockguard/releases/tag/v2.4.5).
+
+### Fixed
+
+- Refuse signature-lock clears under a different Unix UID from the lock file
+  owner, before writing state or opening the audit log. Preserve `fsGroup`
+  volume support and avoid creating sidecars on empty clears.
+- Report inaccessible signature-lock state as an error and keep absent-key
+  clears free of ownership checks and file writes.
+- Keep the terminal replay labeled with its recorded v1.0.0 output instead of
+  substituting the current release version into historical replies.
+
+### Changed
+
+- Clarify that read-only MCP tools use credentials that also authorize the
+  mutating Docker proxy, including in the website and README summaries.
+- Distinguish Standard-mode request signing and shared credentials from the
+  Edge signed hello, and identify Sockguard as a separate optional policy layer.
+- Separate Portwing's software license fee from operator deployment costs and
+  sponsorship funding for project upkeep.
+
 ## [v1.1.1] - 2026-11-03
 
 This patch release hardens version 3 signature handling after a security review
