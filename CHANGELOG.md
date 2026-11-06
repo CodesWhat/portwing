@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- For the next minor (v1.2), refuse plaintext Model C enrollment with HTTP 403
+  before reading the bootstrap credential. Native TLS is accepted, as is a
+  single `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES`.
+  Configure the proxy to overwrite that header and keep the backend private.
+  This is a security exception to the stable HTTP behavior: deployments that
+  enrolled over HTTP in v1.1.x must configure TLS or a trusted TLS proxy, or set
+  `ALLOW_INSECURE_ENROLLMENT=true` for trusted local testing. The default is false;
+  refusal leaves the one-use credential available for a secure retry.
+
 ## [v1.1.2] - 2026-11-05
 
 This patch release prevents signature-lock CLI ownership changes and clarifies

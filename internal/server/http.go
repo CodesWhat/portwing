@@ -283,7 +283,11 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		enroller = auth.NewEnroller(cfg.EnrollmentToken, cfg.AuthorizedKeysFile, ed25519Cfg.Registry)
 		enroller.OnResult = auditor.Enrollment
 		if enroller.Armed() && (cfg.TLSCert == "" || cfg.TLSKey == "") {
-			slog.Warn("enrollment is armed without TLS: plaintext HTTP can expose the enrollment credential; configure TLS_CERT and TLS_KEY or keep the listener private behind a TLS-terminating proxy; plaintext enrollment is deprecated and will be refused by default in v1.1")
+			if cfg.AllowInsecureEnrollment {
+				slog.Warn("enrollment is armed without TLS and ALLOW_INSECURE_ENROLLMENT=true: plaintext HTTP can expose the enrollment credential; use only for trusted local testing")
+			} else {
+				slog.Warn("enrollment is armed without TLS: plaintext enrollment will be refused; configure TLS_CERT and TLS_KEY or a TLS-terminating proxy in TRUSTED_PROXIES that overwrites X-Forwarded-Proto with https")
+			}
 		}
 	}
 
@@ -430,7 +434,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// wrong-method request lands here instead of falling through to the
 	// Docker proxy. Enroller.ServeHTTP already replies 405 for non-POST.
 	if s.enroller != nil {
-		enrollHandler := s.rateLimiter.rateLimitOnly(s.enroller, s.metrics)
+		enrollHandler := s.rateLimiter.rateLimitOnly(s.enrollmentTransport(s.enroller), s.metrics)
 		mux.Handle("/api/portwing/enroll", enrollHandler)
 	}
 

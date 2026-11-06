@@ -24,7 +24,8 @@ type routeTestServerOpts struct {
 	token string
 	// enroll configures AUTHORIZED_KEYS + ENROLLMENT_TOKEN so the
 	// /api/portwing/enroll route is registered.
-	enroll bool
+	enroll             bool
+	insecureEnrollment bool
 }
 
 // newRouteTestServer builds a real *Server via NewServer — the same
@@ -62,6 +63,7 @@ func newRouteTestServer(t *testing.T, opts routeTestServerOpts) (*Server, http.H
 		}
 		cfg.AuthorizedKeysFile = writeAuthorizedKeys(t, pub)
 		cfg.EnrollmentToken = "enrollment-secret"
+		cfg.AllowInsecureEnrollment = opts.insecureEnrollment
 	}
 
 	s, err := NewServer(cfg, client, &stubServerAdapter{})
