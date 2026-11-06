@@ -160,7 +160,7 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
-For a release candidate, pass an explicit version such as `1.1.2-rc.1`.
+For a release candidate, pass an explicit version such as `1.2.0-rc.1`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag and
@@ -256,7 +256,7 @@ the Git-backed deployment or update its GitHub status.
 
 1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; publishes the stable Homebrew cask; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
 2. **Attestations** — SLSA Build L2 provenance for every checksummed release asset (archives, native packages, and per-archive SBOMs) and for the container manifest (`gh attestation verify <asset> --repo CodesWhat/portwing`)
-3. **grype-published-image** — scans the pushed manifest by digest with Grype, once per published platform (`linux/amd64`, `linux/arm64`, `linux/arm/v7`), using `.grype.yaml` for suppressions. This checks what users actually pull at release time; `security-grype.yml` also rescans the latest published release and builds separate amd64 and ARMv7 images from source. Unlike `verify-published` this job is **not** gated on repository visibility; only its SARIF upload is, so the gate keeps working if the repo ever goes private.
+3. **grype-published-image** — scans the pushed manifest by digest with Grype, once per published platform (`linux/amd64`, `linux/arm64`, `linux/arm/v7`), using `.grype.yaml` for suppressions. This checks what users actually pull at release time; `security-grype.yml` also rescans the latest published release and builds source images for all three platforms. Unlike `verify-published` this job is **not** gated on repository visibility; only its SARIF upload is, so the gate keeps working if the repo ever goes private.
 
    The gate is per platform, and the matrix's `gate:` field is the single source of truth:
 
@@ -270,14 +270,16 @@ the Git-backed deployment or update its GitHub status.
    Private repositories need GHAS for code-scanning uploads; the scan and
    failure gate still run without it, with findings retained in the job log.
 
-   **ARMv7 runtime.** Wolfi publishes no armv7 repository, so this image retains
-   Alpine 3.24 release metadata and CA certificates alongside static binaries.
-   Docker CLI 29.9.2 is an official download pinned by SHA256 and built with Go
+   **Static runtime on every platform.** The images retain Alpine 3.24 release
+   metadata and CA certificates alongside static binaries. Docker CLI 29.9.2
+   is an official per-architecture download pinned by SHA256 and built with Go
    1.26.10. Compose is built from checksum-pinned upstream 5.5.1 source with
-   containerd 2.3.6, x/net 0.60.0, and Go 1.27.3, identifies itself as
-   `v5.5.1-portwing.4`, and runs directly or as a CLI plugin.
-   Both ARM recipes omit BusyBox; image health checks use `portwing healthcheck`
-   for HTTP/TLS probes, with HTTPS pinned to the configured `TLS_CERT` leaf.
+   containerd 2.3.6, x/net 0.60.0, compression 1.20.2 and Go 1.27.3, identifies
+   itself as `v5.5.1-portwing.5`, and runs directly or as a CLI plugin.
+   The recipes omit glibc packages and BusyBox. Image health checks use
+   `portwing healthcheck` for HTTP/TLS probes, with HTTPS pinned to the
+   configured `TLS_CERT` leaf. Source-image checks verify static linkage,
+   hardened execution and the actual linked dependency versions.
    The static Docker CLI does not embed a complete Go module inventory, so a
    scanner result is not a complete audit of its dependencies.
    The release job scans the actual published image and gates all three

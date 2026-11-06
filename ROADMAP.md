@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.1.2`,
+> Portwing is stable software. The current release line is `v1.2.0`,
 > a patch release that hardens v3 signature handling.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
@@ -138,7 +138,7 @@ binds a request to one agent, with a stable agent ID kept under
 `/data/credentials`. It needs Drydock 1.9 or later; version 2 and legacy
 signatures stay accepted. See [COMPATIBILITY.md](COMPATIBILITY.md#http-signature-compatibility).
 
-**Next minor (v1.2): enrollment requires TLS.** Native TLS or exactly one
+**In v1.2: enrollment requires TLS.** Native TLS or exactly one
 `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES` is
 required, unless `ALLOW_INSECURE_ENROLLMENT=true` opts in to plaintext for
 trusted local testing. The proxy must overwrite the header and the backend

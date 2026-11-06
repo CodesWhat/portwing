@@ -32,7 +32,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN="$TOKEN" \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.1.2
+  ghcr.io/codeswhat/portwing:1.2.0
 ```
 
 <Callout type="warn">
@@ -56,7 +56,7 @@ docker run -d --name portwing \
   -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
   -e TOKEN_FILE=/run/secrets/portwing-token \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.1.2
+  ghcr.io/codeswhat/portwing:1.2.0
 ```
 
 This is appropriate for Docker secrets, Kubernetes secret volumes, or any orchestrator that can inject files but not env vars safely.
@@ -81,7 +81,7 @@ docker run -d --name portwing \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e TOKEN_HASH="$HASH" \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.1.2
+  ghcr.io/codeswhat/portwing:1.2.0
 ```
 
 To keep the hash out of the environment entirely, write it to a file and use `TOKEN_HASH_FILE`:
@@ -163,7 +163,7 @@ docker run -d --name portwing \
   -v portwing-state:/data/credentials \
   -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.1.2
+  ghcr.io/codeswhat/portwing:1.2.0
 ```
 
 The `portwing-state` volume keeps the agent ID and the signature version locks across restarts. The image pre-creates a writable `/data/credentials`, so without the volume version 3 is still enabled for the life of the container, but the agent ID and the downgrade locks are lost when the container is replaced. Mount the volume so they survive. See [Signature version 3](#signature-version-3-audience-bound).
