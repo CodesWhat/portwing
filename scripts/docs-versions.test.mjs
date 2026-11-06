@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { CURRENT_DOCS_VERSION } from "../docs/src/lib/docs-versions.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DOCS_ROOT = path.join(ROOT, "docs", "content", "docs");
@@ -50,6 +51,11 @@ function stringsIn(source, startPattern) {
   const end = source.indexOf("]", start);
   return [...source.slice(start, end).matchAll(/"([^"]*)"/gu)].map((m) => m[1]);
 }
+
+test("the current page badge matches the current docs metadata", () => {
+  const current = JSON.parse(read("docs/content/docs/current/meta.json"));
+  assert.equal(CURRENT_DOCS_VERSION, current.title);
+});
 
 test("every docs page lives in current/ or a vX.Y/ directory", () => {
   const entries = fs.readdirSync(DOCS_ROOT, { withFileTypes: true });

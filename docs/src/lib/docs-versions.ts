@@ -2,6 +2,7 @@
 
 import type { Root } from "fumadocs-core/page-tree";
 import { getSlugs } from "fumadocs-core/source";
+import currentDocs from "../../content/docs/current/meta.json" with { type: "json" };
 
 // The docs tree is content/docs/current/ plus, later, one content/docs/vX.Y/
 // directory per archived release. `current` is the live docs and must keep
@@ -11,7 +12,7 @@ const CURRENT_DIR = "current";
 const ARCHIVE_DIR = /^v\d+\.\d+$/u;
 // The label the current docs wear. It matches the title of content/docs/current/meta.json, which
 // is what the sidebar version switcher shows.
-export const CURRENT_DOCS_VERSION = "v1.1";
+export const CURRENT_DOCS_VERSION = currentDocs.title;
 
 const CONTENT_MARKER = "/content/docs/";
 
