@@ -1,7 +1,8 @@
 # Portwing Roadmap
 
 > Portwing is stable software. The current release line is `v1.2.0`,
-> a patch release that hardens v3 signature handling.
+> a minor release with TLS required for enrollment by default and a glibc-free
+> container runtime.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
 > direction and priorities — not commitments. Items and ordering may change
 > between releases. For the authoritative record of what has shipped, see the
