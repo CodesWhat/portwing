@@ -1,30 +1,67 @@
-# From-source build: `docker build -t portwing .`
-# (Release images are built by GoReleaser from prebuilt binaries via
-# Dockerfile.release; this file is the standalone equivalent.)
+# checkov:skip=CKV_DOCKER_4:Remote official artifacts use ADD --checksum for mandatory SHA256 verification.
+# Runtime files come from Alpine certificates/metadata and static Go clients.
+# No libc package, shell or package manager enters the final scratch image.
+# From-source equivalent of Dockerfile.release.
 
 # Stage 1: Build the binary from source.
-FROM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
 RUN apk add --no-cache git
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwing
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 \
+    go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwing
 
-# Stage 2: Assemble the Wolfi runtime rootfs (CVE-minimal, no package manager
-# in the final image; the apk database is retained for scanners/SBOM).
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7 AS rootfs
-RUN apk add --no-cache --initdb --root /out \
-    --repository https://packages.wolfi.dev/os \
-    --keys-dir /etc/apk/keys \
-    ca-certificates-bundle busybox docker-cli docker-compose wget \
+# Compose v5.5.1 with patched containerd and x/net, isolated from Portwing modules.
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS compose-builder
+ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee621025f2 https://github.com/docker/compose/archive/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de.tar.gz /tmp/compose.tar.gz
+ARG TARGETARCH
+WORKDIR /compose
+RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \
+    && go get github.com/containerd/containerd/v2@v2.3.6 golang.org/x/net@v0.60.0 \
+    && go mod verify \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 go build -trimpath -tags e2e \
+        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.4" \
+        -o /docker-compose ./cmd
+
+FROM scratch AS docker-amd64
+ADD --checksum=sha256:9ac225999fd5e863f7694c728ef23d480616b1e5639328fa309befd4243d69eb https://download.docker.com/linux/static/stable/x86_64/docker-29.9.2.tgz /tmp/docker.tgz
+
+FROM scratch AS docker-arm64
+ADD --checksum=sha256:873b3e0207857c3b2f28392fb922f3ea6efe37620c16d4d4aaf2fef409c90b73 https://download.docker.com/linux/static/stable/aarch64/docker-29.9.2.tgz /tmp/docker.tgz
+
+FROM scratch AS docker-arm
+ADD --checksum=sha256:7b911fe928d628e4eb6af8714d9ac8ad38b450649b05f3966e54994e6d25f21b https://download.docker.com/linux/static/stable/armhf/docker-29.9.2.tgz /tmp/docker.tgz
+
+FROM docker-${TARGETARCH} AS docker-client
+
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs
+RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
+    && apk add --no-cache --initdb --root /out \
+        --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
+        --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/community" \
+        --keys-dir /etc/apk/keys \
+        ca-certificates-bundle alpine-release \
+    && mkdir -p /out/etc /out/usr/bin \
     && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
     && echo 'portwing:x:65532:' >>/out/etc/group \
     && install -d -o 65532 -g 65532 /out/home/portwing /out/data/stacks \
     && install -d -m 0700 -o 65532 -g 65532 /out/data/credentials \
     && rm -rf /out/var/cache/apk/*
 
-# Stage 3: Final image — Wolfi rootfs plus the binary. Runs as the dedicated
+# Only static Docker and Compose clients enter the runtime.
+COPY --from=docker-client /tmp/docker.tgz /tmp/docker.tgz
+COPY --from=compose-builder /docker-compose /out/usr/bin/docker-compose
+COPY --from=compose-builder /compose/LICENSE /out/usr/share/licenses/docker-compose/LICENSE
+RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker \
+    && chmod 755 /out/usr/bin/docker /out/usr/bin/docker-compose \
+    && mkdir -p /out/usr/libexec/docker/cli-plugins \
+    && ln -s ../../../bin/docker-compose /out/usr/libexec/docker/cli-plugins/docker-compose \
+    && rm /tmp/docker.tgz
+
+# Final image: static clients plus the source-built binary. Runs as the dedicated
 # `portwing` user (UID 65532); reaching the host Docker socket requires adding
 # the socket's group at deploy time via group_add / --group-add (see examples/
 # and SECURITY.md).
@@ -39,12 +76,12 @@ ENV HOME=/home/portwing \
 
 USER 65532:65532
 
-# /data/stacks is pre-created owned by 65532 in the rootfs stage, so volumes
+# /data/stacks is pre-created owned by 65532 in the rootfs stages, so volumes
 # initialized from it are writable by the non-root user.
 VOLUME /data/stacks
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD ["/bin/sh", "-c", "if [ -n \"$TLS_CERT\" ]; then wget -q --no-check-certificate --spider \"https://localhost:${PORT:-3000}/health\"; else wget -q --spider \"http://localhost:${PORT:-3000}/health\"; fi"]
+    CMD ["/usr/bin/portwing", "healthcheck"]
 
 ENTRYPOINT ["/usr/bin/portwing"]

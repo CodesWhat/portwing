@@ -127,7 +127,19 @@ for recipe in Dockerfile Dockerfile.dev Dockerfile.armv7 Dockerfile.release; do
 done
 
 # A healthcheck in a build stage cannot protect the final scratch image.
-for recipe in Dockerfile.armv7 Dockerfile.release; do
+for recipe in Dockerfile Dockerfile.release; do
+	for docker_arch in x86_64 aarch64 armhf; do
+		cp "${recipe}" "${fixture}/${recipe}"
+		sed -i.bak "s@stable/${docker_arch}/@unverified/${docker_arch}/@" "${fixture}/${recipe}"
+		expect_release_contract_failure "must checksum-pin official static Docker for ${docker_arch}" "Missing static client for ${docker_arch} must fail"
+	done
+	cp "${recipe}" "${fixture}/${recipe}"
+	printf '\nFROM cgr.dev/chainguard/wolfi-base:latest AS regression\n' >>"${fixture}/${recipe}"
+	expect_release_contract_failure "runtime must not depend on glibc packages" "Restoring glibc runtime packages must fail"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
+
+for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	awk '
 		/^FROM / && !inserted {
 			print
@@ -146,7 +158,7 @@ done
 
 # A bare final-stage CMD is not a healthcheck: without the HEALTHCHECK
 # instruction the image runs the probe as its default command and has no probe.
-for recipe in Dockerfile.armv7 Dockerfile.release; do
+for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	awk '
 		/^HEALTHCHECK / { getline; print "CMD [\"/usr/bin/portwing\", \"healthcheck\"]"; next }
 		{ print }
@@ -285,7 +297,7 @@ sed '/verify-compose-containerd.sh \/tmp\/docker-compose/d' \
 	"${fixture}/.github/workflows/security-grype.yml" >"${fixture}/.github/workflows/security-grype.yml.tmp"
 mv "${fixture}/.github/workflows/security-grype.yml.tmp" "${fixture}/.github/workflows/security-grype.yml"
 expect_release_contract_failure \
-	"FAIL: security-grype.yml grype-image must verify the ARMv7 Compose containerd version" \
+	"FAIL: security-grype.yml grype-image must verify the Compose containerd version" \
 	"the package release contract must reject a grype-image job that stops verifying the embedded containerd version"
 restore_grype_workflow
 
@@ -620,6 +632,13 @@ expect_release_contract_failure \
 git -C "${fixture}" tag -d v0.0.2 >/dev/null
 mv "${changelog_decoy_backup}" "${fixture}/CHANGELOG.md"
 
+sed '/name: Verify Compose embeds the pinned containerd/a\
+        if: false
+' "${fixture}/.github/workflows/security-grype.yml" >"${fixture}/.github/workflows/security-grype.yml.tmp"
+mv "${fixture}/.github/workflows/security-grype.yml.tmp" "${fixture}/.github/workflows/security-grype.yml"
+expect_release_contract_failure "Compose dependency verification must run on every source image platform" "A conditional dependency check must fail"
+restore_grype_workflow
+
 # The MIT license text is pinned by hash and must carry the project copyright
 # line; a retired AGPL text or an edited copyright line must both fail.
 cp LICENSE "${fixture}/LICENSE"
@@ -631,7 +650,7 @@ expect_release_contract_failure "LICENSE must carry the project copyright line" 
 cp LICENSE "${fixture}/LICENSE"
 rm -f "${fixture}/LICENSE.bak"
 
-for recipe in Dockerfile.armv7 Dockerfile.release; do
+for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	cp "${recipe}" "${fixture}/${recipe}"
 	sed -i.bak 's/--checksum=sha256:[0-9a-f]*/--checksum=sha256:short/' "${fixture}/${recipe}"
 	expect_release_contract_failure "ARM Docker assets must use official versioned URLs and SHA256 checksums" "ARM downloads without a full checksum must fail"

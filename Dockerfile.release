@@ -1,50 +1,33 @@
 # checkov:skip=CKV_DOCKER_4:Remote official artifacts use ADD --checksum for mandatory SHA256 verification.
-# Release image assembled by GoReleaser (dockers_v2) from the prebuilt
-# `portwing` binaries — one image per target platform from this single
-# Dockerfile. (For a from-source build use the top-level Dockerfile instead.)
-#
-# Runtime packages come from Wolfi (Chainguard) on amd64/arm64 and from Alpine
-# on armv7 — Wolfi has no armv7. buildx selects the per-arch base via the
-# predefined TARGETARCH arg. Both arches use the same staging-rootfs → FROM
-# scratch approach: packages install into /out, which the final scratch image
-# copies in, so the apk *binary* never reaches the runtime (CVE-minimal, no
-# package manager) while the apk database is retained for vuln scanners / SBOM.
-#
-# GoReleaser stages the per-platform binary under $TARGETPLATFORM/portwing in
-# the build context (linux/amd64/portwing, linux/arm64/portwing,
-# linux/arm/v7/portwing).
+# Runtime files come from Alpine certificates/metadata and static Go clients.
+# No libc package, shell or package manager enters the final scratch image.
+# GoReleaser stages prebuilt binaries at $TARGETPLATFORM/portwing.
+# For a from-source build use the top-level Dockerfile.
 
 # Compose v5.5.1 with patched containerd and x/net, isolated from Portwing modules.
 FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS compose-builder
 ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee621025f2 https://github.com/docker/compose/archive/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de.tar.gz /tmp/compose.tar.gz
+ARG TARGETARCH
 WORKDIR /compose
 RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \
     && go get github.com/containerd/containerd/v2@v2.3.6 golang.org/x/net@v0.60.0 \
     && go mod verify \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -tags e2e \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 go build -trimpath -tags e2e \
         -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.4" \
         -o /docker-compose ./cmd
 
-# Wolfi rootfs — amd64 and arm64 share one recipe; buildx pulls the per-arch
-# wolfi-base via --platform, so the arm64 build of this stage installs arm64
-# packages even though the stage is named "-amd64".
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7 AS rootfs-amd64
-RUN apk add --no-cache --initdb --root /out \
-    --repository https://packages.wolfi.dev/os \
-    --keys-dir /etc/apk/keys \
-    ca-certificates-bundle busybox docker-cli docker-compose wget \
-    && echo 'portwing:x:65532:65532:portwing:/home/portwing:/sbin/nologin' >>/out/etc/passwd \
-    && echo 'portwing:x:65532:' >>/out/etc/group \
-    && install -d -o 65532 -g 65532 /out/home/portwing /out/data/stacks \
-    && install -d -m 0700 -o 65532 -g 65532 /out/data/credentials \
-    && rm -rf /out/var/cache/apk/*
+FROM scratch AS docker-amd64
+ADD --checksum=sha256:9ac225999fd5e863f7694c728ef23d480616b1e5639328fa309befd4243d69eb https://download.docker.com/linux/static/stable/x86_64/docker-29.9.2.tgz /tmp/docker.tgz
 
-FROM rootfs-amd64 AS rootfs-arm64
+FROM scratch AS docker-arm64
+ADD --checksum=sha256:873b3e0207857c3b2f28392fb922f3ea6efe37620c16d4d4aaf2fef409c90b73 https://download.docker.com/linux/static/stable/aarch64/docker-29.9.2.tgz /tmp/docker.tgz
 
-# Alpine rootfs — armv7 only (Wolfi has no armv7). The branch (vMAJOR.MINOR) is
-# derived from the base image so the FROM tag is the single source of truth for
-# the version: Dependabot bumps the tag and the repositories follow.
-FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs-arm
+FROM scratch AS docker-arm
+ADD --checksum=sha256:7b911fe928d628e4eb6af8714d9ac8ad38b450649b05f3966e54994e6d25f21b https://download.docker.com/linux/static/stable/armhf/docker-29.9.2.tgz /tmp/docker.tgz
+
+FROM docker-${TARGETARCH} AS docker-client
+
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs
 RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && apk add --no-cache --initdb --root /out \
         --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
@@ -58,8 +41,8 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && install -d -m 0700 -o 65532 -g 65532 /out/data/credentials \
     && rm -rf /out/var/cache/apk/*
 
-# Static ARMv7 clients avoid Alpine's older bundled Go dependencies.
-ADD --checksum=sha256:7b911fe928d628e4eb6af8714d9ac8ad38b450649b05f3966e54994e6d25f21b https://download.docker.com/linux/static/stable/armhf/docker-29.9.2.tgz /tmp/docker.tgz
+# Only static Docker and Compose clients enter the runtime.
+COPY --from=docker-client /tmp/docker.tgz /tmp/docker.tgz
 COPY --from=compose-builder /docker-compose /out/usr/bin/docker-compose
 COPY --from=compose-builder /compose/LICENSE /out/usr/share/licenses/docker-compose/LICENSE
 RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker \
@@ -68,11 +51,7 @@ RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker 
     && ln -s ../../../bin/docker-compose /out/usr/libexec/docker/cli-plugins/docker-compose \
     && rm /tmp/docker.tgz
 
-# Select the rootfs by target arch. TARGETARCH is a buildx-predefined global arg
-# (amd64 / arm64 / arm) usable directly in FROM without an explicit ARG.
-FROM rootfs-${TARGETARCH} AS rootfs
-
-# Final image: selected rootfs plus the prebuilt binary. Runs as the dedicated
+# Final image: static clients plus the prebuilt binary. Runs as the dedicated
 # `portwing` user (UID 65532); reaching the host Docker socket requires adding
 # the socket's group at deploy time via group_add / --group-add (see examples/
 # and SECURITY.md).

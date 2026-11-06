@@ -13,6 +13,8 @@ new_fixture() {
 	cp scripts/package-release-config-test.sh "${fixture}/scripts/" || return
 	mkdir -p "${fixture}/scripts/ci" || return
 	cp scripts/ci/go-release-check.sh "${fixture}/scripts/ci/" || return
+	cp Dockerfile Dockerfile.armv7 Dockerfile.dev Dockerfile.release "${fixture}/" || return
+	cp .github/workflows/security-grype.yml "${fixture}/.github/workflows/" || return
 	git -C "${fixture}" init -q || return
 	# Auto maintenance forks a detached process that can still be writing under .git when the
 	# EXIT trap removes the fixture ("rm: cannot remove '.git/objects': Directory not empty").
@@ -58,7 +60,8 @@ if (cd "${unrelated_failure_fixture}" && bash scripts/package-release-config-tes
 	failures=$((failures + 1))
 fi
 
-sed '/^FROM golang:/d' "${missing_builder_fixture}/Dockerfile" >"${missing_builder_fixture}/Dockerfile.tmp"
+# shellcheck disable=SC2016 # Match the literal Docker BUILDPLATFORM argument.
+sed -E '/^FROM (--platform=\$BUILDPLATFORM )?golang:/d' "${missing_builder_fixture}/Dockerfile" >"${missing_builder_fixture}/Dockerfile.tmp"
 mv "${missing_builder_fixture}/Dockerfile.tmp" "${missing_builder_fixture}/Dockerfile"
 
 set +e

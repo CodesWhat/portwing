@@ -1,6 +1,6 @@
 # checkov:skip=CKV_DOCKER_4:Remote official artifacts use ADD --checksum for mandatory SHA256 verification.
 # From-source build for linux/arm/v7: `docker build -f Dockerfile.armv7 .`
-# Wolfi does not support armv7, so the runtime packages come from Alpine.
+# Static clients and Alpine certificates/metadata keep libc out of the runtime.
 # (Release images are built by GoReleaser via the unified Dockerfile.release.)
 
 # Stage 1: Build the binary from source.
