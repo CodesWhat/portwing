@@ -139,6 +139,12 @@ jobs:
           COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}
         run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}"
 
+      - name: Verify Compose embeds patched compression dependency
+        env:
+          GOTOOLCHAIN: local
+          COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}
+        run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}" github.com/klauspost/compress
+
       - name: Run Grype vulnerability scanner
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
         id: grype

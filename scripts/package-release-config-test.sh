@@ -400,6 +400,10 @@ for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 		echo "FAIL: ${dockerfile} Compose must build with patched containerd" >&2
 		failures=$((failures + 1))
 	fi
+	if ! grep -Fq 'github.com/klauspost/compress@v1.20.2' "${dockerfile}"; then
+		echo "FAIL: ${dockerfile} Compose must build with patched compression" >&2
+		failures=$((failures + 1))
+	fi
 	for asset_pattern in \
 		'^ADD --checksum=sha256:[0-9a-f]{64} https://download[.]docker[.]com/linux/static/stable/armhf/docker-[0-9]+[.][0-9]+[.][0-9]+[.]tgz /tmp/docker[.]tgz$' \
 		'^ADD --checksum=sha256:[0-9a-f]{64} https://github[.]com/docker/compose/archive/[0-9a-f]{40}[.]tar[.]gz /tmp/compose[.]tar[.]gz$'; do
@@ -1031,15 +1035,17 @@ require_text "scripts/ci/verify-compose-containerd.sh" "go version -m" \
 grype_image_block="$(awk '/^  grype-image:/ { in_job = 1; next } in_job && /^  [^[:space:]]/ { in_job = 0 } in_job { print }' \
 	.github/workflows/security-grype.yml)"
 compose_check_step="$(awk '
-	/^      - name: / { in_step = ($0 ~ /Verify Compose embeds the pinned containerd/) }
+	/^      - name: / { in_step = ($0 ~ /Verify Compose embeds (the pinned containerd|patched compression dependency)/) }
 	in_step { print }
 ' <<<"${grype_image_block}")"
+compose_check_lines="$(awk '{ sub(/^[[:space:]]*/, ""); print }' <<<"${compose_check_step}")"
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 for expected_text in \
 	'COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}' \
 	'GOTOOLCHAIN: local' \
-	'run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}"'; do
-	if ! grep -Fq -- "${expected_text}" <<<"${compose_check_step}"; then
+	'run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}"' \
+	'run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}" github.com/klauspost/compress'; do
+	if ! grep -Fxq -- "${expected_text}" <<<"${compose_check_lines}"; then
 		echo "FAIL: security-grype.yml grype-image must verify the Compose containerd version (step is missing: ${expected_text})" >&2
 		failures=$((failures + 1))
 	fi

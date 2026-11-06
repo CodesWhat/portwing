@@ -20,10 +20,10 @@ ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee62
 ARG TARGETARCH
 WORKDIR /compose
 RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \
-    && go get github.com/containerd/containerd/v2@v2.3.6 golang.org/x/net@v0.60.0 \
+    && go get github.com/containerd/containerd/v2@v2.3.6 golang.org/x/net@v0.60.0 github.com/klauspost/compress@v1.20.2 \
     && go mod verify \
     && CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 go build -trimpath -tags e2e \
-        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.4" \
+        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.5" \
         -o /docker-compose ./cmd
 
 FROM scratch AS docker-amd64
