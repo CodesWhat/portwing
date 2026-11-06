@@ -104,6 +104,21 @@ case "${release_version}" in
 	;;
 esac
 
+for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
+	cp "${recipe}" "${fixture}/${recipe}"
+	sed -i.bak 's/compress@v1.20.2/compress@v1.19.2/' "${fixture}/${recipe}"
+	printf '\n# was github.com/klauspost/compress@v1.20.2\n' >>"${fixture}/${recipe}"
+	expect_release_contract_failure "Compose must build with patched compression" "A stale compression comment must not hide a downgrade"
+	cp "${recipe}" "${fixture}/${recipe}"
+	sed -i.bak -e 's/compress@v1.20.2/compress@v1.19.2/' \
+		-e 's|WORKDIR /compose|WORKDIR /compose # was github.com/klauspost/compress@v1.20.2|' "${fixture}/${recipe}"
+	expect_release_contract_failure "Compose must build with patched compression" "An inline compression comment must not hide a downgrade"
+	cp "${recipe}" "${fixture}/${recipe}"
+	printf '\nRUN go get github.com/klauspost/compress@v1.20.2\n' >>"${fixture}/${recipe}"
+	expect_release_contract_failure "Compose must build with patched compression" "A duplicate active compression pin must fail"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
+
 compatibility_version_backup="${fixture}/COMPATIBILITY.md.version-backup"
 cp "${fixture}/COMPATIBILITY.md" "${compatibility_version_backup}"
 python3 - "${fixture}/COMPATIBILITY.md" "${release_version}" <<'PYCASE'

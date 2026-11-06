@@ -400,7 +400,12 @@ for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 		echo "FAIL: ${dockerfile} Compose must build with patched containerd" >&2
 		failures=$((failures + 1))
 	fi
-	if ! grep -Fq 'github.com/klauspost/compress@v1.20.2' "${dockerfile}"; then
+	compression_pins="$(
+		active_lines "${dockerfile}" |
+			sed -E 's/[[:space:]]#.*$//' |
+			grep -oE 'github[.]com/klauspost/compress@v[0-9]+[.][0-9]+[.][0-9]+([-+][0-9A-Za-z.+-]*)?' || true
+	)"
+	if [ "${compression_pins}" != 'github.com/klauspost/compress@v1.20.2' ]; then
 		echo "FAIL: ${dockerfile} Compose must build with patched compression" >&2
 		failures=$((failures + 1))
 	fi
