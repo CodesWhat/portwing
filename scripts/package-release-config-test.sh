@@ -359,8 +359,22 @@ for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.dev; do
 	fi
 done
 
-# ARM32 uses checksum-pinned official static clients; Alpine supplies the OS.
-for dockerfile in Dockerfile.armv7 Dockerfile.release; do
+# Every supported runtime must use static clients and omit glibc packages.
+for dockerfile in Dockerfile Dockerfile.release; do
+	if active_lines "${dockerfile}" | grep -Eq 'wolfi-base|packages[.]wolfi[.]dev'; then
+		echo "FAIL: ${dockerfile} runtime must not depend on glibc packages" >&2
+		failures=$((failures + 1))
+	fi
+	for docker_arch in x86_64 aarch64 armhf; do
+		if ! grep -Eq "^ADD --checksum=sha256:[0-9a-f]{64} https://download[.]docker[.]com/linux/static/stable/${docker_arch}/docker-[0-9]+[.][0-9]+[.][0-9]+[.]tgz /tmp/docker[.]tgz$" "${dockerfile}"; then
+			echo "FAIL: ${dockerfile} must checksum-pin official static Docker for ${docker_arch}" >&2
+			failures=$((failures + 1))
+		fi
+	done
+done
+
+# Static clients retain Alpine OS metadata for scanners on every architecture.
+for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	arm_recipe="$(active_lines "${dockerfile}" | sed -n '/^FROM alpine:/,/^FROM /p')"
 	if ! grep -Eq '^[[:space:]]+ca-certificates-bundle alpine-release' <<<"${arm_recipe}"; then
 		echo "FAIL: ${dockerfile} ARM rootfs must retain Alpine distro metadata" >&2
@@ -384,6 +398,15 @@ for dockerfile in Dockerfile.armv7 Dockerfile.release; do
 	fi
 	if ! grep -Fq 'github.com/containerd/containerd/v2@v2.3.6' "${dockerfile}"; then
 		echo "FAIL: ${dockerfile} Compose must build with patched containerd" >&2
+		failures=$((failures + 1))
+	fi
+	compression_pins="$(
+		active_lines "${dockerfile}" |
+			sed -E 's/[[:space:]]#.*$//' |
+			grep -oE 'github[.]com/klauspost/compress@v[0-9]+[.][0-9]+[.][0-9]+([-+][0-9A-Za-z.+-]*)?' || true
+	)"
+	if [ "${compression_pins}" != 'github.com/klauspost/compress@v1.20.2' ]; then
+		echo "FAIL: ${dockerfile} Compose must build with patched compression" >&2
 		failures=$((failures + 1))
 	fi
 	for asset_pattern in \
@@ -1011,27 +1034,35 @@ if [ -z "$grype_deps_exclusion" ]; then
 	failures=$((failures + 1))
 fi
 
-# The ARMv7 image's Compose is built in a compose-builder stage with containerd
-# pinned, but the Dockerfile pin is only text. grype-image must read the module
-# version out of the extracted binary and compare it with the Dockerfile pin,
-# on the ARMv7 leg only (the amd64 image ships Wolfi's compose, no pin), with
-# the Dockerfile passed through env rather than interpolated into the script.
+# Every image's Compose binary must match the recipe's dependency pin.
 require_text "scripts/ci/verify-compose-containerd.sh" "go version -m" \
 	"the Compose containerd check must read the module version from the binary's build info"
 grype_image_block="$(awk '/^  grype-image:/ { in_job = 1; next } in_job && /^  [^[:space:]]/ { in_job = 0 } in_job { print }' \
 	.github/workflows/security-grype.yml)"
 compose_check_step="$(awk '
-	/^      - name: / { in_step = ($0 ~ /Verify ARMv7 Compose embeds the pinned containerd/) }
+	/^      - name: / { in_step = ($0 ~ /Verify Compose embeds (the pinned containerd|patched compression dependency)/) }
 	in_step { print }
 ' <<<"${grype_image_block}")"
+compose_check_lines="$(awk '{ sub(/^[[:space:]]*/, ""); print }' <<<"${compose_check_step}")"
 # shellcheck disable=SC2016 # Asserting the literal text of the workflow.
 for expected_text in \
-	"if: matrix.platform == 'linux/arm/v7'" \
 	'COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}' \
 	'GOTOOLCHAIN: local' \
-	'run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}"'; do
-	if ! grep -Fq -- "${expected_text}" <<<"${compose_check_step}"; then
-		echo "FAIL: security-grype.yml grype-image must verify the ARMv7 Compose containerd version (step is missing: ${expected_text})" >&2
+	'run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}"' \
+	'run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}" github.com/klauspost/compress'; do
+	if ! grep -Fxq -- "${expected_text}" <<<"${compose_check_lines}"; then
+		echo "FAIL: security-grype.yml grype-image must verify the Compose containerd version (step is missing: ${expected_text})" >&2
+		failures=$((failures + 1))
+	fi
+done
+
+if grep -Eq '^[[:space:]]+if:' <<<"${compose_check_step}"; then
+	echo "FAIL: Compose dependency verification must run on every source image platform" >&2
+	failures=$((failures + 1))
+fi
+for image_platform in linux/amd64 linux/arm64 linux/arm/v7; do
+	if ! grep -Fq "platform: ${image_platform}" <<<"${grype_image_block}"; then
+		echo "FAIL: source image scan must include ${image_platform}" >&2
 		failures=$((failures + 1))
 	fi
 done

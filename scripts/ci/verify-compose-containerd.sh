@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 set -euo pipefail
 
-# Proves the docker-compose binary shipped in an image really embeds the
-# containerd version the Dockerfile that built it pins.
+# Proves the shipped Compose binary embeds the pinned containerd version,
+# or the pinned compression version when that module is selected.
 #
 # The Dockerfile pin (`go get github.com/containerd/containerd/v2@vX.Y.Z` in
 # the compose-builder stage) is only text. A build that silently stayed on an
@@ -12,7 +12,7 @@ set -euo pipefail
 # medium. The module version stamped into the binary is the one fact that
 # says what was actually linked.
 #
-# Usage: verify-compose-containerd.sh <docker-compose-binary> <dockerfile>
+# Usage: verify-compose-containerd.sh <docker-compose-binary> <dockerfile> [module]
 #
 # Expected version: read from the Dockerfile at run time, never hardcoded here.
 # Actual version: the `dep` line for the module in `go version -m <binary>`.
@@ -21,12 +21,19 @@ set -euo pipefail
 # (or several different ones), a `go version -m` failure, a binary with no
 # containerd module line (or a replaced one), and a mismatch all exit 1.
 
-readonly module="github.com/containerd/containerd/v2"
+readonly module="${3:-github.com/containerd/containerd/v2}"
 
-if [[ $# -ne 2 ]]; then
-	echo "usage: $0 <docker-compose-binary> <dockerfile>" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+	echo "usage: $0 <docker-compose-binary> <dockerfile> [module]" >&2
 	exit 2
 fi
+case "${module}" in
+github.com/containerd/containerd/v2 | github.com/klauspost/compress) ;;
+*)
+	echo "error: unsupported Compose dependency: ${module}" >&2
+	exit 2
+	;;
+esac
 binary_path="$1"
 dockerfile="$2"
 
@@ -88,7 +95,7 @@ if [[ $(wc -l <<<"${actual}" | tr -d '[:space:]') -ne 1 || ${actual} == *replace
 fi
 
 if [[ ${actual} != "${expected}" ]]; then
-	echo "error: ${binary_path} embeds ${module} ${actual}, but ${dockerfile} pins ${expected}; the build did not pick up the pinned containerd" >&2
+	echo "error: ${binary_path} embeds ${module} ${actual}, but ${dockerfile} pins ${expected}; the build did not pick up the pinned dependency" >&2
 	exit 1
 fi
 

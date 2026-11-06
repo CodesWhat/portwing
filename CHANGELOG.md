@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Build all container architectures from Alpine certificates/metadata and
+  statically linked Portwing, Docker and Compose clients. This removes the
+  glibc runtime package affected by CVE-2026-84243. Keep non-root execution,
+  shell-free HTTP/TLS health checks and HIGH-severity image scan gates.
+- Build Compose with `klauspost/compress` v1.20.2 to fix GO-2026-6865
+  (CVE-2026-116591), and verify the module version linked into each image.
+
 - For the next minor (v1.2), refuse plaintext Model C enrollment with HTTP 403
   before reading the bootstrap credential. Native TLS is accepted, as is a
   single `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES`.
