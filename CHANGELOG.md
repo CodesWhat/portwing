@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.0] - 2026-11-06
+
+### Security
+
+- Pin optional Sockguard images to [v2.4.6](https://github.com/CodesWhat/sockguard/releases/tag/v2.4.6)
+  for the compression advisory while retaining the audited preset allowlists.
+
+- Build all container architectures from Alpine certificates/metadata and
+  statically linked Portwing, Docker and Compose clients. This removes the
+  glibc runtime package affected by CVE-2026-84243. Keep non-root execution,
+  shell-free HTTP/TLS health checks and HIGH-severity image scan gates.
+- Build Compose with `klauspost/compress` v1.20.2 to fix GO-2026-6865
+  (CVE-2026-116591), and verify the module version linked into each image.
+
+- Refuse plaintext Model C enrollment with HTTP 403
+  before reading the bootstrap credential. Native TLS is accepted, as is a
+  single `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES`.
+  Configure the proxy to overwrite that header and keep the backend private.
+  This is a security exception to the stable HTTP behavior: deployments that
+  enrolled over HTTP in v1.1.x must configure TLS or a trusted TLS proxy, or set
+  `ALLOW_INSECURE_ENROLLMENT=true` for trusted local testing. The default is false;
+  refusal leaves the one-use credential available for a secure retry.
+
 ## [v1.1.2] - 2026-11-05
 
 This patch release prevents signature-lock CLI ownership changes and clarifies

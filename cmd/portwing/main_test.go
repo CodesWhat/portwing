@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -914,6 +915,15 @@ func TestRun_StandardMode_DrainsInFlightRequestOnShutdown(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	logFile, err := os.CreateTemp(t.TempDir(), "shutdown-log-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logFile.Close()
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, nil)))
+	defer slog.SetDefault(previousLogger)
+
 	// /_portwing/health requires no auth and calls docker Ping, which the
 	// mock daemon delays by pingDelay — our in-flight handler.
 	type reqResult struct {
@@ -972,6 +982,13 @@ func TestRun_StandardMode_DrainsInFlightRequestOnShutdown(t *testing.T) {
 	}
 	if runRes.code != 0 {
 		t.Fatalf("run returned %d, want 0", runRes.code)
+	}
+	logs, err := os.ReadFile(logFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(logs), "server shutdown error") {
+		t.Fatalf("successful shutdown logged an error: %s", logs)
 	}
 	// The crux of the regression test: run() must not return until after the
 	// in-flight handler actually finished draining. Reverting the fix makes

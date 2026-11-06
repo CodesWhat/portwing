@@ -16,7 +16,7 @@ import (
 )
 
 func TestUnauthenticatedRoutesRejectUnreadBodies(t *testing.T) {
-	s, handler := newRouteTestServer(t, routeTestServerOpts{token: "health-secret", enroll: true})
+	s, handler := newRouteTestServer(t, routeTestServerOpts{token: "health-secret", enroll: true, insecureEnrollment: true})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
 
@@ -41,6 +41,20 @@ func TestUnauthenticatedRoutesRejectUnreadBodies(t *testing.T) {
 		}
 		assertUnreadBodyRejected(t, ts.URL, http.MethodPost, "/api/portwing/enroll", "Content-Length: 1\r\n", "", http.StatusTooManyRequests)
 	})
+}
+
+func TestEnrollmentTransportRejectsUnreadBodyAfterAdmission(t *testing.T) {
+	s, handler := newRouteTestServer(t, routeTestServerOpts{enroll: true})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+	assertUnreadBodyRejected(t, ts.URL, http.MethodPost, "/api/portwing/enroll", "Content-Length: 1\r\n", "", http.StatusForbidden)
+	if !s.enroller.Armed() {
+		t.Fatal("transport refusal consumed enrollment credential")
+	}
+	for i := 0; i < 10; i++ {
+		s.rateLimiter.RecordFailure("127.0.0.1")
+	}
+	assertUnreadBodyRejected(t, ts.URL, http.MethodPost, "/api/portwing/enroll", "Content-Length: 1\r\n", "", http.StatusTooManyRequests)
 }
 
 func TestAuthenticationRejectsUnreadBodies(t *testing.T) {

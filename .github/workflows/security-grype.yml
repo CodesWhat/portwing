@@ -48,6 +48,11 @@ jobs:
             dockerfile: Dockerfile
             category: grype-image
             fail-build: true
+          - name: "Security: Grype ARM64 Container Scan"
+            platform: linux/arm64
+            dockerfile: Dockerfile
+            category: grype-image-arm64
+            fail-build: true
           - name: "Security: Grype ARMv7 Container Scan"
             platform: linux/arm/v7
             dockerfile: Dockerfile.armv7
@@ -93,10 +98,10 @@ jobs:
           persist-credentials: false
 
       - name: Set up QEMU
-        if: matrix.platform == 'linux/arm/v7'
+        if: matrix.platform != 'linux/amd64'
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
         with:
-          platforms: arm
+          platforms: arm,arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
@@ -111,12 +116,13 @@ jobs:
           load: true
           tags: portwing:grype-scan
           # Keep the vulnerability scan honest: cached apk-install layers can
-          # preserve stale distro packages after Wolfi publishes fixes.
+          # preserve stale distro packages after Alpine publishes fixes.
           no-cache: true
 
-      - name: Verify ARMv7 clients and HTTP/TLS health checks
-        if: matrix.platform == 'linux/arm/v7'
-        run: python3 scripts/armv7-image-smoke.py portwing:grype-scan
+      - name: Verify static clients and HTTP/TLS health checks
+        env:
+          IMAGE_PLATFORM: ${{ matrix.platform }}
+        run: python3 scripts/armv7-image-smoke.py portwing:grype-scan "${IMAGE_PLATFORM}"
 
       - name: Verify scoped scanner exclusions are not linked
         run: |
@@ -126,21 +132,18 @@ jobs:
           docker cp "${container_id}:/usr/bin/docker-compose" /tmp/docker-compose
           ./scripts/verify-scanner-exclusions.sh /tmp/portwing /tmp/docker-compose
 
-      - name: Verify ARMv7 Compose embeds the pinned containerd
-        # The Dockerfile pin is text and the smoke test only runs
-        # `docker-compose version`, so a build that stayed on an older
-        # containerd would pass both, and the scan gates at high while the
-        # containerd advisory was medium. Read the module version stamped into
-        # the binary and compare it with the pin in the Dockerfile that built
-        # it. Uses the runner image's own Go (go version -m downloads nothing);
-        # GOTOOLCHAIN=local keeps it from fetching a toolchain through the
-        # egress allow-list. The amd64 image ships Wolfi's compose package, not
-        # the compose-builder stage, so only this leg has a pin to check.
-        if: matrix.platform == 'linux/arm/v7'
+      - name: Verify Compose embeds the pinned containerd
+        # Read actual linked module versions; recipe pins alone are insufficient.
         env:
           GOTOOLCHAIN: local
           COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}
         run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}"
+
+      - name: Verify Compose embeds patched compression dependency
+        env:
+          GOTOOLCHAIN: local
+          COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}
+        run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}" github.com/klauspost/compress
 
       - name: Run Grype vulnerability scanner
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2

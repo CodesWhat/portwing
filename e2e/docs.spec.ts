@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import { MOBILE, overflowsHorizontally, test } from "./fixtures";
 
@@ -79,24 +81,28 @@ test.describe("docs on desktop", () => {
   });
 });
 
+const currentVersion = JSON.parse(
+  readFileSync(path.join(__dirname, "../docs/content/docs/current/meta.json"), "utf8"),
+).title;
+const archives = JSON.parse(
+  readFileSync(path.join(__dirname, "../docs/content/docs/meta.json"), "utf8"),
+).pages.filter((version: string) => /^v\d+\.\d+$/u.test(version));
+
 const switcher = (page: Page) =>
-  page.locator('button[aria-haspopup="dialog"]').filter({ hasText: "v1.1" });
+  page.locator('button[aria-haspopup="dialog"]').filter({ hasText: currentVersion });
 
-test("version switcher labels the current line and reaches the archived v1.0 docs", async ({
-  page,
-}) => {
+test("version switcher and page badge label the current docs line", async ({ page }) => {
   await page.goto("/docs/api-reference");
-  await switcher(page).click();
-  await expect(page.locator('a[href="/docs/v0.9"]')).toBeVisible();
-  await page.locator('a[href="/docs/v1.0"]').click();
-  await expect(page).toHaveURL(/\/docs\/v1\.0$/);
-  await expect(page.getByText("Archived documentation for v1.0").first()).toBeVisible();
+  await expect(switcher(page)).toBeVisible();
+  await expect(page.locator("span.chip.nocase").filter({ hasText: currentVersion })).toBeVisible();
 });
 
-test("version switcher reaches the archived v0.9 docs", async ({ page }) => {
-  await page.goto("/docs/api-reference");
-  await switcher(page).click();
-  await page.locator('a[href="/docs/v0.9"]').click();
-  await expect(page).toHaveURL(/\/docs\/v0\.9$/);
-  await expect(page.getByText("Archived documentation for v0.9").first()).toBeVisible();
-});
+for (const version of archives) {
+  test(`version switcher reaches the archived ${version} docs`, async ({ page }) => {
+    await page.goto("/docs/api-reference");
+    await switcher(page).click();
+    await page.locator(`a[href="/docs/${version}"]`).click();
+    await expect(page).toHaveURL(new URL(`/docs/${version}`, page.url()).href);
+    await expect(page.getByText(`Archived documentation for ${version}`).first()).toBeVisible();
+  });
+}

@@ -424,7 +424,7 @@ function assertAdvisoryJob(source, entries) {
   // mutators. The invocation must expand both arrays literally.
   assert.match(
     advisory,
-    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}"\$\{default_mutator_flags\[@\]\}" \\\n^ {14}"\$\{coefficient_args\[@\]\+"\$\{coefficient_args\[@\]\}"\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
+    /^ {12}if ! gremlins unleash --tags="" \\\n^ {14}"\$\{advisory_flags\[@\]\}" \\\n^ {14}"\$\{default_mutator_flags\[@\]\}" \\\n^ {14}"\$\{coefficient_args\[@\]\+"\$\{coefficient_args\[@\]\}"\}" \\\n^ {14}"\$\{scope_args\[@\]\+"\$\{scope_args\[@\]\}"\}" \\\n^ {14}--output "\$\{report\}" \\\n^ {14}"\$\{package\}" 2>&1 \| tee "mutation-advisory-\$\{name\}\.txt"; then$/mu,
     "the advisory job must expand advisory_flags and default_mutator_flags on the unleash invocation",
   );
 

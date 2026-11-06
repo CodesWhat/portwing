@@ -349,7 +349,7 @@ func TestRegisterRoutesEnrollmentEndpoint(t *testing.T) {
 
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
-	ts := httptest.NewServer(mux)
+	ts := httptest.NewTLSServer(mux)
 	defer ts.Close()
 
 	// POST /api/portwing/enroll with wrong token should return 401 (endpoint is registered).

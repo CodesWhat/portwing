@@ -308,6 +308,7 @@ func TestEnrollmentAuditActorUsesTrustedClientResolution(t *testing.T) {
 			cfg := minimalConfig()
 			cfg.AuthorizedKeysFile = keyPath
 			cfg.EnrollmentToken = "expected"
+			cfg.AllowInsecureEnrollment = true // Isolate audit client resolution.
 			cfg.TrustedProxies = tt.trustedProxies
 			s, err := NewServer(cfg, client, &stubServerAdapter{})
 			if err != nil {
