@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Pin optional Sockguard images to [v2.4.6](https://github.com/CodesWhat/sockguard/releases/tag/v2.4.6)
+  for the compression advisory while retaining the audited preset allowlists.
+
 - Build all container architectures from Alpine certificates/metadata and
   statically linked Portwing, Docker and Compose clients. This removes the
   glibc runtime package affected by CVE-2026-84243. Keep non-root execution,
