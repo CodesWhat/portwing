@@ -173,7 +173,7 @@ export const roadmap: Milestone[] = [
     emoji: "🔐",
     status: "planned",
     items: [
-      "Enrollment requires TLS, either native or through a trusted proxy reporting HTTPS, unless ALLOW_INSECURE_ENROLLMENT explicitly opts in. Not in v1.1: the agent still only warns at startup",
+      "Next minor (v1.2): enrollment requires native TLS or HTTPS reported by a trusted proxy unless ALLOW_INSECURE_ENROLLMENT=true opts in. Version 1.1.x only warns",
     ],
   },
   {

@@ -64,6 +64,24 @@ func TestLoadRejectsPartialTLSKeypair(t *testing.T) {
 	}
 }
 
+func TestLoadInsecureEnrollmentOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{{"", false}, {"true", true}, {"false", false}, {"invalid", false}} {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv("ALLOW_INSECURE_ENROLLMENT", tc.value)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.AllowInsecureEnrollment != tc.want {
+				t.Fatalf("AllowInsecureEnrollment = %v, want %v", cfg.AllowInsecureEnrollment, tc.want)
+			}
+		})
+	}
+}
+
 // TestLoadEdgeModeWithHashOnlyErrors ensures that DRYDOCK_URL + TOKEN_HASH
 // (without TOKEN) returns an error.
 func TestLoadEdgeModeWithHashOnlyErrors(t *testing.T) {

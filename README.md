@@ -483,7 +483,7 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks |
 | **v1.0** ✅ | Binding Stability | `STABILITY.md` guarantees are binding semver commitments, opt-in controller-assisted two-key rotation (first available in rc.2, Drydock `v1.8.0-rc.1+`), competitive review refreshed against primary sources, final v0.9 docs archived from its release tag |
 | **v1.1** ✅ | Audience-Bound Signatures | Ed25519 signature version 3 binds each request to one agent (Drydock 1.9+), stable persistent agent ID under `/data/credentials`, `SIGNATURE_MIN_VERSION`, `portwing signature-lock` for downgrade locks |
-| **Planned** | Enrollment Over TLS | Enrollment requires TLS unless `ALLOW_INSECURE_ENROLLMENT` opts in. Not shipped in v1.1; the agent only warns at startup |
+| **Planned** | Enrollment Over TLS | Next minor (v1.2): enrollment requires native TLS or HTTPS reported by a trusted proxy unless `ALLOW_INSECURE_ENROLLMENT=true` opts in. Version 1.1.x only warns |
 | **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.
