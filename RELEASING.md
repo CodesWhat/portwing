@@ -172,8 +172,8 @@ The scheduled main-release monitor
 through `main`, re-add `allow-prerelease: true` to its `with:` block for that
 stage and remove it again when the stable release follows.
 
-This requires the **`RELEASE_PAT`** secret (fine-grained PAT, Contents:
-read/write on this repo). Tags pushed with the default `GITHUB_TOKEN` do not
+This requires the **`RELEASE_PAT`** secret in the main-only **`Release`**
+environment (fine-grained PAT, Contents: read/write on this repo). Tags pushed with the default `GITHUB_TOKEN` do not
 trigger downstream workflows, so without the PAT the tag would never fire
 `release.yml`.
 
@@ -199,8 +199,9 @@ bypass its protection rules. Keep the source-verification job read-only and
 outside the environment so untrusted tag content cannot receive publish
 permissions before those checks pass.
 
-The release job also requires **`HOMEBREW_TAP_TOKEN`**, a fine-grained token
-with Contents read/write access to `CodesWhat/homebrew-tap`. The default
+The release job also requires **`HOMEBREW_TAP_TOKEN`** in the **`Production`**
+environment, a fine-grained token with Contents read/write access to
+`CodesWhat/homebrew-tap`. The default
 `GITHUB_TOKEN` cannot publish to a different repository. Prerelease tags render
 the cask for validation but do not upload it (`skip_upload: auto`).
 
