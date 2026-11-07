@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/codeswhat/portwing/internal/audit"
 	"github.com/codeswhat/portwing/internal/auth"
 	"github.com/codeswhat/portwing/internal/config"
 	"github.com/codeswhat/portwing/internal/protocol"
@@ -60,6 +62,72 @@ func edgeRotationRequest(t *testing.T, c *Client, ctrl *websocket.Conn, method, 
 		t.Fatalf("lost response correlation: %+v", response)
 	}
 	return response
+}
+
+func TestEdgeRotationAudit(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, method, action, body             string
+		status                                 int
+		apiOutcome, operation, rotationOutcome string
+	}{
+		{"status", http.MethodGet, "", "", 200, audit.OutcomeAllowed, "", ""},
+		{"prepare", http.MethodPost, "/prepare", "{}", 200, audit.OutcomeAllowed, "prepare", audit.OutcomeAllowed},
+		{"invalid activation", http.MethodPost, "/activate", `{"key_id":"wrong"}`, 400, audit.OutcomeDenied, "activate", audit.OutcomeError},
+		{"wrong method", http.MethodGet, "/prepare", "", 405, audit.OutcomeDenied, "", ""},
+		{"malformed body", http.MethodPost, "/prepare", "{", 400, audit.OutcomeDenied, "", ""},
+		{"body at limit", http.MethodPost, "/prepare", "{}" + strings.Repeat(" ", 4094), 200, audit.OutcomeAllowed, "prepare", audit.OutcomeAllowed},
+		{"body above limit", http.MethodPost, "/prepare", "{}" + strings.Repeat(" ", 4095), 400, audit.OutcomeDenied, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, ctrl, hello := managedEdgeClient(t)
+			logger, closeAudit, err := audit.New("", 8)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(closeAudit)
+			c.auditor = logger
+			c.cfg.DrydockURL = "wss://controller.test/api/portwing/ws"
+			path := protocol.KeyRotationPath + "/edge" + tc.action
+			start := time.Now()
+			response := edgeRotationRequest(t, c, ctrl, tc.method, path, tc.body)
+			elapsedMs := float64(time.Since(start)) / float64(time.Millisecond)
+			if response.StatusCode != tc.status {
+				t.Fatalf("status = %d, want %d: %s", response.StatusCode, tc.status, response.Body)
+			}
+			apiCount, rotationCount := 0, 0
+			for _, record := range logger.Records(0) {
+				if record.Actor != c.cfg.DrydockURL {
+					t.Fatalf("audit actor = %q, want controller URL", record.Actor)
+				}
+				switch record.Event {
+				case audit.EventAPIRequest:
+					apiCount++
+					if record.Method != tc.method || record.Path != path || record.Status != tc.status || record.Outcome != tc.apiOutcome {
+						t.Fatalf("API audit does not match response: %+v", record)
+					}
+					if record.DurationMs < 0 || record.DurationMs > elapsedMs {
+						t.Fatalf("audit duration %fms exceeds request duration %fms", record.DurationMs, elapsedMs)
+					}
+				case audit.EventKeyRotation:
+					rotationCount++
+					if record.Operation != tc.operation || record.Outcome != tc.rotationOutcome || record.KeyID != hello.PubKeyID {
+						t.Fatalf("key rotation audit does not match operation: %+v", record)
+					}
+				default:
+					t.Fatalf("unexpected audit event: %+v", record)
+				}
+			}
+			wantRotations := 0
+			if tc.operation != "" {
+				wantRotations = 1
+			}
+			if apiCount != 1 || rotationCount != wantRotations {
+				t.Fatalf("audit counts: API %d, key rotation %d (want %d)", apiCount, rotationCount, wantRotations)
+			}
+		})
+	}
 }
 
 func TestEdgeRotationStagesAndSignsReplacement(t *testing.T) {
