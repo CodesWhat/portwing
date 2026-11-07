@@ -5,11 +5,47 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 var lockTestTime = time.Date(2026, 11, 2, 12, 30, 0, 0, time.UTC)
+
+func TestSignatureLocks_FileSizeBoundary(t *testing.T) {
+	t.Parallel()
+	const contents = `{"version":1,"locks":{"aaaaaaaaaaaaaaaa":"2026-11-02T12:30:00Z"}}`
+	for _, tc := range []struct {
+		name      string
+		size      int
+		wantError bool
+	}{
+		{"at limit", maxSignatureLocksBytes, false},
+		{"above limit", maxSignatureLocksBytes + 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			data := contents + strings.Repeat(" ", tc.size-len(contents))
+			if err := os.WriteFile(filepath.Join(dir, SignatureLocksFileName), []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			locks, err := OpenSignatureLocks(dir)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "exceed") {
+					t.Fatalf("oversized locks file: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if since, ok := locks.LockedSince("aaaaaaaaaaaaaaaa"); !ok || !since.Equal(lockTestTime) {
+				t.Fatalf("lock at file-size limit lost: since %v, present %v", since, ok)
+			}
+		})
+	}
+}
 
 func TestSignatureLocks_LockPersistsAcrossReopen(t *testing.T) {
 	t.Parallel()

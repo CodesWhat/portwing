@@ -12,7 +12,7 @@ import (
 
 func TestValidateAgentID(t *testing.T) {
 	t.Parallel()
-	valid := []string{"a", "0", "-", "agent-1", strings.Repeat("a", 64), "0123456789abcdef0123456789abcdef", "550e8400-e29b-41d4-a716-446655440000"}
+	valid := []string{"a", "z", "0", "-", "agent-1", strings.Repeat("a", 64), "0123456789abcdef0123456789abcdef", "550e8400-e29b-41d4-a716-446655440000"}
 	for _, id := range valid {
 		if err := ValidateAgentID(id); err != nil {
 			t.Errorf("ValidateAgentID(%q) = %v, want nil", id, err)

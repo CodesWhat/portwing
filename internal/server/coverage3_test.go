@@ -12,12 +12,14 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -585,23 +587,50 @@ func TestListenAndServeTLSBranchFails(t *testing.T) {
 	defer stop()
 
 	cfg := minimalConfig()
-	cfg.Port = "19876" // use a port that's likely free
-	cfg.TLSCert = "nonexistent.crt"
-	cfg.TLSKey = "nonexistent.key"
+	cfg.Port = "0"
+	dir := t.TempDir()
+	cfg.TLSCert = filepath.Join(dir, "missing.crt")
+	cfg.TLSKey = filepath.Join(dir, "missing.key")
 
 	s, err := NewServer(cfg, client, &stubServerAdapter{})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
+	errCh := make(chan error, 1)
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		errCh <- s.ListenAndServe()
+	}()
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		_ = s.Shutdown(ctx)
+		select {
+		case <-serveDone:
+		case <-ctx.Done():
+			t.Error("ListenAndServe did not stop after Shutdown")
+		}
 	}()
 
-	// ListenAndServeTLS will fail because the cert files don't exist.
-	if err := s.ListenAndServe(); err == nil {
-		t.Error("expected error from ListenAndServeTLS with nonexistent cert, got nil")
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("missing TLS certificate: %v, want file-not-found error", err)
+			}
+			return
+		case <-tick.C:
+			if s.Addr() != nil {
+				t.Fatal("missing TLS certificate must not fall back to a plaintext listener")
+			}
+		case <-deadline.C:
+			t.Fatal("missing TLS certificate did not fail promptly")
+		}
 	}
 }
 
