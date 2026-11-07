@@ -404,7 +404,10 @@ printf 'preserved\n' >"${nightly_seed}/cached-freshentry"
 # The same actual verifier must reject a new copy that survived cleanup.
 printf 'go test fuzz v1\nstring("new")\n' >"${manifest_generated}/newentry"
 printf 'leftover\n' >"${nightly_seed}/cached-newentry"
-if (cd "${fixture}"; FUZZER=FuzzNope GENERATED="${manifest_generated}" SEED="${nightly_seed}" bash "${fixture}/verify-step.sh") >"${fixture}/verify-leftover.log" 2>&1; then
+if (
+	cd "${fixture}"
+	FUZZER=FuzzNope GENERATED="${manifest_generated}" SEED="${nightly_seed}" bash "${fixture}/verify-step.sh"
+) >"${fixture}/verify-leftover.log" 2>&1; then
 	fail "nightly cleanup verification must reject a surviving new destination"
 fi
 
