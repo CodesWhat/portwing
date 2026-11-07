@@ -358,6 +358,24 @@ status=0
 [ ! -e "${manifest_repo}/seed/cached-freshentry" ] ||
 	fail "cleanup left this run's own copy (cached-freshentry) behind"
 
+# A copy may create a partial destination and still fail. Cleanup owns it.
+partial_bin="${fixture}/partial-bin"
+partial_seed="${fixture}/partial-seed"
+mkdir -p "${partial_bin}" "${partial_seed}"
+cat >"${partial_bin}/cp" <<'MOCK'
+#!/usr/bin/env bash
+printf 'partial\n' >"$2"
+exit 1
+MOCK
+chmod +x "${partial_bin}/cp"
+out="${fixture}/partial.json"
+PATH="${partial_bin}:${PATH}" bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "${manifest_generated}" "${partial_seed}" "" "${out}"
+[ ! -e "${partial_seed}/cached-freshentry" ] || fail "failed partial copy must not leave a generated seed behind"
+
+printf 'pre-existing\n' >"${partial_seed}/cached-freshentry"
+PATH="${partial_bin}:${PATH}" bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "${manifest_generated}" "${partial_seed}" "" "${out}"
+[ "$(cat "${partial_seed}/cached-freshentry")" = "pre-existing" ] || fail "copy/cleanup must preserve a pre-existing destination"
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} fuzz-score.sh check(s) failed" >&2
 	exit 1
