@@ -177,7 +177,7 @@ AEAD suites by design.
 | WebSocket read | 16 MB | Prevent memory exhaustion from large WebSocket frames |
 | HTTP response body read | 100 MB | Bound buffered Docker API responses |
 | Legacy edge log response | 100 MB | Bound a buffered `dd:container_log_response` for older controllers |
-| Edge log-stream frame | 256 KiB | Skip an oversized Docker log frame before it enters the controller queue |
+| Decoded Docker log chunk | 256 KiB | Stream larger Docker log frames in bounded chunks before the controller queue |
 | Concurrent edge log streams | 128 | Bound Docker readers and per-stream goroutines independently of message handlers |
 | Edge outbound queue | 256 frames | Evict and reconnect a stalled controller instead of growing memory without limit |
 | Legacy edge follow-log window | ~7s | Bound a non-streaming `follow=true` request so it can't hold a message-handler slot indefinitely |

@@ -395,7 +395,7 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 	// returns for the same container. A trailing read error (EOF, or the follow
 	// window's deadline firing mid-read) still yields the bytes read so far, so
 	// use them and keep the error at debug.
-	data, err := docker.DecodeContainerLogs(io.LimitReader(body, maxContainerLogBytes))
+	data, err := docker.DecodeContainerLogs(docker.LimitContainerLogStream(body, maxContainerLogBytes))
 	if err != nil {
 		slog.Debug("decoding container logs", "container", msg.ContainerID, "error", err)
 	}

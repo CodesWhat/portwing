@@ -19,7 +19,6 @@ Every example persists `/data/credentials` (a `portwing-state` volume in Compose
 Before starting any of them, generate a token and export the Docker socket's group ID (the images run as the non-root `portwing` user, UID 65532, and need `group_add` to reach the socket):
 
 ```bash
-kubectl create namespace portwing --dry-run=client -o yaml | kubectl apply -f -
 openssl rand -hex 32 > portwing_token.txt
 sudo chown 65532:65532 portwing_token.txt && sudo chmod 0400 portwing_token.txt
 export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
@@ -107,6 +106,7 @@ stat -c '%g' /var/run/docker.sock
 Standard mode:
 
 ```bash
+kubectl create namespace portwing --dry-run=client -o yaml | kubectl apply -f -
 openssl rand -hex 32 > portwing_token.txt
 openssl req -x509 -newkey ed25519 -nodes -days 30 \
   -subj /CN=portwing.portwing.svc \

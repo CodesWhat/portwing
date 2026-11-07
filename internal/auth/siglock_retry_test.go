@@ -3,11 +3,52 @@
 package auth
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestSignatureLocks_RemovedDirectoryReportsFailureUntilRestored(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	locks, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const keyID = "0011223344556677"
+	if added, err := locks.Lock(keyID, time.Now()); err != nil || !added {
+		t.Fatalf("initial lock: added=%v, err=%v", added, err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if added, err := locks.Lock(keyID, time.Now()); added || !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("missing directory attempt %d: added=%v, err=%v, want missing-file error", attempt, added, err)
+		}
+		if _, held := locks.LockedSince(keyID); !held {
+			t.Fatal("failed persistence dropped the in-memory lock")
+		}
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := locks.Lock(keyID, time.Now()); added || err != nil {
+		t.Fatalf("restored directory: added=%v, err=%v", added, err)
+	}
+	reopened, err := OpenSignatureLocks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, held := reopened.LockedSince(keyID); !held {
+		t.Fatal("recovered lock was not persisted")
+	}
+}
 
 // A first persist that fails must be retried: with the lock only in memory a
 // restart would reopen the downgrade.

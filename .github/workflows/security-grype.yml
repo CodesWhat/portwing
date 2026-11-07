@@ -66,15 +66,9 @@ jobs:
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
         with:
           egress-policy: block
-          # 9236a389bd48b984df91adc1bc924620.r2.cloudflarestorage.com is the R2
-          # bucket Chainguard currently serves cgr.dev/chainguard/wolfi-base blob
-          # layers from. Pinned to the exact host rather than a *.r2.cloudflarestorage.com
-          # wildcard; if the bucket hash rotates, widen to the wildcard instead.
           allowed-endpoints: >
-            9236a389bd48b984df91adc1bc924620.r2.cloudflarestorage.com:443
             api.github.com:443
             auth.docker.io:443
-            cgr.dev:443
             codeload.github.com:443
             dl-cdn.alpinelinux.org:443
             docker-images-prod.s3.dualstack.us-east-1.amazonaws.com:443
@@ -83,7 +77,6 @@ jobs:
             get.anchore.io:443
             github.com:443
             grype.anchore.io:443
-            packages.wolfi.dev:443
             production.cloudfront.docker.com:443
             proxy.golang.org:443
             raw.githubusercontent.com:443
@@ -171,7 +164,7 @@ jobs:
           {
             echo "### Grype Container Scan (${SCAN_PLATFORM})"
             echo "- Scanned the built image (binary build-info → real shipped deps) for HIGH/CRITICAL CVEs"
-            echo "- Base image: Wolfi on amd64, Alpine with official static clients on ARMv7; both FROM scratch"
+            echo "- Base image: Alpine certificates/metadata with official static Docker and source-built Compose clients on amd64, arm64 and ARMv7; all FROM scratch"
           } >> "$GITHUB_STEP_SUMMARY"
 
   grype-deps:
@@ -315,8 +308,13 @@ jobs:
             exit 1
           fi
 
-          if ! jq empty "${sarif_file}" >/dev/null 2>&1; then
-            echo "::error::${sarif_file} is not valid JSON; failing closed rather than passing the gosec gate silently."
+          if ! jq -e '
+            .version == "2.1.0"
+            and (.runs | type == "array" and length == 1)
+            and .runs[0].tool.driver.name == "gosec"
+            and (.runs[0].results | type == "array")
+          ' "${sarif_file}" >/dev/null 2>&1; then
+            echo "::error::${sarif_file} has no valid gosec SARIF run/results; failing closed."
             exit 1
           fi
 

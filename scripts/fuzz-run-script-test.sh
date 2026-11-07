@@ -231,6 +231,19 @@ MOCK_MODE=flake-exhausted MOCK_STATE="${fixture}/state" PATH="${bin}:${PATH}" \
 [ "$(wc -l <"${hook_log}" | tr -d ' ')" = "2" ] ||
 	fail "FUZZ_ATTEMPT_HOOK must fire once per failed attempt (2 attempts here)"
 
+# Auxiliary I/O and hook failures are runner errors, never product crashes.
+status="$(run_fuzz pass FUZZ_OUTPUT_FILE="${fixture}")"
+[ "${status}" = "2" ] || fail "unwritable output destination must exit 2, got ${status}"
+grep -Fq "FUZZ_OUTPUT_FILE" "${fixture}/stderr" || fail "output failure must name its destination setting"
+
+status="$(run_fuzz pass FUZZ_LOG_FILE="${fixture}")"
+expect "unwritable accumulated log" 2 error "" "${status}"
+
+fail_attempt() { return 23; }
+export -f fail_attempt
+status="$(run_fuzz flake-exhausted FUZZ_ATTEMPT_HOOK=fail_attempt)"
+expect "failing corpus hook" 2 error "" "${status}"
+
 # FUZZ_RETRIES must be validated before anything runs: 0, negative, or
 # non-numeric used to skip the retry loop's body entirely and either
 # misreport the misconfiguration as kind=flake or abort on an unbound `rc`,
@@ -271,6 +284,14 @@ env MOCK_MODE=pass MOCK_STATE="${state}" PATH="${mktemp_bin}:${bin}:${PATH}" \
 	MOCK_EXPECT_TARGET="FuzzTarget" MOCK_EXPECT_FUZZTIME="1s" \
 	bash "${fuzz_run}" "./internal/fixture/" "FuzzTarget" "1s" >"${fixture}/stdout" 2>"${fixture}/stderr" || status=$?
 expect "tee failing to write the attempt log" 2 error "" "${status}"
+
+cat >"${mktemp_bin}/mktemp" <<'SHIM'
+#!/usr/bin/env bash
+exit 1
+SHIM
+status="$(run_fuzz pass PATH="${mktemp_bin}:${bin}:${PATH}")"
+expect "attempt log creation failure" 2 error "" "${status}"
+[ ! -e "${fixture}/state" ] || fail "a missing attempt log must prevent go test from running"
 
 # Meta-check: prove the fake go shim's flag assertions actually bite. If
 # fuzz-run.sh silently dropped -fuzz= from its go test invocation, nightly

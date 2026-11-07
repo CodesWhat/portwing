@@ -248,8 +248,10 @@ test-only key.
 accepts version 1, 2 and 3 signatures, so a controller can fetch it before it knows the
 audience (until `SIGNATURE_MIN_VERSION=3` is set: the minimum applies after the
 signature verifies, so this path then needs a version 3 signature too and the
-controller must already have the agent ID). It should sign version 3 only when
-`v3` is `true`. The ID is
+controller must already have the agent ID). During initial negotiation, it
+should start signing version 3 only when `v3` is `true`. Once a v3 request has
+been accepted, keep signing v3 even if a later info response says otherwise;
+see **Pin v3 per agent** below. The ID is
 generated on first start (32 lowercase hex characters) and stored in `agent-id`
 under `STATE_DIR`; it survives restarts. `AGENT_ID` overrides it. The rule,
 which controllers should validate against: 1 to 64 characters from `a-z`,
@@ -269,10 +271,14 @@ downgrade lock refuses them. Each is logged at startup, shown in
 | `state-not-writable` | The agent has a usable ID, from `AGENT_ID` or an existing readable `agent-id` file, but the state directory is missing, not a directory, world-writable or not writable. The downgrade locks could not be stored, and locks that vanish on restart would reopen the downgrade. | Mount a writable volume at `/data/credentials` (or set `STATE_DIR`). |
 
 These reasons are only returned to a caller whose signature verified. A forged
-signature always gets `invalid-signature` and a body of `unauthorized`. A
-request with no `X-Portwing-Signature` header falls through to token
-authentication and gets a plain 401 without that reason header. Either way the
-agent's ID and v3 state are not exposed to anyone without a key. `GET /_portwing/info` (authenticated) reports the same state.
+signature for a known key gets `invalid-signature` and a body of `unauthorized`;
+an unknown key ID gets `unknown-key`. A request with no
+`X-Portwing-Signature` header falls through to token authentication. A valid
+token succeeds; without one it gets a plain 401 without that reason header.
+The agent's ID and v3 state require valid authentication when credentials are
+configured. With no credentials and `ALLOW_UNAUTHENTICATED=true`, the local
+development opt-in also permits unauthenticated access to this information.
+`GET /_portwing/info` (authenticated) reports the same state.
 
 **Wrong audience.** A signature made for another agent fails verification and
 is reported as `invalid-signature`. A client may also send

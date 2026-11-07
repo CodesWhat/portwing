@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v1.2.0] - 2026-11-06
+## [v1.2.0] - 2026-11-07
 
 ### Security
 
@@ -33,6 +33,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enrolled over HTTP in v1.1.x must configure TLS or a trusted TLS proxy, or set
   `ALLOW_INSECURE_ENROLLMENT=true` for trusted local testing. The default is false;
   refusal leaves the one-use credential available for a secure retry.
+
+### Fixed
+
+- Parse digest-pinned image references without putting the digest into registry
+  lookup names or tags, including containers updated by Drydock 1.7.
+- Keep inline script text out of CSP attribute detection and recognize whitespace
+  around external script `src` attributes.
+- Sync a newly created enrollment keys file's parent directory before reporting
+  success. Existing keys files still need only file write permission.
+- Reject empty or malformed gosec reports instead of counting them as zero findings.
+- Preserve raw TTY log bytes and large frame payloads, and report truncated
+  multiplexed headers as errors.
+- Keep reporting signature-lock storage failures until a retry succeeds,
+  including when the state directory is removed. In-memory downgrade
+  protection remains in place.
+- Correct authentication guidance for minimum signature versions,
+  shared-credential fallback and v3 first contact.
 
 ## [v1.1.2] - 2026-11-05
 

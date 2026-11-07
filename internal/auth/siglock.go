@@ -136,6 +136,8 @@ func (l *SignatureLocks) refreshLocked() {
 		// under the file lock, merged with what is on disk.
 		if release, err := l.acquireLocked(); err == nil {
 			release()
+		} else {
+			l.pendingErr = err
 		}
 		return
 	}
@@ -151,6 +153,8 @@ func (l *SignatureLocks) refreshLocked() {
 			l.dirty = true
 			if release, err := l.acquireLocked(); err == nil {
 				release()
+			} else {
+				l.pendingErr = err
 			}
 		}
 		return
