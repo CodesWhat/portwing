@@ -376,6 +376,38 @@ printf 'pre-existing\n' >"${partial_seed}/cached-freshentry"
 PATH="${partial_bin}:${PATH}" bash "${fuzz_score}" "./this/package/does/not/exist/" "FuzzNope" "${manifest_generated}" "${partial_seed}" "" "${out}"
 [ "$(cat "${partial_seed}/cached-freshentry")" = "pre-existing" ] || fail "copy/cleanup must preserve a pre-existing destination"
 
+# Execute the actual nightly steps against a pre-existing matching destination.
+workflow_step() {
+	awk -v step="$1" '
+		$0 == "      - name: " step { inside = 1; next }
+		inside && /^      - name:/ { exit }
+		inside && /^        run: \|$/ { run = 1; next }
+		run && /^          / { sub(/^          /, ""); print; next }
+		run && NF { exit }
+	' "${repository_root}/.github/workflows/quality-fuzz-nightly.yml"
+}
+workflow_step "Score corpus coverage" >"${fixture}/score-step.sh"
+workflow_step "Verify cached corpus copies were cleaned up" >"${fixture}/verify-step.sh"
+nightly_seed="${fixture}/nightly-seed"
+mkdir -p "${nightly_seed}"
+printf 'preserved\n' >"${nightly_seed}/cached-freshentry"
+(
+	cd "${fixture}"
+	export PKG=./nope FUZZER=FuzzNope GENERATED="${manifest_generated}" SEED="${nightly_seed}"
+	mkdir -p scripts/ci
+	ln -s "${fuzz_score}" scripts/ci/fuzz-score.sh
+	ln -s "${union_awk}" scripts/ci/fuzz-coverprofile-union.awk
+	bash "${fixture}/score-step.sh"
+	bash "${fixture}/verify-step.sh"
+) || fail "nightly cleanup verification must accept preserved pre-existing destinations"
+[ "$(cat "${nightly_seed}/cached-freshentry")" = preserved ] || fail "nightly steps changed the pre-existing destination"
+# The same actual verifier must reject a new copy that survived cleanup.
+printf 'go test fuzz v1\nstring("new")\n' >"${manifest_generated}/newentry"
+printf 'leftover\n' >"${nightly_seed}/cached-newentry"
+if (cd "${fixture}"; FUZZER=FuzzNope GENERATED="${manifest_generated}" SEED="${nightly_seed}" bash "${fixture}/verify-step.sh") >"${fixture}/verify-leftover.log" 2>&1; then
+	fail "nightly cleanup verification must reject a surviving new destination"
+fi
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} fuzz-score.sh check(s) failed" >&2
 	exit 1
