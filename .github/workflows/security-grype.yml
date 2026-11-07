@@ -308,8 +308,13 @@ jobs:
             exit 1
           fi
 
-          if ! jq empty "${sarif_file}" >/dev/null 2>&1; then
-            echo "::error::${sarif_file} is not valid JSON; failing closed rather than passing the gosec gate silently."
+          if ! jq -e '
+            .version == "2.1.0"
+            and (.runs | type == "array" and length == 1)
+            and .runs[0].tool.driver.name == "gosec"
+            and (.runs[0].results | type == "array")
+          ' "${sarif_file}" >/dev/null 2>&1; then
+            echo "::error::${sarif_file} has no valid gosec SARIF run/results; failing closed."
             exit 1
           fi
 
