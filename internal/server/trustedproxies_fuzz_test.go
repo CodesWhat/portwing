@@ -3,12 +3,14 @@
 package server
 
 import (
+	"bytes"
+	"net"
+	"strings"
 	"testing"
 )
 
 // FuzzParseTrustedProxies verifies that ParseTrustedProxies never panics on
-// arbitrary CIDR/IP input and that successfully-parsed entries are usable
-// (non-nil network objects).
+// arbitrary CIDR/IP input and preserves the configured trust boundary.
 func FuzzParseTrustedProxies(f *testing.F) {
 	// Seed: valid CIDR strings and bare IPs.
 	f.Add("127.0.0.1")
@@ -25,22 +27,44 @@ func FuzzParseTrustedProxies(f *testing.F) {
 	f.Add("0.0.0.0/0")
 	f.Add("::/0")
 	f.Add("256.0.0.1/24")
+	f.Add(" \t\n")
+	f.Add(" 127.0.0.1 ")
+	f.Add("::ffff:192.0.2.1")
 
 	f.Fuzz(func(t *testing.T, input string) {
-		if input == "" {
-			return
-		}
 		entries := []string{input}
 		nets, err := ParseTrustedProxies(entries)
-		if err != nil {
-			// Parse errors are expected for most fuzz inputs.
+		trimmed := strings.TrimSpace(input)
+		if trimmed == "" {
+			if err != nil || len(nets) != 0 {
+				t.Fatalf("empty proxy entry: %d networks, error %v", len(nets), err)
+			}
 			return
 		}
-		// If no error, the returned slice must be non-nil and each element valid.
-		for i, n := range nets {
-			if n == nil {
-				t.Errorf("ParseTrustedProxies returned nil network at index %d", i)
+		var want *net.IPNet
+		if ip := net.ParseIP(trimmed); ip != nil {
+			bits := 128
+			if ip.To4() != nil {
+				bits = 32
 			}
+			want = &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)}
+		} else {
+			_, want, _ = net.ParseCIDR(trimmed)
+		}
+		if want == nil {
+			if err == nil {
+				t.Fatal("invalid proxy entry accepted")
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("valid proxy entry rejected: %v", err)
+		}
+		if len(nets) != 1 || nets[0] == nil {
+			t.Fatalf("valid proxy entry returned %d networks, want one nonnil network", len(nets))
+		}
+		if !nets[0].IP.Equal(want.IP) || !bytes.Equal(nets[0].Mask, want.Mask) {
+			t.Fatalf("proxy trust boundary = %v, want %v", nets[0], want)
 		}
 	})
 }

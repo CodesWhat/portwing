@@ -769,7 +769,7 @@ func ParseTrustedProxies(entries []string) ([]*net.IPNet, error) {
 		if !strings.Contains(s, "/") {
 			if ip := net.ParseIP(s); ip != nil {
 				if ip.To4() != nil {
-					s += "/32"
+					s = ip.String() + "/32"
 				} else {
 					s += "/128"
 				}

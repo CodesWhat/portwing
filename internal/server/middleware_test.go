@@ -468,6 +468,35 @@ func TestClientIPTrustedProxy(t *testing.T) {
 	}
 }
 
+func TestClientIPMappedIPv4TrustedProxy(t *testing.T) {
+	t.Parallel()
+	nets, err := ParseTrustedProxies([]string{"::ffff:192.0.2.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, peer, want string
+	}{
+		{"IPv4 peer", "192.0.2.1:50000", "203.0.113.7"},
+		{"mapped peer", "[::ffff:192.0.2.1]:50000", "203.0.113.7"},
+		{"other IPv4 peer", "192.0.2.2:50000", "192.0.2.2"},
+		{"IPv6 loopback", "[::1]:50000", "::1"},
+		{"other IPv6 peer", "[::abcd]:50000", "::abcd"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rl := NewRateLimiter()
+			rl.SetTrustedProxies(nets)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.peer
+			req.Header.Set("X-Forwarded-For", "203.0.113.7")
+			if got := rl.clientIP(req); got != tc.want {
+				t.Fatalf("clientIP = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRateLimiterNotBypassedBySpoofedXFF verifies that rotating
 // X-Forwarded-For values cannot reset the failure counter for the real peer.
 func TestRateLimiterNotBypassedBySpoofedXFF(t *testing.T) {
