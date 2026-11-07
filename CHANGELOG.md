@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ALLOW_INSECURE_ENROLLMENT=true` for trusted local testing. The default is false;
   refusal leaves the one-use credential available for a secure retry.
 
+### Fixed
+
+- Keep reporting signature-lock storage failures until a retry succeeds,
+  including when the state directory is removed. In-memory downgrade
+  protection remains in place.
+- Correct authentication guidance for minimum signature versions,
+  shared-credential fallback and v3 first contact.
+
 ## [v1.1.2] - 2026-11-05
 
 This patch release prevents signature-lock CLI ownership changes and clarifies
