@@ -313,6 +313,52 @@ func TestNonceLRU_ExpiredOnBothClocksEvicts(t *testing.T) {
 	}
 }
 
+func TestNonceLRU_ExpiryBoundary(t *testing.T) {
+	t.Parallel()
+	const ttl = 2 * time.Minute
+	for _, tc := range []struct {
+		name          string
+		wall, elapsed time.Duration
+		wantExpired   bool
+	}{
+		{"both at ttl", ttl, ttl, false},
+		{"wall at ttl", ttl, ttl + time.Nanosecond, false},
+		{"elapsed at ttl", ttl + time.Nanosecond, ttl, false},
+		{"both past ttl", ttl + time.Nanosecond, ttl + time.Nanosecond, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			lru := NewNonceLRU(1, 60)
+			lru.Close()
+			base := time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC)
+			cur := base
+			lru.now = func() time.Time { return cur }
+			lru.elapsed = func(_, _ time.Time) time.Duration { return tc.elapsed }
+			if err := lru.Add("recorded"); err != nil {
+				t.Fatal(err)
+			}
+			cur = base.Add(tc.wall)
+			lru.evictExpired()
+			if got := lru.Seen("recorded"); got == tc.wantExpired {
+				t.Fatalf("nonce retained = %v, want %v", got, !tc.wantExpired)
+			}
+			err := lru.Add("replacement")
+			if tc.wantExpired {
+				if err != nil || !lru.Seen("replacement") {
+					t.Fatalf("expired nonce did not free capacity: %v", err)
+				}
+			} else {
+				if !errors.Is(err, ErrNonceCapacity) {
+					t.Fatalf("capacity refusal = %v, want ErrNonceCapacity", err)
+				}
+				if err := lru.Add("recorded"); !errors.Is(err, ErrNonceReplay) {
+					t.Fatalf("nonce at expiry boundary became replayable: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkNonceCapacityRefusal(b *testing.B) {
 	for _, size := range []int{100, 10000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
