@@ -301,6 +301,34 @@ for job in grype-image grype-deps gosec; do
 		fail "pre-existing '${job}' job must remain in ${workflow}"
 done
 
+# Execute the actual gosec gate, so an empty report cannot mean zero findings.
+gosec_fixture="$(mktemp -d)"
+trap 'rm -rf "${gosec_fixture}"' EXIT
+awk '
+	/^      - name: Gate on gosec HIGH\/MEDIUM findings$/ { inside = 1; next }
+	inside && /^        run: \|$/ { run = 1; next }
+	run && /^          / { sub(/^          /, ""); print; next }
+	run && NF { exit }
+' "${workflow}" >"${gosec_fixture}/gate.sh"
+[ -s "${gosec_fixture}/gate.sh" ] || fail "the actual gosec gate must be executable in regression fixtures"
+check_gosec_report() {
+	local expected="$1" report="$2" status=0
+	printf '%s\n' "${report}" >"${gosec_fixture}/gosec-results.sarif"
+	(cd "${gosec_fixture}" && bash gate.sh) >"${gosec_fixture}/gate.log" 2>&1 || status=$?
+	if [ "${expected}" = pass ]; then
+		[ "${status}" -eq 0 ] || fail "gosec gate rejected valid non-gating report: ${report}"
+	else
+		[ "${status}" -ne 0 ] || fail "gosec gate accepted an invalid or gating report: ${report}"
+	fi
+}
+check_gosec_report fail '{}'
+check_gosec_report fail '{"version":"2.1.0","runs":[]}'
+check_gosec_report fail '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"gosec"}}}]}'
+check_gosec_report fail '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"other"}},"results":[]}]}'
+check_gosec_report pass '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"gosec"}},"results":[]}]}'
+check_gosec_report pass '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"gosec"}},"results":[{"level":"warning"}]}]}'
+check_gosec_report fail '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"gosec"}},"results":[{"level":"error","ruleId":"G101"}]}]}'
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} security-grype contract check(s) failed" >&2
 	exit 1

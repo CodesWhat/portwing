@@ -4,6 +4,13 @@
 .git/
 .github/
 .claude/
+.planning/
+.turbo/
+.vercel/
+.lighthouseci/
+.playwright-mcp/
+.mockups/
+portwing
 .idea/
 .vscode/
 dist/

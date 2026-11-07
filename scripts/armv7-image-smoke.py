@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the shipped ARM clients and shell-free healthcheck under QEMU."""
+"""Exercise static runtime clients and the shell-free HTTP/TLS healthcheck."""
 
 import http.server
 import pathlib
@@ -24,6 +24,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main():
     image = sys.argv[1]
+    platform = sys.argv[2] if len(sys.argv) > 2 else "linux/arm/v7"
     container = "portwing-arm-smoke-" + uuid.uuid4().hex
     servers = []
     threads = []
@@ -42,7 +43,7 @@ def main():
             # or helper applets exist in the runtime image.
             subprocess.run(
                 ["docker", "create", "--name", container, "--platform",
-                 "linux/arm/v7", image, "version"],
+                 platform, image, "version"],
                 check=True, capture_output=True, timeout=30,
             )
             user = subprocess.run(
@@ -61,8 +62,21 @@ def main():
             if user != "65532:65532" or "ID=alpine" not in distro.splitlines():
                 raise RuntimeError("image must identify Alpine and run as UID 65532")
             if any(line in packages.splitlines() for line in
-                   ["P:busybox", "P:busybox-binsh", "P:ssl_client"]):
-                raise RuntimeError("ARM runtime must not retain BusyBox packages")
+                   ["P:busybox", "P:busybox-binsh", "P:ssl_client", "P:glibc", "P:musl"]):
+                raise RuntimeError("static runtime must not retain shell or libc packages")
+            for client in ("portwing", "docker", "docker-compose"):
+                binary = pathlib.Path(directory) / client
+                subprocess.run(
+                    ["docker", "cp", f"{container}:/usr/bin/{client}", str(binary)],
+                    check=True, capture_output=True, timeout=30,
+                )
+                linkage = subprocess.run(
+                    ["file", "-b", str(binary)], check=True,
+                    capture_output=True, text=True, timeout=10,
+                ).stdout
+                if "statically linked" not in linkage:
+                    raise RuntimeError(f"{client} must be statically linked: {linkage}")
+                print(f"verified {client}: {linkage.strip()}")
             subprocess.run(["docker", "rm", container], check=True,
                            capture_output=True, timeout=20)
 
@@ -73,7 +87,9 @@ def main():
                              if certificate else [])
                 return subprocess.run(
                     ["docker", "run", "--rm", "--name", container,
-                     "--platform", "linux/arm/v7", "--network", "host",
+                     "--platform", platform, "--network", "host",
+                     "--read-only", "--cap-drop=ALL",
+                     "--security-opt=no-new-privileges", "--tmpfs", "/tmp",
                      *env_args, *cert_args, "--entrypoint", command, image, *arguments],
                     capture_output=True, text=True, timeout=30,
                 )

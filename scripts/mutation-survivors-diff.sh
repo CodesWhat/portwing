@@ -101,7 +101,7 @@ jq -s \
 	--arg package "${package_filter}" \
 	--arg source "${source_filter}" \
 	'
-    (map(.packages
+    .[-2:] | (map(.packages
          | map(select($package == "" or .name == $package))
          | map(select($source == "" or .source == $source))
          | map({key: (.name + "/" + .source), value: {state, ids: (.mutants | map(.f + ":" + .m + ":" + .a + ":" + (.o | tostring)))}})

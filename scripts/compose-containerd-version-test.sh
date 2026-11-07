@@ -62,7 +62,7 @@ write_build_info() {
 
 run_script() {
 	PATH="${bin}:${PATH}" MOCK_BUILD_INFO="${fixture}/buildinfo.txt" \
-		bash "${script}" "${binary}" "${fixture}/Dockerfile" 2>&1
+		bash "${script}" "${binary}" "${fixture}/Dockerfile" "$@" 2>&1
 }
 
 expect_pass() {
@@ -193,6 +193,18 @@ status=$?
 set -e
 if [ "${status}" -eq 0 ] || ! grep -Fq "go is not on PATH" <<<"${output}"; then
 	fail "a missing go must fail the check: ${output}"
+fi
+
+write_dockerfile "github.com/klauspost/compress@v1.20.2"
+write_build_info $'\tdep\tgithub.com/klauspost/compress\tv1.20.2\th1:xyz='
+if ! output="$(run_script github.com/klauspost/compress)"; then
+	fail "a binary on the pinned compression module must pass: ${output}"
+fi
+write_build_info $'\tdep\tgithub.com/klauspost/compress\tv1.19.2\th1:xyz='
+if output="$(run_script github.com/klauspost/compress)"; then
+	fail "an older compression module must fail: ${output}"
+elif ! grep -Fq 'embeds github.com/klauspost/compress v1.19.2, but' <<<"${output}"; then
+	fail "compression mismatch must identify the linked version: ${output}"
 fi
 
 if [ "${failures}" -ne 0 ]; then

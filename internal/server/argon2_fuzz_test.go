@@ -3,6 +3,9 @@
 package server
 
 import (
+	"encoding/base64"
+	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -13,6 +16,8 @@ func FuzzParsePHC(f *testing.F) {
 	// Seed: valid PHC strings.
 	f.Add("$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$YWJjZGVmZ2hpamtsbW5vcA")
 	f.Add("$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRz$aGFzaGhhc2hoYXNoaGFzaA")
+	f.Add("$argon2id$v=19$m=8,t=1,p=1$c2FsdA$aGFzaA")
+	f.Add("$argon2id$v=19$m=7,t=1,p=1$c2FsdA$aGFzaA")
 	// Seed: hostile inputs — wrong algo, truncated, empty, nulls, long.
 	f.Add("")
 	f.Add("$argon2i$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$YWJj")
@@ -39,11 +44,22 @@ func FuzzParsePHC(f *testing.F) {
 		if params.Parallelism < 1 {
 			t.Errorf("parsed PHC has Parallelism < 1: %d", params.Parallelism)
 		}
+		if params.Memory < 8*uint32(params.Parallelism) {
+			t.Errorf("parsed PHC memory %d is below minimum for parallelism %d", params.Memory, params.Parallelism)
+		}
 		if len(params.Salt) == 0 {
 			t.Error("parsed PHC has empty Salt")
 		}
 		if len(params.Hash) == 0 {
 			t.Error("parsed PHC has empty Hash")
+		}
+		encoded := fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
+			params.Memory, params.Time, params.Parallelism,
+			base64.RawStdEncoding.EncodeToString(params.Salt),
+			base64.RawStdEncoding.EncodeToString(params.Hash))
+		roundTrip, err := ParsePHC(encoded)
+		if err != nil || !reflect.DeepEqual(roundTrip, params) {
+			t.Fatalf("PHC parameters changed after encoding: %v", err)
 		}
 	})
 }

@@ -32,7 +32,7 @@
 <hr>
 
 > [!NOTE]
-> **The current release line is `v1.1.2`; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published.** The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **The current release line is `v1.2.0`; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published.** The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
 Controller-assisted two-key rotation requires Portwing `v1.0` or later
 and Drydock `v1.8.0-rc.1` or later on the v1.8 line. Both sides require explicit
@@ -148,7 +148,7 @@ This runs sockguard and Portwing as separate containers sharing a filtered socke
 
 services:
   sockguard:
-    image: ghcr.io/codeswhat/sockguard:2.4.5
+    image: ghcr.io/codeswhat/sockguard:2.4.6
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -165,7 +165,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.1.2
+    image: ghcr.io/codeswhat/portwing:1.2.0
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -215,19 +215,21 @@ For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](example
 Edge mode is Ed25519-only — generate a keypair first and register the public key with Drydock (`POST /api/v1/portwing/keys`):
 
 ```bash
+umask 077
 portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+portwing keygen -pub-from portwing_ed25519.pem
 sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
 export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 ```
 
-The last line of keygen's stdout is the `authorized_keys` line to register with Drydock. With `keygen > portwing_ed25519.pem` it lands as the last line of the `.pem` file, not on the terminal. To print just that line, run `portwing keygen -pub-from portwing_ed25519.pem`.
+Register the public line printed by `-pub-from` with Drydock. The command runs before the private key is locked to the container user.
 
 The image runs as UID 65532, so `group_add` with the Docker socket's group ID is what lets it reach the socket.
 
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.1.2
+    image: ghcr.io/codeswhat/portwing:1.2.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -272,10 +274,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_1.1.2_linux_amd64.deb
+sudo apt install ./portwing_1.2.0_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_1.1.2_linux_amd64.rpm
+sudo rpm --install ./portwing_1.2.0_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -299,7 +301,7 @@ docker run -d \
   -v portwing-state:/data/credentials \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.1.2
+  ghcr.io/codeswhat/portwing:1.2.0
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -386,7 +388,7 @@ flowchart LR
 | 📡 | **SSE Compatibility** | Drop-in replacement for existing Drydock agents, including `dd:watcher-snapshot` full inventory on connect. |
 | ✍️ | **Signed Supply Chain** | Cosign keyless signatures, per-archive CycloneDX SBOMs, an image SBOM attestation, and SLSA Build L2 provenance on every release. Verifiable without managing signing keys. |
 | 🛡️ | **Two-Layer Defense** | Pair with [sockguard](https://github.com/codeswhat/sockguard) so the agent never touches the raw Docker socket directly. |
-| 🪶 | **Minimal Footprint** | Static Go binary (~10 MB). Compressed container image: ~45 MB amd64 and ~41 MB arm64 (Wolfi, Chainguard), ~33 MB arm/v7 (Alpine). CGO disabled, stripped, no external runtime dependencies. |
+| 🪶 | **Minimal Footprint** | Static Go binary. Scratch images with Alpine certificates and static Docker/Compose clients on amd64, arm64 and arm/v7. No runtime package manager. |
 | 🧩 | **Standalone Mode** | `ADAPTER=generic` provides a clean REST + SSE API on `/api/v1/*` backed by the local Docker daemon — no Drydock account required. |
 
 <hr>
@@ -483,7 +485,7 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v0.9.x** ✅ | Controller-Owned Updates | Controller-owned Drydock watcher and update execution (Drydock `v1.6.0-rc.11+`), edge audit export, loopback default for the edge operations listener, MCP revision 2026-07-28, `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` browser origin and Host checks |
 | **v1.0** ✅ | Binding Stability | `STABILITY.md` guarantees are binding semver commitments, opt-in controller-assisted two-key rotation (first available in rc.2, Drydock `v1.8.0-rc.1+`), competitive review refreshed against primary sources, final v0.9 docs archived from its release tag |
 | **v1.1** ✅ | Audience-Bound Signatures | Ed25519 signature version 3 binds each request to one agent (Drydock 1.9+), stable persistent agent ID under `/data/credentials`, `SIGNATURE_MIN_VERSION`, `portwing signature-lock` for downgrade locks |
-| **Planned** | Enrollment Over TLS | Enrollment requires TLS unless `ALLOW_INSECURE_ENROLLMENT` opts in. Not shipped in v1.1; the agent only warns at startup |
+| **v1.2** ✅ | Enrollment TLS and Container Runtime | Enrollment requires native TLS or HTTPS reported by a trusted proxy unless `ALLOW_INSECURE_ENROLLMENT=true` opts in for trusted testing. Static Docker/Compose clients remove the glibc runtime package on all three architectures |
 | **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.
@@ -515,7 +517,7 @@ SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release
 [![google/uuid](https://img.shields.io/badge/google%2Fuuid-00ADD8?logo=go&logoColor=fff)](https://github.com/google/uuid)
 [![golang.org/x/crypto](https://img.shields.io/badge/x%2Fcrypto-00ADD8?logo=go&logoColor=fff)](https://pkg.go.dev/golang.org/x/crypto)
 [![Sigstore](https://img.shields.io/badge/Sigstore-FFC107?logo=sigstore&logoColor=000)](https://www.sigstore.dev/)
-[![Wolfi](https://img.shields.io/badge/Wolfi-4A4A55?logo=chainguard&logoColor=fff)](https://edu.chainguard.dev/open-source/wolfi/overview/)
+[![Alpine Linux](https://img.shields.io/badge/Alpine_Linux-0D597F?logo=alpinelinux&logoColor=fff)](https://alpinelinux.org/about/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=fff)](https://www.docker.com/)
 [![GoReleaser](https://img.shields.io/badge/GoReleaser-00ADD8?logo=go&logoColor=fff)](https://goreleaser.com/)
 [![Anthropic](https://img.shields.io/badge/Anthropic-CC785C?style=flat&logo=anthropic&logoColor=white)](https://claude.ai/)

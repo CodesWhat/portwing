@@ -1,0 +1,495 @@
+---
+title: Authentication
+description: Configure token-based or Ed25519 per-client key authentication for the Portwing agent.
+---
+
+Portwing supports four authentication mechanisms, ordered below from weakest to strongest. One shared-secret option and Ed25519 keys can coexist during migration — the middleware checks for an `X-Portwing-Signature` header first and falls back to token verification when that header is absent. Plaintext token configuration (`TOKEN` or `TOKEN_FILE`) and hash-at-rest configuration (`TOKEN_HASH` or `TOKEN_HASH_FILE`) are mutually exclusive.
+
+Requests authenticate via `Authorization: Bearer`, `X-Portwing-Token`, or `X-Dd-Agent-Secret` for token-based auth, and via a set of `X-Portwing-*` headers for Ed25519.
+
+See [Configuration](/configuration) for a complete environment variable reference, and [Connection Modes](/connection-modes) for how auth applies in edge (WebSocket) mode.
+
+<Callout type="warn">
+Standard mode refuses to start without at least one configured credential.
+Unauthenticated local development must be explicitly enabled with
+`ALLOW_UNAUTHENTICATED=true` on a loopback bind; exposing that mode on a
+non-loopback address requires the separate
+`ALLOW_UNAUTHENTICATED_REMOTE=true` acknowledgement.
+</Callout>
+
+The examples below publish port 3000 on host loopback only. For remote access, configure Portwing TLS before widening that bind, or keep the plaintext listener private behind a TLS-terminating reverse proxy.
+
+---
+
+## 1. Plaintext token
+
+Set `TOKEN` to a random secret. Every request must supply it in one of the accepted headers.
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TOKEN="$TOKEN" \
+  -p 127.0.0.1:3000:3000 \
+  ghcr.io/codeswhat/portwing:1.1.2
+```
+
+<Callout type="warn">
+`TOKEN` is visible in `docker inspect` output and process listings. Use this option for local evaluation only. For any network-exposed deployment, use `TOKEN_FILE`, `TOKEN_HASH`, or Ed25519 keys instead.
+</Callout>
+
+---
+
+## 2. File-based token
+
+`TOKEN_FILE` points to a file containing the plaintext token. Mount the file as a read-only secret so the token never appears in environment variable dumps.
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+printf '%s' "$TOKEN" > /run/secrets/portwing-token
+chown 65532:65532 /run/secrets/portwing-token && chmod 0400 /run/secrets/portwing-token
+
+docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /run/secrets/portwing-token:/run/secrets/portwing-token:ro \
+  -e TOKEN_FILE=/run/secrets/portwing-token \
+  -p 127.0.0.1:3000:3000 \
+  ghcr.io/codeswhat/portwing:1.1.2
+```
+
+This is appropriate for Docker secrets, Kubernetes secret volumes, or any orchestrator that can inject files but not env vars safely.
+
+---
+
+## 3. Argon2id hash-at-rest
+
+`TOKEN_HASH` stores an Argon2id hash of the token so the plaintext never appears in environment variable dumps or config files. At runtime the agent performs a constant-time Argon2id comparison against the presented token. Cold verification is capped at two concurrent derivations across the agent; excess cold requests receive HTTP 429 before allocating Argon2 memory. After the first successful verification, a fixed-size SHA-256 success digest keeps normal request cost flat.
+
+**Generate the hash with `portwing hash-token`.** The token is read from stdin — it is never passed as a command-line argument to avoid exposure in shell history and process listings.
+
+```bash
+# Generate a token and hash it
+TOKEN=$(openssl rand -hex 32)
+HASH=$(printf '%s' "$TOKEN" | portwing hash-token)
+# Output format: $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+
+# Start the agent with the hash
+docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TOKEN_HASH="$HASH" \
+  -p 127.0.0.1:3000:3000 \
+  ghcr.io/codeswhat/portwing:1.1.2
+```
+
+To keep the hash out of the environment entirely, write it to a file and use `TOKEN_HASH_FILE`:
+
+```bash
+printf '%s' "$TOKEN" | portwing hash-token > /run/secrets/portwing-token-hash
+chown 65532:65532 /run/secrets/portwing-token-hash && chmod 0400 /run/secrets/portwing-token-hash
+
+docker run -d --name portwing \
+  -v /run/secrets/portwing-token-hash:/run/secrets/portwing-token-hash:ro \
+  -e TOKEN_HASH_FILE=/run/secrets/portwing-token-hash \
+  ...
+```
+
+<Callout type="info">
+`TOKEN_HASH` is the recommended *token-based* option — among the three shared-secret mechanisms above, it's the one to reach for, since the plaintext token exists only on the caller side and the agent stores and compares only the Argon2id hash. [Ed25519 per-client keys](#4-ed25519-per-client-keys) below remain the recommended mechanism overall for production, since they avoid a shared secret entirely; use `TOKEN_HASH` when a caller can't do per-request signing.
+</Callout>
+
+---
+
+## 4. Ed25519 per-client keys
+
+Ed25519 keypairs give each client a distinct cryptographic identity. Every
+version 2 request carries a detached signature over the HTTP method, complete
+origin-form request target, a SHA-256 body hash, a Unix timestamp, and a
+128-bit random nonce. The agent verifies the signature, rejects requests with
+a timestamp skew greater than the allowed window (60 seconds by default, set by
+`MAX_CLOCK_SKEW_SECONDS`), and tracks nonces in an in-memory
+LRU to prevent replay. Each nonce is retained for at least twice the skew
+window before it can be evicted, so a nonce stays blocked for as long as its
+timestamp could still verify.
+
+Version 2 signatures cover the method, request target, body hash, timestamp and
+nonce, but not which agent they're meant for, and each agent keeps its own
+nonce cache. A request captured on its way to one agent can be replayed against
+another agent that trusts the same key within the skew window.
+[Signature version 3](#signature-version-3-audience-bound) binds the agent ID
+into the signature and closes that. Use TLS for Standard-mode traffic either
+way, and give each agent its own controller key where that matters.
+
+No shared secret is involved. Compromising one client's private key does not affect other enrolled clients.
+
+### Generate a keypair
+
+```bash
+# Writes the private key (PEM PKCS#8) and the authorized_keys line to stdout.
+portwing keygen -comment "my-platform:prod"
+```
+
+The last line of keygen's stdout is the `authorized_keys` line. To re-derive it later from an existing private key, run `portwing keygen -pub-from <private.pem> [-comment <text>]`; it prints only that line.
+
+Copy the `authorized_keys` output line to the agent host:
+
+```text
+# /etc/portwing/authorized_keys  (root:65532, mode 0640 — readable by the
+# container's non-root user, not world-readable)
+ed25519 AAAA... my-platform:prod
+```
+
+The file format mirrors OpenSSH `authorized_keys`. Each non-blank, non-comment line is:
+
+```text
+ed25519 <base64-public-key> [comment]
+```
+
+Comment out or remove a line to revoke that key. Credential files must resolve
+to regular files. On Unix, the agent refuses files that are world-readable or
+group/world-writable; mode `0640` remains valid for secret mounts that need a
+container-readable group. Permissions are checked on the opened file
+descriptor so a path swap cannot race the validation.
+
+### Start the agent with Ed25519 auth
+
+```bash
+docker run -d --name portwing \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /etc/portwing/authorized_keys:/etc/portwing/authorized_keys:ro \
+  -v portwing-state:/data/credentials \
+  -e AUTHORIZED_KEYS=/etc/portwing/authorized_keys \
+  -p 127.0.0.1:3000:3000 \
+  ghcr.io/codeswhat/portwing:1.1.2
+```
+
+The `portwing-state` volume keeps the agent ID and the signature version locks across restarts. The image pre-creates a writable `/data/credentials`, so without the volume version 3 is still enabled for the life of the container, but the agent ID and the downgrade locks are lost when the container is replaced. Mount the volume so they survive. See [Signature version 3](#signature-version-3-audience-bound).
+
+### Request signing headers
+
+Signature version 2 clients must send five headers on every request:
+
+| Header | Format |
+|--------|--------|
+| `X-Portwing-Key-ID` | Hex-encoded first 8 bytes of SHA-256 of the raw public key |
+| `X-Portwing-Timestamp` | Unix epoch, seconds, decimal string |
+| `X-Portwing-Nonce` | 32 random hex characters (128-bit) |
+| `X-Portwing-Signature` | Base64url (no padding) Ed25519 signature over the canonical message |
+| `X-Portwing-Signature-Version` | Must be `2` for the full request-target format |
+
+The agent checks the signature first. Timestamp skew and replay are decided only
+after it verifies, so a caller without the key gets `invalid-signature` for a
+stale timestamp or a used nonce. `unknown-key` is the exception and is returned
+as soon as the key ID isn't found, because key IDs aren't secret and operators
+need it to debug.
+
+Rejected Ed25519 requests return `401` with an `X-Portwing-Reason` response
+header set to `timestamp-skew`, `replay`, `unknown-key`, `invalid-signature`,
+`nonce-capacity`, `audience-mismatch`, `signature-locked`,
+`signature-version-too-low`, `agent-id-not-v3-compatible`,
+`agent-id-not-persistent`, or `state-not-writable`. `nonce-capacity` means the agent could not record
+a fresh nonce because the cache contained only unexpired entries; it is
+distinct from replay. `invalid-signature` also covers missing headers,
+malformed nonces, malformed signatures, and signatures that fail verification.
+The last six are described under
+[Signature version 3](#signature-version-3-audience-bound).
+
+The canonical message is a newline-separated UTF-8 string:
+
+```text
+METHOD
+/path/to/resource?exact=raw&query=order
+<sha256-hex-of-body>
+<unix-timestamp>
+<nonce-hex>
+```
+
+The second line is the complete origin-form request target: escaped path plus
+the exact, unmodified raw query string. Adding, removing, changing, or
+reordering query parameters therefore invalidates the signature. For an empty
+body, use the SHA-256 of the empty string:
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+Unversioned legacy signatures remain accepted only for query-free requests.
+Any request with a query string must use signature version 2. This permits a
+bounded migration without retaining query-tampering exposure.
+
+### Signature version 3 (audience-bound)
+
+Agent nonces are per agent, so a signed request captured for agent A replays on
+agent B when both register the same controller key. Version 3 closes that by
+putting the receiving agent's ID, the audience, inside the signed bytes. Set
+`X-Portwing-Signature-Version: 3`. The headers are the same as version 2, and
+the canonical message is the version 2 message with a domain tag and the agent
+ID in front:
+
+```text
+portwing-sig-v3
+<agent-id>
+METHOD
+/path/to/resource?exact=raw&query=order
+<sha256-hex-of-body>
+<unix-timestamp>
+<nonce-hex>
+```
+
+The target is the same query-inclusive form version 2 uses. A version 3
+signature never verifies as version 2 or legacy, and the reverse. The shared
+fixture `internal/auth/testdata/signature-v3-vectors.json` holds the exact
+bytes, signatures and expected verdicts for a GET, a GET with a query, a POST
+with a body, cross-agent replay and cross-version attempts, signed with a
+test-only key.
+
+**Finding the audience.** `GET /_portwing/info` returns the agent ID as
+`agentId` and `v3` (`true` or `false`, with a `v3Reason` when `false`). It
+accepts version 1, 2 and 3 signatures, so a controller can fetch it before it knows the
+audience (until `SIGNATURE_MIN_VERSION=3` is set: the minimum applies after the
+signature verifies, so this path then needs a version 3 signature too and the
+controller must already have the agent ID). It should sign version 3 only when
+`v3` is `true`. The ID is
+generated on first start (32 lowercase hex characters) and stored in `agent-id`
+under `STATE_DIR`; it survives restarts. `AGENT_ID` overrides it. The rule,
+which controllers should validate against: 1 to 64 characters from `a-z`,
+`0-9` and `-`, matching `^[a-z0-9-]{1,64}$`. In Edge mode `hello.agentId` is
+the same value.
+
+**When v3 is unavailable.** Three situations make the agent refuse version 3
+while version 2 and legacy keep working, unless `SIGNATURE_MIN_VERSION` or a
+downgrade lock refuses them. Each is logged at startup, shown in
+`/_portwing/info` as `"v3": false` with a `v3Reason`, and returned as the
+`X-Portwing-Reason` of a refused v3 request:
+
+| Reason | Cause | Fix |
+|---|---|---|
+| `agent-id-not-v3-compatible` | `AGENT_ID` is set to a value outside `^[a-z0-9-]{1,64}$`. Earlier releases accepted any value, so the agent still starts. | Set `AGENT_ID` to 1 to 64 characters from `a-z`, `0-9` and `-`, or unset it. |
+| `agent-id-not-persistent` | `AGENT_ID` is not set and there is no usable state directory, so the generated ID would change on every restart and the downgrade locks would not survive. | Set `AGENT_ID`, or mount a writable volume at `/data/credentials` (or set `STATE_DIR`). |
+| `state-not-writable` | The agent has a usable ID, from `AGENT_ID` or an existing readable `agent-id` file, but the state directory is missing, not a directory, world-writable or not writable. The downgrade locks could not be stored, and locks that vanish on restart would reopen the downgrade. | Mount a writable volume at `/data/credentials` (or set `STATE_DIR`). |
+
+These reasons are only returned to a caller whose signature verified. A forged
+signature always gets `invalid-signature` and a body of `unauthorized`. A
+request with no `X-Portwing-Signature` header falls through to token
+authentication and gets a plain 401 without that reason header. Either way the
+agent's ID and v3 state are not exposed to anyone without a key. `GET /_portwing/info` (authenticated) reports the same state.
+
+**Wrong audience.** A signature made for another agent fails verification and
+is reported as `invalid-signature`. A client may also send
+`X-Portwing-Audience: <agent-id>` naming the agent it signed for. The agent then
+checks the signature against that audience; when it verifies but the audience
+is not this agent's ID, the agent answers `audience-mismatch` without recording
+the nonce, so a misrouted request is easy to tell apart from a bad key. A
+signature that does not verify gets `invalid-signature` whatever the header
+says.
+
+**Downgrade lock.** The first time a key verifies a version 3 request, the
+agent locks it: that key's version 2 and legacy signatures are refused from
+then on, so a captured v2 request cannot be used against it. The lock is stored
+per key ID in `signature-locks.json` under `STATE_DIR`, so a restart does not
+reopen the downgrade, and the lock is written to the audit log as a
+`signature_lock` event. A refused request answers `401` with
+`X-Portwing-Reason: signature-locked` and a body like:
+
+```text
+key locked to v3 since 2026-11-02T12:30:00Z; clear with portwing signature-lock clear 93320ffe32b3b477
+```
+
+The lock state is only revealed to a caller whose signature verified. Without
+the key you only ever see `invalid-signature`.
+
+If you roll a controller back to a release without version 3, its keys are
+locked out. Clear the lock and the key can sign version 2 again, until it next
+signs version 3:
+
+```bash
+docker exec portwing portwing signature-lock list
+docker exec portwing portwing signature-lock clear 93320ffe32b3b477
+docker exec portwing portwing signature-lock clear --all
+```
+
+A running agent notices the change on its next request; no restart or signal is
+needed. Each clear is written to the audit log (`AUDIT_LOG`) as a
+`signature_lock` event with the operation `clear` or `clear_all`. The commands
+read `STATE_DIR` the same way the agent does.
+
+Run `clear` as the agent's OS user. On Linux and macOS it refuses to write when
+the effective UID differs from the existing lock file's owner. Root-owned,
+group-writable `fsGroup` directories remain supported: run as the agent UID
+that owns the lock file. An empty clear creates no state or sidecar. For the
+published container, use its default UID 65532, without
+`docker exec -u root`. A root-run clear could otherwise replace private state
+with root-owned files that the agent cannot read after a restart.
+
+**Requiring v3 everywhere.** `SIGNATURE_MIN_VERSION=3` refuses version 2 and
+legacy signatures for all keys, locked or not, with
+`X-Portwing-Reason: signature-version-too-low`. `2` refuses only legacy. The
+default is `1`, which accepts everything. Like the lock, the minimum is only
+reported after the signature verified.
+
+**Persistence.** Container images prepare `/data/credentials`; mount a volume
+there, or set `STATE_DIR`. It defaults to `KEY_ROTATION_DIR` when that is set.
+The directory must be writable by the agent and not world-writable; group write
+is fine, so a Kubernetes `fsGroup` volume works. The shipped Compose and
+Kubernetes examples mount it. The agent checks that the directory is writable,
+not that it survives the container being replaced, so an unmounted image
+directory enables v3 but loses the agent ID and locks on replacement. Without a
+usable directory and without `AGENT_ID`, the agent refuses v3
+(`agent-id-not-persistent`) rather than serve it on an identity that changes on
+restart. If the agent has an ID (`AGENT_ID` or an existing `agent-id` file) but
+the state directory is not writable, v3 is refused too (`state-not-writable`), because
+locks that reset on restart would reopen the downgrade. If a lock cannot be
+written at the moment it is created (the disk fills, say), it still holds in
+memory and the agent retries the write on every later request until it
+succeeds, logging an error each time. A lock file that exists but cannot be read
+stops startup rather than dropping locks. If the file is deleted while the agent
+is running, the agent keeps the locks in memory, logs an error, and writes the
+file back on the next check. Clearing locks with `portwing signature-lock`
+writes an empty file rather than deleting it.
+
+**Rotation.** The controller-assisted rotation endpoints accept version 2 or 3.
+The lock is per key ID and does not carry over a key rotation: the replacement
+key starts unlocked and locks when it first signs version 3.
+
+**Pin v3 per agent.** Once a controller has had one v3 request accepted by an
+agent, it must keep signing v3 for that agent. It must not fall back to v2 or
+legacy after an `invalid-signature` or because a later `/_portwing/info`
+response says `"v3": false` without operator action. The info response isn't
+signed and a 401 reason can be forged by anything that terminates TLS in
+between, so neither is a safe reason to downgrade. Don't re-fetch info to
+recover from an `invalid-signature`.
+
+**The lock is first-contact trust.** The per-key lock only engages after the
+agent has accepted a first v3 request from that key. A request path that
+tampers with traffic before then can still hold a controller on v2. The locks
+live in the state directory, so mount a durable volume at `/data/credentials`
+(or set `STATE_DIR`). Without one, a replaced container starts with no locks.
+
+**Migration.**
+
+1. Upgrade Portwing to a release with version 3. Nothing changes: version 2
+   and legacy signatures are still accepted.
+2. Upgrade the controller to one that signs version 3 (Drydock 1.9 or later).
+   It reads `agentId` from `/_portwing/info` and signs version 3 from then on.
+   Each key locks the first time it does.
+3. Set `SIGNATURE_MIN_VERSION=3` once every client signs version 3. This is
+   the recommended end state: it closes the downgrade for keys that have not
+   signed yet and doesn't depend on the lock file.
+
+### Key rotation (zero-downtime)
+
+1. Generate a new keypair: `portwing keygen -comment "my-platform:prod:2026-07"`
+2. Append the new public key line to the authorized-keys file on the agent host.
+3. Send `SIGHUP` to reload: `kill -HUP $(pidof portwing)` or `docker kill --signal HUP portwing`. Both old and new keys are now active.
+4. Update the platform to sign with the new private key.
+5. Remove the old key from the file and send another `SIGHUP`.
+
+Hot reload rebuilds the in-memory key map and logs each added and removed key ID. The nonce LRU is preserved across reload.
+
+### Controller-assisted rotation
+
+This opt-in feature requires Portwing `v1.0` or later and Drydock
+`v1.8.0-rc.1` or later on the v1.8 line. The first v1.0 release candidate and Drydock's
+v1.6/v1.7 lines do not provide this pairing. See the
+[compatibility matrix](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md)
+for artifact verification. Wire compatibility alone does not establish rotation
+support.
+
+Set `KEY_ROTATION_DIR` to a persistent directory owned by Portwing with mode
+`0700`. Container images prepare `/data/credentials` for UID/GID `65532`;
+explicitly mount a named volume there and set the variable to that path. With a
+read-only root filesystem, the mounted directory must still be writable. For a
+bind mount, prepare ownership and permissions on the host first. No managed
+storage is enabled by default. Keep deployment bootstrap credentials mounted
+read-only and back up managed storage separately.
+
+In Standard mode, configure `AUTHORIZED_KEYS` as usual. The reserved,
+Ed25519-authenticated API is:
+
+| Method | Path | Signer and body |
+|---|---|---|
+| GET | `/_portwing/auth/rotation` | Current or pending signer; public key IDs only |
+| POST | `/_portwing/auth/rotation/prepare` | Current signer; `{ "public_key": "<base64 raw Ed25519 public key>" }` |
+| POST | `/_portwing/auth/rotation/commit` | Pending signer; `{}` |
+| POST | `/_portwing/auth/rotation/abort` | Current signer; `{}` |
+
+Use signature version 2 or 3 without query parameters. A bearer credential cannot
+manage keys. Each signer can replace only its own identity. Preparation retains
+both keys; only a request signed by the replacement can retire its predecessor.
+Drydock stages its replacement private key before preparation, proves it through
+a signed status request and then commits. Configure the controller agent's
+`DD_AGENT_<name>_ROTATIONDIR` to a private persistent directory to enable this.
+The original configured signing key remains unchanged.
+
+Portwing overlays managed keys on the operator-owned file without rewriting it.
+Reload and restart retain committed replacements. Removing the original root
+line and successfully reloading with `SIGHUP` revokes that root's managed
+descendants and durably forgets their rotation state. Re-adding the root starts
+from the bootstrap key. A failed reload reports an error and keeps the last
+good registry, so fix storage errors before relying on revocation. Keep the root
+line while using a managed replacement. Removing managed storage or disabling
+rotation reverts to deployment bootstrap authority; after a completed rotation,
+that can disconnect the peer and re-enable an old credential. Treat a reset as
+an operator recovery action, with coordinated trust changes at both ends.
+
+In Edge mode, the agent advertises `edge-key-rotation` only when managed storage
+is enabled. It generates its replacement locally and sends only the public key
+over its existing controller connection. Drydock stages that key for the exact
+agent name, asks the agent to reconnect, and retires the old key only after a
+fresh signed hello proves possession. Agent private keys never leave Portwing.
+Use one key per agent; rotation refuses keys already bound to multiple names.
+Reuse by an agent that has never connected cannot be detected, so unique keys
+remain an operator requirement. TLS still authenticates the controller.
+
+Drydock exposes `GET` and `POST /api/v1/agents/:name/key-rotation` through its
+existing session access policy. API keys are rejected, and recovery-assurance
+sessions cannot mutate credentials. POST accepts `{ "action": "rotate" }` or
+`{ "action": "abort" }`. Standard completion returns `200`. Edge activation
+returns `202` with `phase: "awaiting-reconnect"`; this is pending work, not proof
+of completion. Read status again after reconnect. These endpoints expose only
+public IDs, never PEM data. Ordinary Docker proxy requests cannot call this
+reserved management namespace.
+
+A failed proof leaves the old key active. Retrying reuses a staged replacement;
+abort cancels only an uncommitted replacement. If a Standard commit response is
+lost, Drydock reconciles using its durable pending credential, including before
+opening SSE after restart. Edge persists its trial signer before reconnecting;
+a lost welcome can retry that signer, while a terminal rejection restores the
+old signer and retains the staged key. Temporary transport or storage failures
+leave the operation unconfirmed and require checking status before retrying.
+Restart validates the durability of saved credentials before using them. Preserve both managed directories until
+the operation is resolved. Run only one controller writer per Standard managed
+credential directory.
+
+### Key revocation
+
+Comment out or remove the key line from the authorized-keys file, then send `SIGHUP`. The key is removed from the in-memory map immediately and any subsequent request signed with that key is rejected with 401.
+
+### Edge mode (WebSocket)
+
+In edge mode the agent initiates an outbound WebSocket connection to the platform. Authentication happens in a signed hello message before the `welcome` response is sent. `PRIVATE_KEY_FILE` is **required** for edge mode — the Drydock controller endpoint accepts only Ed25519-signed hellos and rejects token-hash authentication (`ed25519-required`). Set it to the agent's Ed25519 private key, and register the matching public key with Drydock:
+
+```yaml
+# docker-compose.yml (edge mode)
+environment:
+  DRYDOCK_URL: wss://platform.example.com
+  PRIVATE_KEY_FILE: /run/secrets/portwing-private-key
+```
+
+The hello carries `pubKeyId`, `timestamp`, `nonce`, and `signature` fields. The controller verifies the signature against its own copy of the agent's registered public key before sending `welcome`; if verification fails the connection is closed. Individual messages after the hello are not signed separately — they are implicitly authorized by the authenticated TLS+WebSocket session.
+
+See [Connection Modes](/connection-modes) for a full description of edge mode.
+
+<Callout type="info">
+Drydock `v1.6.0-rc.11+` is the supported feature peer for Portwing v0.9.0 and implements its complete controller-owned watcher/update contract. Older controllers may remain wire-compatible without those feature semantics. A missing or disabled endpoint returns 404, which the agent treats as fatal rather than retrying forever.
+</Callout>
+
+<Callout type="warn">
+Drydock's bundled `AgentClient` (the HTTP-polling client used in Standard Mode) supports both token authentication (the default `X-Dd-Agent-Secret` path, see [3. Argon2id hash-at-rest](#3-argon2id-hash-at-rest) above) and per-request Ed25519 signing. Set `DD_AGENT_{name}_AUTHMODE=ed25519`, `DD_AGENT_{name}_SIGNINGKEYID`, and `DD_AGENT_{name}_SIGNINGKEY` to use the latter; the controller then sends the five `X-Portwing-*` signature headers instead of a shared secret. Standard Mode Ed25519 signing and Edge Mode's Ed25519 *hello* signing are separate mechanisms. The Edge Mode hello remains required by the supported Drydock `v1.6.0-rc.11+` WebSocket path.
+</Callout>
+
+---
+
+## Migrating from tokens to Ed25519
+
+Token auth and Ed25519 auth work simultaneously. Set both `TOKEN_HASH` and `AUTHORIZED_KEYS` during the transition period. The middleware checks for `X-Portwing-Signature` first; requests without that header fall through to token verification. Once all clients are sending signed requests, remove the token variables and restart.

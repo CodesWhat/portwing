@@ -6,6 +6,8 @@ run-name: >-
   }}
 
 # Monthly/manual quality gate using Gremlins (Go mutation tester).
+# Upward ratchets use the proposal from run 42142844995 (2026-11-06), seven samples per
+# metric and its computed variability buffers. Timeout-heavy rows stay put.
 # Floors are ratchets from measured v0.6.0 runs. Keep generator-only and
 # integration-test-only packages out of this production-package matrix.
 #
@@ -28,7 +30,7 @@ env:
   GREMLINS_VERSION: v0.6.0
 
 concurrency:
-  group: mutation-testing-${{ github.workflow }}
+  group: mutation-testing-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -47,11 +49,11 @@ jobs:
             mcover: 100
           - name: server
             package: ./internal/server
-            efficacy: 77.88
-            mcover: 94.12
+            efficacy: 84.74
+            mcover: 96.37
           - name: adapter
             package: ./internal/adapter
-            efficacy: 84.68
+            efficacy: 93.78
             mcover: 93.28
           - name: adapter-drydock
             package: ./internal/adapter/drydock
@@ -74,44 +76,35 @@ jobs:
             mcover: 97.96
           - name: banner
             package: ./internal/banner
-            # 42 of banner's 68 mutants are NOT COVERED, so mcover sits far
-            # below every other package here. Render's ANSI/width branches are
-            # selected by terminalCols() and colorEnabled() reading a real
-            # terminal, and the unit tests drive neither. Measured 76.92/38.24
-            # in both 33288345891 and 33672715580, with zero timeouts, so
-            # these are stable rather than slack. The old 16.00 was never a
-            # measurement of this package.
+            # Historical 38.24 coverage included 42 generator-only mutants.
+            # The generator is now excluded; runtime banner/tty files remain
+            # measured. Keep both existing floors until real runs justify a
+            # ratchet, never lower them to hide newly exposed survivors.
             efficacy: 76.92
             mcover: 38.24
           - name: config
             package: ./internal/config
-            efficacy: 82.22
+            efficacy: 97.75
             mcover: 100
           - name: docker
             package: ./internal/docker
-            # Efficacy floor was 100 against a measured 90.43/90.39. The
-            # mcover floor of 78.08 is stale in the other direction (measured
-            # 93.50/93.47) and is left alone rather than ratcheted here.
-            efficacy: 90.39
-            mcover: 78.08
+            efficacy: 93.48
+            mcover: 93.68
           - name: edge
             package: ./internal/edge
-            # Measured 74.73/91.00 in both 33288345891 and 33672715580. The
-            # old 85.21/96.02 never held on either branch. PW-6.6's
-            # dockerReady() boundary survivors are the way back up.
-            efficacy: 74.73
+            efficacy: 85.54
             mcover: 91.00
           - name: generic
             package: ./internal/generic
-            efficacy: 85.00
+            efficacy: 99.00
             mcover: 100
           - name: log
             package: ./internal/log
             zero_mutants: true
           - name: mcp
             package: ./internal/mcp
-            efficacy: 79.49
-            mcover: 79.59
+            efficacy: 93.78
+            mcover: 87.97
           - name: metrics
             package: ./internal/metrics
             # workers=1 repeats: 91.76/94.44, 92.00/83.33, 91.11/94.74.
@@ -194,6 +187,18 @@ jobs:
           if [ -n "${{ matrix.timeout_coefficient || '' }}" ]; then
             gremlins_args+=(--timeout-coefficient "${{ matrix.timeout_coefficient }}")
           fi
+          case "${{ matrix.package }}" in
+            ./cmd/portwing)
+              # v0.6.0 infers package main as the module root, whose setup
+              # failure otherwise scores as a kill. Integration mode runs the
+              # real suite. Prove that suite passes before counting kills.
+              go test -tags="" ./...
+              gremlins_args+=(--integration)
+              ;;
+            ./internal/banner)
+              gremlins_args+=(--exclude-files '(^|/)gen/main[.]go$')
+              ;;
+          esac
           if [ "${{ matrix.zero_mutants || false }}" = "true" ]; then
             gremlins unleash --tags="" "${gremlins_args[@]+"${gremlins_args[@]}"}" "${{ matrix.package }}" 2>&1 | tee mutation-report.txt
             grep -q "No results to report" mutation-report.txt
@@ -728,19 +733,19 @@ jobs:
             # ./internal/server. Floor is floor(measured) - 2pp of slack.
             floor: 93
             packages: |
-              ./internal/server|server|77.88
+              ./internal/server|server|84.74
           - group: edge
             # Measured 82.56% in run 33901506579 (2026-09-04): killed 71,
             # lived 15 across ./internal/edge.
             floor: 80
             packages: |
-              ./internal/edge|edge|74.73
+              ./internal/edge|edge|85.54
           - group: generic
             # Measured 83.33% in run 33901506579 (2026-09-04): killed 5,
             # lived 1 across ./internal/generic.
             floor: 81
             packages: |
-              ./internal/generic|generic|85.00
+              ./internal/generic|generic|99.00
           - group: misc-a
             # adapter-drydock hit the same cliff as pool and protocol: run
             # 33848880338 generated 32 extra mutants and TIMED OUT 30 of
@@ -753,7 +758,7 @@ jobs:
             # lived 7 summed across adapter, adapter-drydock, auth and audit.
             floor: 92
             packages: |
-              ./internal/adapter|adapter|84.68
+              ./internal/adapter|adapter|93.78
               ./internal/adapter/drydock|adapter-drydock|82.50|40
               ./internal/auth|auth|88.58
               ./internal/audit|audit|88.31
@@ -762,8 +767,8 @@ jobs:
             # lived 8 summed across docker, mcp and metrics.
             floor: 92
             packages: |
-              ./internal/docker|docker|90.39
-              ./internal/mcp|mcp|79.49
+              ./internal/docker|docker|93.48
+              ./internal/mcp|mcp|93.78
               ./internal/metrics|metrics|90.00
           - group: misc-c
             # Measured 92.86% in run 33901506579 (2026-09-04): killed 39,
@@ -773,7 +778,7 @@ jobs:
             packages: |
               ./cmd/portwing|portwing|100
               ./internal/banner|banner|76.92
-              ./internal/config|config|82.22
+              ./internal/config|config|97.75
               ./internal/log|log|
               ./internal/pool|pool|50.00|40
               ./internal/protocol|protocol|100|40
@@ -883,10 +888,22 @@ jobs:
               coefficient_args+=(--timeout-coefficient "${coefficient}")
             fi
 
+            scope_args=()
+            case "${package}" in
+              ./cmd/portwing)
+                go test -tags="" ./...
+                scope_args+=(--integration)
+                ;;
+              ./internal/banner)
+                scope_args+=(--exclude-files '(^|/)gen/main[.]go$')
+                ;;
+            esac
+
             if ! gremlins unleash --tags="" \
               "${advisory_flags[@]}" \
               "${default_mutator_flags[@]}" \
               "${coefficient_args[@]+"${coefficient_args[@]}"}" \
+              "${scope_args[@]+"${scope_args[@]}"}" \
               --output "${report}" \
               "${package}" 2>&1 | tee "mutation-advisory-${name}.txt"; then
               echo "advisory: ${name} did not complete; reporting it as unavailable"

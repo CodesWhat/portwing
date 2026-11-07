@@ -267,15 +267,16 @@ func startExec(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "hijacking unsupported", http.StatusInternalServerError)
 		return
 	}
+	if _, err := io.Copy(io.Discard, r.Body); err != nil {
+		http.Error(w, "reading exec request", http.StatusBadRequest)
+		return
+	}
 	conn, rw, err := hijacker.Hijack()
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
-	if _, err := io.Copy(io.Discard, r.Body); err != nil {
-		return
-	}
 	if _, err := rw.WriteString(
 		"HTTP/1.1 101 Switching Protocols\r\n" +
 			"Connection: Upgrade\r\n" +

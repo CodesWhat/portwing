@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.0] - 2026-11-07
+
+### Security
+
+- Keep bare IPv4-mapped addresses in `TRUSTED_PROXIES` scoped to one IPv4 host.
+  Previously, appending `/32` to the mapped IPv6 literal trusted `::/32` instead,
+  affecting forwarding-header identity and enrollment transport checks.
+
+- Pin optional Sockguard images to [v2.4.6](https://github.com/CodesWhat/sockguard/releases/tag/v2.4.6)
+  for the compression advisory while retaining the audited preset allowlists.
+
+- Build all container architectures from Alpine certificates/metadata and
+  statically linked Portwing, Docker and Compose clients. This removes the
+  glibc runtime package affected by CVE-2026-84243. Keep non-root execution,
+  shell-free HTTP/TLS health checks and HIGH-severity image scan gates.
+- Build Compose with `klauspost/compress` v1.20.2 to fix GO-2026-6865
+  (CVE-2026-116591), and verify the module version linked into each image.
+
+- Refuse plaintext Model C enrollment with HTTP 403
+  before reading the bootstrap credential. Native TLS is accepted, as is a
+  single `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES`.
+  Configure the proxy to overwrite that header and keep the backend private.
+  This is a security exception to the stable HTTP behavior: deployments that
+  enrolled over HTTP in v1.1.x must configure TLS or a trusted TLS proxy, or set
+  `ALLOW_INSECURE_ENROLLMENT=true` for trusted local testing. The default is false;
+  refusal leaves the one-use credential available for a secure retry.
+
+### Fixed
+
+- Parse digest-pinned image references without putting the digest into registry
+  lookup names or tags, including containers updated by Drydock 1.7.
+- Keep inline script text out of CSP attribute detection and recognize whitespace
+  around external script `src` attributes.
+- Sync a newly created enrollment keys file's parent directory before reporting
+  success. Existing keys files still need only file write permission.
+- Reject empty or malformed gosec reports instead of counting them as zero findings.
+- Preserve raw TTY log bytes and large frame payloads, and report truncated
+  multiplexed headers as errors.
+- Keep reporting signature-lock storage failures until a retry succeeds,
+  including when the state directory is removed. In-memory downgrade
+  protection remains in place.
+- Correct authentication guidance for minimum signature versions,
+  shared-credential fallback and v3 first contact.
+
 ## [v1.1.2] - 2026-11-05
 
 This patch release prevents signature-lock CLI ownership changes and clarifies

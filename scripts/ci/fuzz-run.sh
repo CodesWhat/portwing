@@ -51,8 +51,18 @@ fi
 
 emit() {
 	if [ -n "${FUZZ_OUTPUT_FILE:-}" ]; then
-		echo "$1" >>"${FUZZ_OUTPUT_FILE}"
+		if ! echo "$1" >>"${FUZZ_OUTPUT_FILE}"; then
+			echo "${annotate_prefix}${target}: FUZZ_OUTPUT_FILE could not be updated." >&2
+			exit 2
+		fi
 	fi
+}
+
+runner_error() {
+	echo "${annotate_prefix}${target}: $1" >&2
+	emit "kind=error"
+	emit "status=2"
+	exit 2
 }
 
 reject_retries() {
@@ -90,7 +100,9 @@ if [ "${retries}" -lt 1 ] || [ "${retries}" -gt 100 ]; then
 	reject_retries
 fi
 
-attempt_log="$(mktemp)"
+if ! attempt_log="$(mktemp)"; then
+	runner_error "could not create the attempt log."
+fi
 # `$?` at the moment the trap fires is this script's own pending exit code
 # (0-4, from whichever `exit N` triggered it) — capture and re-exit with it
 # explicitly. Cleanup runs with errexit still active in the trap's own
@@ -133,7 +145,9 @@ while [ "${attempt}" -le "${retries}" ]; do
 	fi
 
 	if [ -n "${FUZZ_LOG_FILE:-}" ]; then
-		cat "${attempt_log}" >>"${FUZZ_LOG_FILE}"
+		if ! cat "${attempt_log}" >>"${FUZZ_LOG_FILE}"; then
+			runner_error "FUZZ_LOG_FILE could not be updated."
+		fi
 	fi
 
 	if [ "${rc}" -eq 0 ]; then
@@ -143,7 +157,9 @@ while [ "${attempt}" -le "${retries}" ]; do
 	fi
 
 	if [ -n "${FUZZ_ATTEMPT_HOOK:-}" ]; then
-		"${FUZZ_ATTEMPT_HOOK}" "${attempt}"
+		if ! "${FUZZ_ATTEMPT_HOOK}" "${attempt}"; then
+			runner_error "FUZZ_ATTEMPT_HOOK failed; the attempt could not be retained."
+		fi
 	fi
 
 	if grep -q "Failing input written to testdata" "${attempt_log}"; then

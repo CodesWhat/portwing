@@ -33,6 +33,7 @@ func FuzzParseImageRef(f *testing.F) {
 	f.Add(strings.Repeat("a", 1024))
 	f.Add("image@sha256:abc123")
 	f.Add("UPPER:CASE")
+	f.Add("lscr.io/linuxserver/jackett:latest@sha256:" + strings.Repeat("a", 64))
 
 	f.Fuzz(func(t *testing.T, input string) {
 		// Must never panic.
@@ -46,6 +47,12 @@ func FuzzParseImageRef(f *testing.F) {
 		// Tag invariant: always non-empty (defaults to "latest").
 		if tag == "" {
 			t.Errorf("ParseImageRef(%q): tag is empty", input)
+		}
+
+		// Pinning the same reference by digest must preserve its lookup fields.
+		pinnedRegistry, pinnedName, pinnedTag := ParseImageRef(input + "@sha256:" + strings.Repeat("a", 64))
+		if pinnedRegistry != registry || pinnedName != name || pinnedTag != tag {
+			t.Fatalf("digest pin changed lookup fields for %q: (%q, %q, %q) -> (%q, %q, %q)", input, registry, name, tag, pinnedRegistry, pinnedName, pinnedTag)
 		}
 
 		// Name may be empty for degenerate inputs like "" or ":"

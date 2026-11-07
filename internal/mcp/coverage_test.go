@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -653,7 +654,7 @@ func (r *failAfterNBytesReader) Read(p []byte) (int, error) {
 }
 
 func TestDemuxLogs_OversizedFrame(t *testing.T) {
-	// A frame larger than maxLogFrameSize should be skipped.
+	// A large frame is streamed, then trimmed by the MCP tail bounds.
 	var buf bytes.Buffer
 
 	// Write oversized frame header (size > 256KiB).
@@ -663,8 +664,9 @@ func TestDemuxLogs_OversizedFrame(t *testing.T) {
 	binary.BigEndian.PutUint32(hdr[4:8], oversizeBytes)
 	buf.Write(hdr)
 
-	// Write the actual payload (pretend it's the oversized frame data).
+	// End the large line before the following normal line.
 	oversizeData := make([]byte, oversizeBytes)
+	oversizeData[len(oversizeData)-1] = '\n'
 	buf.Write(oversizeData)
 
 	// Write a normal frame after the oversized one.
@@ -675,36 +677,39 @@ func TestDemuxLogs_OversizedFrame(t *testing.T) {
 	buf.Write(hdr2)
 	buf.WriteString(line)
 
-	lines, err := decodeContainerLogLines(&buf)
+	lines, truncated, err := decodeContainerLogTail(&buf)
 	if err != nil {
 		t.Fatalf("decodeContainerLogLines error for oversized frame: %v", err)
 	}
+	if !truncated {
+		t.Fatal("large frame must report the MCP tail truncation")
+	}
 	if len(lines) != 1 {
-		t.Fatalf("expected 1 line after oversized frame skip, got %d", len(lines))
+		t.Fatalf("expected newest line after bounded tail trimming, got %d", len(lines))
 	}
 	if !strings.Contains(lines[0], "after-oversize") {
-		t.Errorf("unexpected line content: %q", lines[0])
+		t.Errorf("newest line missing from %d-byte result", len(lines[0]))
 	}
 }
 
-func TestDemuxLogs_OversizedFrameCopyError(t *testing.T) {
-	// An oversized frame where the skip itself fails.
+func TestDemuxLogs_LargeFrameReadError(t *testing.T) {
+	// Partial large-frame data must retain its read error.
 	var buf bytes.Buffer
 
-	// Write oversized frame header but not enough bytes to skip.
+	// Write a header whose full payload is unavailable.
 	oversizeBytes := uint32(256<<10 + 1)
 	hdr := make([]byte, 8)
 	hdr[0] = 1
 	binary.BigEndian.PutUint32(hdr[4:8], oversizeBytes)
 	buf.Write(hdr)
-	// Write only 10 bytes of data — not enough to skip the full frame.
+	// Only ten payload bytes are available.
 	buf.Write(make([]byte, 10))
 
 	_, err := decodeContainerLogLines(&buf)
 	if err == nil {
 		t.Fatal("expected error when oversized frame data is truncated")
 	}
-	if !strings.Contains(err.Error(), "skipping oversized log frame") {
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

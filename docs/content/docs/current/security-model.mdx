@@ -63,7 +63,7 @@ The hardened compose file (`examples/docker-compose.with-sockguard.yml`) demonst
 ```yaml
 services:
   sockguard:
-    image: ghcr.io/codeswhat/sockguard:2.4.5
+    image: ghcr.io/codeswhat/sockguard:2.4.6
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -78,7 +78,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.1.2
+    image: ghcr.io/codeswhat/portwing:1.2.0
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -272,7 +272,7 @@ while bad enrollment credentials use the authentication-failure window.
 | WebSocket read | 16 MB | Prevent memory exhaustion from large WebSocket frames |
 | HTTP response body read | 100 MB | Bound buffered Docker API responses |
 | Legacy edge log response | 100 MB | Bound a buffered `dd:container_log_response` for older controllers |
-| Edge log-stream frame | 256 KiB | Skip an oversized Docker log frame before it enters the controller queue |
+| Decoded Docker log chunk | 256 KiB | Stream larger Docker log frames in bounded chunks before the controller queue |
 | Concurrent edge log streams | 128 | Bound Docker readers and per-stream goroutines independently of message handlers |
 | Edge outbound queue | 256 frames | Evict and reconnect a stalled controller instead of growing memory without limit |
 | Legacy edge follow-log window | ~7s | Bound a non-streaming `follow=true` request so it can't hold a message-handler slot indefinitely |
@@ -337,7 +337,7 @@ Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0
 Verify a release before running it:
 
 ```bash
-VERSION=1.1.2
+VERSION=1.2.0
 
 # Verify the checksums file
 cosign verify-blob \

@@ -102,10 +102,8 @@ jobs:
         with:
           egress-policy: block
           allowed-endpoints: >
-            9236a389bd48b984df91adc1bc924620.r2.cloudflarestorage.com:443
             api.github.com:443
             auth.docker.io:443
-            cgr.dev:443
             codeload.github.com:443
             dl-cdn.alpinelinux.org:443
             dl.google.com:443
@@ -118,7 +116,6 @@ jobs:
             github.com:443
             go.dev:443
             goreleaser.com:443
-            packages.wolfi.dev:443
             pkg-containers.githubusercontent.com:443
             production.cloudflare.docker.com:443
             production.cloudfront.docker.com:443

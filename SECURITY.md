@@ -2,17 +2,18 @@
 
 ## Supported Versions
 
-Security fixes are shipped on the **latest stable release line**. The 1.0
-line became unsupported when v1.1 shipped, and the 0.9 line became
-unsupported when v1.0 shipped. Upgrade from 1.0.x to 1.1.x; the 1.1 line keeps
-the 1.0 wire and stays compatible with existing controllers (see
-[COMPATIBILITY.md](COMPATIBILITY.md)).
+Security fixes are shipped on the **latest stable release line**. The v1.2
+line keeps the existing wire protocol. Enrollment requires TLS, either natively
+or through a trusted proxy reporting HTTPS; `ALLOW_INSECURE_ENROLLMENT=true`
+opts in to plaintext for trusted local testing. Review
+[COMPATIBILITY.md](COMPATIBILITY.md) before upgrading.
 
-| Version        | Supported          |
-| -------------- | ------------------ |
-| 1.1.x (latest stable) | :white_check_mark: |
-| 1.0.x          | :x:                |
-| < 1.0          | :x:                |
+| Version | Supported |
+| --- | --- |
+| 1.2.x (latest stable) | :white_check_mark: |
+| 1.1.x | :x: |
+| 1.0.x | :x: |
+| < 1.0 | :x: |
 
 ## Reporting a Vulnerability
 
@@ -85,7 +86,7 @@ entry is removed once.
 
 The nonce LRU cache (capacity controlled by `NONCE_LRU_SIZE`, default 10,000) tracks nonces within the ±60 s timestamp window to block replayed Ed25519-signed requests. At capacity the cache first evicts every entry past its retention TTL — those nonces can no longer pass the timestamp check, so dropping them opens nothing — and records the new nonce in the space that frees. If nothing has expired, the request is refused instead of being admitted unrecorded: accepting a nonce the cache cannot store would leave that exact request replayable for the rest of its timestamp window. Nonces are only recorded *after* a valid Ed25519 signature has been verified, so an unauthenticated attacker cannot fill the cache; the default 10,000 entries exceeds expected request volume for a single-host agent, and an operator driving more can raise `NONCE_LRU_SIZE`.
 
-- **Minimal attack surface**: static binary, three direct dependencies, stdlib crypto only, Wolfi OS base image with no package manager.
+- **Minimal attack surface**: static binary, three direct dependencies, stdlib crypto only, scratch runtime with Alpine certificates/metadata and static Docker/Compose clients, without a runtime package manager.
 - **Supply chain**: SHA-pinned GitHub Actions with harden-runner on every job, weekly govulncheck/grype/gosec scans, OpenSSF Scorecard, cosign-signed images, SLSA Build L2 provenance, per-archive CycloneDX SBOMs, and a container-image SBOM attestation on every release.
 - **Published-image rescan**: every Monday, Grype rescans the currently published GHCR release image (the latest non-prerelease tag, all three platforms: `linux/amd64`, `linux/arm64`, and `linux/arm/v7`) at the same HIGH/CRITICAL cutoff and `.grype.yaml` suppressions used at release time, so a CVE disclosed after a release ships doesn't go unnoticed until the next one. A failing scan fails the workflow run and uploads SARIF results to the Security tab; the lane runs on the Monday cron and on manual dispatch, and isn't wired into the automated quality-lane tracking-issue notifier, so a red run has to be caught in the Actions tab.
 

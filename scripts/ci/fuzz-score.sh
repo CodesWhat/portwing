@@ -126,8 +126,11 @@ if [ -z "${tracked_cached_reason}" ] && [ -n "${generated}" ] && [ -d "${generat
 	mkdir -p "${seed}" 2>/dev/null || true
 	while IFS= read -r -d '' src; do
 		dest="${seed}/cached-$(basename "${src}")"
+		if [ -e "${dest}" ] || [ -L "${dest}" ]; then
+			continue
+		fi
+		printf '%s\n' "${dest}" >>"${manifest}"
 		if cp "${src}" "${dest}" 2>/dev/null; then
-			printf '%s\n' "${dest}" >>"${manifest}"
 			corpus_cached=$((corpus_cached + 1))
 		fi
 	done < <(find "${generated}" -maxdepth 1 -type f -print0 2>/dev/null)

@@ -48,6 +48,41 @@ test("inline scripts are hashed for every tag form an HTML parser accepts", () =
   assert.doesNotMatch(cspFor('<SCRIPT SRC="/app.js"></SCRIPT>'), /'sha256-/u);
 });
 
+test("src detection uses the opening tag and allows attribute whitespace", () => {
+  const cspFor = (html) =>
+    headersForHTML(html).find((header) => header.key === "Content-Security-Policy")?.value ?? "";
+  assert.match(cspFor('<script>window.example = " src=/app.js";</script>'), /'sha256-/u);
+});
+
+test("external script attributes allow whitespace around the equals sign", () => {
+  const cspFor = (html) =>
+    headersForHTML(html).find((header) => header.key === "Content-Security-Policy")?.value ?? "";
+  for (const opening of [
+    '<script src = "/app.js">',
+    '<script SRC\t= "/app.js">',
+    '<script\n src\n=\n"/app.js">',
+  ]) {
+    assert.doesNotMatch(cspFor(`${opening}alert(1)</script>`), /'sha256-/u);
+  }
+});
+
+test("src text inside quoted attribute values stays inline", () => {
+  const cspFor = (html) =>
+    headersForHTML(html).find((header) => header.key === "Content-Security-Policy")?.value ?? "";
+  const expected = cspFor("<script>alert(1)</script>").match(/'sha256-[^']+'/u)?.[0];
+  for (const opening of [
+    '<script data-label=" src = /app.js">',
+    "<script data-label=' src=/app.js'>",
+    '<script data-label="> src = /app.js">',
+    '<script data-label=" src = /app.js" data-src="/other.js">',
+  ]) {
+    assert.ok(cspFor(`${opening}alert(1)</script>`).includes(expected), opening);
+  }
+  for (const opening of ['<script data-label=" src = /other.js" src="/app.js">', "<script src>"]) {
+    assert.doesNotMatch(cspFor(`${opening}alert(1)</script>`), /'sha256-/u);
+  }
+});
+
 test("static output paths map to clean public routes", () => {
   assert.equal(routeForOutputPath("out/index.html"), "/");
   assert.equal(routeForOutputPath("out/compare.html"), "/compare");

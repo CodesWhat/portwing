@@ -295,8 +295,9 @@ func (m *ContainerManager) toContainer(inspect *docker.ContainerInspect, listEnt
 func ParseImageRef(imageRef string) (registry, name, tag string) {
 	tag = "latest"
 
-	// Split off tag or digest.
-	ref := imageRef
+	// A digest pins the image but is not part of its repository or tag.
+	ref, _, _ := strings.Cut(imageRef, "@")
+	// Split off the tag after removing the digest's own colon.
 	if idx := strings.LastIndex(ref, ":"); idx != -1 {
 		// Make sure this colon is not part of a registry port by checking
 		// if the part after the colon contains a slash (which would mean

@@ -177,7 +177,7 @@ AEAD suites by design.
 | WebSocket read | 16 MB | Prevent memory exhaustion from large WebSocket frames |
 | HTTP response body read | 100 MB | Bound buffered Docker API responses |
 | Legacy edge log response | 100 MB | Bound a buffered `dd:container_log_response` for older controllers |
-| Edge log-stream frame | 256 KiB | Skip an oversized Docker log frame before it enters the controller queue |
+| Decoded Docker log chunk | 256 KiB | Stream larger Docker log frames in bounded chunks before the controller queue |
 | Concurrent edge log streams | 128 | Bound Docker readers and per-stream goroutines independently of message handlers |
 | Edge outbound queue | 256 frames | Evict and reconnect a stalled controller instead of growing memory without limit |
 | Legacy edge follow-log window | ~7s | Bound a non-streaming `follow=true` request so it can't hold a message-handler slot indefinitely |
@@ -269,14 +269,18 @@ and must contain a single JSON value. A caller presents the token and a public k
 the agent appends the key to the authorized_keys file, reloads the registry,
 and burns the token (refusing further enrollment until restart).
 
-Enrollment sends its bootstrap credential in the request body, so use HTTPS.
-When enrollment is armed without native TLS, startup logs a warning. A
-TLS-terminating proxy is suitable if Portwing's HTTP listener stays private;
-the warning still appears because TLS is not configured on Portwing itself.
-Plaintext enrollment is deprecated. Version 1.1.x still accepts it and only
-warns at startup. Refusing it by default, accepting native TLS or HTTPS
-reported by a trusted proxy, and an explicit `ALLOW_INSECURE_ENROLLMENT` opt-in
-are planned and not implemented yet.
+Enrollment sends its bootstrap credential in the request body. Starting in v1.2,
+plaintext enrollment returns HTTP 403 before the body is read and leaves the
+credential armed. Native TLS is accepted. A TLS-terminating proxy is accepted
+only when the direct peer is in `TRUSTED_PROXIES` and reports exactly one
+`X-Forwarded-Proto: https` value. The proxy must overwrite that header, and
+Portwing's backend listener must remain private. Client-supplied headers from
+untrusted peers, protocol lists and duplicate headers do not establish HTTPS.
+
+`ALLOW_INSECURE_ENROLLMENT=true` explicitly restores plaintext enrollment for
+trusted local testing; the default is false. Startup warns when enrollment is
+armed without native TLS, including behind a proxy. Version 1.1.x only warns
+and has no opt-in setting.
 
 See `docs/design/ed25519-auth.md` for full threat analysis, key rotation
 procedures, and migration path from token auth.

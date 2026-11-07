@@ -139,6 +139,19 @@ row="$(jq -c '.[] | select(.package == "metrics/gated")' <<<"${output}")"
 [ "$(jq '.new | length' <<<"${row}")" = "0" ] || fail "an unchanged run must report zero new mutants (row: ${row})"
 [ "$(jq -r '.persisted' <<<"${row}")" = "2" ] || fail "an unchanged run must persist both mutants (row: ${row})"
 
+# The override may contain a whole history. Compare the newest two rows.
+fixture4="${test_root}/fixture4.jsonl"
+{
+	jq -cn --argjson mutants "[$(mutant old.go M1 L aaaaaaaaaaaa 0 1 1)]" \
+		'{schema:1, packages:[{name:"metrics", package:"./internal/metrics", source:"gated", state:"measured", counts:{lived:1,not_covered:0}, mutants:$mutants}]}'
+	cat "${fixture3}"
+} >"${fixture4}"
+output="$(MUTATION_SURVIVORS_RECORDS="${fixture4}" bash "${diff_script}")"
+row="$(jq -c '.[] | select(.package == "metrics/gated")' <<<"${output}")"
+[ "$(jq '.killed | length' <<<"${row}")" = "0" ] || fail "long override must not compare the oldest pair"
+[ "$(jq '.new | length' <<<"${row}")" = "0" ] || fail "long override must compare the last two unchanged rows"
+[ "$(jq -r '.persisted' <<<"${row}")" = "2" ] || fail "long override must retain the latest pair's survivors"
+
 # --- filters -------------------------------------------------------------
 #
 # fixture1 carries two packages (server/advisory and worker/gated), so an

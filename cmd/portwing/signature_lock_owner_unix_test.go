@@ -10,7 +10,37 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/codeswhat/portwing/internal/auth"
 )
+
+func TestSignatureLockClearAllDoesNotAuditAnAlreadyClearedState(t *testing.T) {
+	dir := t.TempDir()
+	seedLocks(t, dir, lockIDA)
+	t.Setenv("STATE_DIR", dir)
+	auditPath := filepath.Join(dir, "audit.log")
+	t.Setenv("AUDIT_LOG", auditPath)
+	original := signatureLockUID
+	signatureLockUID = func() int {
+		// Another process clears the state after the CLI's initial read.
+		other, err := auth.OpenSignatureLocks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := other.ClearAll(); err != nil {
+			t.Fatal(err)
+		}
+		return os.Geteuid()
+	}
+	t.Cleanup(func() { signatureLockUID = original })
+	code, out, errOut := runLockCmd(t, "clear", "--all")
+	if code != 0 || !strings.Contains(out, "cleared 0 signature lock(s)") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if events := auditLines(t, auditPath); len(events) != 0 {
+		t.Fatalf("no-op clear recorded a change: %v", events)
+	}
+}
 
 func TestSignatureLockClearRefusesDifferentUID(t *testing.T) {
 	for _, target := range []string{lockIDA, "--all"} {

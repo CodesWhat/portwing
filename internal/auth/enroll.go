@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -375,7 +376,12 @@ var appendAuthorizedKey = appendKeyLine
 // write, creating it (mode 0600) if it does not exist.
 func appendKeyLine(path, line string) (err error) {
 	// #nosec G304 -- authorized_keys path is explicit operator configuration.
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	created := err == nil
+	if errors.Is(err, os.ErrExist) {
+		// #nosec G304 -- authorized_keys path is explicit operator configuration.
+		f, err = os.OpenFile(path, os.O_APPEND|os.O_RDWR, 0o600)
+	}
 	if err != nil {
 		return fmt.Errorf("opening authorized_keys for append: %w: %w", errAppendNotStarted, err)
 	}
@@ -388,6 +394,11 @@ func appendKeyLine(path, line string) (err error) {
 		// so a partially written key line isn't reported as success.
 		if cerr := f.Close(); cerr != nil && err == nil {
 			err = fmt.Errorf("closing authorized_keys: %w", cerr)
+		}
+		if err == nil && created {
+			if syncErr := syncRotationStateDirectory(filepath.Dir(path)); syncErr != nil {
+				err = fmt.Errorf("persisting authorized_keys directory entry: %w", syncErr)
+			}
 		}
 	}()
 	// Sync before reporting success: a burn lost to a crash would re-arm the

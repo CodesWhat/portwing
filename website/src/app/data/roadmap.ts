@@ -168,12 +168,14 @@ export const roadmap: Milestone[] = [
     ],
   },
   {
-    version: "Planned",
-    title: "Enrollment Over TLS",
+    version: "v1.2",
+    title: "Enrollment TLS and Container Runtime",
     emoji: "🔐",
-    status: "planned",
+    status: "released",
     items: [
-      "Enrollment requires TLS, either native or through a trusted proxy reporting HTTPS, unless ALLOW_INSECURE_ENROLLMENT explicitly opts in. Not in v1.1: the agent still only warns at startup",
+      "Enrollment requires native TLS or HTTPS reported by a trusted proxy unless ALLOW_INSECURE_ENROLLMENT=true opts in for trusted local testing",
+      "Scratch images use Alpine certificates and static Docker/Compose clients on amd64, arm64 and arm/v7, without a glibc runtime package",
+      "Compose builds with the patched compression dependency and image scans keep the HIGH severity gate on every platform",
     ],
   },
   {
