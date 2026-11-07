@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v1.2.0] - 2026-11-06
+## [v1.2.0] - 2026-11-07
 
 ### Security
 
@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Sync a newly created enrollment keys file's parent directory before reporting
+  success. Existing keys files still need only file write permission.
+- Reject empty or malformed gosec reports instead of counting them as zero findings.
 - Preserve raw TTY log bytes and large frame payloads, and report truncated
   multiplexed headers as errors.
 - Keep reporting signature-lock storage failures until a retry succeeds,
