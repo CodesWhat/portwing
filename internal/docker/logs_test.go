@@ -246,57 +246,46 @@ func TestDecodeMultiplexedLogStream_FrameAtCapIsNotSkipped(t *testing.T) {
 	}
 }
 
-// TestDecodeMultiplexedLogStream_OversizedFrameSkippedThenContinues exercises
-// the negation boundary of the "io.CopyN(...) err != nil" check on its
-// success side: when an oversized frame's payload is fully present, discard
-// must succeed silently (no emit for it) and decoding must continue onto the
-// next frame.
-func TestDecodeMultiplexedLogStream_OversizedFrameSkippedThenContinues(t *testing.T) {
+func TestDecodeMultiplexedLogStream_LargeFrameStreamsThenContinues(t *testing.T) {
 	t.Parallel()
-
-	oversized := dockerLogFrame(byte(ContainerLogStdout), bytes.Repeat([]byte{'B'}, maxLogFrameSize+1))
-	input := append(oversized, dockerLogFrame(byte(ContainerLogStderr), []byte("after"))...)
-
-	type call struct {
-		stream  ContainerLogStream
-		payload []byte
-	}
-	var got []call
-	err := decodeMultiplexedLogStream(bytes.NewReader(input), func(s ContainerLogStream, p []byte) error {
-		got = append(got, call{s, append([]byte(nil), p...)})
+	payload := bytes.Repeat([]byte{'B'}, maxLogFrameSize+1)
+	input := append(dockerLogFrame(byte(ContainerLogStdout), payload), dockerLogFrame(byte(ContainerLogStderr), []byte("after"))...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	sawStderr := false
+	err := decodeMultiplexedLogStream(bytes.NewReader(input), func(stream ContainerLogStream, part []byte) error {
+		if len(part) > maxLogFrameSize {
+			t.Fatalf("chunk size %d exceeds its allocation bound", len(part))
+		}
+		if stream == ContainerLogStderr {
+			sawStderr = true
+			_, _ = stderr.Write(part)
+		} else {
+			if sawStderr {
+				t.Fatal("stdout arrived after the following stderr frame")
+			}
+			_, _ = stdout.Write(part)
+		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("decodeMultiplexedLogStream: %v", err)
+		t.Fatal(err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("emit calls = %d, want 1 (oversized frame must be skipped, not emitted)", len(got))
-	}
-	if got[0].stream != ContainerLogStderr || string(got[0].payload) != "after" {
-		t.Fatalf("emit = %+v, want stderr %q", got[0], "after")
+	if !bytes.Equal(stdout.Bytes(), payload) || stderr.String() != "after" {
+		t.Fatalf("payloads changed: stdout %d bytes, stderr %q", stdout.Len(), stderr.String())
 	}
 }
 
-// TestDecodeMultiplexedLogStream_OversizedFrameTruncatedReturnsError is the
-// failure-side mirror of the test above: when an oversized frame's payload
-// is NOT fully present, the CopyN discard fails and decoding must return a
-// wrapped error rather than silently continuing.
-func TestDecodeMultiplexedLogStream_OversizedFrameTruncatedReturnsError(t *testing.T) {
+func TestDecodeMultiplexedLogStream_LargeFrameTruncatedReturnsPartialData(t *testing.T) {
 	t.Parallel()
-
-	header := dockerLogHeader(byte(ContainerLogStdout), maxLogFrameSize+100)
-	// Only a few bytes of the claimed oversized payload actually follow.
-	input := append(header, []byte("short")...)
-
-	err := decodeMultiplexedLogStream(bytes.NewReader(input), func(ContainerLogStream, []byte) error {
-		t.Fatal("emit called for a frame whose oversized payload was never fully available")
+	input := append(dockerLogHeader(byte(ContainerLogStdout), maxLogFrameSize+100), []byte("short")...)
+	var got bytes.Buffer
+	err := decodeMultiplexedLogStream(bytes.NewReader(input), func(_ ContainerLogStream, payload []byte) error {
+		_, _ = got.Write(payload)
 		return nil
 	})
-	if err == nil {
-		t.Fatal("expected an error when discarding a truncated oversized frame")
-	}
-	if !strings.Contains(err.Error(), "skipping oversized log frame") {
-		t.Fatalf("error = %v, want it to mention 'skipping oversized log frame'", err)
+	if !errors.Is(err, io.ErrUnexpectedEOF) || got.String() != "short" {
+		t.Fatalf("partial payload %q, error %v", got.String(), err)
 	}
 }
 

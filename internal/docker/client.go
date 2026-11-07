@@ -551,7 +551,10 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 		return nil, err
 	}
 
-	return resp.Body, nil
+	return formattedLogReadCloser{
+		ReadCloser: resp.Body,
+		format:     responseLogFormat(resp.Header.Get("Content-Type"), c.apiVersion),
+	}, nil
 }
 
 // CreateExec creates an exec instance in the given container and returns

@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve raw TTY log bytes and large frame payloads, and report truncated
+  multiplexed headers as errors.
 - Keep reporting signature-lock storage failures until a retry succeeds,
   including when the state directory is removed. In-memory downgrade
   protection remains in place.
