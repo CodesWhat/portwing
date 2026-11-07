@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Parse digest-pinned image references (`repo:tag@sha256:<digest>`) correctly
+  when reporting containers. Previously the tag was taken from after the last
+  colon, so the image name became `repo:tag@sha256` and the tag became the
+  digest hex, which broke registry lookups in the controller for containers
+  recreated by digest-pinned updates.
+
 ## [v1.2.0] - 2026-11-06
 
 ### Security

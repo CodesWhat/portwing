@@ -32,6 +32,8 @@ func FuzzParseImageRef(f *testing.F) {
 	f.Add("a/b/c/d/e:tag")
 	f.Add(strings.Repeat("a", 1024))
 	f.Add("image@sha256:abc123")
+	f.Add("lscr.io/a/b:latest@sha256:abc123")
+	f.Add("registry.example.com:5000/a/b:v1@sha256:abc123")
 	f.Add("UPPER:CASE")
 
 	f.Fuzz(func(t *testing.T, input string) {

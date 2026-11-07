@@ -292,11 +292,20 @@ func (m *ContainerManager) toContainer(inspect *docker.ContainerInspect, listEnt
 //	"nginx:latest"                       -> ("docker.io", "nginx", "latest")
 //	"nginx"                              -> ("docker.io", "nginx", "latest")
 //	"ghcr.io/owner/repo:v1.2"           -> ("ghcr.io", "owner/repo", "v1.2")
+//	"ghcr.io/owner/repo:v1.2@sha256:ab" -> ("ghcr.io", "owner/repo", "v1.2")
+//	"ghcr.io/owner/repo@sha256:ab"      -> ("ghcr.io", "owner/repo", "latest")
 func ParseImageRef(imageRef string) (registry, name, tag string) {
 	tag = "latest"
 
-	// Split off tag or digest.
+	// Drop any digest suffix ("repo:tag@sha256:<hex>" or "repo@sha256:<hex>")
+	// first, so the colon inside the digest is never mistaken for the tag
+	// separator. The digest itself is not part of the return value.
 	ref := imageRef
+	if idx := strings.Index(ref, "@"); idx != -1 {
+		ref = ref[:idx]
+	}
+
+	// Split off the tag.
 	if idx := strings.LastIndex(ref, ":"); idx != -1 {
 		// Make sure this colon is not part of a registry port by checking
 		// if the part after the colon contains a slash (which would mean

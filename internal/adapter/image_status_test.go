@@ -67,6 +67,34 @@ func TestParseImageRef(t *testing.T) {
 			wantName:     "library/redis",
 			wantTag:      "7",
 		},
+		{
+			name:         "tag pinned by digest",
+			imageRef:     "lscr.io/linuxserver/jackett:latest@sha256:ed134f44644d26c1c1f30f973580cadf6d2f79db6919db961bdd57a633387750",
+			wantRegistry: "lscr.io",
+			wantName:     "linuxserver/jackett",
+			wantTag:      "latest",
+		},
+		{
+			name:         "digest only keeps default latest tag",
+			imageRef:     "ghcr.io/owner/repo@sha256:ed134f44644d26c1c1f30f973580cadf6d2f79db6919db961bdd57a633387750",
+			wantRegistry: "ghcr.io",
+			wantName:     "owner/repo",
+			wantTag:      "latest",
+		},
+		{
+			name:         "implicit docker.io with tag pinned by digest",
+			imageRef:     "nginx:1.25@sha256:ed134f44644d26c1c1f30f973580cadf6d2f79db6919db961bdd57a633387750",
+			wantRegistry: "docker.io",
+			wantName:     "nginx",
+			wantTag:      "1.25",
+		},
+		{
+			name:         "registry port with tag pinned by digest",
+			imageRef:     "localhost:5000/org/api:v2@sha256:ed134f44644d26c1c1f30f973580cadf6d2f79db6919db961bdd57a633387750",
+			wantRegistry: "localhost:5000",
+			wantName:     "org/api",
+			wantTag:      "v2",
+		},
 	}
 
 	for _, tt := range tests {
