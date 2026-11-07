@@ -606,3 +606,32 @@ func TestEnroller_UpgradedV100RotationArms(t *testing.T) {
 		t.Fatalf("new token after restart: expected 401, got %d", code)
 	}
 }
+
+// Not parallel: uses the existing directory-sync failure seam.
+func TestAppendKeyLineSyncsCreatedDirectoryEntry(t *testing.T) {
+	realSync := syncRotationDirectory
+	t.Cleanup(func() { syncRotationDirectory = realSync })
+	calls := 0
+	syncRotationDirectory = func(dir *os.File) error {
+		calls++
+		return realSync(dir)
+	}
+	path := filepath.Join(t.TempDir(), "authorized_keys")
+	if err := appendKeyLine(path, "# initial"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("new-file parent sync calls = %d, want 1", calls)
+	}
+	if err := appendKeyLine(path, "# existing"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("existing-file append synced parent; calls = %d", calls)
+	}
+	failure := errors.New("directory sync failed")
+	syncRotationDirectory = func(*os.File) error { return failure }
+	if err := appendKeyLine(filepath.Join(t.TempDir(), "authorized_keys"), "# initial"); !errors.Is(err, failure) {
+		t.Fatalf("creation returned %v, want directory sync failure", err)
+	}
+}
