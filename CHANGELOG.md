@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep inline script text out of CSP attribute detection and recognize whitespace
+  around external script `src` attributes.
 - Sync a newly created enrollment keys file's parent directory before reporting
   success. Existing keys files still need only file write permission.
 - Reject empty or malformed gosec reports instead of counting them as zero findings.
