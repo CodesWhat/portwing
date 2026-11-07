@@ -5,6 +5,7 @@ package docker
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"testing"
 )
 
@@ -84,6 +85,52 @@ func FuzzDecodeContainerLogStream(f *testing.F) {
 
 		if emitted > len(input) {
 			t.Fatalf("emitted %d bytes, exceeds input length %d", emitted, len(input))
+		}
+
+		// Generate valid frames too: malformed-input checks alone pass when
+		// the decoder silently drops every payload or mixes stdout and stderr.
+		payload := input
+		if len(payload) > maxLogFrameSize {
+			payload = payload[:maxLogFrameSize]
+		}
+		frames := append(dockerLogFrame(byte(ContainerLogStdout), payload),
+			dockerLogFrame(byte(ContainerLogStderr), payload)...)
+		calls := 0
+		err := DecodeContainerLogStream(bytes.NewReader(frames), func(stream ContainerLogStream, got []byte) error {
+			wantStream := ContainerLogStdout
+			if calls == 1 {
+				wantStream = ContainerLogStderr
+			}
+			if calls >= 2 || stream != wantStream || !bytes.Equal(got, payload) {
+				t.Fatalf("frame %d: stream %d, payload matches %v", calls, stream, bytes.Equal(got, payload))
+			}
+			calls++
+			return nil
+		})
+		wantCalls := 2
+		if len(payload) == 0 {
+			wantCalls = 0
+		}
+		if err != nil || calls != wantCalls {
+			t.Fatalf("valid frames: calls %d, want %d; error %v", calls, wantCalls, err)
+		}
+
+		raw := append([]byte("tty:"), payload...)
+		decoded, err := DecodeContainerLogs(bytes.NewReader(raw))
+		if err != nil || !bytes.Equal(decoded, raw) {
+			t.Fatalf("TTY payload changed: error %v", err)
+		}
+
+		stop := errors.New("consumer stopped")
+		if len(payload) > 0 {
+			calls = 0
+			err = DecodeContainerLogStream(bytes.NewReader(frames), func(ContainerLogStream, []byte) error {
+				calls++
+				return stop
+			})
+			if !errors.Is(err, stop) || calls != 1 {
+				t.Fatalf("consumer error: calls %d, error %v", calls, err)
+			}
 		}
 	})
 }
