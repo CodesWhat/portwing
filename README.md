@@ -215,6 +215,7 @@ For hosts behind NAT or a firewall, [`examples/docker-compose.edge.yml`](example
 Edge mode is Ed25519-only — generate a keypair first and register the public key with Drydock (`POST /api/v1/portwing/keys`):
 
 ```bash
+umask 077
 portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
 portwing keygen -pub-from portwing_ed25519.pem
 sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem

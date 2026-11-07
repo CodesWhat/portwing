@@ -27,8 +27,13 @@ function inlineScriptHashes(html) {
   // and `<SCRIPT>` all close or open a script element. Every form this misses
   // gets no hash, and the CSP then blocks a script the page needs, so the
   // failure is silent at build time and fatal in the browser.
-  for (const match of html.matchAll(/<script((?:\s[^>]*)?)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi)) {
-    if (/\ssrc\s*=/i.test(match[1])) continue;
+  for (const match of html.matchAll(
+    /<script\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi,
+  )) {
+    const attributes = match[1].matchAll(
+      /([^\s"'<>/=]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g,
+    );
+    if (Array.from(attributes, (attribute) => attribute[1].toLowerCase()).includes("src")) continue;
     const digest = crypto.createHash("sha256").update(match[2]).digest("base64");
     hashes.add(`'sha256-${digest}'`);
   }
