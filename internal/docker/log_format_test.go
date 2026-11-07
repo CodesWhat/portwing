@@ -12,6 +12,32 @@ import (
 	"testing"
 )
 
+func TestResponseLogFormat(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, contentType, apiVersion string
+		want                          logStreamFormat
+	}{
+		{"raw type at introduction", "application/vnd.docker.raw-stream", "v1.42", logFormatRaw},
+		{"older ambiguous raw type", "application/vnd.docker.raw-stream", "v1.41", logFormatAuto},
+		{"newer API major", "application/vnd.docker.raw-stream", "v2.0", logFormatRaw},
+		{"older API major", "application/vnd.docker.raw-stream", "v0.99", logFormatAuto},
+		{"missing version separator", "application/vnd.docker.raw-stream", "v1", logFormatAuto},
+		{"invalid version major", "application/vnd.docker.raw-stream", "vbad.44", logFormatAuto},
+		{"invalid version minor", "application/vnd.docker.raw-stream", "v1.bad", logFormatAuto},
+		{"missing content type", "", "v1.44", logFormatAuto},
+		{"unrecognized content type", "text/plain", "v1.44", logFormatAuto},
+		{"unambiguous multiplexed type", "application/vnd.docker.multiplexed-stream", "v1.41", logFormatMultiplexed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := responseLogFormat(tc.contentType, tc.apiVersion); got != tc.want {
+				t.Fatalf("format = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetContainerLogsPreservesRawContentType(t *testing.T) {
 	t.Parallel()
 	payload := []byte{1, 0, 0, 0, 0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o'}
