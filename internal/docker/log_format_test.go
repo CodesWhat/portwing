@@ -5,7 +5,9 @@ package docker
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -127,5 +129,19 @@ func TestLargeLogFrameStopsOnConsumerError(t *testing.T) {
 	})
 	if !errors.Is(err, stop) || calls != 1 {
 		t.Fatalf("consumer calls %d, error %v", calls, err)
+	}
+}
+
+func TestMultiplexedLogPayloadTruncation(t *testing.T) {
+	for _, payloadSize := range []int{0, maxLogFrameSize} {
+		t.Run(fmt.Sprint(payloadSize), func(t *testing.T) {
+			input := make([]byte, 8+payloadSize)
+			input[0] = 1
+			binary.BigEndian.PutUint32(input[4:8], uint32(payloadSize+1))
+			got, err := DecodeContainerLogs(bytes.NewReader(input))
+			if !errors.Is(err, io.ErrUnexpectedEOF) || len(got) != payloadSize {
+				t.Fatalf("got %d bytes, error %v; want %d bytes and unexpected EOF", len(got), err, payloadSize)
+			}
+		})
 	}
 }

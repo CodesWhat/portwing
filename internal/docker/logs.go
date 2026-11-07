@@ -177,6 +177,9 @@ func decodeMultiplexedLogStream(r io.Reader, emit func(ContainerLogStream, []byt
 				}
 			}
 			if err != nil {
+				if errors.Is(err, io.EOF) {
+					return io.ErrUnexpectedEOF
+				}
 				return err
 			}
 			remaining -= partSize
