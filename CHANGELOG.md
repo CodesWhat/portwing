@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Parse digest-pinned image references without putting the digest into registry
+  lookup names or tags, including containers updated by Drydock 1.7.
 - Keep inline script text out of CSP attribute detection and recognize whitespace
   around external script `src` attributes.
 - Sync a newly created enrollment keys file's parent directory before reporting
