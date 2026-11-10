@@ -71,8 +71,21 @@ RULESET="$(
 JSON
 )"
 
-existing_id="$(gh api "repos/$REPO/rulesets" \
-	--jq ".[] | select(.name == \"$NAME\") | .id" 2>/dev/null || true)"
+find_ruleset_id() {
+	gh api --paginate --slurp "repos/$REPO/rulesets" |
+		jq -er --arg name "$NAME" '
+            [.[][] | select(.name == $name) | .id] as $ids
+            | if ($ids | length) == 0 then ""
+              elif ($ids | length) == 1
+                and ($ids[0] | type) == "number"
+                and $ids[0] > 0
+                and ($ids[0] | floor) == $ids[0]
+              then $ids[0] | tostring
+              else error("ruleset lookup must return one positive integer ID or no match")
+              end'
+}
+
+existing_id="$(find_ruleset_id)"
 
 if [ -n "$existing_id" ]; then
 	echo "→ Updating existing ruleset #$existing_id on $REPO ..."
@@ -82,7 +95,11 @@ else
 	printf '%s' "$RULESET" | gh api --method POST "repos/$REPO/rulesets" --input - >/dev/null
 fi
 
-id="$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name == \"$NAME\") | .id")"
+id="$(find_ruleset_id)"
+if [ -z "$id" ]; then
+	echo "Ruleset is missing after application; cannot verify protection." >&2
+	exit 1
+fi
 echo "✓ Applied. Effective ruleset:"
 gh api "repos/$REPO/rulesets/$id" --jq '{
   id, name, enforcement,
