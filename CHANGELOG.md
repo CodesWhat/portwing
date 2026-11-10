@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Clarify required Edge-mode signing keys, optional controller capabilities and
   the JSON-only fallback for controllers without binary-response support.
+- Correct the fuzzing guide: saturated targets replay nightly and are excluded
+  from the monthly matrix.
 
 ## [v1.2.0] - 2026-11-07
 
