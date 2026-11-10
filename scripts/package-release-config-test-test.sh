@@ -188,6 +188,16 @@ for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	cp "${recipe}" "${fixture}/${recipe}"
 done
 
+# Docker uses the last HEALTHCHECK instruction in a stage, including NONE.
+for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
+	cp "${recipe}" "${fixture}/${recipe}"
+	printf '\nHEALTHCHECK NONE\n' >>"${fixture}/${recipe}"
+	expect_release_contract_failure \
+		"${recipe} must use the shell-free Portwing healthcheck" \
+		"a later HEALTHCHECK NONE must disable the probe contract"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
+
 observability_example="examples/observability/docker-compose.yml"
 sed -i.bak 's#test: \["CMD", "/usr/bin/portwing", "healthcheck"\]#test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/health"]#' "${fixture}/${observability_example}"
 expect_release_contract_failure \

@@ -392,7 +392,8 @@ for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	# A bare CMD runs the probe as the container's default command, so the check
 	# has to see it inside a HEALTHCHECK instruction, continuation lines joined.
 	runtime_instructions="$(awk '{ if (sub(/\\$/, "")) { joined = joined $0; next } print joined $0; joined = "" }' <<<"${runtime_stage}")"
-	if ! grep -Eq '^[[:space:]]*HEALTHCHECK[[:space:]].*CMD \["/usr/bin/portwing", "healthcheck"\]$' <<<"${runtime_instructions}"; then
+	last_healthcheck="$(awk '/^[[:space:]]*HEALTHCHECK[[:space:]]/ { last = $0 } END { print last }' <<<"${runtime_instructions}")"
+	if ! grep -Eq '^[[:space:]]*HEALTHCHECK[[:space:]].*CMD \["/usr/bin/portwing", "healthcheck"\]$' <<<"${last_healthcheck}"; then
 		echo "FAIL: ${dockerfile} must use the shell-free Portwing healthcheck" >&2
 		failures=$((failures + 1))
 	fi

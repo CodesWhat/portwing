@@ -84,8 +84,8 @@ EOF
 
 # --- the compute script itself must not abort on the bad record ------------
 
-compute_output="$(bash "${compute}" "${records_dir}")"
-compute_status=$?
+compute_status=0
+compute_output="$(bash "${compute}" "${records_dir}")" || compute_status=$?
 [ "${compute_status}" -eq 0 ] ||
 	fail "fuzz-history-compute.sh must exit 0 even with a malformed corpus_total in one record (got ${compute_status})"
 
