@@ -51,7 +51,9 @@ exception.
 ## Mixed Portwing/Drydock versions
 
 `drydockCompat` and `serverCompatLevel` identify the wire compatibility epoch;
-their major component must match. Product versions are independent. The
+a major mismatch emits a warning but does not reject the connection. Such a
+pairing is unsupported until verified against the compatibility matrix.
+Product versions are independent. The
 compatibility matrix lists the exact supported pairings, and every Portwing
 release runs contract tests against the oldest and newest Drydock versions it
 claims to support.

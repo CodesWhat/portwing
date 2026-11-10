@@ -210,9 +210,10 @@ positionally is unaffected). `dd:container_log_response.logs` is plain text —
 Docker's 8-byte stream-frame headers are stripped for a non-TTY container and a
 TTY container's header-less stream is passed through unchanged — matching the
 HTTP `/logs` route. `follow` is served as a **bounded** live window (the agent
-asks the daemon to end the stream a few seconds out, via a Unix-timestamp
-`until`) because the response is a single buffered message, not a stream —
-continuous tailing uses the `request`/`stream`/`stream_end` path against
+asks the daemon to end the stream after 5 seconds, via a Unix-timestamp
+`until`, with a 7-second handler deadline including the 2-second grace period)
+because the response is a single buffered message, not a stream.
+Continuous tailing uses the `request`/`stream`/`stream_end` path against
 `GET /containers/{id}/logs?follow=1`.
 
 ## 4. Standard Mode HTTP API
@@ -388,7 +389,7 @@ In addition to host/container metrics, the Prometheus endpoints (`/_portwing/met
 
 Its relationship to `ErrHostMetricsUnsupported`/`portwing_host_metrics_supported` (which cover the `/proc`-derived fields) is one-directional, not independent: a broken data root leaves the `/proc` fields intact, but a missing `/proc` short-circuits collection before `statfs` runs, so no disk figure is reported on a host without procfs even though `statfs` would have worked there.
 
-**Failed collection.** When collection fails outright — `ErrHostMetricsUnsupported`, i.e. a host with no procfs — the tick emits an `error` frame with `code` `host-metrics-unavailable` and the collection error as its `message`, on the same 30-second cadence as the `metrics` frame it replaces, and with no `requestId` because the tick answers no request. It does **not** emit a `metrics` frame: collection returns a partially populated snapshot alongside the error, and a zero-filled `metrics` frame is indistinguishable from a real reading of a completely idle host. This is the wire's counterpart to `portwing_host_metrics_supported 0` on the Prometheus endpoints and to the MCP `host_metrics` tool's error: the failing tick carries something instead of nothing, so a controller that reads `code` off a `requestId`-less `error` frame can tell an unsupported host from a supported one that has stopped reporting. Reading it is opt-in, and no controller does yet. Drydock's edge adapter returns early on any `error` frame that carries no `requestId`, so the frame arrives and is dropped with no log and no state change; that same guard is what makes the frame safe to send unnegotiated, since no controller can mis-correlate it with a pending request.
+**Failed collection.** When collection returns any error, including `ErrHostMetricsUnsupported` on a host without procfs, the tick emits an `error` frame with `code` `host-metrics-unavailable` and the collection error as its `message`, on the same 30-second cadence as the `metrics` frame it replaces, and with no `requestId` because the tick answers no request. It does **not** emit a `metrics` frame: collection returns a partially populated snapshot alongside the error, and a zero-filled `metrics` frame is indistinguishable from a real reading of a completely idle host. This is the wire's counterpart to `portwing_host_metrics_supported 0` on the Prometheus endpoints and to the MCP `host_metrics` tool's error: the failing tick carries something instead of nothing, so a controller that reads `code` off a `requestId`-less `error` frame can tell an unsupported host from a supported one that has stopped reporting. Reading it is opt-in, and no controller does yet. Drydock's edge adapter returns early on any `error` frame that carries no `requestId`, so the frame arrives and is dropped with no log and no state change; that same guard is what makes the frame safe to send unnegotiated, since no controller can mis-correlate it with a pending request.
 
 | Metric | Source | Platform |
 |--------|--------|----------|
@@ -625,16 +626,21 @@ without drawing the duplicate-`requestId` rejection of §3.3.
 - **Binaries:** `CGO_ENABLED=0`, `-trimpath`, `-s -w` (stripped)
 - **OS/Arch:** linux/amd64, linux/arm64, linux/arm/v7, darwin/amd64, darwin/arm64
 - **Docker:** Multi-arch manifest at `ghcr.io/codeswhat/portwing`
-- **Base images:** Wolfi OS (amd64/arm64), Alpine (armv7)
+- **Runtime images:** `scratch` on amd64, arm64 and arm/v7, with Alpine certificates and metadata.
 
 ### 14.2 Docker Image
 
-Chainguard Wolfi OS packages assembled into a `FROM scratch` image (Alpine on armv7). Minimal OCI image with no package manager in the runtime — packages are installed into a staging rootfs and copied into the final scratch stage, retaining the package database for scanners.
+All three Linux architectures use a `FROM scratch` runtime containing Alpine
+certificates and package metadata, plus statically linked Portwing, Docker and
+Compose clients. No libc, shell, BusyBox, wget or package manager is installed
+in the runtime. The image runs as UID 65532.
 
-Packages:
-
-- **Wolfi (amd64/arm64):** `ca-certificates-bundle`, `busybox`, `docker-cli`, `docker-compose`, `wget`
-- **Alpine (armv7):** `ca-certificates-bundle` and `alpine-release`, with `alpine-keys` as a dependency. Docker CLI 29.9.2 is an official static ARMv7 download pinned by SHA256 and built with Go 1.26.10. Compose is built from checksum-pinned upstream 5.5.1 source with containerd 2.3.6, x/net 0.60.0, and Go 1.27.3, identifies itself as `v5.5.1-portwing.4`, and is available directly and as a Docker CLI plugin. Both ARM image recipes omit BusyBox and use `portwing healthcheck` for HTTP/TLS probes.
+Docker CLI 29.9.2 comes from architecture-specific official static downloads
+pinned by SHA256. Compose is built from checksum-pinned upstream 5.5.1 source
+with containerd 2.3.6, x/net 0.60.0 and klauspost/compress 1.20.2 using Go 1.27.3.
+It identifies itself as `v5.5.1-portwing.5` and is available directly and as a
+Docker CLI plugin. Health probes run `/usr/bin/portwing healthcheck` with HTTP
+or TLS, according to the agent configuration.
 
 ## 15. Migration Strategy
 

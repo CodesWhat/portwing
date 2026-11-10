@@ -39,6 +39,21 @@ asserted one that the code did not support.
 
 ---
 
+## Evidence correction, 2026-11-10
+
+The runtime and wire descriptions below capture the September evaluation.
+Re-check them against current Portwing and Drydock before implementation.
+The original runtime build logs and benchmark fixtures are not included in
+this note. In particular, the recorded Node 24.20/OpenSSL 3.6.4 pairing does
+not match the [official Node 24.20.0 source](https://github.com/nodejs/node/blob/v24.20.0/deps/openssl/openssl/VERSION.dat),
+which bundles OpenSSL 3.5.7. That original build provenance is unverified;
+the timing tables remain historical reports that need fresh measurement.
+
+A separate primitive-signature replay on 2026-11-10 passed both Go-to-Node
+and Node-to-Go verification with Go 1.27.3 on darwin/arm64, Node 24.22.2 and
+its reported OpenSSL 4.1.0. This replay measured neither TLS interoperability
+nor performance. The adoption decision remains deferred.
+
 ## 1. Decision
 
 **Defer adopting ML-DSA on both signed surfaces. Do not adopt pure ML-DSA-87
@@ -284,9 +299,9 @@ This is the entire case for splitting the decision by surface.
 
 ### 3.5 Cross-implementation interoperability, verified
 
-Go 1.27's `crypto/mldsa` and Node 24.20's `node:crypto` (OpenSSL 3.6.4) produce
-**mutually verifiable** ML-DSA-87 signatures with an empty context. Both
-directions were tested and both pass:
+The September note reported mutually verifiable ML-DSA-87 signatures with
+an empty context. Its original runtime provenance is unverified, as corrected
+above. The separate November 10 primitive replay passed both directions:
 
 - Node verified a Go-produced signature over the hello canonical string.
 - Go verified a Node-produced signature over the same string.
@@ -298,10 +313,12 @@ Drydock already does for Ed25519. The prefix is a fixed 22 bytes:
 30820a32300b060960864801650304031303820a2100
 ```
 
-Drydock runs `node:24-alpine` and requires `node >= 24.0.0`, so this is
-available to it today. **Neither side needs a new dependency.** That removes
-what would otherwise have been the strongest reason to defer, and it is why the
-trigger in section 7 is cheap to hit rather than years away.
+The stated `node >= 24.0.0` engine range does not guarantee ML-DSA support.
+Node added ML-DSA KeyObject, signing and verification support in
+[24.6.0](https://nodejs.org/en/blog/release/v24.6.0). Any future adoption must
+require at least that version and verify the actual OpenSSL build. A moving
+`node:24-alpine` image is not evidence for every supported installation.
+No new Portwing dependency is proposed by this deferred design.
 
 ---
 
@@ -700,15 +717,15 @@ Any one of these reopens the decision. Each is checkable rather than a vibe.
    and carries the matching `MLDSA44`/`MLDSA65`/`MLDSA87` TLS signature schemes
    with `directSigning` (`crypto/tls/auth.go:145-146, 161-162`).
 
-   **The runtime on the other end is not a blocker either**, which narrows this
-   trigger further than the previous revision did. Drydock requires Node >= 24
-   (`app/package.json:5-7`) and serves TLS through `https.createServer` when
-   configured (`app/api/index.ts:260-270`), and section 3.5 measured that this Node
-   and OpenSSL combination does ML-DSA-87 natively. A TLS 1.3 handshake with an
-   ML-DSA-87 certificate is within reach of both stacks as they ship today.
+   **Correction, 2026-11-10:** section 3.5 exercises primitive signatures.
+   It does not test a TLS handshake, certificate parsing, TLS signature-scheme
+   negotiation or a deployment's CA chain. Node's `>= 24.0.0` engine range
+   also includes versions without its ML-DSA primitive API. Actual TLS
+   interoperability between the chosen Go and Node/OpenSSL builds remains
+   unmeasured and must be verified before treating this trigger as satisfied.
 
-   So the real trigger is **certificate issuance and ecosystem compatibility**,
-   not runtime support: a CA path that will issue an ML-DSA leaf (public CAs
+   The trigger requires **verified runtime interoperability, certificate
+   issuance and ecosystem compatibility**: a CA path that will issue an ML-DSA leaf (public CAs
    will not, so this means an internal CA), plus every intermediary in the
    deployment tolerating a certificate chain roughly two orders of magnitude
    larger than an Ed25519 one, plus browsers and other clients that hit the same
@@ -808,12 +825,15 @@ rather than after a two-repo protocol change.
 
 ## 9. Reproducing the measurements
 
-Nothing in this section is committed. To re-measure, create a throwaway module
+The original benchmark fixtures are not included here. To re-measure, create a throwaway module
 outside the repo with `go 1.27` and a benchmark that:
 
 1. Signs the 129-byte canonical string from section 2.1 with
-   `ed25519.Sign` and with `mldsa.GenerateKey(mldsa.MLDSA87()).Sign` using an
-   empty `&mldsa.Options{}`.
+   `ed25519.Sign` and with ML-DSA-87. First call
+   `sk, err := mldsa.GenerateKey(mldsa.MLDSA87())` and handle the error, then
+   call `sig, err := sk.Sign(nil, message, &mldsa.Options{})` and handle that
+   error. Obtain the public key with `sk.PublicKey()`; the signing reader
+   argument is ignored by this API.
 2. Reports `len(sig)`, `len(pk.Bytes())`, and their base64url and standard-base64
    encoded lengths.
 3. Benchmarks sign, verify, and keygen for Ed25519, ML-DSA-65, and ML-DSA-87,
@@ -824,7 +844,12 @@ For the interoperability check in section 3.5, have the Go side write the raw
 public key, signature, and message as hex; on the Node side wrap the raw public
 key with the 22-byte SPKI prefix, `createPublicKey({format: "der", type:
 "spki"})`, and `verify(null, msg, pubKey, sig)`. Then reverse the direction with
-`generateKeyPairSync("ml-dsa-87")` and `mldsa.NewPublicKey` on the Go side.
+`generateKeyPairSync("ml-dsa-87")`. Export the Node public key as SPKI DER,
+verify and remove the prefix, then call
+`pk, err := mldsa.NewPublicKey(mldsa.MLDSA87(), rawPublicKey)` and handle the
+error. Verify with `mldsa.Verify(pk, message, signature, &mldsa.Options{})`.
+Record the actual Go, Node and OpenSSL versions with the result. This primitive
+check does not establish TLS certificate interoperability.
 
 Re-run this before acting on any trigger in section 7. The numbers are toolchain
 and hardware specific, and `crypto/mldsa` is new enough that its performance is
