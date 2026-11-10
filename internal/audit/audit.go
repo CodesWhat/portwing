@@ -39,7 +39,7 @@
 //
 // Enrollment events add:
 //
-//	"key_id": "<enrolled key ID>"
+//	"key_id": "<enrolled key ID on allowed results; empty on denied results>"
 //
 // # Configuration
 //
@@ -72,7 +72,7 @@ const (
 	EventComposeOp   = "compose_op"   // Docker Compose operation
 	EventAuthFailure = "auth_failure" // invalid token presented
 	EventRateLimited = "rate_limited" // request blocked by rate limiter
-	EventEnrollment  = "enrollment"   // Ed25519 key enrolled via /api/portwing/enroll
+	EventEnrollment  = "enrollment"   // Ed25519 enrollment result via /api/portwing/enroll
 	EventKeyRotation = "key_rotation"
 	// EventSignatureLock records a key being locked to signature version 3
 	// ("lock") or an operator clearing that lock ("clear", "clear_all").

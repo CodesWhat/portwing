@@ -1024,10 +1024,8 @@ func TestDecodeContainerLogLinesPreservesLinesAcrossReadBoundaries(t *testing.T)
 
 // TestResponseIDMatchesRequestID verifies that every response carries the
 // same id as the request that produced it, byte-for-byte, for both a
-// numeric and a string id. Nothing else in this package checks id
-// correlation — the fuzz property only checks jsonrpc=="2.0" — so a bug that
-// swapped or dropped the id (breaking a client's ability to match responses
-// to in-flight requests) could ship unnoticed.
+// numeric and a string id. These fixed cases complement FuzzMCPHandler's
+// raw JSON-RPC response ID correlation checks.
 func TestResponseIDMatchesRequestID(t *testing.T) {
 	h, shutdown := newTestHandler(t)
 	defer shutdown()
