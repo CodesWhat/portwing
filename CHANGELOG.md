@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Clarify required Edge-mode signing keys, optional controller capabilities and
+  the JSON-only fallback for controllers without binary-response support.
+
 ## [v1.2.0] - 2026-11-07
 
 ### Security

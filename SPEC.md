@@ -116,8 +116,10 @@ controller that supports it echoes the value in `welcome.capabilities`, and the
 agent then carries every non-streaming Docker API response body as standard
 base64 in the response message's `bodyBase64` field (legacy `body` left unset),
 which lets non-JSON bodies such as the plain-text `OK` from `GET /_ping` cross
-the wire. A welcome without the value keeps the legacy `body` encoding, so
-older controllers interoperate without a protocol-version bump.
+the wire. When `edge-response-body-b64` is absent from `welcome.capabilities`, including
+when the array is omitted, the agent keeps the legacy JSON-only `body` encoding.
+Non-JSON responses require this capability; without it the agent returns an
+encoding error. JSON responses remain compatible without a protocol-version bump.
 
 `edge-request-body-stream` gates the opposite direction: it tells a
 controller the agent can accept a `request` whose body is not carried inline

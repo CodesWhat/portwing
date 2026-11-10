@@ -290,10 +290,11 @@ just advertised. A controller that supports it echoes the same value in
 `welcome.capabilities`; the agent then carries every non-streaming Docker API
 response body as standard base64 in the response message's `bodyBase64` field
 (with the legacy `body` field left unset), which is what lets a non-JSON body
-such as the plain-text `OK` from `GET /_ping` cross the wire. When the welcome
-carries no `capabilities` — any controller before Drydock support landed — the
-agent keeps the legacy `body` encoding, so the capability degrades gracefully
-without a `portwing/1.0` protocol-version bump.
+such as the plain-text `OK` from `GET /_ping` cross the wire. When `edge-response-body-b64` is absent from `welcome.capabilities`, including
+when the array is omitted, the agent keeps the legacy JSON-only `body` encoding.
+Non-JSON responses require this capability; without it the agent returns an
+encoding error. JSON responses remain compatible without a `portwing/1.0`
+protocol-version bump.
 
 `edge-request-body-stream` runs the opposite direction, and unlike
 `edge-response-body-b64` it is not negotiated against `welcome.capabilities`:
