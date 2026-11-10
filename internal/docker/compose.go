@@ -404,6 +404,17 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving stack lock path: %w", err)
 	}
+	absBase, err := filepath.Abs(cm.stacksDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving stacks directory: %w", err)
+	}
+	physicalBase, err := canonicalStackLockPath(absBase)
+	if err != nil {
+		return "", fmt.Errorf("resolving physical stacks directory: %w", err)
+	}
+	if !pathWithin(physicalBase, lockKey) {
+		return "", fmt.Errorf("stack path %q escapes stacks directory", stackDir)
+	}
 	return lockKey, nil
 }
 
