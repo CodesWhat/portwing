@@ -642,7 +642,7 @@ func TestHandleComposeSuccessPathAuditOutcomeError(t *testing.T) {
 	t.Parallel()
 
 	// ComposeManager.Execute always returns (response, nil) with Success=false
-	// when the command fails (e.g., docker-compose not installed).
+	// when request validation fails, without executing a Compose command.
 	// This exercises lines 356-360 in http.go (the resp.Success=false branch),
 	// including the audit.OutcomeError record that branch is responsible for.
 	client, stop := newStubDockerClient(t)
@@ -662,15 +662,14 @@ func TestHandleComposeSuccessPathAuditOutcomeError(t *testing.T) {
 
 	s := &Server{
 		dockerClient: client,
-		compose:      docker.NewComposeManager("", "1.44", client.GetSocketPath()),
+		compose:      docker.NewComposeManager(t.TempDir(), "1.44", client.GetSocketPath()),
 		rateLimiter:  rl,
 		auditor:      auditor,
 		cfg:          minimalConfig(),
 	}
 
-	// The compose manager with no stacksDir will run validateRequest → returns
-	// {Success:false, Error:...}, nil — exercising lines 356-360.
-	body := `{"operation":"ps","stackName":"mystack"}`
+	// Invalid environment keys produce a deterministic Compose failure.
+	body := `{"operation":"ps","stackName":"mystack","envVars":{"INVALID-NAME":"value"}}`
 	req := httptest.NewRequest(http.MethodPost, "/_portwing/compose", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
@@ -686,7 +685,11 @@ func TestHandleComposeSuccessPathAuditOutcomeError(t *testing.T) {
 		t.Fatalf("decoding response body: %v (body=%s)", err, rec.Body.String())
 	}
 	if resp.Success {
-		t.Fatalf("expected Success=false for a stack directory that doesn't exist, got %+v", resp)
+		t.Fatalf("expected Success=false for the invalid environment key, got %+v", resp)
+	}
+
+	if resp.Error != `invalid env var key: "INVALID-NAME"` {
+		t.Fatalf("error = %q, want the Compose validation detail", resp.Error)
 	}
 
 	// Now verify the audit side effect this test is named for: the

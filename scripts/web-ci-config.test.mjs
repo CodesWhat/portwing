@@ -101,7 +101,11 @@ test("pre-push mirrors the root web lane", () => {
 test("check:web runs knip so dead-code coverage travels with the same gate", () => {
   assert.equal(packageJson.scripts.knip, "knip");
   assert.match(packageJson.scripts["check:web"], /npm run knip &&/);
-  assert.ok(packageJson.devDependencies.knip, "knip must be a pinned devDependency");
+  assert.match(
+    packageJson.devDependencies.knip,
+    /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u,
+    "knip must be a pinned exact version",
+  );
 
   const knipConfig = JSON.parse(fs.readFileSync(path.join(ROOT, "knip.json"), "utf8"));
   for (const workspace of ["website", "docs", "analytics"]) {
