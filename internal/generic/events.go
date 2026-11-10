@@ -106,7 +106,9 @@ func (b *EventBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		events: make(chan []byte, 64),
 	}
 
-	b.registerClient(client)
+	if !b.registerClient(client) {
+		return
+	}
 
 	slog.Info("generic SSE client connected", "clientId", client.id)
 
@@ -144,7 +146,7 @@ func (b *EventBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // registerClient adds a client and, if it is the first one, starts the
 // shared upstream Docker event subscription that will feed it.
-func (b *EventBroadcaster) registerClient(client *sseClient) {
+func (b *EventBroadcaster) registerClient(client *sseClient) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.clients[client.id] = client
@@ -152,8 +154,10 @@ func (b *EventBroadcaster) registerClient(client *sseClient) {
 		if !b.startUpstreamLocked() {
 			delete(b.clients, client.id)
 			close(client.events)
+			return false
 		}
 	}
+	return true
 }
 
 // removeClient cleans up a disconnected client and, if it was the last one,

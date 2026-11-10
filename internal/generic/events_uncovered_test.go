@@ -3,14 +3,33 @@
 package generic
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/codeswhat/portwing/internal/docker"
 )
+
+func TestFailedSSESubscriptionDoesNotLogConnected(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	b := NewEventBroadcaster(nil)
+	b.newEventStream = func(*docker.Client) eventSubscriber { return stubFailingSubscriber{} }
+	b.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/events", nil))
+	if strings.Contains(logs.String(), "generic SSE client connected") {
+		t.Fatalf("failed subscription was logged as connected: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "failed to subscribe") {
+		t.Fatalf("missing subscription failure: %s", logs.String())
+	}
+}
 
 // TestRemoveClientUnknownID exercises the `!ok` early-return in removeClient
 // (events.go) — removing a client id that isn't registered (e.g. a duplicate
