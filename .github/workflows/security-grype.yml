@@ -270,7 +270,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Gosec
-        uses: docker://ghcr.io/securego/gosec@sha256:7bcf1edbab3e80d8006a28d53e7031a9c9775be8eec30679e4adc1f51d272121  # v2.30.0
+        uses: securego/gosec@4504603eddc5a91a7b7713932d6d1d3792126103  # v2.30.0 image
         with:
           # -no-fail keeps gosec itself from deciding the job's outcome. gosec
           # has no native severity cutoff (unlike severity-cutoff: high on the
