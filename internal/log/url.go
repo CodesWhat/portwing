@@ -5,6 +5,7 @@ package log
 import (
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -34,6 +35,7 @@ func SanitizeURLError(err error) string {
 		safe.URL = RedactURL(urlErr.URL)
 		message = strings.ReplaceAll(message, urlErr.Error(), safe.Error())
 		if urlErr.URL != "" {
+			message = strings.ReplaceAll(message, strconv.Quote(urlErr.URL), strconv.Quote(safe.URL))
 			message = strings.ReplaceAll(message, urlErr.URL, safe.URL)
 		}
 	}

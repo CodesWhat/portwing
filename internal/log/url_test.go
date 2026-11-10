@@ -44,6 +44,10 @@ func TestSanitizeURLError(t *testing.T) {
 		{"wrapped", fmt.Errorf("connect: %w", urlErr), `connect: Get "https://controller.example/base": connection refused`},
 		{"wrapper URL", fmt.Errorf("connect %s: %w", raw, urlErr), `connect https://controller.example/base: Get "https://controller.example/base": connection refused`},
 		{"quoted wrapper URL", fmt.Errorf("connect %q: %w", raw, urlErr), `connect "https://controller.example/base": Get "https://controller.example/base": connection refused`},
+		{"escaped quoted URL", func() error {
+			u := &url.Error{Op: "Get", URL: raw + `"`, Err: errors.New("connection refused")}
+			return fmt.Errorf("connect %q: %w", u.URL, u)
+		}(), `connect "https://controller.example/base": Get "https://controller.example/base": connection refused`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := SanitizeURLError(tc.err); got != tc.want {
