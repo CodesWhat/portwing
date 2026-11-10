@@ -33,6 +33,9 @@ func SanitizeURLError(err error) string {
 		safe := *urlErr
 		safe.URL = RedactURL(urlErr.URL)
 		message = strings.ReplaceAll(message, urlErr.Error(), safe.Error())
+		if urlErr.URL != "" {
+			message = strings.ReplaceAll(message, urlErr.URL, safe.URL)
+		}
 	}
 	return Sanitize(message)
 }
