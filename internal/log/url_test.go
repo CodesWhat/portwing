@@ -29,6 +29,7 @@ func TestRedactURL(t *testing.T) {
 
 func TestSanitizeURLError(t *testing.T) {
 	t.Parallel()
+	//nolint:gosec // G101: fake URL credentials exercise diagnostic redaction.
 	raw := "https://user:secret@controller.example/base?credential=secret#secret"
 	urlErr := &url.Error{Op: "Get", URL: raw, Err: errors.New("connection refused")}
 	for _, tc := range []struct {

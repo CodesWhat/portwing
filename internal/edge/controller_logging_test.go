@@ -7,6 +7,7 @@ import "testing"
 func TestEdgeAuditControllerAddressRedactsCredentials(t *testing.T) {
 	t.Parallel()
 	c, logger, _ := newAuditedTestClient(t)
+	//nolint:gosec // G101: fake URL credentials exercise diagnostic redaction.
 	raw := "https://hidden-user:hidden-password@controller.example/base?credential=query-secret#fragment-secret"
 	c.cfg.DrydockURL = raw
 	isExec, admitted := c.admitRawExecStart("POST", "/exec/redaction/start")

@@ -20,6 +20,7 @@ func TestControllerDiagnosticsRedactCredentials(t *testing.T) {
 			previous := slog.Default()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 			t.Cleanup(func() { slog.SetDefault(previous) })
+			//nolint:gosec // G101: fake URL credentials exercise diagnostic redaction.
 			raw := "http://hidden-user:hidden-password@controller.example/base?credential=query-secret#fragment-secret"
 			optIn := "false"
 			if allow {
