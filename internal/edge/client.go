@@ -1359,7 +1359,8 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	if c.handleKeyRotationRequest(ctx, req, target) {
 		return
 	}
-	if strings.HasPrefix(req.Path, composeRequestPrefix) {
+	composePath, _, _ := strings.Cut(req.Path, "?")
+	if composePath == composeRequestPrefix {
 		c.handleComposeRequestTo(ctx, req, target)
 		return
 	}

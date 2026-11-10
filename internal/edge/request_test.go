@@ -574,46 +574,50 @@ func TestHandleRequestJSONBodyRoundTripsThroughBase64WhenNegotiated(t *testing.T
 func TestHandleRequestRoutesComposeToComposeManager(t *testing.T) {
 	t.Parallel()
 
-	c, ctrl := newTestClient(t)
-	fd := &fakeDocker{} // no canned response: a call here means mis-routing to dockerd.
-	c.dockerClient = fd
-	c.compose = docker.NewComposeManager(t.TempDir(), "1.44", "")
+	for _, path := range []string{"/_portwing/compose", "/_portwing/compose?source=controller"} {
+		t.Run(path, func(t *testing.T) {
+			c, ctrl := newTestClient(t)
+			fd := &fakeDocker{} // no canned response: a call here means mis-routing to dockerd.
+			c.dockerClient = fd
+			c.compose = docker.NewComposeManager(t.TempDir(), "1.44", "")
 
-	body, err := json.Marshal(docker.ComposeRequest{
-		// Omitting StackName fails ComposeManager's own validation, so this
-		// exercises the routing without shelling out to a real compose binary.
-		Operation: "up",
-	})
-	if err != nil {
-		t.Fatalf("marshal compose request: %v", err)
-	}
+			body, err := json.Marshal(docker.ComposeRequest{
+				// Omitting StackName fails ComposeManager's own validation, so this
+				// exercises the routing without shelling out to a real compose binary.
+				Operation: "up",
+			})
+			if err != nil {
+				t.Fatalf("marshal compose request: %v", err)
+			}
 
-	c.handleRequest(context.Background(), protocol.RequestMessage{
-		RequestID: "compose-1",
-		Method:    http.MethodPost,
-		Path:      "/_portwing/compose",
-		Body:      body,
-	})
+			c.handleRequest(context.Background(), protocol.RequestMessage{
+				RequestID: "compose-1",
+				Method:    http.MethodPost,
+				Path:      path,
+				Body:      body,
+			})
 
-	var resp protocol.ResponseMessage
-	decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
-	if resp.RequestID != "compose-1" {
-		t.Errorf("RequestID = %q, want compose-1", resp.RequestID)
-	}
+			var resp protocol.ResponseMessage
+			decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+			if resp.RequestID != "compose-1" {
+				t.Errorf("RequestID = %q, want compose-1", resp.RequestID)
+			}
 
-	var composeResp docker.ComposeResponse
-	decodeData(t, resp.Body, &composeResp)
-	if composeResp.Success {
-		t.Error("Success = true, want false for a request missing StackName")
-	}
-	if !strings.Contains(composeResp.Error, "stack name is required") {
-		t.Errorf("Error = %q, want it to mention the missing stack name", composeResp.Error)
-	}
+			var composeResp docker.ComposeResponse
+			decodeData(t, resp.Body, &composeResp)
+			if composeResp.Success {
+				t.Error("Success = true, want false for a request missing StackName")
+			}
+			if !strings.Contains(composeResp.Error, "stack name is required") {
+				t.Errorf("Error = %q, want it to mention the missing stack name", composeResp.Error)
+			}
 
-	fd.mu.Lock()
-	defer fd.mu.Unlock()
-	if len(fd.doCalls) != 0 {
-		t.Errorf("Docker calls = %d, want 0 — compose requests must not reach dockerd", len(fd.doCalls))
+			fd.mu.Lock()
+			defer fd.mu.Unlock()
+			if len(fd.doCalls) != 0 {
+				t.Errorf("Docker calls = %d, want 0 — compose requests must not reach dockerd", len(fd.doCalls))
+			}
+		})
 	}
 }
 
@@ -764,3 +768,27 @@ type unaryFailedBody struct {
 
 func (b *unaryFailedBody) Read(p []byte) (int, error) { return copy(p, b.data), b.err }
 func (*unaryFailedBody) Close() error                 { return nil }
+
+func TestHandleRequestPreservesComposeNeighborPaths(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"/_portwing/compose-extra", "/_portwing/compose/child", "/_portwing/compose-extra?value=1"} {
+		t.Run(path, func(t *testing.T) {
+			c, ctrl := newTestClient(t)
+			//nolint:bodyclose // handleRequest consumes and closes the response body.
+			fd := &fakeDocker{doResp: mkResp(http.StatusNotFound, "application/json", `{"message":"not found"}`)}
+			c.dockerClient = fd
+			c.compose = docker.NewComposeManager(t.TempDir(), "1.44", "")
+			c.handleRequest(context.Background(), protocol.RequestMessage{RequestID: "neighbor", Method: http.MethodPost, Path: path})
+			var resp protocol.ResponseMessage
+			decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+			fd.mu.Lock()
+			defer fd.mu.Unlock()
+			if len(fd.doCalls) != 1 || fd.doCalls[0].path != path {
+				t.Fatalf("neighbor path was not forwarded unchanged: %+v", fd.doCalls)
+			}
+			if resp.StatusCode != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404", resp.StatusCode)
+			}
+		})
+	}
+}
