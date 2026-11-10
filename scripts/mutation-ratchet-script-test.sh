@@ -321,7 +321,7 @@ efficacy_proposals="$(jq '[.proposals[] | select(.metric == "efficacy")] | lengt
 case10="${fixture}/case10"
 mkdir -p "${case10}/records/exactly5"
 write_record "${case10}/records/exactly5" "exactly5" "./internal/exactly5" \
-	"gated" "success" 5 70.00 90.00 70.00 90.00 95
+	"gated" "success" 5 70.00 94.74 70.00 90.00 95 90 5
 : >"${case10}/history.jsonl"
 
 bash "${ratchet}" "${case10}/records" "${case10}/history.jsonl" "${case10}/out.json"
@@ -448,6 +448,17 @@ proposed_without="$(jq -r '.proposals[] | select(.metric == "efficacy") | .propo
 	fail "the discarded row must not change basis: with=${basis_with} without=${basis_without}"
 [ "${proposed_with}" = "${proposed_without}" ] ||
 	fail "the discarded row must not raise (or change) the proposal: with=${proposed_with} without=${proposed_without}"
+
+# Incomplete current counts cannot enter the efficacy pool at its raw score.
+case15="${fixture}/case15"
+write_record "${case15}/records/incomplete" "incomplete" "./internal/incomplete" \
+	"gated" "success" 1 70 95 90 99 99 null 1
+: >"${case15}/history.jsonl"
+bash "${ratchet}" "${case15}/records" "${case15}/history.jsonl" "${case15}/out.json"
+[ "$(jq '[.proposals[] | select(.metric == "efficacy")] | length' "${case15}/out.json")" = "0" ] ||
+	fail "incomplete timed-out current row must not propose an efficacy floor"
+[ "$(jq '[.proposals[] | select(.metric == "mutator_coverage")] | length' "${case15}/out.json")" = "1" ] ||
+	fail "incomplete efficacy counts must not discard independently measured coverage"
 
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} mutation ratchet check(s) failed" >&2

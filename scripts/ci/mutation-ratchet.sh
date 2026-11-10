@@ -200,6 +200,11 @@ while IFS= read -r name; do
 		if [ -z "${measured}" ] || [ -z "${current_floor}" ]; then
 			continue
 		fi
+		# Without both verdict counts this run cannot be discounted for
+		# timeouts. Do not admit its higher, raw efficacy into the pool.
+		if [ "${metric}" = "efficacy" ] && [ "${timed_out}" -gt 0 ] && { [ -z "${killed}" ] || [ -z "${lived}" ]; }; then
+			continue
+		fi
 		pool_ok=1
 
 		# PW-7.36. A timed-out mutant is neither killed nor lived, so it is
