@@ -122,7 +122,8 @@ export default function ComparePage() {
             <p className="cp-sub">
               <Link href="/docs/competitive-landscape#direct-peers-reviewed">
                 Reviewed releases and source evidence
-              </Link>: Portainer 2.45.3, Komodo 2.3.4, Arcane 2.17.1 and Hawser 0.2.52.
+              </Link>
+              : Portainer 2.45.3, Komodo 2.3.4, Arcane 2.17.1 and Hawser 0.2.52.
             </p>
           </div>
         </section>
