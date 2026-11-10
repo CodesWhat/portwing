@@ -390,6 +390,10 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 
 	// Validate stack path is within stacksDir, capturing its canonical form.
 	stackDir := effectiveStackDir(req)
+	physicalBase, err := canonicalStackLockPath(cm.stacksDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving physical stacks directory: %w", err)
+	}
 	stackDirKey, err := cm.resolveStackRoot(stackDir)
 	if err != nil {
 		return "", fmt.Errorf("invalid stack path: %w", err)
@@ -404,25 +408,21 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving stack lock path: %w", err)
 	}
-	absBase, err := filepath.Abs(cm.stacksDir)
-	if err != nil {
-		return "", fmt.Errorf("resolving stacks directory: %w", err)
-	}
-	physicalBase, err := canonicalStackLockPath(absBase)
-	if err != nil {
-		return "", fmt.Errorf("resolving physical stacks directory: %w", err)
-	}
 	if !pathWithin(physicalBase, lockKey) {
 		return "", fmt.Errorf("stack path %q escapes stacks directory", stackDir)
 	}
 	return lockKey, nil
 }
 
-// canonicalStackLockPath resolves existing symlinks for lock identity. Missing
+// canonicalStackLockPath resolves an absolute physical lock identity. Missing
 // suffixes are retained so the first deployment can lock a new stack.
 func canonicalStackLockPath(path string) (string, error) {
-	current, suffix := path, ""
-	for {
+	current, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	suffix := ""
+	for current != filepath.Dir(current) {
 		resolved, err := filepath.EvalSymlinks(current)
 		if err == nil {
 			return filepath.Join(resolved, suffix), nil
@@ -436,12 +436,11 @@ func canonicalStackLockPath(path string) (string, error) {
 			return "", err
 		}
 		parent := filepath.Dir(current)
-		if parent == current {
-			return "", err
-		}
 		suffix = filepath.Join(filepath.Base(current), suffix)
 		current = parent
 	}
+	resolved, err := filepath.EvalSymlinks(current)
+	return filepath.Join(resolved, suffix), err
 }
 
 func validateComposeOperation(operation string) error {

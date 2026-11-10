@@ -1278,3 +1278,66 @@ func TestExecuteRejectsStackAliasOutsideRoot(t *testing.T) {
 		t.Fatalf("Compose ran outside the stack root: %v", err)
 	}
 }
+
+func TestCanonicalStackLockPathRelativeRoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	got, err := canonicalStackLockPath("new-stack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(base, "new-stack"); got != want {
+		t.Fatalf("lock identity = %q, want absolute %q", got, want)
+	}
+}
+
+func TestCanonicalStackLockPathMissingHierarchy(t *testing.T) {
+	t.Parallel()
+	dir, err := os.MkdirTemp("", "pw-root-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(dir) })
+	path := filepath.Join(string(filepath.Separator), filepath.Base(dir), "new-stack")
+	if _, err := os.Lstat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("fixture root must be absent: %v", err)
+	}
+	got, err := canonicalStackLockPath(path)
+	if err != nil || got != path {
+		t.Fatalf("missing hierarchy identity = %q, %v; want %q", got, err, path)
+	}
+}
+
+func TestValidateRequestInvalidConfiguredRoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("this platform retains the removed working directory path")
+	}
+	cm := &ComposeManager{stacksDir: "relative"}
+	_, err := cm.validateRequest(ComposeRequest{StackName: "app"})
+	if err == nil || !strings.Contains(err.Error(), "resolving physical stacks directory") {
+		t.Fatalf("invalid configured root must be reported before stack resolution: %v", err)
+	}
+}
+
+func TestValidateRequestDanglingConfiguredRoot(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base")
+	if err := os.Symlink("missing", base); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: base}
+	_, err := cm.validateRequest(ComposeRequest{StackName: "app"})
+	if err == nil || !strings.Contains(err.Error(), "resolving physical stacks directory") {
+		t.Fatalf("dangling configured root must be reported before stack resolution: %v", err)
+	}
+}
