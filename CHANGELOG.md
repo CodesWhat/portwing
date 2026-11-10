@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep the pinned CI browser image aligned with the updated Playwright package.
 - Clarify required Edge-mode signing keys, optional controller capabilities and
   the JSON-only fallback for controllers without binary-response support.
 - Correct the fuzzing guide: saturated targets replay nightly and are excluded
