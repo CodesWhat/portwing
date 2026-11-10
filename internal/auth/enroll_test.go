@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -539,18 +540,43 @@ func TestEnroller_AppendFailureMissingDirectoryStaysArmed(t *testing.T) {
 }
 
 // Not parallel: swaps the package-level appendAuthorizedKey seam.
-func TestEnroller_AppendFailureAfterOpenKeepsBurn(t *testing.T) {
-	e, _, _ := setupEnroller(t, "secrettok")
-	prev := appendAuthorizedKey
-	t.Cleanup(func() { appendAuthorizedKey = prev })
-	appendAuthorizedKey = func(string, string) error {
-		return errors.New("closing authorized_keys: simulated flush failure")
-	}
-	if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", code)
-	}
-	if code := enrollOnce(t, e, "secrettok"); code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 on retry, got %d", code)
+func TestEnroller_AppendFailureAfterOpenDisarmsProcess(t *testing.T) {
+	for _, prefix := range []string{"", "\n"} {
+		t.Run(fmt.Sprintf("written=%d", len(prefix)), func(t *testing.T) {
+			e, _, path := setupEnroller(t, "secrettok")
+			previous := appendAuthorizedKey
+			t.Cleanup(func() { appendAuthorizedKey = previous })
+			appendAuthorizedKey = func(path string, _ string) error {
+				if err := os.WriteFile(path, []byte(prefix), 0o600); err != nil {
+					return err
+				}
+				return errors.New("simulated append failure after opening authorized_keys")
+			}
+			if code := enrollOnce(t, e, "secrettok"); code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", code)
+			}
+			if e.Armed() {
+				t.Fatal("failed append left this process armed")
+			}
+			if code := enrollOnce(t, e, "secrettok"); code != http.StatusUnauthorized {
+				t.Fatalf("retry status = %d, want 401", code)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil || len(bytes.TrimSpace(data)) != 0 {
+				t.Fatalf("failed append installed persistent state: %q, %v", data, err)
+			}
+			restarted := NewEnroller("secrettok", path, NewKeyRegistry(path))
+			if !restarted.Armed() {
+				t.Fatal("restart could not retry the unsuccessful enrollment")
+			}
+			appendAuthorizedKey = previous
+			if code := enrollOnce(t, restarted, "secrettok"); code != http.StatusOK {
+				t.Fatalf("successful retry status = %d, want 200", code)
+			}
+			if NewEnroller("secrettok", path, NewKeyRegistry(path)).Armed() {
+				t.Fatal("successful enrollment re-armed after restart")
+			}
+		})
 	}
 }
 
