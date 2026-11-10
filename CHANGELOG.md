@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the pinned CI browser image aligned with the updated Playwright package.
+
 ## [v1.2.0] - 2026-11-07
 
 ### Security
