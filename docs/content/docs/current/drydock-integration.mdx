@@ -3,6 +3,13 @@ title: Drydock Integration
 description: How Portwing serves as a Drydock agent — the Drydock-native container model, REST/SSE endpoints, the adapter that maps Drydock expectations onto Docker, and how a Drydock controller registers and communicates with the agent.
 ---
 
+<Callout type="info">
+The documentation site can update before a release finishes publishing. Confirm
+the version is available on the [GitHub releases page](https://github.com/CodesWhat/portwing/releases)
+before using its image or package commands. If publication is still running, use
+the latest completed release.
+</Callout>
+
 Portwing is designed to be a drop-in replacement for the original Drydock Node.js agent. It speaks the same REST and SSE protocol that [Drydock](https://github.com/CodesWhat/drydock)'s `AgentClient` expects, and adds an outbound WebSocket path (Edge Mode) for NAT/firewall-constrained hosts.
 
 ---
