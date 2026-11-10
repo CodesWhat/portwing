@@ -267,12 +267,8 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 	if err := validateComposeOperation(req.Operation); err != nil {
 		return &ComposeResponse{Success: false, Error: err.Error()}, nil
 	}
-	// validateRequest also resolves and returns the canonical stack
-	// directory, so Execute doesn't re-derive and re-validate it a second
-	// time for the lock key below: a second, independent resolveStackRoot
-	// call here could never disagree with validateRequest's (both resolve
-	// the same StackDir/StackName fallback against the same immutable
-	// cm.stacksDir), which left that second call's error branch dead code.
+	// validateRequest returns the physical stack lock identity, including
+	// existing symlink aliases. File operations retain their rooted paths.
 	stackDirKey, err := cm.validateRequest(req)
 	if err != nil {
 		return &ComposeResponse{Success: false, Error: err.Error()}, nil
@@ -353,10 +349,8 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 }
 
 // validateRequest checks the request for invalid or dangerous inputs. On
-// success it also returns the request's canonical (cleaned, absolute) stack
-// directory, so a caller that needs it (Execute, for the per-stack lock key)
-// doesn't have to re-derive and re-validate it with a second call that could
-// never disagree with this one.
+// success it also returns the physical stack lock identity. File operations
+// retain their original paths and the existing os.Root checks.
 func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 	if req.StackName == "" {
 		return "", fmt.Errorf("stack name is required")
@@ -406,7 +400,37 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 		}
 	}
 
-	return stackDirKey, nil
+	lockKey, err := canonicalStackLockPath(stackDirKey)
+	if err != nil {
+		return "", fmt.Errorf("resolving stack lock path: %w", err)
+	}
+	return lockKey, nil
+}
+
+// canonicalStackLockPath resolves existing symlinks for lock identity. Missing
+// suffixes are retained so the first deployment can lock a new stack.
+func canonicalStackLockPath(path string) (string, error) {
+	current, suffix := path, ""
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			return filepath.Join(resolved, suffix), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		// An existing node that cannot resolve is a dangling alias, not a
+		// missing directory suffix that can be appended unchanged.
+		if _, statErr := os.Lstat(current); statErr == nil {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		suffix = filepath.Join(filepath.Base(current), suffix)
+		current = parent
+	}
 }
 
 func validateComposeOperation(operation string) error {

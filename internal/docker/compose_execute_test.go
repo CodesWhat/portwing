@@ -984,7 +984,11 @@ func TestExecuteCanceledStackWaitDoesNotWrite(t *testing.T) {
 				t.Fatal(err)
 			}
 			cm := &ComposeManager{stacksDir: dir, composeBin: filepath.Join(dir, "must-not-run")}
-			unlock, err := cm.lockStack(t.Context(), stack)
+			lockKey, err := cm.validateRequest(ComposeRequest{StackName: "app"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlock, err := cm.lockStack(t.Context(), lockKey)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1005,7 +1009,7 @@ func TestExecuteCanceledStackWaitDoesNotWrite(t *testing.T) {
 				response, err := cm.Execute(ctx, ComposeRequest{Operation: "up", StackName: "app", Files: map[string]string{"compose.yaml": "replacement"}})
 				done <- result{response, err}
 			}()
-			waitForStackReferences(t, cm, stack, 2)
+			waitForStackReferences(t, cm, lockKey, 2)
 			if !deadline {
 				cancel()
 			}
@@ -1013,7 +1017,7 @@ func TestExecuteCanceledStackWaitDoesNotWrite(t *testing.T) {
 			select {
 			case got = <-done:
 				cm.stackLocksMu.Lock()
-				refs := cm.stackLocks[stack].refs
+				refs := cm.stackLocks[lockKey].refs
 				cm.stackLocksMu.Unlock()
 				if refs != 1 {
 					t.Errorf("references after canceled waiter = %d, want owner only", refs)
@@ -1190,4 +1194,87 @@ func TestComposeManagerCancellationRacingRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	unlock()
+}
+
+func TestExecuteSerializesPhysicalStackAliases(t *testing.T) {
+	t.Parallel()
+	for _, suffix := range []string{"", "new-stack", "nested/new-stack"} {
+		t.Run(suffix, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			real := filepath.Join(dir, "real")
+			if err := os.Mkdir(real, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("real", filepath.Join(dir, "alias")); err != nil {
+				t.Fatal(err)
+			}
+			cm := &ComposeManager{stacksDir: dir, composeBin: filepath.Join(dir, "must-not-run")}
+			first := ComposeRequest{Operation: "ps", StackName: "first", StackDir: filepath.Join("real", suffix)}
+			key, err := cm.validateRequest(first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlock, err := cm.lockStack(t.Context(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer unlock()
+			ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+			defer cancel()
+			response, err := cm.Execute(ctx, ComposeRequest{Operation: "ps", StackName: "second", StackDir: filepath.Join("alias", suffix)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.Success || !strings.Contains(response.Error, "waiting for stack: context deadline exceeded") {
+				t.Fatalf("physical alias bypassed the held stack lock: %+v", response)
+			}
+		})
+	}
+}
+
+func TestValidateRequestRejectsUnresolvableStackAlias(t *testing.T) {
+	t.Parallel()
+	for _, dangling := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dangling=%v", dangling), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			stackDir := "file/child"
+			if dangling {
+				stackDir = "alias"
+				if err := os.Symlink("missing", filepath.Join(dir, "alias")); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(filepath.Join(dir, "file"), []byte("not a directory"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cm := &ComposeManager{stacksDir: dir}
+			if _, err := cm.validateRequest(ComposeRequest{StackName: "app", StackDir: stackDir}); err == nil {
+				t.Fatal("unresolvable stack path was accepted")
+			}
+		})
+	}
+}
+
+func TestExecuteRejectsStackAliasOutsideRoot(t *testing.T) {
+	t.Parallel()
+	dir, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "fake-compose.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf invoked > invoked\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: dir, composeBin: script}
+	response, err := cm.Execute(t.Context(), ComposeRequest{Operation: "ps", StackName: "app", StackDir: "outside"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Success {
+		t.Fatal("stack alias escaped the rooted directory")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "invoked")); !os.IsNotExist(err) {
+		t.Fatalf("Compose ran outside the stack root: %v", err)
+	}
 }
