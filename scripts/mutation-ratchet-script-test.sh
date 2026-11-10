@@ -460,6 +460,61 @@ bash "${ratchet}" "${case15}/records" "${case15}/history.jsonl" "${case15}/out.j
 [ "$(jq '[.proposals[] | select(.metric == "mutator_coverage")] | length' "${case15}/out.json")" = "1" ] ||
 	fail "incomplete efficacy counts must not discard independently measured coverage"
 
+# Unknown current timeout counts cannot establish a clean ratchet sample.
+case16="${fixture}/case16"
+write_record "${case16}/records/unknown" "unknown" "./internal/unknown" \
+	"gated" "success" null 70 94.74 90 99 95 90 5
+: >"${case16}/history.jsonl"
+bash "${ratchet}" "${case16}/records" "${case16}/history.jsonl" "${case16}/out.json"
+[ "$(jq '.proposals | length' "${case16}/out.json")" = "0" ] ||
+	fail "unknown timeout count must not be credited as zero for floor proposals"
+[ "$(jq -r '.skipped[0].reason' "${case16}/out.json")" = "unmeasured-counts" ] ||
+	fail "unknown current counts must be recorded as unmeasured"
+
+# Unknown historical timeout counts cannot enter the efficacy pool either.
+case17="${fixture}/case17"
+write_record "${case17}/records/history" "history" "./internal/history" \
+	"gated" "success" 0 70 90 90 99 100 90 10
+write_history_row "history" 55 99 "prior" null 50 50 >"${case17}/history.jsonl"
+bash "${ratchet}" "${case17}/records" "${case17}/history.jsonl" "${case17}/out.json"
+jq -e '.proposals[] | select(.metric=="efficacy") | .basis == 90' "${case17}/out.json" >/dev/null ||
+	fail "unknown historical timeout count must not be admitted as a clean efficacy measurement"
+[ "$(jq '.proposals[] | select(.metric=="efficacy") | .discarded_rows' "${case17}/out.json")" = "1" ] ||
+	fail "unknown historical efficacy must be visibly discarded"
+
+# Malformed counts stay data and cannot reach shell arithmetic.
+case18="${fixture}/case18"
+write_record "${case18}/records/invalid" "invalid" "./internal/invalid" \
+	"gated" "success" 0 70 95 90 99 '"invalid"' 95 5
+: >"${case18}/history.jsonl"
+case18_status=0
+bash "${ratchet}" "${case18}/records" "${case18}/history.jsonl" "${case18}/out.json" || case18_status=$?
+expect_status 0 "${case18_status}" "invalid counts must be reported without aborting the ratchet"
+if [ -f "${case18}/out.json" ]; then
+	[ "$(jq -r '.skipped[0].reason' "${case18}/out.json")" = "unmeasured-counts" ] ||
+		fail "invalid mutant total must be unmeasured"
+fi
+
+# A known zero-verdict run is unmeasured even if nonviable mutants make
+# its timeout percentage look small.
+case19="${fixture}/case19"
+write_record "${case19}/records/no-verdicts" "no-verdicts" "./internal/no-verdicts" \
+	"gated" "success" 1 70 100 90 99 99 0 0
+: >"${case19}/history.jsonl"
+bash "${ratchet}" "${case19}/records" "${case19}/history.jsonl" "${case19}/out.json"
+[ "$(jq '.proposals | length' "${case19}/out.json")" = "0" ] ||
+	fail "a current run without killed/lived verdicts must not propose floors"
+[ "$(jq -r '.skipped[0].reason' "${case19}/out.json")" = "no-verdicts" ] ||
+	fail "a known zero-verdict current run must be visibly unmeasured"
+
+case20="${fixture}/case20"
+write_record "${case20}/records/history" "history" "./internal/history" \
+	"gated" "success" 0 70 90 90 99 100 90 10
+write_history_row "history" 0 99 "prior" 1 0 0 >"${case20}/history.jsonl"
+bash "${ratchet}" "${case20}/records" "${case20}/history.jsonl" "${case20}/out.json"
+[ "$(jq '.proposals[] | select(.metric=="efficacy") | .discarded_rows' "${case20}/out.json")" = "1" ] ||
+	fail "an all-timeout historical efficacy is unmeasured and must be discarded"
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} mutation ratchet check(s) failed" >&2
 	exit 1

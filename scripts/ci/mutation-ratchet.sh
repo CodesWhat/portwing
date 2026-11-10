@@ -96,6 +96,8 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 min_gain_hundredths=200
+# Fifteen digits keep count sums and percentage products within bash integers.
+count_max=999999999999999
 
 # Seed buffers for the two packages called out above. "name:metric" -> floor.
 # A colon, not a pipe: case patterns treat "|" as alternation, so
@@ -158,9 +160,15 @@ while IFS= read -r name; do
 	package="$(jq -r '.package' <<<"${record}")"
 	mode="$(jq -r '.mode' <<<"${record}")"
 	outcome="$(jq -r '.outcome' <<<"${record}")"
-	timed_out="$(jq -r '.timed_out // 0' <<<"${record}")"
-	killed="$(jq -r '.killed // empty' <<<"${record}")"
-	lived="$(jq -r '.lived // empty' <<<"${record}")"
+	counts="$(jq -r --argjson max "${count_max}" '
+        def count:
+          if type == "number" and . == floor and . >= 0 and . <= $max
+          then tostring else "unknown" end;
+        [.timed_out, .mutants_total, .killed, .lived] | map(count) | @tsv
+    ' <<<"${record}")"
+	IFS=$'\t' read -r timed_out mutants_total killed lived <<<"${counts}"
+	[ "${killed}" != "unknown" ] || killed=""
+	[ "${lived}" != "unknown" ] || lived=""
 
 	if [ "${mode}" != "gated" ]; then
 		jq -cn --arg name "${name}" --arg reason "${mode}" '{name: $name, reason: $reason}' >>"${skipped_file}"
@@ -168,6 +176,14 @@ while IFS= read -r name; do
 	fi
 	if [ "${outcome}" != "success" ]; then
 		jq -cn --arg name "${name}" --arg reason "outcome-${outcome}" '{name: $name, reason: $reason}' >>"${skipped_file}"
+		continue
+	fi
+	if [ "${timed_out}" = "unknown" ] || [ "${mutants_total}" = "unknown" ]; then
+		jq -cn --arg name "${name}" '{name: $name, reason: "unmeasured-counts"}' >>"${skipped_file}"
+		continue
+	fi
+	if [ -n "${killed}" ] && [ -n "${lived}" ] && [ "$((killed + lived))" -eq 0 ]; then
+		jq -cn --arg name "${name}" '{name: $name, reason: "no-verdicts"}' >>"${skipped_file}"
 		continue
 	fi
 
@@ -182,7 +198,6 @@ while IFS= read -r name; do
 	# check always passes. Above the tolerance the package is still skipped,
 	# same as before, but with the counts that produced the decision
 	# attached instead of a bare reason string.
-	mutants_total="$(jq -r '.mutants_total // 0' <<<"${record}")"
 	mutants_attempted=$((mutants_total + timed_out))
 	if [ "$((timed_out * 100))" -gt "$((mutants_attempted * 5))" ]; then
 		jq -cn --arg name "${name}" --argjson timed_out "${timed_out}" --argjson mutants "${mutants_attempted}" \
@@ -235,11 +250,15 @@ while IFS= read -r name; do
 		# because a raw value can only be higher than the discounted truth
 		# and could only ever push the minimum up, never down — dropping it
 		# is the conservative branch, and the proposal reports it in
-		# discarded_rows. As of this writing, quality-history:mutation.jsonl
-		# carries 64 rows and none has this shape — every row either carries
-		# the full killed/lived/timed_out/efficacy set or has timed_out == 0
-		# — so this branch has never actually fired against real history.
-		history_result="$(jq -c --arg name "${name}" --arg metric "${metric}" --arg run_id "${GITHUB_RUN_ID:-}" '
+		# discarded_rows. Unknown timeout counts and known zero-verdict runs
+		# are also excluded: neither establishes measured efficacy.
+		history_result="$(jq -c --arg name "${name}" --arg metric "${metric}" --arg run_id "${GITHUB_RUN_ID:-}" --argjson max "${count_max}" '
+            def valid_count: type == "number" and . == floor and . >= 0 and . <= $max;
+            def efficacy_usable:
+              (.timed_out | valid_count)
+              and (if (.killed | valid_count) and (.lived | valid_count)
+                   then (.killed + .lived) > 0
+                   else .timed_out == 0 end);
             [ .[]
               | select(.name == $name and .mode == "gated" and .outcome == "success")
               | select($run_id == "" or ((.run_id // "") | tostring) != $run_id)
@@ -249,12 +268,11 @@ while IFS= read -r name; do
                 values: [ .[]
                   | select(
                       $metric != "efficacy"
-                      or ((.timed_out // 0) == 0)
-                      or (.killed != null and .lived != null)
+                      or efficacy_usable
                     )
                   | (
-                      if $metric == "efficacy" and ((.timed_out // 0) > 0)
-                      then (100 * .killed) / (.killed + .lived + (.timed_out // 0))
+                      if $metric == "efficacy" and (.timed_out > 0)
+                      then (100 * .killed) / (.killed + .lived + .timed_out)
                       else .[$metric]
                       end
                     )
@@ -263,8 +281,7 @@ while IFS= read -r name; do
                 discarded: [ .[]
                   | select(
                       $metric == "efficacy"
-                      and ((.timed_out // 0) > 0)
-                      and (.killed == null or .lived == null)
+                      and (efficacy_usable | not)
                     )
                 ] | length
               }
