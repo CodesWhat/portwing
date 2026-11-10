@@ -7,8 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Update optional Prometheus observability examples to digest-pinned 3.16.0 for
+  upstream security fixes.
+
 ### Fixed
 
+- Serialize internal symlink aliases of the same Compose stack and reject
+  aliases outside the configured stacks directory before running Compose.
+- Retain multiple large quality-history measurements within a bounded byte budget.
+- Stop the Renovate protection helper on failed, ambiguous or malformed ruleset
+  lookups and failed post-update verification.
+- Check the final effective Docker healthcheck and exercise the production
+  ClusterFuzzLite linker-wrapping flag on Linux.
+- Keep dependency review off deleted-branch push events and name the actual
+  emitting script in nightly fuzz error reports.
+- Clarify enrollment storage-failure behavior and verify restart/retry boundaries.
 - Keep the pinned CI browser image aligned with the updated Playwright package.
 
 ## [v1.2.0] - 2026-11-07

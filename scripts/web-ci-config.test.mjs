@@ -207,3 +207,9 @@ test("Vercel deploys main while disabling automatic preview deployments", () => 
   assert.equal(settingForBranch("main", { main: true, "**": false }), true);
   assert.equal(settingForBranch("unspecified", { main: false }), true);
 });
+
+test("dependency review excludes deleted branches while retaining pull requests", () => {
+  const dependencyReview = jobSection(workflow, "dependency-review");
+  assert.match(dependencyReview, /github\.event_name == 'pull_request'/u);
+  assert.match(dependencyReview, /github\.event_name == 'push' && !github\.event\.deleted/u);
+});

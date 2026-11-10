@@ -42,7 +42,7 @@ if (route === "repos/fixture/project/rulesets") {
     const rows = args.includes("--paginate") ? pages.flat() : pages[0];
     process.stdout.write(rows.filter((r) => r.name === target.name).map((r) => String(r.id)).join("\n"));
   } else if (args.includes("--slurp")) {
-    process.stdout.write(JSON.stringify(pages));
+    process.stdout.write(JSON.stringify(args.includes("--paginate") ? pages : [pages[0]]));
   } else {
     process.stdout.write(JSON.stringify(pages[0]));
   }
