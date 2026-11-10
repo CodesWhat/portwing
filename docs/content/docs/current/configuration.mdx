@@ -58,6 +58,23 @@ The following variables govern how Portwing authenticates incoming requests. `TO
 | `ALLOW_UNAUTHENTICATED` | `false` | Explicit development-only opt-in to start Standard mode without a credential. Safe by default only on a loopback `BIND_ADDRESS`. |
 | `ALLOW_UNAUTHENTICATED_REMOTE` | `false` | Additional dangerous opt-in required when an unauthenticated listener binds a non-loopback address. |
 
+### Credential source precedence
+
+When several sources are configured, Portwing selects them in this order:
+
+- Plaintext shared secret: `TOKEN_FILE`, then `DD_AGENT_SECRET_FILE`, then
+  `TOKEN`, then `DD_AGENT_SECRET`. A configured file takes precedence over either
+  inline value.
+- Hash at rest: `TOKEN_HASH_FILE` takes precedence over `TOKEN_HASH`.
+- Authorized keys path: `AUTHORIZED_KEYS` takes precedence over its alias
+  `AUTHORIZED_KEYS_FILE`. Both variables point directly to the key registry.
+- Enrollment secret: `ENROLLMENT_TOKEN` takes precedence over
+  `ENROLLMENT_TOKEN_FILE`.
+
+Selected secret files are read once at startup and their contents are trimmed.
+An unreadable selected file stops startup. Plaintext and hash-at-rest shared
+secret configurations remain mutually exclusive.
+
 <Callout type="warn">
 `TOKEN` stores the secret in plaintext in the process environment. Use `TOKEN_HASH` (Argon2id) for any environment accessible to more than one person, or where secret scanning tools may read process state.
 </Callout>
@@ -129,6 +146,6 @@ These variables mirror Drydock agent configuration names for deployments managed
 
 | Variable | Default | Description |
 |---|---|---|
-| `DD_AGENT_SECRET` | — | Drydock agent secret token. Read before `TOKEN` is applied; `TOKEN` takes precedence if both are set. |
+| `DD_AGENT_SECRET` | — | Fallback plaintext shared secret when `TOKEN` is unset. See credential source precedence above for file overrides. |
 | `DD_AGENT_SECRET_FILE` | — | File containing the Drydock agent secret token. |
 | `DD_POLL_INTERVAL` | `300` | Container inventory refresh interval in seconds (Drydock-compatible polling mode). Range: `1..4611686018` seconds. |
