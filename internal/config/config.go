@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	applog "github.com/codeswhat/portwing/internal/log"
 )
 
 type Config struct {
@@ -186,9 +188,9 @@ func Load() (*Config, error) {
 		scheme := getURLScheme(drydockURL)
 		if scheme == "http" || scheme == "ws" {
 			if !allowInsecureEdgeURL {
-				return nil, fmt.Errorf("refusing plaintext controller URL %q: use https:// or wss://, or set ALLOW_INSECURE_EDGE_URL=true", drydockURL)
+				return nil, fmt.Errorf("refusing plaintext controller URL %q: use https:// or wss://, or set ALLOW_INSECURE_EDGE_URL=true", applog.RedactURL(drydockURL))
 			}
-			slog.Warn("connecting to the controller over a plaintext scheme: the controller's identity is unverified and an on-path attacker can drive dockerd — set ALLOW_INSECURE_EDGE_URL=true only for trusted local testing", "drydockURL", drydockURL)
+			slog.Warn("connecting to the controller over a plaintext scheme: the controller's identity is unverified and an on-path attacker can drive dockerd — set ALLOW_INSECURE_EDGE_URL=true only for trusted local testing", "drydockURL", applog.RedactURL(drydockURL))
 		}
 	}
 

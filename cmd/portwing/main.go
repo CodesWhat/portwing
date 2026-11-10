@@ -112,7 +112,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	if cfg.IsEdgeMode() {
-		slog.Info("starting in edge mode", "url", cfg.DrydockURL)
+		slog.Info("starting in edge mode", "url", applog.RedactURL(cfg.DrydockURL))
 		auditor, auditClose, err := audit.New(cfg.AuditLog, cfg.AuditBufferSize)
 		if err != nil {
 			slog.Error("failed to open audit log", "error", err)
@@ -126,7 +126,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			cancel()
 		}()
 		if err := edgeClient.Run(ctx); err != nil && ctx.Err() == nil {
-			slog.Error("edge client error", "error", applog.Sanitize(err.Error()))
+			slog.Error("edge client error", "error", applog.SanitizeURLError(err))
 			return 1
 		}
 	} else {

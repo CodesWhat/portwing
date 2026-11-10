@@ -386,10 +386,10 @@ func (c *Client) Run(ctx context.Context) error {
 
 		if err != nil {
 			if errors.Is(err, errFatal) {
-				slog.Error("fatal connection error, not retrying", "error", applog.Sanitize(err.Error()))
+				slog.Error("fatal connection error, not retrying", "error", applog.SanitizeURLError(err))
 				return err
 			}
-			slog.Warn("connection lost", "error", applog.Sanitize(err.Error()))
+			slog.Warn("connection lost", "error", applog.SanitizeURLError(err))
 		}
 
 		// Reset backoff after a connection that was actually established, so a
@@ -490,7 +490,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		Proxy:            c.proxyFunc(),
 	}
 
-	slog.Info("connecting to controller", "url", wsURL)
+	slog.Info("connecting to controller", "url", applog.RedactURL(wsURL))
 
 	conn, resp, err := dialer.DialContext(ctx, wsURL, nil)
 	if resp != nil {
@@ -651,7 +651,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		if changed, err := c.keyRotation.Confirm(); err != nil {
 			slog.Warn("controller accepted replacement but local confirmation is pending", "error", err)
 		} else if changed && c.auditor != nil {
-			c.auditor.KeyRotation(c.cfg.DrydockURL, "confirm", c.keyRotation.Status().CurrentKeyID, audit.OutcomeAllowed)
+			c.auditor.KeyRotation(c.redactedControllerURL(), "confirm", c.keyRotation.Status().CurrentKeyID, audit.OutcomeAllowed)
 		}
 	}
 
@@ -1367,7 +1367,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	// A path with no leading slash would be glued to the API version prefix
 	// and routed by the daemon differently than it was classified here.
 	if err := docker.ValidateAPIPath(req.Path); err != nil {
-		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, 0, 0)
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, 0, 0)
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
@@ -1407,7 +1407,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	}
 
 	if err != nil {
-		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, 0, msEdge(start))
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, 0, msEdge(start))
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
@@ -1473,7 +1473,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 				"error", applog.Sanitize(streamErr.Error()))
 		}
 
-		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, outcome, resp.StatusCode, msEdge(start))
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, outcome, resp.StatusCode, msEdge(start))
 		_ = c.sendTypedMessageTo(target, protocol.TypeStreamEnd, protocol.StreamEndMessage{
 			RequestID: req.RequestID,
 			Reason:    reason,
@@ -1482,14 +1482,14 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		// Read body (capped).
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 		if err != nil {
-			c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
+			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("reading Docker response: %v", err),
 				RequestID: req.RequestID,
 			})
 			return
 		}
-		c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, audit.OutcomeAllowed, resp.StatusCode, msEdge(start))
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeAllowed, resp.StatusCode, msEdge(start))
 
 		respMsg := protocol.ResponseMessage{
 			RequestID:   req.RequestID,
@@ -1558,7 +1558,7 @@ func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.Reques
 
 	resp, err := c.compose.Execute(ctx, composeReq)
 	if err != nil {
-		c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, audit.OutcomeError)
+		c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, audit.OutcomeError)
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
@@ -1570,7 +1570,7 @@ func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.Reques
 	if !resp.Success {
 		outcome = audit.OutcomeError
 	}
-	c.auditor.ComposeOp(c.cfg.DrydockURL, composeReq.Operation, composeReq.StackName, outcome)
+	c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, outcome)
 
 	body, err := json.Marshal(resp)
 	if err != nil {
@@ -2224,4 +2224,8 @@ func currentControllerState(connected bool) string {
 		return "connected"
 	}
 	return "disconnected"
+}
+
+func (c *Client) redactedControllerURL() string {
+	return applog.RedactURL(c.cfg.DrydockURL)
 }
