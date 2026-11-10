@@ -149,7 +149,10 @@ func (b *EventBroadcaster) registerClient(client *sseClient) {
 	defer b.mu.Unlock()
 	b.clients[client.id] = client
 	if len(b.clients) == 1 {
-		b.startUpstreamLocked()
+		if !b.startUpstreamLocked() {
+			delete(b.clients, client.id)
+			close(client.events)
+		}
 	}
 }
 
@@ -183,7 +186,7 @@ type eventSubscriber interface {
 // startUpstreamLocked opens the shared docker.EventStream subscription and
 // starts the goroutine that fans its events out to every registered client.
 // Callers must hold mu.
-func (b *EventBroadcaster) startUpstreamLocked() {
+func (b *EventBroadcaster) startUpstreamLocked() bool {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	stream := b.newEventStream(b.dockerClient)
@@ -192,15 +195,16 @@ func (b *EventBroadcaster) startUpstreamLocked() {
 		// EventStream.Subscribe's current implementation never fails
 		// synchronously — it reconnects with backoff internally and only
 		// reports failures via log lines — but don't leave upstreamCancel
-		// unset (and clients waiting on a subscription that never started)
-		// if a future implementation does.
+		// unset with clients waiting on a subscription that never started.
+		// The caller removes and closes the failed client so a reconnect retries.
 		cancel()
 		slog.Error("failed to subscribe to docker events", "error", err)
-		return
+		return false
 	}
 
 	b.upstreamCancel = cancel
 	go b.pumpUpstream(eventCh)
+	return true
 }
 
 // stopUpstreamLocked cancels the shared upstream subscription, if any.
