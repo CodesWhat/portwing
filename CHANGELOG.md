@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.1] - 2026-11-13
+
 ### Security
 
 - Build Portwing and Compose with Go 1.27.4 to include the net/http fix for
