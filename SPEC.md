@@ -637,7 +637,7 @@ in the runtime. The image runs as UID 65532.
 
 Docker CLI 29.9.2 comes from architecture-specific official static downloads
 pinned by SHA256. Compose is built from checksum-pinned upstream 5.5.1 source
-with containerd 2.3.6, x/net 0.60.0 and klauspost/compress 1.20.2 using Go 1.27.3.
+with containerd 2.3.6, x/net 0.60.0 and klauspost/compress 1.20.2 using Go 1.27.4.
 It identifies itself as `v5.5.1-portwing.5` and is available directly and as a
 Docker CLI plugin. Health probes run `/usr/bin/portwing healthcheck` with HTTP
 or TLS, according to the agent configuration.
