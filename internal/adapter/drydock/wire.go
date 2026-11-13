@@ -99,6 +99,11 @@ func toDrydockContainer(container adapter.Container) drydockContainer {
 		registryURL = "docker.io"
 	}
 
+	updateKind := container.UpdateKind
+	if updateKind == "" {
+		updateKind = adapter.UpdateKindUnknown
+	}
+
 	wireContainer := drydockContainer{
 		ID:          container.ID,
 		Name:        container.Name,
@@ -128,7 +133,7 @@ func toDrydockContainer(container adapter.Container) drydockContainer {
 		},
 		Result:          container.Result,
 		UpdateAvailable: container.UpdateAvailable,
-		UpdateKind:      drydockContainerUpdateKind{Kind: "unknown"},
+		UpdateKind:      drydockContainerUpdateKind{Kind: string(updateKind)},
 		IncludeTags:     container.IncludeTags,
 		ExcludeTags:     container.ExcludeTags,
 		TransformTags:   container.TransformTags,

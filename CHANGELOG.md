@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep credentials in controller URLs out of startup, reconnect and audit output.
+- Route only the exact Edge Compose endpoint to the Compose manager, and preserve
+  known update kinds in Drydock container syncs.
+- Close failed SSE subscriptions so the next client can start a fresh subscription.
+- Keep ordinary audit reads out of export counters.
+- Skip unsupported mutation floor proposals when timeout verdict counts are missing,
+  reject survivor records with missing source files, and retain measured survivors
+  when the producer leaves the timeout count unknown.
 - Serialize internal symlink aliases of the same Compose stack and reject
   aliases outside the configured stacks directory before running Compose.
 - Retain multiple large quality-history measurements within a bounded byte budget.
