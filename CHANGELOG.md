@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.1] - 2026-11-13
+
+### Security
+
+- Build Portwing and Compose with Go 1.27.4 to include the net/http fix for
+  GO-2026-6859 (CVE-2026-97054).
+- Bound Compose request-path metadata lookups to the configured stacks root
+  and omit symlink targets from validation errors. Absolute symlink aliases
+  are rejected consistently with rooted file access.
+- Update optional Prometheus observability examples to digest-pinned 3.16.0 for
+  upstream security fixes.
+
+### Fixed
+
+- Enforce numeric mutation floors for the logging package after URL redaction
+  introduced measurable mutants.
+
+- Keep credentials in controller URLs out of startup, reconnect and audit output.
+- Route only the exact Edge Compose endpoint to the Compose manager, and preserve
+  known update kinds in Drydock container syncs.
+- Close failed SSE subscriptions so the next client can start a fresh subscription.
+- Keep ordinary audit reads out of export counters.
+- Skip unsupported mutation floor proposals when timeout verdict counts are missing,
+  reject survivor records with missing source files, and retain measured survivors
+  when the producer leaves the timeout count unknown.
+- Serialize internal symlink aliases of the same Compose stack and reject
+  aliases outside the configured stacks directory before running Compose.
+- Retain multiple large quality-history measurements within a bounded byte budget.
+- Stop the Renovate protection helper on failed, ambiguous or malformed ruleset
+  lookups and failed post-update verification.
+- Check the final effective Docker healthcheck and exercise the production
+  ClusterFuzzLite linker-wrapping flag on Linux.
+- Keep dependency review off deleted-branch push events and name the actual
+  emitting script in nightly fuzz error reports.
+- Clarify enrollment storage-failure behavior and verify restart/retry boundaries.
+- Keep the pinned CI browser image aligned with the updated Playwright package.
+- Clarify required Edge-mode signing keys, optional controller capabilities and
+  the JSON-only fallback for controllers without binary-response support.
+- Correct the fuzzing guide: saturated targets replay nightly and are excluded
+  from the monthly matrix.
+- Align current docs with runtime log-window bounds, diagnostic compatibility
+  warnings, static image contents and the optional Sockguard boundary.
+- Correct the deferred ML-DSA note's runtime prerequisites and reproduction
+  recipe; leave TLS interoperability and historical build provenance unverified.
+
 ## [v1.2.0] - 2026-11-07
 
 ### Security

@@ -151,7 +151,7 @@ A release that changes a stable surface must update the corresponding artifact:
 - the audit logging reference and cursor/export tests for audit schema changes;
 - the configuration reference and parser tests for environment changes;
 - MCP protocol/tool tests for MCP changes;
-- Portwing and Drydock wire-contract tests for edge changes; and
+- Portwing and Drydock wire-contract tests for WebSocket and wire-contract changes; and
 - `COMPATIBILITY.md`, the changelog, and operator documentation for any support
   or deprecation change.
 

@@ -15,7 +15,7 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 |---|---|---|
 | `PORT` | `3000` | TCP port the HTTP server listens on. |
 | `BIND_ADDRESS` | Standard: `0.0.0.0`; Edge: `127.0.0.1` | IP address the HTTP/operations listener binds to. Edge mode defaults to loopback because its operations routes have no inbound authentication, and it refuses a non-loopback address unless `ALLOW_UNAUTHENTICATED_REMOTE=true` is set; use a broader address only on an isolated monitoring network. |
-| `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Portwing operates in Edge mode and connects outbound to Drydock. A plaintext `http://`/`ws://` scheme is rejected at startup unless `ALLOW_INSECURE_EDGE_URL=true`. |
+| `DRYDOCK_URL` | — | WebSocket URL for Edge mode (e.g. `wss://drydock.example.com`). When set, Portwing operates in Edge mode and connects outbound to Drydock. Requires `PRIVATE_KEY_FILE`; omitting it is a startup error. A plaintext `http://`/`ws://` scheme is rejected at startup unless `ALLOW_INSECURE_EDGE_URL=true`. |
 | `ALLOW_INSECURE_EDGE_URL` | `false` | Dangerous opt-in to connect Edge mode to a plaintext `http://`/`ws://` `DRYDOCK_URL`. The controller's identity is otherwise verified by TLS alone, so this is for trusted local testing only. |
 | `TLS_CERT` | — | Path to server TLS certificate (Standard mode). Must be set together with `TLS_KEY`; partial configuration is a startup error. |
 | `TLS_KEY` | — | Path to server TLS private key (Standard mode). Must be set together with `TLS_CERT`; partial configuration is a startup error. |
@@ -25,6 +25,13 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 | `TRUSTED_PROXIES` | — | Comma-separated list of CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`) for reverse proxies whose `X-Forwarded-For` header Portwing will trust for real-IP resolution. When unset, forwarding headers are ignored entirely. |
 | `ALLOWED_ORIGINS` | — | Comma-separated list of exact browser origins (`scheme://host[:port]`, e.g. `https://ops.example.com,http://localhost:5173`) Portwing accepts. Empty by default: any request that carries an `Origin` header is rejected with 403 before authentication. Requests with no `Origin` header are unaffected. Entries must use `http` or `https`, name a host, and carry no path, query, fragment or userinfo; IP hosts must be in canonical form; `*` and anything else is a startup error. Applies in standard mode and to edge mode's operations listener. |
 | `ALLOWED_HOSTS` | — | Comma-separated hostnames (e.g. `portwing.internal.example`) accepted in the `Host` header while authentication is off, and always on edge mode's operations listener. IP addresses, `localhost` and single-label names such as `portwing` are always accepted. Compared case-insensitively; the request's port and one trailing dot are ignored. Entries must be bare hostnames: a scheme, port, path, userinfo or wildcard is a startup error. In standard mode it has no effect when authentication is on. Edge mode's operations listener is checked whatever `TOKEN` is set to, because that listener never authenticates. |
+
+An `authorized_keys` append failure returns HTTP 500. A failure after opening
+the file disarms enrollment in the running process. If no burn or key reached
+storage, a restart can re-arm the same bootstrap credential to retry that
+unsuccessful operation. A successful enrollment is reported only after the burn
+and key have been synced, and remains consumed after restart. A malformed partial
+burn is treated as used.
 
 <Callout type="warn">
 `TRUSTED_PROXIES` affects rate-limiting and IP-based access controls. An over-broad CIDR (e.g. `0.0.0.0/0`) lets any client spoof its source IP, bypassing those controls. Set only the CIDRs of your actual proxy infrastructure.
@@ -48,15 +55,32 @@ The following variables govern how Portwing authenticates incoming requests. `TO
 | `AUTHORIZED_KEYS_FILE` | — | Alias for `AUTHORIZED_KEYS`. |
 | `MAX_CLOCK_SKEW_SECONDS` | `60` | Maximum tolerated clock difference (seconds) between client and agent when validating Ed25519 request timestamps. Range: `1..4611686018` seconds. |
 | `NONCE_LRU_SIZE` | `10000` | Capacity of the in-memory nonce cache used for replay protection. |
-| `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on first use. The burn is recorded as a `# portwing-enrollment-burned` comment in the authorized_keys file and persists across restarts. |
+| `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on successful enrollment. The burn is recorded as a `# portwing-enrollment-burned` comment in the authorized_keys file and persists across restarts. |
 | `ENROLLMENT_TOKEN_FILE` | — | Path to a file containing the enrollment token. |
 | `ALLOW_INSECURE_ENROLLMENT` | `false` | Since v1.2: allow plaintext Model C enrollment for trusted local testing. By default enrollment requires native TLS or exactly one `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES`. The proxy must overwrite the header and the backend listener must stay private. |
 | `SIGNATURE_MIN_VERSION` | `1` | Lowest Ed25519 request signature version accepted for every key: `1` (legacy, the default), `2`, or `3`. Rejected requests answer `signature-version-too-low` after the signature verified. See [Authentication](/authentication#signature-version-3-audience-bound). |
 | `STATE_DIR` | `KEY_ROTATION_DIR`, else `/data/credentials` | Directory for Portwing's own persistent state: the generated agent ID (`agent-id`) and the per-key signature locks (`signature-locks.json`). Created with mode `0700` when set explicitly. The default is used only if it already exists, as in the container images. The directory must be writable and not world-writable (group write is fine). Without a usable directory and without `AGENT_ID`, v3 is refused. The shipped examples mount `/data/credentials`. |
 | `KEY_ROTATION_DIR` | — | Opt-in private persistent directory for controller-assisted Ed25519 rotation. Requires `AUTHORIZED_KEYS` in Standard mode or `PRIVATE_KEY_FILE` in Edge mode. Directory mode must be `0700`; managed files contain credentials and require backup. Available since v1.0; controller assistance requires Drydock v1.8.0-rc.1+ on the v1.8 line. See [Authentication](/authentication#controller-assisted-rotation). |
-| `PRIVATE_KEY_FILE` | — | Path to an Ed25519 private key (PEM PKCS#8) used to sign the agent's Edge-mode hello message. |
+| `PRIVATE_KEY_FILE` | — | Path to an Ed25519 private key (PEM PKCS#8) used to sign the agent's Edge-mode hello message. Required when `DRYDOCK_URL` is set. |
 | `ALLOW_UNAUTHENTICATED` | `false` | Explicit development-only opt-in to start Standard mode without a credential. Safe by default only on a loopback `BIND_ADDRESS`. |
 | `ALLOW_UNAUTHENTICATED_REMOTE` | `false` | Additional dangerous opt-in required when an unauthenticated listener binds a non-loopback address. |
+
+### Credential source precedence
+
+When several sources are configured, Portwing selects them in this order:
+
+- Plaintext shared secret: `TOKEN_FILE`, then `DD_AGENT_SECRET_FILE`, then
+  `TOKEN`, then `DD_AGENT_SECRET`. A configured file takes precedence over either
+  inline value.
+- Hash at rest: `TOKEN_HASH_FILE` takes precedence over `TOKEN_HASH`.
+- Authorized keys path: `AUTHORIZED_KEYS` takes precedence over its alias
+  `AUTHORIZED_KEYS_FILE`. Both variables point directly to the key registry.
+- Enrollment secret: `ENROLLMENT_TOKEN` takes precedence over
+  `ENROLLMENT_TOKEN_FILE`.
+
+Selected secret files are read once at startup and their contents are trimmed.
+An unreadable selected file stops startup. Plaintext and hash-at-rest shared
+secret configurations remain mutually exclusive.
 
 <Callout type="warn">
 `TOKEN` stores the secret in plaintext in the process environment. Use `TOKEN_HASH` (Argon2id) for any environment accessible to more than one person, or where secret scanning tools may read process state.
@@ -78,6 +102,11 @@ unauthenticated listener on a non-loopback address.
 |---|---|---|
 | `DOCKER_SOCKET` | Auto-detect | Path to the Docker Unix socket. Portwing checks `/var/run/docker.sock`, `~/.docker/run/docker.sock`, `~/.orbstack/run/docker.sock`, and `/run/docker.sock` in that order; falls back to `/var/run/docker.sock` if none exist. |
 | `STACKS_DIR` | `/data/stacks` | Directory where Compose stack files are stored and managed. |
+
+Compose stack paths use rooted filesystem access. Relative symlinks that remain
+inside `STACKS_DIR` share the same physical stack lock. Absolute symlinks and
+links that escape the root are rejected. File writes continue to reject symlink
+directory components. Errors for rejected request paths omit symlink targets.
 
 Portwing talks to the Docker daemon over the Unix socket only — there is no `DOCKER_HOST` TCP transport.
 
@@ -129,6 +158,6 @@ These variables mirror Drydock agent configuration names for deployments managed
 
 | Variable | Default | Description |
 |---|---|---|
-| `DD_AGENT_SECRET` | — | Drydock agent secret token. Read before `TOKEN` is applied; `TOKEN` takes precedence if both are set. |
+| `DD_AGENT_SECRET` | — | Fallback plaintext shared secret when `TOKEN` is unset. See credential source precedence above for file overrides. |
 | `DD_AGENT_SECRET_FILE` | — | File containing the Drydock agent secret token. |
 | `DD_POLL_INTERVAL` | `300` | Container inventory refresh interval in seconds (Drydock-compatible polling mode). Range: `1..4611686018` seconds. |

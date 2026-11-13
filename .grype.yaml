@@ -82,8 +82,11 @@
 # GO-2026-4883 and GO-2026-4887 through 2026-08-27, then selected the latter's
 # Go alias on 2026-08-28. Keep both ID pairs scoped below so database alias
 # selection cannot flip the release gate again. The five GHSA entries were
-# then still open: github.com/docker/docker v28.5.2+incompatible was still
-# vendored, and none had a fix on that legacy import path (removed 2026-10-02).
+# covered the vendored github.com/docker/docker v28.5.2+incompatible module.
+# Those entries were removed on 2026-10-02 when that module was no longer
+# shipped. Correction, 2026-11-10: the earlier blanket no-fix claim was too
+# broad. GHSA-x744-4wpc-v9h2 lists Docker Engine 29.3.1 as patched:
+# https://github.com/advisories/GHSA-x744-4wpc-v9h2
 #
 # 2026-08-16 audit (code-scanning alert 191): the v5.4.0 compose binary
 # embeds x/crypto v0.54.0, so the GO-2026-5932 ignore above was re-scoped

@@ -124,3 +124,19 @@ func TestDrydockContainerIncludesRuntimeDetailsAndError(t *testing.T) {
 		t.Fatalf("startedAt = %q, want preserved timestamp", got.Details.StartedAt)
 	}
 }
+
+func TestDrydockContainerPreservesUpdateKind(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []adapter.ContainerUpdateKind{"", adapter.UpdateKindUnknown, adapter.UpdateKindMajor, adapter.UpdateKindMinor, adapter.UpdateKindPatch, adapter.UpdateKindDigest} {
+		t.Run(string(kind), func(t *testing.T) {
+			got := toDrydockContainer(adapter.Container{UpdateKind: kind}).UpdateKind.Kind
+			want := string(kind)
+			if want == "" {
+				want = "unknown"
+			}
+			if got != want {
+				t.Fatalf("kind = %q, want %q", got, want)
+			}
+		})
+	}
+}

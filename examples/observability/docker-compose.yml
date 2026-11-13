@@ -7,7 +7,7 @@
 name: portwing-observability
 
 x-portwing-runtime: &portwing-runtime
-  image: ghcr.io/codeswhat/portwing:1.2.0
+  image: ghcr.io/codeswhat/portwing:1.2.1
   restart: unless-stopped
   read_only: true
   cap_drop: [ALL]
@@ -18,7 +18,7 @@ x-portwing-runtime: &portwing-runtime
     - "${DOCKER_SOCK_GID:?set this to the GID of /var/run/docker.sock}"
 
 x-prometheus-runtime: &prometheus-runtime
-  image: prom/prometheus:v3.10.0-distroless@sha256:4d2174874988fe0d8356fa5c799210767661a2ffce6bb03cdc64306f6579d7b9
+  image: prom/prometheus:v3.16.0-distroless@sha256:e8b8fb0e336fe0affce6f9ea347b11d24975465fd3ba8119420186679c3efd5f
   restart: unless-stopped
   read_only: true
   cap_drop: [ALL]

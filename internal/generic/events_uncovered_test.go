@@ -3,12 +3,33 @@
 package generic
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/codeswhat/portwing/internal/docker"
 )
+
+func TestFailedSSESubscriptionDoesNotLogConnected(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	b := NewEventBroadcaster(nil)
+	b.newEventStream = func(*docker.Client) eventSubscriber { return stubFailingSubscriber{} }
+	b.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/events", nil))
+	if strings.Contains(logs.String(), "generic SSE client connected") {
+		t.Fatalf("failed subscription was logged as connected: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "failed to subscribe") {
+		t.Fatalf("missing subscription failure: %s", logs.String())
+	}
+}
 
 // TestRemoveClientUnknownID exercises the `!ok` early-return in removeClient
 // (events.go) — removing a client id that isn't registered (e.g. a duplicate
@@ -176,5 +197,52 @@ func TestBroadcastDropsOnFullClientBuffer(t *testing.T) {
 		}
 	default:
 		t.Fatal("ok client did not receive the broadcast event")
+	}
+}
+
+type stubSuccessfulSubscriber struct{ events <-chan docker.DockerEvent }
+
+func (s stubSuccessfulSubscriber) Subscribe(context.Context) (<-chan docker.DockerEvent, error) {
+	return s.events, nil
+}
+
+func TestSubscribeFailureAllowsNextClientToRecover(t *testing.T) {
+	t.Parallel()
+	b := NewEventBroadcaster(nil)
+	events := make(chan docker.DockerEvent, 1)
+	defer close(events)
+	attempts := 0
+	b.newEventStream = func(*docker.Client) eventSubscriber {
+		attempts++
+		if attempts == 1 {
+			return stubFailingSubscriber{}
+		}
+		return stubSuccessfulSubscriber{events: events}
+	}
+	failed := &sseClient{id: "failed", events: make(chan []byte, 1)}
+	b.registerClient(failed)
+	defer b.removeClient(failed.id)
+	select {
+	case _, ok := <-failed.events:
+		if ok {
+			t.Fatal("failed subscription delivered an event")
+		}
+	default:
+		t.Fatal("failed subscription left the client waiting")
+	}
+	next := &sseClient{id: "next", events: make(chan []byte, 1)}
+	b.registerClient(next)
+	defer b.removeClient(next.id)
+	if attempts != 2 {
+		t.Fatalf("subscribe attempts = %d, want 2", attempts)
+	}
+	events <- docker.DockerEvent{Type: "container", Action: "start", Actor: docker.Actor{ID: "recovered"}}
+	select {
+	case data := <-next.events:
+		if !strings.Contains(string(data), "recovered") {
+			t.Fatalf("unexpected event: %s", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recovered subscription did not deliver an event")
 	}
 }

@@ -3,6 +3,13 @@ title: Native Installation
 description: Install, verify, configure, upgrade, and remove Portwing with Homebrew, deb, or rpm packages.
 ---
 
+<Callout type="info">
+The documentation site can update before a release finishes publishing. Confirm
+the version is available on the [GitHub releases page](https://github.com/CodesWhat/portwing/releases)
+before using its image or package commands. If publication is still running, use
+the latest completed release.
+</Callout>
+
 Portwing releases ship native packages in addition to the multi-architecture
 container image and tar archives:
 
@@ -39,7 +46,7 @@ Download the package for your architecture from the
 [GitHub release](https://github.com/CodesWhat/portwing/releases). For example:
 
 ```bash
-VERSION=1.2.0
+VERSION=1.2.1
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.deb" \
@@ -58,7 +65,7 @@ Use `linux_arm64.deb` on 64-bit Arm or `linux_armv7.deb` on 32-bit Arm.
 Download the matching package and its signature bundle:
 
 ```bash
-VERSION=1.2.0
+VERSION=1.2.1
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.rpm" \

@@ -175,7 +175,7 @@ jobs:
       # The browsers ship in this image, so nothing downloads them from cdn.playwright.dev (whose
       # block-mode DNS answers disagree with harden-runner, upstream harden-runner#708). The tag
       # must match the exact @playwright/test version; the digest pins the linux/amd64 index.
-      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:bc4fbb329a25287ed23e9216c97063646abdd1bf2da669a9895fa3e2078b2302
 
     steps:
       # The image runs through `docker run` on the host rather than a job-level `container:`,
@@ -392,7 +392,7 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee  # v4.39.0
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
         with:
           # One non-matrix job on purpose. A matrix appends the leg value to
           # the check-run name even with a single entry (drydock requires
@@ -416,7 +416,7 @@ jobs:
         run: go build ./...
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee  # v4.39.0
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
         with:
           category: .github/workflows/ci.yml:codeql
 
@@ -425,7 +425,7 @@ jobs:
     if: >-
       github.event.repository.visibility == 'public' &&
       (github.event_name == 'pull_request' ||
-       (github.event_name == 'push' &&
+       (github.event_name == 'push' && !github.event.deleted &&
         (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -267,12 +267,8 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 	if err := validateComposeOperation(req.Operation); err != nil {
 		return &ComposeResponse{Success: false, Error: err.Error()}, nil
 	}
-	// validateRequest also resolves and returns the canonical stack
-	// directory, so Execute doesn't re-derive and re-validate it a second
-	// time for the lock key below: a second, independent resolveStackRoot
-	// call here could never disagree with validateRequest's (both resolve
-	// the same StackDir/StackName fallback against the same immutable
-	// cm.stacksDir), which left that second call's error branch dead code.
+	// validateRequest returns the physical stack lock identity, including
+	// existing symlink aliases. File operations retain their rooted paths.
 	stackDirKey, err := cm.validateRequest(req)
 	if err != nil {
 		return &ComposeResponse{Success: false, Error: err.Error()}, nil
@@ -353,10 +349,8 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 }
 
 // validateRequest checks the request for invalid or dangerous inputs. On
-// success it also returns the request's canonical (cleaned, absolute) stack
-// directory, so a caller that needs it (Execute, for the per-stack lock key)
-// doesn't have to re-derive and re-validate it with a second call that could
-// never disagree with this one.
+// success it also returns the physical stack lock identity. File operations
+// retain their original paths and the existing os.Root checks.
 func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 	if req.StackName == "" {
 		return "", fmt.Errorf("stack name is required")
@@ -396,8 +390,11 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 
 	// Validate stack path is within stacksDir, capturing its canonical form.
 	stackDir := effectiveStackDir(req)
-	stackDirKey, err := cm.resolveStackRoot(stackDir)
+	physicalBase, err := canonicalStackLockPath(cm.stacksDir)
 	if err != nil {
+		return "", fmt.Errorf("resolving physical stacks directory: %w", err)
+	}
+	if _, err := cm.resolveStackRoot(stackDir); err != nil {
 		return "", fmt.Errorf("invalid stack path: %w", err)
 	}
 	for relPath := range req.Files {
@@ -406,7 +403,69 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 		}
 	}
 
-	return stackDirKey, nil
+	root, err := os.OpenRoot(physicalBase)
+	if os.IsNotExist(err) {
+		// A missing configured root cannot contain request-controlled aliases.
+		return filepath.Join(physicalBase, filepath.Clean(stackDir)), nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolving physical stacks directory: directory is not accessible")
+	}
+	defer func() { _ = root.Close() }()
+	lockKey, err := rootedStackLockPath(root, physicalBase, filepath.Clean(stackDir))
+	if err != nil {
+		return "", fmt.Errorf("stack path is not accessible within stacks directory")
+	}
+	return lockKey, nil
+}
+
+func rootedStackLockPath(root *os.Root, base, relative string) (string, error) {
+	current, suffix := relative, ""
+	for current != "." {
+		if _, err := root.Lstat(current); err == nil {
+			if _, err := root.Stat(current); err != nil {
+				return "", err
+			}
+			// The rooted lookup has bounded every link before canonicalization.
+			resolved, err := filepath.EvalSymlinks(filepath.Join(base, current))
+			return filepath.Join(resolved, suffix), err
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		suffix = filepath.Join(filepath.Base(current), suffix)
+		current = filepath.Dir(current)
+	}
+	return filepath.Join(base, suffix), nil
+}
+
+// canonicalStackLockPath resolves a trusted configured root to an absolute
+// identity. Missing suffixes are retained for first deployment. Request paths
+// use rootedStackLockPath instead.
+func canonicalStackLockPath(path string) (string, error) {
+	current, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	suffix := ""
+	for current != filepath.Dir(current) {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			return filepath.Join(resolved, suffix), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		// An existing node that cannot resolve is a dangling alias, not a
+		// missing directory suffix that can be appended unchanged.
+		if _, statErr := os.Lstat(current); statErr == nil {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		suffix = filepath.Join(filepath.Base(current), suffix)
+		current = parent
+	}
+	resolved, err := filepath.EvalSymlinks(current)
+	return filepath.Join(resolved, suffix), err
 }
 
 func validateComposeOperation(operation string) error {

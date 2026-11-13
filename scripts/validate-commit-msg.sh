@@ -50,7 +50,7 @@ fi
 
 for ctype in "${types[@]}"; do
 	if printf '%s\n' "$first_line" |
-		grep -qE "^${ctype}(\([A-Za-z0-9._/-]+\))?!?: .+"; then
+		grep -E "^${ctype}(\([A-Za-z0-9._/-]+\))?!?: .+" >/dev/null; then
 		exit 0
 	fi
 done

@@ -172,8 +172,7 @@ MUTANT_OK_FILTER='
 
 # The 5-line window around $2 in file $1, whitespace-trimmed per line, each
 # followed by \x1f, hashed and truncated to 12 hex characters. A line before
-# 1 or past EOF (including a missing file entirely) contributes an empty
-# field rather than failing: the window is padding-tolerant by design so a
+# 1 or past EOF contributes an empty field rather than failing: the window is padding-tolerant by design so a
 # mutant near the top of a short file still gets an identity. One awk pass
 # per mutant collects the whole window (and stops reading past it) instead
 # of five separate `sed` scans, each restarting at line 1.
@@ -293,6 +292,11 @@ build_from_raw() {
 			break
 		fi
 
+		if [ ! -f "${src_root}/${real}" ]; then
+			bad=1
+			break
+		fi
+
 		a="$(window_hash "${src_root}/${real}" "${l}")"
 		jq -cn \
 			--arg f "${f}" --arg m "${m}" --arg s "${s}" --arg a "${a}" \
@@ -352,7 +356,8 @@ one_object() {
 # count is the number of `.mutations[].status == "TIMED OUT"` entries,
 # read directly rather than through a proxy field.
 #
-# Three-way exit status, not a boolean: 0 means "yes, all timed out", 1
+# Three-way exit status, not a boolean: 0 means "unmeasured" (all timed out
+# or unknown timeouts without any verdicts), 1
 # means "no, this looks like a real measurement", and 2 means "the fields
 # this depends on are malformed" -- a caller that only checked for 0/nonzero
 # would read 2 the same as 1 and fall through to treating a corrupted
@@ -362,26 +367,29 @@ one_object() {
 # to parse "08" as octal and abort the whole script under `set -e`, since 8
 # and 9 are not valid octal digits.
 #
-# The extraction below never falls back with `// 0`: the workflow always
-# writes `timed_out`/`killed`/`lived` (gated) and `mutants_killed`/
-# `mutants_lived` (advisory) as either a number or an explicit JSON null
-# (see the writer step's `// null`), so there is no legitimate "absent"
-# case to paper over. `// 0` folded `false` and `null` alike into a
-# passing "0" before `is_digits` ever saw them, so a corrupt record with
-# `"killed": false` read as a real zero instead of the malformed value it
-# is. `safe_count` requires an actual non-negative integer and emits the
-# literal string "BAD" for anything else (`null`, `false`, a string, a
-# float, a negative number, or an array/object); `is_digits` then rejects
-# "BAD" the same way it rejects any other non-digit string.
+# Counts remain strictly typed. An explicit null timed_out is documented by
+# the producer when the text line is absent. It means unknown, not zero:
+# positive killed/lived counts still establish measurement; without either
+# verdict the entry stays unmeasured. An absent field is malformed.
 SAFE_COUNT_FILTER='def safe_count: if (type == "number") and (. == floor) and (. >= 0) then tostring else "BAD" end;'
 gated_all_timed_out() {
 	local file="$1"
 	local vals timed_out killed lived
 	vals="$(jq -r "${SAFE_COUNT_FILTER}"'
-        [(.timed_out | safe_count), (.killed | safe_count), (.lived | safe_count)] | @tsv
+        [(if has("timed_out") and .timed_out == null then "UNKNOWN" else (.timed_out | safe_count) end),
+         (.killed | safe_count), (.lived | safe_count)] | @tsv
     ' "${file}" 2>/dev/null || true)"
 	IFS=$'\t' read -r timed_out killed lived <<<"${vals}"
-	if ! is_digits "${timed_out}" || ! is_digits "${killed}" || ! is_digits "${lived}"; then
+	if ! is_digits "${killed}" || ! is_digits "${lived}"; then
+		return 2
+	fi
+	if [ "${timed_out}" = "UNKNOWN" ]; then
+		if [ "$((10#${killed} + 10#${lived}))" -eq 0 ]; then
+			return 0
+		fi
+		return 1
+	fi
+	if ! is_digits "${timed_out}"; then
 		return 2
 	fi
 	if [ "$((10#${timed_out}))" -gt 0 ] && [ "$((10#${killed} + 10#${lived}))" -eq 0 ]; then

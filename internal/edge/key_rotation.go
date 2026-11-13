@@ -55,7 +55,7 @@ func (c *Client) handleKeyRotationRequest(ctx context.Context, req protocol.Requ
 			if code >= 400 {
 				outcome = audit.OutcomeDenied
 			}
-			c.auditor.APIRequest(c.cfg.DrydockURL, req.Method, req.Path, outcome, code, float64(time.Since(start).Microseconds())/1000)
+			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, outcome, code, float64(time.Since(start).Microseconds())/1000)
 		}
 	}()
 	if c.cfg.KeyRotationDir == "" {
@@ -131,7 +131,7 @@ func (c *Client) handleKeyRotationRequest(ctx context.Context, req protocol.Requ
 		if err != nil {
 			outcome = audit.OutcomeError
 		}
-		c.auditor.KeyRotation(c.cfg.DrydockURL, strings.TrimPrefix(action, "/"), caller, outcome)
+		c.auditor.KeyRotation(c.redactedControllerURL(), strings.TrimPrefix(action, "/"), caller, outcome)
 	}
 	if errors.Is(err, auth.ErrRotationInvalid) {
 		fail(http.StatusBadRequest)

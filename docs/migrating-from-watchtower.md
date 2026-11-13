@@ -197,7 +197,7 @@ checked for updates by Drydock.
 | Compose support | Recreate only | Full lifecycle (`up`/`down`/`pull`/`ps`/`logs`) |
 | Exec / terminal | No | Yes (WebSocket) |
 | Self-hosted required | No (just Docker) | Yes (Drydock server) |
-| Resource footprint | ~6 MB compressed image | ~45 MB compressed Portwing image (~10 MB binary) + Drydock server |
+| Resource footprint | ~6 MB compressed image | Portwing image includes Docker/Compose clients; Drydock runs separately |
 
 ---
 

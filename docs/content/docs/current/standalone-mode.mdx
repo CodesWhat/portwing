@@ -3,6 +3,13 @@ title: Standalone Mode
 description: Run Portwing as a hardened remote Docker API without a Drydock platform connection, using the generic REST adapter.
 ---
 
+<Callout type="info">
+The documentation site can update before a release finishes publishing. Confirm
+the version is available on the [GitHub releases page](https://github.com/CodesWhat/portwing/releases)
+before using its image or package commands. If publication is still running, use
+the latest completed release.
+</Callout>
+
 Portwing normally operates in one of two connection modes — edge (WebSocket to Drydock) or standard (Drydock-compatible HTTP server). **Standalone mode** is a third option: set `ADAPTER=generic` and Portwing becomes a self-contained, security-hardened remote Docker API with no external controller required.
 
 The generic adapter exposes a clean REST and SSE surface under `/api/v1/*`, backed directly by the local Docker daemon. Everything else — auth enforcement, rate limiting, TLS, the Docker API passthrough, the MCP server, health endpoints — works identically to the other modes.
@@ -21,7 +28,7 @@ docker run -d \
   -e ADAPTER=generic \
   -e TOKEN=my-secret \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/codeswhat/portwing:1.2.0
+  ghcr.io/codeswhat/portwing:1.2.1
 ```
 
 <Callout type="warn">
@@ -54,7 +61,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ```json
 {
-  "agentVersion": "1.2.0",
+  "agentVersion": "1.2.1",
   "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"
@@ -155,7 +162,7 @@ curl -sf http://localhost:3000/_portwing/health
   "live": true,
   "ready": true,
   "mode": "standard",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "uptimeSeconds": 3842.7,
   "docker": "connected",
   "controller": "not_applicable"

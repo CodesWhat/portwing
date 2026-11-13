@@ -82,11 +82,10 @@ isn't committed before the cache is pruned.
 
 `FuzzParseImageRef` and `FuzzParseLabels` are the exception: both are
 saturated (millions of executions, zero new interesting inputs), so the
-nightly and monthly lanes run them as a seed-replay only — the committed and
-cached corpus replayed through `go test -run`, no `-fuzz` minutes, no growth
-in `$GOCACHE/fuzz/` for either — while still catching a regression in what's
-already committed. The command above still runs a real 5-second `-fuzz` smoke
-for them locally; only the CI lanes' cadence differs.
+nightly lane replays their committed and cached corpus through `go test -run`,
+with no `-fuzz` minutes or growth in `$GOCACHE/fuzz/`. The monthly lane excludes
+these two targets. Nightly replay still catches regressions in the existing
+corpus. The command above runs a real 5-second `-fuzz` smoke for them locally.
 
 ### Benchmarks
 

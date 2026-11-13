@@ -3,6 +3,13 @@ title: Drydock Integration
 description: How Portwing serves as a Drydock agent — the Drydock-native container model, REST/SSE endpoints, the adapter that maps Drydock expectations onto Docker, and how a Drydock controller registers and communicates with the agent.
 ---
 
+<Callout type="info">
+The documentation site can update before a release finishes publishing. Confirm
+the version is available on the [GitHub releases page](https://github.com/CodesWhat/portwing/releases)
+before using its image or package commands. If publication is still running, use
+the latest completed release.
+</Callout>
+
 Portwing is designed to be a drop-in replacement for the original Drydock Node.js agent. It speaks the same REST and SSE protocol that [Drydock](https://github.com/CodesWhat/drydock)'s `AgentClient` expects, and adds an outbound WebSocket path (Edge Mode) for NAT/firewall-constrained hosts.
 
 ---
@@ -257,7 +264,7 @@ Handshake sequence:
 {
   "type": "hello",
   "data": {
-    "version": "1.2.0",
+    "version": "1.2.1",
     "protocol": "portwing/1.0",
     "agentId": "uuid",
     "agentName": "my-server",
@@ -290,10 +297,11 @@ just advertised. A controller that supports it echoes the same value in
 `welcome.capabilities`; the agent then carries every non-streaming Docker API
 response body as standard base64 in the response message's `bodyBase64` field
 (with the legacy `body` field left unset), which is what lets a non-JSON body
-such as the plain-text `OK` from `GET /_ping` cross the wire. When the welcome
-carries no `capabilities` — any controller before Drydock support landed — the
-agent keeps the legacy `body` encoding, so the capability degrades gracefully
-without a `portwing/1.0` protocol-version bump.
+such as the plain-text `OK` from `GET /_ping` cross the wire. When `edge-response-body-b64` is absent from `welcome.capabilities`, including
+when the array is omitted, the agent keeps the legacy JSON-only `body` encoding.
+Non-JSON responses require this capability; without it the agent returns an
+encoding error. JSON responses remain compatible without a `portwing/1.0`
+protocol-version bump.
 
 `edge-request-body-stream` runs the opposite direction, and unlike
 `edge-response-body-b64` it is not negotiated against `welcome.capabilities`:
@@ -506,7 +514,7 @@ These are set in Drydock's agent component configuration, not environment variab
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.2.0
+    image: ghcr.io/codeswhat/portwing:1.2.1
     environment:
       TOKEN: "${DD_AGENT_SECRET}"
       PORT: "3000"
