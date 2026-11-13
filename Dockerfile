@@ -4,7 +4,7 @@
 # From-source equivalent of Dockerfile.release.
 
 # Stage 1: Build the binary from source.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS builder
 RUN apk add --no-cache git
 ARG TARGETARCH
 WORKDIR /src
@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 \
     go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwing
 
 # Compose v5.5.1 with patched containerd and x/net, isolated from Portwing modules.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS compose-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS compose-builder
 ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee621025f2 https://github.com/docker/compose/archive/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de.tar.gz /tmp/compose.tar.gz
 ARG TARGETARCH
 WORKDIR /compose

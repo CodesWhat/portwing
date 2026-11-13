@@ -58,8 +58,8 @@
 #                                   that invocation; the append itself still
 #                                   happens).
 #   QUALITY_HISTORY_RETAIN_BYTES    byte ceiling enforced alongside RETAIN,
-#                                   default 1048576 (1 MiB) once RETAIN is
-#                                   set. Whole oldest records are dropped
+#                                   default 2 MiB per retained record, capped
+#                                   at 64 MiB. Whole oldest records are dropped
 #                                   until the file fits or only the newest
 #                                   record remains; the newest record is
 #                                   never dropped, even if it alone exceeds
@@ -227,7 +227,9 @@ esac
 
 retain_bytes="${QUALITY_HISTORY_RETAIN_BYTES:-}"
 if [ -n "${retain}" ] && [ -z "${retain_bytes}" ]; then
-	retain_bytes=1048576
+	# A survivor payload can reach 1 MiB before its run envelope is added.
+	# Scale with the count cap so multiple large measurements remain usable.
+	retain_bytes="$(awk -v n="${retain}" 'BEGIN { bytes = n * 2097152; if (bytes > 67108864) bytes = 67108864; printf "%.0f", bytes }')"
 fi
 case "${retain_bytes}" in
 '') ;;

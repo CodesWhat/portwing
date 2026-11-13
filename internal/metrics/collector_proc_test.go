@@ -316,56 +316,26 @@ MemAvailable:    1024000 kB
 	}
 }
 
-// TestReadMemInfoSkipsColonlessLineBeforeMemTotal verifies a line with no
-// ":" preceding MemTotal is skipped rather than ending the scan, killing the
-// INVERT_LOOPCTRL mutant at collector.go:260:4 (`continue` -> `break`). The
-// existing TestCollectMemoryFixtureMalformedLine puts its colon-less line
-// AFTER MemTotal, so it does not exercise this mutant; this test puts it
-// first. Real code skips the bad line via `continue` and reaches MemTotal.
-// The mutant's `break` stops at the very first line, before MemTotal is ever
-// parsed, leaving mi.total at 0.
-func TestReadMemInfoSkipsColonlessLineBeforeMemTotal(t *testing.T) {
+// Malformed lines before MemTotal must be skipped, so neither parser branch
+// can end collection before the valid memory figures are reached.
+func TestReadMemInfoSkipsMalformedPrefix(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	mkProcFixture(t, dir, "meminfo", `this line has no colon
-MemTotal:       2048000 kB
-MemFree:         1024000 kB
-`)
-	mi, err := readMemInfo(dir)
-	if err != nil {
-		t.Fatalf("readMemInfo: %v", err)
-	}
-	wantTotal := uint64(2048000 * 1024)
-	if mi.total != wantTotal {
-		t.Errorf("mi.total = %d, want %d", mi.total, wantTotal)
-	}
-	if mi.free == 0 {
-		t.Error("mi.free = 0, want nonzero (MemFree line should have been reached)")
-	}
-}
-
-// TestReadMemInfoSkipsUnparseableValueBeforeMemTotal verifies a line with an
-// unparseable value preceding MemTotal is skipped rather than ending the
-// scan, killing the INVERT_LOOPCTRL mutant at collector.go:270:4 (`continue`
-// -> `break`). The existing TestCollectMemoryFixtureBadValue puts its
-// bad-value line at MemTotal itself and only asserts MemoryTotal == 0 (true
-// either way), so it does not exercise this mutant; this test puts the
-// bad-value key before MemTotal and asserts MemTotal parses. Real code skips
-// the unparseable line via `continue` and reaches MemTotal. The mutant's
-// `break` exits before ever reaching MemTotal, leaving mi.total at 0.
-func TestReadMemInfoSkipsUnparseableValueBeforeMemTotal(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	mkProcFixture(t, dir, "meminfo", `Weird:          NOTANUMBER kB
-MemTotal:       2048000 kB
-`)
-	mi, err := readMemInfo(dir)
-	if err != nil {
-		t.Fatalf("readMemInfo: %v", err)
-	}
-	wantTotal := uint64(2048000 * 1024)
-	if mi.total != wantTotal {
-		t.Errorf("mi.total = %d, want %d", mi.total, wantTotal)
+	for _, tc := range []struct{ name, prefix string }{
+		{"colonless", "this line has no colon"},
+		{"invalid number", "Weird: NOTANUMBER kB"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			mkProcFixture(t, dir, "meminfo", tc.prefix+"\nMemTotal: 2048000 kB\nMemFree: 1024000 kB\n")
+			mi, err := readMemInfo(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mi.total != 2048000*1024 || mi.free != 1024000*1024 {
+				t.Fatalf("memory figures after malformed line = total %d, free %d", mi.total, mi.free)
+			}
+		})
 	}
 }
 

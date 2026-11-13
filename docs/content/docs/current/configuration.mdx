@@ -26,6 +26,13 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 | `ALLOWED_ORIGINS` | — | Comma-separated list of exact browser origins (`scheme://host[:port]`, e.g. `https://ops.example.com,http://localhost:5173`) Portwing accepts. Empty by default: any request that carries an `Origin` header is rejected with 403 before authentication. Requests with no `Origin` header are unaffected. Entries must use `http` or `https`, name a host, and carry no path, query, fragment or userinfo; IP hosts must be in canonical form; `*` and anything else is a startup error. Applies in standard mode and to edge mode's operations listener. |
 | `ALLOWED_HOSTS` | — | Comma-separated hostnames (e.g. `portwing.internal.example`) accepted in the `Host` header while authentication is off, and always on edge mode's operations listener. IP addresses, `localhost` and single-label names such as `portwing` are always accepted. Compared case-insensitively; the request's port and one trailing dot are ignored. Entries must be bare hostnames: a scheme, port, path, userinfo or wildcard is a startup error. In standard mode it has no effect when authentication is on. Edge mode's operations listener is checked whatever `TOKEN` is set to, because that listener never authenticates. |
 
+An `authorized_keys` append failure returns HTTP 500. A failure after opening
+the file disarms enrollment in the running process. If no burn or key reached
+storage, a restart can re-arm the same bootstrap credential to retry that
+unsuccessful operation. A successful enrollment is reported only after the burn
+and key have been synced, and remains consumed after restart. A malformed partial
+burn is treated as used.
+
 <Callout type="warn">
 `TRUSTED_PROXIES` affects rate-limiting and IP-based access controls. An over-broad CIDR (e.g. `0.0.0.0/0`) lets any client spoof its source IP, bypassing those controls. Set only the CIDRs of your actual proxy infrastructure.
 </Callout>
@@ -48,7 +55,7 @@ The following variables govern how Portwing authenticates incoming requests. `TO
 | `AUTHORIZED_KEYS_FILE` | — | Alias for `AUTHORIZED_KEYS`. |
 | `MAX_CLOCK_SKEW_SECONDS` | `60` | Maximum tolerated clock difference (seconds) between client and agent when validating Ed25519 request timestamps. Range: `1..4611686018` seconds. |
 | `NONCE_LRU_SIZE` | `10000` | Capacity of the in-memory nonce cache used for replay protection. |
-| `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on first use. The burn is recorded as a `# portwing-enrollment-burned` comment in the authorized_keys file and persists across restarts. |
+| `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on successful enrollment. The burn is recorded as a `# portwing-enrollment-burned` comment in the authorized_keys file and persists across restarts. |
 | `ENROLLMENT_TOKEN_FILE` | — | Path to a file containing the enrollment token. |
 | `ALLOW_INSECURE_ENROLLMENT` | `false` | Since v1.2: allow plaintext Model C enrollment for trusted local testing. By default enrollment requires native TLS or exactly one `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES`. The proxy must overwrite the header and the backend listener must stay private. |
 | `SIGNATURE_MIN_VERSION` | `1` | Lowest Ed25519 request signature version accepted for every key: `1` (legacy, the default), `2`, or `3`. Rejected requests answer `signature-version-too-low` after the signature verified. See [Authentication](/authentication#signature-version-3-audience-bound). |
@@ -95,6 +102,11 @@ unauthenticated listener on a non-loopback address.
 |---|---|---|
 | `DOCKER_SOCKET` | Auto-detect | Path to the Docker Unix socket. Portwing checks `/var/run/docker.sock`, `~/.docker/run/docker.sock`, `~/.orbstack/run/docker.sock`, and `/run/docker.sock` in that order; falls back to `/var/run/docker.sock` if none exist. |
 | `STACKS_DIR` | `/data/stacks` | Directory where Compose stack files are stored and managed. |
+
+Compose stack paths use rooted filesystem access. Relative symlinks that remain
+inside `STACKS_DIR` share the same physical stack lock. Absolute symlinks and
+links that escape the root are rejected. File writes continue to reject symlink
+directory components. Errors for rejected request paths omit symlink targets.
 
 Portwing talks to the Docker daemon over the Unix socket only — there is no `DOCKER_HOST` TCP transport.
 

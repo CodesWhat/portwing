@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: prometheus
-          image: prom/prometheus:v3.10.0-distroless@sha256:4d2174874988fe0d8356fa5c799210767661a2ffce6bb03cdc64306f6579d7b9
+          image: prom/prometheus:v3.16.0-distroless@sha256:e8b8fb0e336fe0affce6f9ea347b11d24975465fd3ba8119420186679c3efd5f
           args:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus

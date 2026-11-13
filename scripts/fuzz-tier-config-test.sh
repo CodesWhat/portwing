@@ -301,7 +301,7 @@ for workflow in .github/workflows/quality-fuzz-nightly.yml .github/workflows/qua
 	# path go itself never reads from, silently, forever. step_block's
 	# occurrence param walks every "Resolve corpus paths" step in the file
 	# rather than only the first.
-	corpus_step_count="$(grep -c '^      - name: Resolve corpus paths$' "${workflow}")"
+	corpus_step_count="$(grep -c '^      - name: Resolve corpus paths$' "${workflow}" || true)"
 	if [ "${corpus_step_count}" -eq 0 ]; then
 		fail "${workflow} must have a 'Resolve corpus paths' step"
 	fi
