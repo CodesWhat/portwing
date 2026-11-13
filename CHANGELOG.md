@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Build Portwing and Compose with Go 1.27.4 to include the net/http fix for
+  GO-2026-6859 (CVE-2026-97054).
 - Bound Compose request-path metadata lookups to the configured stacks root
   and omit symlink targets from validation errors. Absolute symlink aliases
   are rejected consistently with rooted file access.

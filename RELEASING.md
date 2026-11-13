@@ -275,7 +275,7 @@ the Git-backed deployment or update its GitHub status.
    metadata and CA certificates alongside static binaries. Docker CLI 29.9.2
    is an official per-architecture download pinned by SHA256 and built with Go
    1.26.10. Compose is built from checksum-pinned upstream 5.5.1 source with
-   containerd 2.3.6, x/net 0.60.0, compression 1.20.2 and Go 1.27.3, identifies
+   containerd 2.3.6, x/net 0.60.0, compression 1.20.2 and Go 1.27.4, identifies
    itself as `v5.5.1-portwing.5`, and runs directly or as a CLI plugin.
    The recipes omit glibc packages and BusyBox. Image health checks use
    `portwing healthcheck` for HTTP/TLS probes, with HTTPS pinned to the
