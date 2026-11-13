@@ -100,7 +100,10 @@ jobs:
             mcover: 100
           - name: log
             package: ./internal/log
-            zero_mutants: true
+            # URL redaction added four default-mutator targets. Run43342158262
+            # killed all four with zero timeouts: 100% efficacy and coverage.
+            efficacy: 100
+            mcover: 100
           - name: mcp
             package: ./internal/mcp
             efficacy: 93.78
@@ -779,7 +782,7 @@ jobs:
               ./cmd/portwing|portwing|100
               ./internal/banner|banner|76.92
               ./internal/config|config|97.75
-              ./internal/log|log|
+              ./internal/log|log|100
               ./internal/pool|pool|50.00|40
               ./internal/protocol|protocol|100|40
 
@@ -914,12 +917,10 @@ jobs:
 
             # Gremlins v0.6.0's report.Do() returns without writing the JSON
             # file when there are zero mutants of the requested types
-            # (report.go:71-73, 243-249), and still exits 0. internal/log
-            # produces zero mutants of these six advisory types, so a missing
-            # report here means "nothing to mutate", not "gremlins failed".
-            # Conflating the two would mislabel it unavailable forever; the
-            # gating matrix's zero_mutants convention for the same package is
-            # the model, an explicit zero row rather than a blank one.
+            # (report.go:71-73, 243-249), and still exits 0. Record that case
+            # as an explicit zero row rather than unavailable. Default-mutator
+            # floors are independent of whether these advisory types produce
+            # mutants for a particular package.
             if [ ! -f "${report}" ]; then
               echo "advisory: ${name} produced no mutants of any advisory type; recording zero-mutants"
               headline_rows+=("| \`${package}\` | 0 | 0 | 0 | 0 | n/a |")

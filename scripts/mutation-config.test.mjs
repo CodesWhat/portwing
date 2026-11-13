@@ -93,7 +93,7 @@ const expectedFloors = new Map([
   ["./internal/docker", [93.48, 93.68]],
   ["./internal/edge", [85.54, 91]],
   ["./internal/generic", [99, 100]],
-  ["./internal/log", null],
+  ["./internal/log", [100, 100]],
   ["./internal/mcp", [93.78, 87.97]],
   ["./internal/metrics", [90, 83.04]],
   ["./internal/pool", [50, 80]],
@@ -152,11 +152,10 @@ function assertMutationWorkflow(source, expectedPackages = productionPackagePath
     const expectedFloor = expectedFloors.get(entry.package);
     if (entry.zero_mutants === "true") {
       assert.equal(
-        entry.name,
-        "log",
-        "only the measured zero-mutant package may use the exception",
+        expectedFloor,
+        null,
+        "a package with measured floors cannot use the zero-mutant exception",
       );
-      assert.equal(expectedFloor, null);
       assert.equal(entry.efficacy, undefined);
       assert.equal(entry.mcover, undefined);
     } else {
@@ -456,11 +455,9 @@ function assertAdvisoryJob(source, entries) {
 
   // Gremlins v0.6.0's report.Do() exits 0 without writing the JSON file when
   // a package has zero mutants of the requested types (report.go:71-73,
-  // 243-249). internal/log is exactly that case among the six advisory
-  // mutators; without this branch a report-less success reads as
-  // "unavailable" forever instead of "measured zero", the same distinction
-  // the gating matrix's own zero_mutants convention draws for the same
-  // package.
+  // 243-249). Without this branch a report-less success reads as
+  // "unavailable" instead of "measured zero". The default-mutator floors
+  // remain independent of which advisory types produce mutants.
   assert.match(
     advisory,
     /^ {12}if \[ ! -f "\$\{report\}" \]; then$/mu,
@@ -1127,6 +1124,18 @@ test("mutation workflow covers production packages with numeric ratchets", () =>
   assertMutationWorkflow(workflow);
 });
 
+test("mutation contract rejects returning the measured log package to zero-mutant mode", () => {
+  const stale = workflow.replace(
+    /(- name: log\n +package: \.\/internal\/log\n)(?: +#[^\n]*\n)* +efficacy: 100\n +mcover: 100/u,
+    "$1            zero_mutants: true",
+  );
+  assert.notEqual(stale, workflow, "fixture must restore the stale zero-mutant declaration");
+  assert.throws(
+    () => assertMutationWorkflow(stale),
+    /a package with measured floors cannot use the zero-mutant exception/u,
+  );
+});
+
 test("mutation contract rejects a missing package", () => {
   assertMutationFailure(
     workflow.replace("./internal/pool", "./internal/missing"),
@@ -1702,7 +1711,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
       '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
     )
     .replace(
-      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run\n            # 33901506579 (2026-09-04): killed 68, lived 3 across\n            # ./internal/server. Floor is floor(measured) - 2pp of slack.\n            floor: 93\n            packages: |\n              ./internal/server|server|84.74\n          - group: edge\n            # Measured 82.56% in run 33901506579 (2026-09-04): killed 71,\n            # lived 15 across ./internal/edge.\n            floor: 80\n            packages: |\n              ./internal/edge|edge|85.54\n          - group: generic\n            # Measured 83.33% in run 33901506579 (2026-09-04): killed 5,\n            # lived 1 across ./internal/generic.\n            floor: 81\n            packages: |\n              ./internal/generic|generic|99.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock's tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            #\n            # Measured 94.02% in run 33901506579 (2026-09-04): killed 110,\n            # lived 7 summed across adapter, adapter-drydock, auth and audit.\n            floor: 92\n            packages: |\n              ./internal/adapter|adapter|93.78\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            # Measured 94.52% in run 33901506579 (2026-09-04): killed 138,\n            # lived 8 summed across docker, mcp and metrics.\n            floor: 92\n            packages: |\n              ./internal/docker|docker|93.48\n              ./internal/mcp|mcp|93.78\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            # Measured 92.86% in run 33901506579 (2026-09-04): killed 39,\n            # lived 3 summed across portwing, banner, config, log, pool and\n            # protocol.\n            floor: 90\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|97.75\n              ./internal/log|log|\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run\n            # 33901506579 (2026-09-04): killed 68, lived 3 across\n            # ./internal/server. Floor is floor(measured) - 2pp of slack.\n            floor: 93\n            packages: |\n              ./internal/server|server|84.74\n          - group: edge\n            # Measured 82.56% in run 33901506579 (2026-09-04): killed 71,\n            # lived 15 across ./internal/edge.\n            floor: 80\n            packages: |\n              ./internal/edge|edge|85.54\n          - group: generic\n            # Measured 83.33% in run 33901506579 (2026-09-04): killed 5,\n            # lived 1 across ./internal/generic.\n            floor: 81\n            packages: |\n              ./internal/generic|generic|99.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock's tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            #\n            # Measured 94.02% in run 33901506579 (2026-09-04): killed 110,\n            # lived 7 summed across adapter, adapter-drydock, auth and audit.\n            floor: 92\n            packages: |\n              ./internal/adapter|adapter|93.78\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            # Measured 94.52% in run 33901506579 (2026-09-04): killed 138,\n            # lived 8 summed across docker, mcp and metrics.\n            floor: 92\n            packages: |\n              ./internal/docker|docker|93.48\n              ./internal/mcp|mcp|93.78\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            # Measured 92.86% in run 33901506579 (2026-09-04): killed 39,\n            # lived 3 summed across portwing, banner, config, log, pool and\n            # protocol.\n            floor: 90\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|97.75\n              ./internal/log|log|100\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
       "",
     );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");
@@ -1710,7 +1719,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
 
 test("mutation contract rejects an advisory group that drops a package", () => {
   assertMutationFailure(
-    workflow.replace("              ./internal/log|log|\n", ""),
+    workflow.replace("              ./internal/log|log|100\n", ""),
     "every package in the gating matrix must appear in exactly one advisory group",
   );
 });

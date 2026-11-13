@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Enforce numeric mutation floors for the logging package after URL redaction
+  introduced measurable mutants.
+
 - Keep credentials in controller URLs out of startup, reconnect and audit output.
 - Route only the exact Edge Compose endpoint to the Compose manager, and preserve
   known update kinds in Drydock container syncs.
