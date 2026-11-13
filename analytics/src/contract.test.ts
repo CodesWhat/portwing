@@ -255,6 +255,15 @@ test("before_send requires and forwards the cookieless server-hash fields", () =
       null,
       `sanitizeEvent must drop events missing ${missingKey}`,
     );
+    assert.equal(
+      sanitizeEvent({
+        event: "$pageview",
+        uuid: "internal-posthog-id",
+        properties: { ...validProperties, [missingKey]: "" },
+      }),
+      null,
+      `sanitizeEvent must drop events with empty ${missingKey}`,
+    );
   }
 });
 

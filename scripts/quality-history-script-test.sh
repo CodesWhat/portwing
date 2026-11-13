@@ -525,6 +525,22 @@ grep -Fq "exactly one JSON object" <<<"${output}" ||
 [ "$(grep -c . <<<"$(branch_file4 mutation-survivors.jsonl)" || true)" = "1" ] ||
 	fail "a rejected empty record file must not append a line"
 
+# The default byte budget must retain multiple legitimate large records.
+bare5="${test_root}/qh-default-bytes.git"
+git init --quiet --bare "${bare5}"
+for marker in 1 2 3 4; do
+	large_record="${test_root}/default-large-${marker}.json"
+	jq -cn --argjson marker "${marker}" '{pad:("x" * 600000), run_marker:$marker}' >"${large_record}"
+	run_append3 mutation-survivors "" "5${marker}0" \
+		QUALITY_HISTORY_REMOTE="${bare5}" QUALITY_HISTORY_RETAIN=3 \
+		QUALITY_HISTORY_RECORD_FILE="${large_record}" >/dev/null
+done
+retained_large="$(git -C "${bare5}" cat-file blob quality-history:mutation-survivors.jsonl)"
+[ "$(jq -s 'length' <<<"${retained_large}")" = "3" ] ||
+	fail "default byte ceiling must retain all three large records allowed by RETAIN=3"
+[ "$(jq -s 'map(.run_marker) | join(",")' -r <<<"${retained_large}")" = "2,3,4" ] ||
+	fail "default retention must retain the newest three large measurements"
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} quality-history script check(s) failed" >&2
 	exit 1

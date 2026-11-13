@@ -152,44 +152,52 @@ func containerSignalSnapshot(id, listState, listStatus, imageID, inspectStatus s
 func TestRefreshBypassesStaleCacheWhenContainerSignalChanges(t *testing.T) {
 	t.Parallel()
 
-	client, fixture, shutdown := newDynamicDockerClient(t)
-	defer shutdown()
+	for _, tc := range []struct{ name, state, status, image string }{
+		{"state", "exited", "Up 5 minutes", "sha256:v1"},
+		{"status", "running", "Exited (0) 1 second ago", "sha256:v1"},
+		{"image", "running", "Up 5 minutes", "sha256:v2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			client, fixture, shutdown := newDynamicDockerClient(t)
+			defer shutdown()
 
-	fixture.Set(containerSignalSnapshot("c1", "running", "Up 5 minutes", "sha256:v1", "running", true))
+			fixture.Set(containerSignalSnapshot("c1", "running", "Up 5 minutes", "sha256:v1", "running", true))
 
-	manager := NewContainerManager(client, "test-agent", nil)
-	if _, err := manager.BuildInventory(context.Background()); err != nil {
-		t.Fatalf("build inventory: %v", err)
-	}
+			manager := NewContainerManager(client, "test-agent", nil)
+			if _, err := manager.BuildInventory(context.Background()); err != nil {
+				t.Fatalf("build inventory: %v", err)
+			}
 
-	// First refresh populates the inspect cache with the "running" signal.
-	if _, _, _, err := manager.Refresh(context.Background()); err != nil {
-		t.Fatalf("first refresh: %v", err)
-	}
-	c1, ok := manager.GetContainer("c1")
-	if !ok || c1.Status != "running" {
-		t.Fatalf("expected c1 running after first refresh, got %+v ok=%v", c1, ok)
-	}
+			// First refresh populates the inspect cache with the "running" signal.
+			if _, _, _, err := manager.Refresh(context.Background()); err != nil {
+				t.Fatalf("first refresh: %v", err)
+			}
+			c1, ok := manager.GetContainer("c1")
+			if !ok || c1.Status != "running" {
+				t.Fatalf("expected c1 running after first refresh, got %+v ok=%v", c1, ok)
+			}
 
-	// The listed entry's State/Status/ImageID change, which changes its
-	// cache signal. A second refresh must detect the mismatch and
-	// re-inspect rather than reuse the stale cached entry.
-	fixture.Set(containerSignalSnapshot("c1", "exited", "Exited (0) 1 second ago", "sha256:v2", "exited", false))
+			// Change one listed signal field while the cached inspect stays running.
+			// The second refresh must re-inspect and observe the stopped container.
+			fixture.Set(containerSignalSnapshot("c1", tc.state, tc.status, tc.image, "exited", false))
 
-	_, updated, _, err := manager.Refresh(context.Background())
-	if err != nil {
-		t.Fatalf("second refresh: %v", err)
-	}
-	if len(updated) != 1 {
-		t.Fatalf("expected c1 to be reported updated after its signal changed, got %d updated", len(updated))
-	}
-	if updated[0].Status != "stopped" {
-		t.Fatalf("expected updated status to be stopped, got %q", updated[0].Status)
-	}
+			_, updated, _, err := manager.Refresh(context.Background())
+			if err != nil {
+				t.Fatalf("second refresh: %v", err)
+			}
+			if len(updated) != 1 {
+				t.Fatalf("expected c1 to be reported updated after its signal changed, got %d updated", len(updated))
+			}
+			if updated[0].Status != "stopped" {
+				t.Fatalf("expected updated status to be stopped, got %q", updated[0].Status)
+			}
 
-	c1, ok = manager.GetContainer("c1")
-	if !ok || c1.Status != "stopped" {
-		t.Fatalf("expected c1 status stopped after signal change, got %+v ok=%v", c1, ok)
+			c1, ok = manager.GetContainer("c1")
+			if !ok || c1.Status != "stopped" {
+				t.Fatalf("expected c1 status stopped after signal change, got %+v ok=%v", c1, ok)
+			}
+		})
 	}
 }
 

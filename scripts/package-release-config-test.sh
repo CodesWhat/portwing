@@ -288,10 +288,21 @@ require_block_text() {
 	fi
 }
 
-require_exactly_one_active ".goreleaser.yml" \
-	'^[[:space:]]*mod_timestamp:' \
-	'mod_timestamp: "{{ .CommitTimestamp }}"' \
-	"release binaries must be byte-reproducible (mod_timestamp pinned to the commit)"
+portwing_build_timestamp="$(awk '
+	/^builds:[[:space:]]*$/ { in_builds = 1; next }
+	in_builds && /^[^[:space:]#]/ { exit }
+	in_builds && /^  - id:/ { in_portwing = ($0 == "  - id: portwing") }
+	in_portwing && /^    mod_timestamp:/ {
+		sub(/^[[:space:]]*/, "")
+		sub(/[[:space:]]+#.*/, "")
+		sub(/[[:space:]]*$/, "")
+		print
+	}
+' .goreleaser.yml)"
+if [ "${portwing_build_timestamp}" != 'mod_timestamp: "{{ .CommitTimestamp }}"' ]; then
+	echo "FAIL: release binaries must be byte-reproducible (portwing build must pin mod_timestamp to the commit)" >&2
+	failures=$((failures + 1))
+fi
 
 # The binary's mtime being pinned doesn't make the archive reproducible on its
 # own: GoReleaser auto-includes LICENSE*/README*/CHANGELOG* with the source
@@ -392,7 +403,8 @@ for dockerfile in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	# A bare CMD runs the probe as the container's default command, so the check
 	# has to see it inside a HEALTHCHECK instruction, continuation lines joined.
 	runtime_instructions="$(awk '{ if (sub(/\\$/, "")) { joined = joined $0; next } print joined $0; joined = "" }' <<<"${runtime_stage}")"
-	if ! grep -Eq '^[[:space:]]*HEALTHCHECK[[:space:]].*CMD \["/usr/bin/portwing", "healthcheck"\]$' <<<"${runtime_instructions}"; then
+	last_healthcheck="$(awk 'toupper($0) ~ /^[[:space:]]*HEALTHCHECK[[:space:]]/ { last = $0 } END { print last }' <<<"${runtime_instructions}")"
+	if ! grep -Eq '^[[:space:]]*HEALTHCHECK[[:space:]].*CMD \["/usr/bin/portwing", "healthcheck"\]$' <<<"${last_healthcheck}"; then
 		echo "FAIL: ${dockerfile} must use the shell-free Portwing healthcheck" >&2
 		failures=$((failures + 1))
 	fi
@@ -1101,11 +1113,11 @@ if [ -n "$emoji_in_workflows" ]; then
 fi
 
 # The two security-grype.yml jobs above are required contexts, so that
-# workflow must fire on every PR. A `paths:` filter under its pull_request
+# workflow must fire on every PR. A `paths:` or `paths-ignore:` filter under its pull_request
 # trigger produces no check run at all on a PR it does not match, which wedges
 # that PR forever. Gate expensive steps inside the job instead.
 grype_pr_paths="$(
-	perl -0777 -ne 'print "path-filtered" if /^  pull_request:.*?^    paths:/ms' \
+	perl -0777 -ne 'print "path-filtered" if /^  pull_request:\n(?:(?:    .*)?\n)*?    paths(?:-ignore)?:/m' \
 		.github/workflows/security-grype.yml
 )"
 if [ -n "$grype_pr_paths" ]; then
