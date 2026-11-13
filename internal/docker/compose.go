@@ -416,9 +416,6 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("stack path is not accessible within stacks directory")
 	}
-	if !pathWithin(physicalBase, lockKey) {
-		return "", fmt.Errorf("stack path %q escapes stacks directory", stackDir)
-	}
 	return lockKey, nil
 }
 
