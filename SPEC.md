@@ -212,7 +212,9 @@ TTY container's header-less stream is passed through unchanged — matching the
 HTTP `/logs` route. `follow` is served as a **bounded** live window (the agent
 asks the daemon to end the stream after 5 seconds, via a Unix-timestamp
 `until`, with a 7-second handler deadline including the 2-second grace period)
-because the response is a single buffered message, not a stream.
+because the response is a single buffered message, not a stream. When `follow`
+is `true`, the handler replaces any caller-supplied `until` with that five-second
+endpoint; the caller's cutoff does not constrain the stream.
 Continuous tailing uses the `request`/`stream`/`stream_end` path against
 `GET /containers/{id}/logs?follow=1`.
 
@@ -389,7 +391,7 @@ In addition to host/container metrics, the Prometheus endpoints (`/_portwing/met
 
 Its relationship to `ErrHostMetricsUnsupported`/`portwing_host_metrics_supported` (which cover the `/proc`-derived fields) is one-directional, not independent: a broken data root leaves the `/proc` fields intact, but a missing `/proc` short-circuits collection before `statfs` runs, so no disk figure is reported on a host without procfs even though `statfs` would have worked there.
 
-**Failed collection.** When collection returns any error, including `ErrHostMetricsUnsupported` on a host without procfs, the tick emits an `error` frame with `code` `host-metrics-unavailable` and the collection error as its `message`, on the same 30-second cadence as the `metrics` frame it replaces, and with no `requestId` because the tick answers no request. It does **not** emit a `metrics` frame: collection returns a partially populated snapshot alongside the error, and a zero-filled `metrics` frame is indistinguishable from a real reading of a completely idle host. This is the wire's counterpart to `portwing_host_metrics_supported 0` on the Prometheus endpoints and to the MCP `host_metrics` tool's error: the failing tick carries something instead of nothing, so a controller that reads `code` off a `requestId`-less `error` frame can tell an unsupported host from a supported one that has stopped reporting. Reading it is opt-in, and no controller does yet. Drydock's edge adapter returns early on any `error` frame that carries no `requestId`, so the frame arrives and is dropped with no log and no state change; that same guard is what makes the frame safe to send unnegotiated, since no controller can mis-correlate it with a pending request.
+**Failed collection.** When collection returns any error, including `ErrHostMetricsUnsupported` on a host without procfs, the tick emits an `error` frame with `code` `host-metrics-unavailable` and the collection error as its `message`, on the same configurable cadence as the `metrics` frame it replaces (`HEARTBEAT_INTERVAL`, default 30 seconds), and with no `requestId` because the tick answers no request. Changing `HEARTBEAT_INTERVAL` changes the interval between these error frames. It does **not** emit a `metrics` frame: collection returns a partially populated snapshot alongside the error, and a zero-filled `metrics` frame is indistinguishable from a real reading of a completely idle host. This is the wire's counterpart to `portwing_host_metrics_supported 0` on the Prometheus endpoints and to the MCP `host_metrics` tool's error: the failing tick carries something instead of nothing, so a controller that reads `code` off a `requestId`-less `error` frame can tell an unsupported host from a supported one that has stopped reporting. Reading it is opt-in, and no controller does yet. Drydock's edge adapter returns early on any `error` frame that carries no `requestId`, so the frame arrives and is dropped with no log and no state change; that same guard is what makes the frame safe to send unnegotiated, since no controller can mis-correlate it with a pending request.
 
 | Metric | Source | Platform |
 |--------|--------|----------|
