@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.2] - 2026-11-13
+
+### Fixed
+
+- Keep the Drydock watcher name `docker` when `dd.watch` is `true` or `false`,
+  and preserve the label for controller monitoring policy (#489).
+
 ## [v1.2.1] - 2026-11-13
 
 ### Security
