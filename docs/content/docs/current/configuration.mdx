@@ -86,6 +86,11 @@ unauthenticated listener on a non-loopback address.
 | `DOCKER_SOCKET` | Auto-detect | Path to the Docker Unix socket. Portwing checks `/var/run/docker.sock`, `~/.docker/run/docker.sock`, `~/.orbstack/run/docker.sock`, and `/run/docker.sock` in that order; falls back to `/var/run/docker.sock` if none exist. |
 | `STACKS_DIR` | `/data/stacks` | Directory where Compose stack files are stored and managed. |
 
+Compose stack paths use rooted filesystem access. Relative symlinks that remain
+inside `STACKS_DIR` share the same physical stack lock. Absolute symlinks and
+links that escape the root are rejected. File writes continue to reject symlink
+directory components. Errors for rejected request paths omit symlink targets.
+
 Portwing talks to the Docker daemon over the Unix socket only — there is no `DOCKER_HOST` TCP transport.
 
 ---

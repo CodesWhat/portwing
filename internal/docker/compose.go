@@ -394,8 +394,7 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving physical stacks directory: %w", err)
 	}
-	stackDirKey, err := cm.resolveStackRoot(stackDir)
-	if err != nil {
+	if _, err := cm.resolveStackRoot(stackDir); err != nil {
 		return "", fmt.Errorf("invalid stack path: %w", err)
 	}
 	for relPath := range req.Files {
@@ -404,9 +403,18 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 		}
 	}
 
-	lockKey, err := canonicalStackLockPath(stackDirKey)
+	root, err := os.OpenRoot(physicalBase)
+	if os.IsNotExist(err) {
+		// A missing configured root cannot contain request-controlled aliases.
+		return filepath.Join(physicalBase, filepath.Clean(stackDir)), nil
+	}
 	if err != nil {
-		return "", fmt.Errorf("resolving stack lock path: %w", err)
+		return "", fmt.Errorf("resolving physical stacks directory: directory is not accessible")
+	}
+	defer func() { _ = root.Close() }()
+	lockKey, err := rootedStackLockPath(root, physicalBase, filepath.Clean(stackDir))
+	if err != nil {
+		return "", fmt.Errorf("stack path is not accessible within stacks directory")
 	}
 	if !pathWithin(physicalBase, lockKey) {
 		return "", fmt.Errorf("stack path %q escapes stacks directory", stackDir)
@@ -414,8 +422,28 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 	return lockKey, nil
 }
 
-// canonicalStackLockPath resolves an absolute physical lock identity. Missing
-// suffixes are retained so the first deployment can lock a new stack.
+func rootedStackLockPath(root *os.Root, base, relative string) (string, error) {
+	current, suffix := relative, ""
+	for current != "." {
+		if _, err := root.Lstat(current); err == nil {
+			if _, err := root.Stat(current); err != nil {
+				return "", err
+			}
+			// The rooted lookup has bounded every link before canonicalization.
+			resolved, err := filepath.EvalSymlinks(filepath.Join(base, current))
+			return filepath.Join(resolved, suffix), err
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		suffix = filepath.Join(filepath.Base(current), suffix)
+		current = filepath.Dir(current)
+	}
+	return filepath.Join(base, suffix), nil
+}
+
+// canonicalStackLockPath resolves a trusted configured root to an absolute
+// identity. Missing suffixes are retained for first deployment. Request paths
+// use rootedStackLockPath instead.
 func canonicalStackLockPath(path string) (string, error) {
 	current, err := filepath.Abs(path)
 	if err != nil {

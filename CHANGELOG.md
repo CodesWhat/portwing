@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Bound Compose request-path metadata lookups to the configured stacks root
+  and omit symlink targets from validation errors. Absolute symlink aliases
+  are rejected consistently with rooted file access.
 - Update optional Prometheus observability examples to digest-pinned 3.16.0 for
   upstream security fixes.
 
