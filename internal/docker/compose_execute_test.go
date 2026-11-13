@@ -984,7 +984,11 @@ func TestExecuteCanceledStackWaitDoesNotWrite(t *testing.T) {
 				t.Fatal(err)
 			}
 			cm := &ComposeManager{stacksDir: dir, composeBin: filepath.Join(dir, "must-not-run")}
-			unlock, err := cm.lockStack(t.Context(), stack)
+			lockKey, err := cm.validateRequest(ComposeRequest{StackName: "app"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlock, err := cm.lockStack(t.Context(), lockKey)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1005,7 +1009,7 @@ func TestExecuteCanceledStackWaitDoesNotWrite(t *testing.T) {
 				response, err := cm.Execute(ctx, ComposeRequest{Operation: "up", StackName: "app", Files: map[string]string{"compose.yaml": "replacement"}})
 				done <- result{response, err}
 			}()
-			waitForStackReferences(t, cm, stack, 2)
+			waitForStackReferences(t, cm, lockKey, 2)
 			if !deadline {
 				cancel()
 			}
@@ -1013,7 +1017,7 @@ func TestExecuteCanceledStackWaitDoesNotWrite(t *testing.T) {
 			select {
 			case got = <-done:
 				cm.stackLocksMu.Lock()
-				refs := cm.stackLocks[stack].refs
+				refs := cm.stackLocks[lockKey].refs
 				cm.stackLocksMu.Unlock()
 				if refs != 1 {
 					t.Errorf("references after canceled waiter = %d, want owner only", refs)
@@ -1190,4 +1194,227 @@ func TestComposeManagerCancellationRacingRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	unlock()
+}
+
+func TestExecuteSerializesPhysicalStackAliases(t *testing.T) {
+	t.Parallel()
+	for _, suffix := range []string{"", "new-stack", "nested/new-stack"} {
+		t.Run(suffix, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			real := filepath.Join(dir, "real")
+			if err := os.Mkdir(real, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("real", filepath.Join(dir, "alias")); err != nil {
+				t.Fatal(err)
+			}
+			cm := &ComposeManager{stacksDir: dir, composeBin: filepath.Join(dir, "must-not-run")}
+			first := ComposeRequest{Operation: "ps", StackName: "first", StackDir: filepath.Join("real", suffix)}
+			key, err := cm.validateRequest(first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlock, err := cm.lockStack(t.Context(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer unlock()
+			ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+			defer cancel()
+			response, err := cm.Execute(ctx, ComposeRequest{Operation: "ps", StackName: "second", StackDir: filepath.Join("alias", suffix)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.Success || !strings.Contains(response.Error, "waiting for stack: context deadline exceeded") {
+				t.Fatalf("physical alias bypassed the held stack lock: %+v", response)
+			}
+		})
+	}
+}
+
+func TestValidateRequestRejectsUnresolvableStackAlias(t *testing.T) {
+	t.Parallel()
+	for _, dangling := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dangling=%v", dangling), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			stackDir := "file/child"
+			if dangling {
+				stackDir = "alias"
+				if err := os.Symlink("missing", filepath.Join(dir, "alias")); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(filepath.Join(dir, "file"), []byte("not a directory"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cm := &ComposeManager{stacksDir: dir}
+			if _, err := cm.validateRequest(ComposeRequest{StackName: "app", StackDir: stackDir}); err == nil {
+				t.Fatal("unresolvable stack path was accepted")
+			}
+		})
+	}
+}
+
+func TestExecuteRejectsStackAliasOutsideRoot(t *testing.T) {
+	t.Parallel()
+	dir, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "fake-compose.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf invoked > invoked\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: dir, composeBin: script}
+	response, err := cm.Execute(t.Context(), ComposeRequest{Operation: "ps", StackName: "app", StackDir: "outside"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Success {
+		t.Fatal("stack alias escaped the rooted directory")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "invoked")); !os.IsNotExist(err) {
+		t.Fatalf("Compose ran outside the stack root: %v", err)
+	}
+}
+
+func TestCanonicalStackLockPathRelativeRoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	got, err := canonicalStackLockPath("new-stack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(base, "new-stack"); got != want {
+		t.Fatalf("lock identity = %q, want absolute %q", got, want)
+	}
+}
+
+func TestCanonicalStackLockPathMissingHierarchy(t *testing.T) {
+	t.Parallel()
+	dir, err := os.MkdirTemp("", "pw-root-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(dir) })
+	path := filepath.Join(string(filepath.Separator), filepath.Base(dir), "new-stack")
+	if _, err := os.Lstat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("fixture root must be absent: %v", err)
+	}
+	got, err := canonicalStackLockPath(path)
+	if err != nil || got != path {
+		t.Fatalf("missing hierarchy identity = %q, %v; want %q", got, err, path)
+	}
+}
+
+func TestValidateRequestInvalidConfiguredRoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("this platform retains the removed working directory path")
+	}
+	cm := &ComposeManager{stacksDir: "relative"}
+	_, err := cm.validateRequest(ComposeRequest{StackName: "app"})
+	if err == nil || !strings.Contains(err.Error(), "resolving physical stacks directory") {
+		t.Fatalf("invalid configured root must be reported before stack resolution: %v", err)
+	}
+}
+
+func TestValidateRequestDanglingConfiguredRoot(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base")
+	if err := os.Symlink("missing", base); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: base}
+	_, err := cm.validateRequest(ComposeRequest{StackName: "app"})
+	if err == nil || !strings.Contains(err.Error(), "resolving physical stacks directory") {
+		t.Fatalf("dangling configured root must be reported before stack resolution: %v", err)
+	}
+}
+
+func TestOutsideStackAliasDoesNotDiscloseTargets(t *testing.T) {
+	t.Parallel()
+	dir, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	privateTarget := filepath.Join(outside, "private-marker")
+	if err := os.Symlink(privateTarget, filepath.Join(outside, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: dir, composeBin: filepath.Join(dir, "must-not-run")}
+	var firstError string
+	for _, child := range []string{"missing", "dangling"} {
+		response, err := cm.Execute(t.Context(), ComposeRequest{Operation: "ps", StackName: "app", StackDir: filepath.Join("outside", child)})
+		if err != nil || response.Success {
+			t.Fatalf("outside alias accepted: %+v, %v", response, err)
+		}
+		if strings.Contains(response.Error, outside) || strings.Contains(response.Error, "private-marker") {
+			t.Fatalf("outside target disclosed: %s", response.Error)
+		}
+		if firstError == "" {
+			firstError = response.Error
+		} else if response.Error != firstError {
+			t.Fatalf("outside node type disclosed: %q versus %q", firstError, response.Error)
+		}
+	}
+}
+
+func TestValidateRequestRejectsAbsoluteStackAlias(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	if err := os.Mkdir(real, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(dir, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: dir}
+	if _, err := cm.validateRequest(ComposeRequest{StackName: "app", StackDir: "alias"}); err == nil {
+		t.Fatal("absolute alias bypassed the rooted path policy")
+	}
+}
+
+func TestValidateRequestMissingConfiguredRoot(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	physical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: filepath.Join(dir, "new-root")}
+	key, err := cm.validateRequest(ComposeRequest{StackName: "app"})
+	if err != nil || key != filepath.Join(physical, "new-root", "app") {
+		t.Fatalf("missing configured root: %q, %v", key, err)
+	}
+	if _, err := os.Stat(cm.stacksDir); !os.IsNotExist(err) {
+		t.Fatalf("validation created the root: %v", err)
+	}
+}
+
+func TestValidateRequestConfiguredRootIsFile(t *testing.T) {
+	t.Parallel()
+	base := filepath.Join(t.TempDir(), "base")
+	if err := os.WriteFile(base, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: base}
+	if _, err := cm.validateRequest(ComposeRequest{StackName: "app", StackDir: "."}); err == nil {
+		t.Fatal("regular file accepted as configured root")
+	}
+	cm.stacksDir = filepath.Join(base, "child")
+	if _, err := cm.validateRequest(ComposeRequest{StackName: "app"}); err == nil {
+		t.Fatal("non-directory parent accepted in configured root")
+	}
 }

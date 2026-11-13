@@ -525,7 +525,12 @@ jobs:
                 echo "or corpus regression. See this step's own log for the underlying error."
                 ;;
               *)
-                echo "scripts/ci/fuzz-replay.sh reported kind=error (reason: \`${REASON:-none}\`)."
+                if [ -n "${FUZZTIME}" ]; then
+                  emitting_script="fuzz-run.sh"
+                else
+                  emitting_script="fuzz-replay.sh"
+                fi
+                echo "scripts/ci/${emitting_script} reported kind=error (reason: \`${REASON:-none}\`)."
                 echo "See this step's own log for detail."
                 ;;
               esac

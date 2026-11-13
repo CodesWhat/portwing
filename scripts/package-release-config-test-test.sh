@@ -104,6 +104,32 @@ case "${release_version}" in
 	;;
 esac
 
+for filter in paths paths-ignore; do
+	awk -v filter="${filter}" '
+		{ print }
+		/^  pull_request:/ { print "    " filter ": [\"docs/**\"]" }
+	' .github/workflows/security-grype.yml >"${fixture}/.github/workflows/security-grype.yml"
+	expect_release_contract_failure \
+		"FAIL: security-grype.yml must not path-filter its pull_request trigger" \
+		"required scanner checks must reject pull_request ${filter}"
+	restore_grype_workflow
+done
+
+# A timestamp on a different build cannot replace the Portwing binary pin.
+awk '
+	/^    mod_timestamp:/ { next }
+	/^archives:/ {
+		print "  - id: other"
+		print "    mod_timestamp: \"{{ .CommitTimestamp }}\""
+		print ""
+	}
+	{ print }
+' .goreleaser.yml >"${fixture}/.goreleaser.yml"
+expect_release_contract_failure \
+	"release binaries must be byte-reproducible" \
+	"a different build must not satisfy the Portwing binary timestamp pin"
+cp .goreleaser.yml "${fixture}/.goreleaser.yml"
+
 for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	cp "${recipe}" "${fixture}/${recipe}"
 	sed -i.bak 's/compress@v1.20.2/compress@v1.19.2/' "${fixture}/${recipe}"
@@ -185,6 +211,18 @@ for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	expect_release_contract_failure \
 		"${recipe} must use the shell-free Portwing healthcheck" \
 		"a bare final-stage CMD must not satisfy the healthcheck contract"
+	cp "${recipe}" "${fixture}/${recipe}"
+done
+
+# Docker uses the last HEALTHCHECK instruction in a stage, including NONE.
+for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
+	for instruction in 'HEALTHCHECK NONE' 'Healthcheck NONE' 'healthcheck NONE'; do
+		cp "${recipe}" "${fixture}/${recipe}"
+		printf '\n%s\n' "${instruction}" >>"${fixture}/${recipe}"
+		expect_release_contract_failure \
+			"${recipe} must use the shell-free Portwing healthcheck" \
+			"a later ${instruction} must disable the probe contract"
+	done
 	cp "${recipe}" "${fixture}/${recipe}"
 done
 

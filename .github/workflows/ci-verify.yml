@@ -425,7 +425,7 @@ jobs:
     if: >-
       github.event.repository.visibility == 'public' &&
       (github.event_name == 'pull_request' ||
-       (github.event_name == 'push' &&
+       (github.event_name == 'push' && !github.event.deleted &&
         (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
