@@ -367,12 +367,7 @@ func (w *failingWriteResponseWriter) Write([]byte) (int, error) {
 }
 func (w *failingWriteResponseWriter) WriteHeader(int) {}
 
-// TestHandleAuditEncodeFailureRecordsFailureMetric verifies both sides of the
-// `err != nil` check in handleAudit's json.Encode: an encode failure records
-// a failure metric and does not record a success, while a normal (encode
-// succeeds) request records success and no failure. This kills the
-// CONDITIONALS_NEGATION mutant at audit_export.go:42:49.
-func TestHandleAuditEncodeFailureRecordsFailureMetric(t *testing.T) {
+func TestHandleAuditEncodeFailureDoesNotCountAsExport(t *testing.T) {
 	t.Parallel()
 
 	s := makeAuditTestServer(t, 8)
@@ -386,18 +381,18 @@ func TestHandleAuditEncodeFailureRecordsFailureMetric(t *testing.T) {
 	var b strings.Builder
 	s.metrics.WritePrometheus(&b, func(value string) string { return value })
 	body := b.String()
-	if !strings.Contains(body, `portwing_audit_exports_total{outcome="error"} 1`) {
-		t.Fatalf("missing failed audit export metric after encode failure:\n%s", body)
+	if !strings.Contains(body, `portwing_audit_exports_total{outcome="error"} 0`) {
+		t.Fatalf("plain audit read changed the export failure count:\n%s", body)
 	}
 	if strings.Contains(body, `portwing_audit_exports_total{outcome="success"} 1`) {
 		t.Fatalf("unexpected success metric recorded after encode failure:\n%s", body)
 	}
+	if !strings.Contains(body, "portwing_audit_buffer_records 0\n") {
+		t.Fatalf("failed read updated audit state metrics:\n%s", body)
+	}
 }
 
-// TestHandleAuditEncodeSuccessRecordsSuccessMetric is the complementary case
-// to TestHandleAuditEncodeFailureRecordsFailureMetric: a normal request that
-// encodes successfully must record a success and no failure.
-func TestHandleAuditEncodeSuccessRecordsSuccessMetric(t *testing.T) {
+func TestHandleAuditEncodeSuccessDoesNotCountAsExport(t *testing.T) {
 	t.Parallel()
 
 	s := makeAuditTestServer(t, 8)
@@ -411,10 +406,13 @@ func TestHandleAuditEncodeSuccessRecordsSuccessMetric(t *testing.T) {
 	var b strings.Builder
 	s.metrics.WritePrometheus(&b, func(value string) string { return value })
 	body := b.String()
-	if !strings.Contains(body, `portwing_audit_exports_total{outcome="success"} 1`) {
-		t.Fatalf("missing successful audit export metric:\n%s", body)
+	if !strings.Contains(body, `portwing_audit_exports_total{outcome="success"} 0`) {
+		t.Fatalf("plain audit read changed the export success count:\n%s", body)
 	}
 	if strings.Contains(body, `portwing_audit_exports_total{outcome="error"} 1`) {
 		t.Fatalf("unexpected failure metric recorded on successful encode:\n%s", body)
+	}
+	if !strings.Contains(body, "portwing_audit_buffer_records 1\n") {
+		t.Fatalf("successful read did not update audit state metrics:\n%s", body)
 	}
 }

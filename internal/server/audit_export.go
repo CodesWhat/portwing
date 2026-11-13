@@ -42,12 +42,11 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		if s.metrics != nil {
-			s.metrics.IncAuditExport(false)
-		}
 		return
 	}
-	s.recordAuditExport(true)
+	if s.auditor != nil {
+		s.setAuditMetrics(s.auditor.Stats())
+	}
 }
 
 func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
@@ -60,16 +59,6 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 
 func auditResetCursor(stats audit.Stats) uint64 {
 	return audit.ResetCursor(stats)
-}
-
-func (s *Server) recordAuditExport(success bool) {
-	if s.metrics == nil {
-		return
-	}
-	s.metrics.IncAuditExport(success)
-	if s.auditor != nil {
-		s.setAuditMetrics(s.auditor.Stats())
-	}
 }
 
 func (s *Server) setAuditMetrics(stats audit.Stats) {

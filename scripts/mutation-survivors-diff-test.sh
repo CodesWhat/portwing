@@ -103,7 +103,7 @@ fixture2="${test_root}/fixture2.jsonl"
 
 output="$(MUTATION_SURVIVORS_RECORDS="${fixture2}" bash "${diff_script}")"
 row="$(jq -c '.[] | select(.package == "edge/gated")' <<<"${output}")"
-[ "$(jq -r '.comparable // "unset"' <<<"${row}")" = "unset" ] ||
+[ "$(jq 'has("comparable")' <<<"${row}")" = "false" ] ||
 	fail "measured->measured must not carry a 'comparable' key (row: ${row})"
 [ "$(jq '.killed | length' <<<"${row}")" = "1" ] ||
 	fail "dropping one of two mutants must report exactly one kill (row: ${row})"

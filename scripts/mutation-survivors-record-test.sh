@@ -450,12 +450,33 @@ digamma|./internal/digamma
 koppa|./internal/koppa
 EOF
 
+# A documented null timeout count retains positive verdict evidence. With
+# no verdicts and no timeout count, the run remains unmeasured.
+for name in null-positive null-zero missing-source; do
+	mkdir -p "${records_dir}/${name}" "${src_root}/internal/${name}"
+	cp "${src_root}/internal/alpha/a.go" "${src_root}/internal/${name}/a.go"
+	jq -n --arg name "${name}" '{name:$name, package:("./internal/"+$name), mode:"gated", outcome:"success", timed_out:null, killed:1, lived:1}' >"${records_dir}/${name}/quality-history-record.json"
+	jq -n --arg name "${name}" '{name:$name, survivors:[{file:"a.go", line:6, column:8, mutator:"CONDITIONALS_BOUNDARY"}], uncovered:[]}' >"${records_dir}/${name}/mutation-survivors.json"
+	printf '%s|./internal/%s\n' "${name}" "${name}" >>"${expected_list}"
+done
+jq '.killed=0 | .lived=0' "${records_dir}/null-zero/quality-history-record.json" >"${test_root}/zero.json"
+mv "${test_root}/zero.json" "${records_dir}/null-zero/quality-history-record.json"
+jq '.timed_out=0' "${records_dir}/missing-source/quality-history-record.json" >"${test_root}/missing.json"
+mv "${test_root}/missing.json" "${records_dir}/missing-source/quality-history-record.json"
+rm "${src_root}/internal/missing-source/a.go"
+
 output="$(bash "${record}" "${records_dir}" "${advisory_dir}" "${src_root}" "${expected_list}")"
 
 jq -e 'type == "object"' >/dev/null <<<"${output}" ||
 	fail "the record script must print exactly one JSON object (output: ${output})"
 [ "$(jq -r '.schema' <<<"${output}")" = "1" ] || fail "schema must be 1"
 [ "$(jq -r '.anchor' <<<"${output}")" = "trimline5-sha256-12" ] || fail "anchor must name the identity scheme"
+
+for spec in "null-positive measured" "null-zero unmeasured" "missing-source unparseable"; do
+	read -r name state <<<"${spec}"
+	got="$(jq -r --arg name "${name}" '.packages[] | select(.name==$name and .source=="gated") | .state' <<<"${output}")"
+	[ "${got}" = "${state}" ] || fail "${name} must be ${state}, got ${got}"
+done
 
 # --- alpha/gated: the identity rule ------------------------------------------
 
@@ -566,7 +587,7 @@ mu="$(jq -c '.packages[] | select(.name == "mu" and .source == "gated")' <<<"${o
 # A malformed shape in one package must demote only that package's entry,
 # never abort the whole run: alpha (processed earlier) and rho (processed
 # later) both still measured proves the script kept going past mu.
-[ "$(jq -r '.packages | length' <<<"${output}")" = "52" ] ||
+[ "$(jq -r '.packages | length' <<<"${output}")" = "58" ] ||
 	fail "a malformed package must not drop other packages from the run (got $(jq -r '.packages | length' <<<"${output}") entries)"
 
 # --- nu/gated, xi/advisory: every mutant TIMED OUT ---------------------------

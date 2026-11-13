@@ -2066,14 +2066,16 @@ func TestArgon2VerifierCacheHit(t *testing.T) {
 func TestHandleDockerProxyStripsAuthHeaders(t *testing.T) {
 	t.Parallel()
 
-	var receivedHeaders http.Header
+	headers := make(chan http.Header, 1)
 	sockPath, cleanup := shortSocketPath(t)
 	defer cleanup()
 	listener := newUnixListener(t, sockPath)
 
 	fakeDaemon := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			receivedHeaders = r.Header.Clone()
+			if r.URL.Path == "/v1.44/containers/json" {
+				headers <- r.Header.Clone()
+			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, `{}`)
 		}),
@@ -2107,7 +2109,8 @@ func TestHandleDockerProxyStripsAuthHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleDockerProxy(rec, req)
 
-	if receivedHeaders != nil {
+	select {
+	case receivedHeaders := <-headers:
 		if got := receivedHeaders.Get("Authorization"); got != "" {
 			t.Errorf("Authorization leaked to docker: %q", got)
 		}
@@ -2117,10 +2120,7 @@ func TestHandleDockerProxyStripsAuthHeaders(t *testing.T) {
 		if got := receivedHeaders.Get("X-Custom"); got != "keepme" {
 			t.Errorf("X-Custom was wrongly stripped: %q", got)
 		}
-	} else {
-		// If the proxied request never reached the fake daemon, the header
-		// assertions above never ran and this test would pass having checked
-		// nothing. Fail loudly instead of silently skipping the coverage.
+	case <-time.After(time.Second):
 		t.Fatal("proxied request never reached the fake daemon")
 	}
 }
