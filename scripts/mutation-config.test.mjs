@@ -1126,7 +1126,7 @@ test("mutation workflow covers production packages with numeric ratchets", () =>
 
 test("mutation contract rejects returning the measured log package to zero-mutant mode", () => {
   const stale = workflow.replace(
-    /(- name: log\n +package: \.\/internal\/log\n)(?: +#[^\n]*\n)* +efficacy: 100\n +mcover: 100/u,
+    /(- name: log\n +package: \.\/internal\/log\n)(?: +#[^\n]*\n)* +zero_mutants: false\n +efficacy: 100\n +mcover: 100/u,
     "$1            zero_mutants: true",
   );
   assert.notEqual(stale, workflow, "fixture must restore the stale zero-mutant declaration");
