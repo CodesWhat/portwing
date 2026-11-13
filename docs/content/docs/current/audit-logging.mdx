@@ -72,7 +72,7 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 | `rate_limited` | A request is blocked by the rate limiter |
 | `compose_op` | A Docker Compose lifecycle operation runs |
 | `exec_start` | An exec start is attempted: an interactive tunnel, a detached `docker exec -d`, or an attached start sent without an upgrade. Written for each attempt that reaches the admission decision, before anything reaches Docker. A streamed-body start dropped while its body is still being reassembled (missing or duplicate request ID, bad base64, a byte cap, the idle timeout, a cancel) never gets there and writes none |
-| `enrollment` | An Ed25519 key is enrolled via `/api/portwing/enroll` |
+| `enrollment` | An Ed25519 enrollment result from `/api/portwing/enroll`: `allowed` on success; `denied` when the enrollment credential is rejected or transport is refused. Failures during method checking, JSON decoding, public-key validation or storage writes emit no enrollment record |
 | `key_rotation` | A key rotation step runs: the controller prepares, commits or aborts a replacement key (standalone), prepares, activates or aborts it (edge), or the edge agent confirms it after the controller accepts the replacement |
 | `signature_lock` | A key is locked to signature version 3 after its first v3 request (`operation` `lock`), or an operator clears locks with `portwing signature-lock clear` (`operation` `clear` or `clear_all`). `key_id` is the locked key; empty for `clear_all` |
 
@@ -100,7 +100,7 @@ If the start then fails, the `exec_start` record stays `allowed` and the failure
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `key_id` | string | The fingerprint or identifier of the enrolled Ed25519 public key |
+| `key_id` | string | The enrolled Ed25519 key ID for an `allowed` result; empty for a `denied` result |
 
 **`key_rotation`** — Key rotation events add:
 
@@ -170,7 +170,7 @@ Because audit records are plain newline-delimited JSON, they slot into any log p
 
 ## Auth and key-enrollment events as first-class records
 
-`auth_failure` and `enrollment` events are emitted before any business logic runs, making them reliable indicators of credential probing and key-management activity regardless of request outcome. Every failed token presentation produces an `auth_failure` record with the actor IP, method, and path — no successful request is required to trigger logging.
+`auth_failure` records authentication failures; `enrollment` records enrollment results, including refusals before a key is installed. Their outcomes identify credential probing and key-management activity. Every failed token presentation produces an `auth_failure` record with the actor IP, method, and path — no successful request is required to trigger logging.
 
 This means audit coverage begins at the perimeter: you can alert on `auth_failure` spikes or unexpected `enrollment` events without parsing application logs. See [Authentication](/authentication) for how Ed25519 keys are verified and [Security Model](/security-model) for the broader threat model these events are designed to surface.
 

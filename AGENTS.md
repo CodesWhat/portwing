@@ -29,7 +29,8 @@ go test -race ./...                 # all tests (race detector is mandatory)
 golangci-lint run                   # lint (config: .golangci.yml, v2 schema)
 go test -tags integration ./internal/integration/   # needs a real dockerd
 
-# Fuzzers (5s smoke, all 10; CI runs 60s, nightly 5m, monthly 6x10m legs = 1h):
+# Fuzzers: local 5s and CI 60s smoke run all 10. Nightly 5m and monthly
+# 6x10m exploration exclude ParseImageRef/ParseLabels; those replay nightly.
 go test -run='^$' -fuzz='^FuzzParsePHC$' -fuzztime=5s ./internal/server/
 go test -run='^$' -fuzz='^FuzzParseTrustedProxies$' -fuzztime=5s ./internal/server/
 go test -run='^$' -fuzz='^FuzzParseImageRef$' -fuzztime=5s ./internal/adapter/
@@ -60,7 +61,7 @@ PORTWING_TOKEN=<token> ./scripts/drydock-compat-check.sh http://localhost:3000
 
 ## Conventions
 
-- **Commits:** plain Conventional Commits, no emoji — `<type>(scope): <description>` (see CONTRIBUTING.md). Enforced by lefthook via `scripts/validate-commit-msg.sh`.
+- **Commits:** plain Conventional Commits, no emoji — `<type>(scope): <description>`, with optional scope (see CONTRIBUTING.md). Enforced by lefthook via `scripts/validate-commit-msg.sh`.
 - **Branches:** `main` is production; one active dev branch is the next release; feature branches merge into the dev branch promptly and are deleted after merge.
 - **Tests:** table-driven with `httptest`; anything touching goroutines runs under `-race` in CI — write tests accordingly (no unsynchronized `httptest.ResponseRecorder` access from a handler goroutine; wrap with a mutex-guarded recorder).
 - **Errors:** wrap with `fmt.Errorf("context: %w", err)`; structured logging via `log/slog` only.

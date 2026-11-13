@@ -401,11 +401,12 @@ This means the authorized-keys file remains the single source of truth regardles
 
 ---
 
-## 6. Current comparison
+## 6. Historical comparison, Portwing v0.8.1
 
 This design is implemented as of Portwing v0.8.1. The canonical cross-product
 review now lives in the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape);
-this table retains only the authentication-specific comparison.
+this table preserves the authentication comparison at that implementation point.
+It is historical evidence, not a current capability matrix.
 
 | Property | Portwing v0.8.1 | Komodo v2 Periphery | Arcane v2.9 Agent |
 |----------|-----------------|---------------------|-------------------|

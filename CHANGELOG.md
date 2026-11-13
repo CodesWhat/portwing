@@ -38,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   emitting script in nightly fuzz error reports.
 - Clarify enrollment storage-failure behavior and verify restart/retry boundaries.
 - Keep the pinned CI browser image aligned with the updated Playwright package.
+- Clarify required Edge-mode signing keys, optional controller capabilities and
+  the JSON-only fallback for controllers without binary-response support.
+- Correct the fuzzing guide: saturated targets replay nightly and are excluded
+  from the monthly matrix.
+- Align current docs with runtime log-window bounds, diagnostic compatibility
+  warnings, static image contents and the optional Sockguard boundary.
+- Correct the deferred ML-DSA note's runtime prerequisites and reproduction
+  recipe; leave TLS interoperability and historical build provenance unverified.
 
 ## [v1.2.0] - 2026-11-07
 

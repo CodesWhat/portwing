@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import type { Metadata } from "next";
+import Link from "next/link";
 import { CompareMatrix } from "@/components/compare-matrix";
 import { Footer } from "@/components/footer";
 import { SiteHeader } from "@/components/site-header";
@@ -27,7 +28,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Portwing vs Alternatives — Remote Docker Agent Comparisons",
     description:
-      "Compare Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, and adjacent Docker tools using an August 2026 primary-source review.",
+      "Compare Portwing with Portainer Agent, Komodo Periphery, Arcane Agent, Hawser, and adjacent Docker tools using the October 26, 2026 primary-source review.",
     url: `${BASE_URL}/compare`,
     siteName: SITE_CONFIG.name,
     locale: SITE_CONFIG.locale,
@@ -117,6 +118,12 @@ export default function ComparePage() {
             <p className="cp-sub">
               Current agent capabilities, controller tradeoffs, and deliberate non-goals — sourced
               from published product documentation and reviewed October 26, 2026.
+            </p>
+            <p className="cp-sub">
+              <Link href="/docs/competitive-landscape#direct-peers-reviewed">
+                Reviewed releases and source evidence
+              </Link>
+              : Portainer 2.45.3, Komodo 2.3.4, Arcane 2.17.1 and Hawser 0.2.52.
             </p>
           </div>
         </section>
