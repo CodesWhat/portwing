@@ -216,11 +216,13 @@ done
 
 # Docker uses the last HEALTHCHECK instruction in a stage, including NONE.
 for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
-	cp "${recipe}" "${fixture}/${recipe}"
-	printf '\nHEALTHCHECK NONE\n' >>"${fixture}/${recipe}"
-	expect_release_contract_failure \
-		"${recipe} must use the shell-free Portwing healthcheck" \
-		"a later HEALTHCHECK NONE must disable the probe contract"
+	for instruction in 'HEALTHCHECK NONE' 'Healthcheck NONE' 'healthcheck NONE'; do
+		cp "${recipe}" "${fixture}/${recipe}"
+		printf '\n%s\n' "${instruction}" >>"${fixture}/${recipe}"
+		expect_release_contract_failure \
+			"${recipe} must use the shell-free Portwing healthcheck" \
+			"a later ${instruction} must disable the probe contract"
+	done
 	cp "${recipe}" "${fixture}/${recipe}"
 done
 
