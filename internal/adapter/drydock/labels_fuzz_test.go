@@ -12,9 +12,10 @@ import (
 func FuzzParseLabels(f *testing.F) {
 	// Seed: well-formed label maps as flat key\x00value\x00... pairs.
 	// The fuzzer receives a single string that we split on \x00 to form pairs.
-	f.Add(LabelDisplayName + "\x00MyService\x00" + LabelWatch + "\x00docker")
+	f.Add(LabelDisplayName + "\x00MyService\x00" + LabelWatch + "\x00true")
 	f.Add(LabelTagInclude + "\x00^v\\d+$\x00" + LabelTagExclude + "\x00beta")
 	f.Add(LabelDisplayIcon + "\x00mdi-server\x00" + LabelTagTransform + "\x00s/^v//")
+	f.Add(LabelWatch + "\x00false")
 	// Hostile seeds.
 	f.Add("")
 	f.Add("\x00")
@@ -39,7 +40,9 @@ func FuzzParseLabels(f *testing.F) {
 		_ = result.IncludeTags
 		_ = result.ExcludeTags
 		_ = result.TransformTags
-		_ = result.Watcher
+		if result.Watcher != "" {
+			t.Fatalf("labels selected watcher %q, want default Docker watcher", result.Watcher)
+		}
 	})
 }
 

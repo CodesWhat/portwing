@@ -297,7 +297,6 @@ func ParseLabels(labels map[string]string) adapter.LabelResult {
 		IncludeTags:   labels[LabelTagInclude],
 		ExcludeTags:   labels[LabelTagExclude],
 		TransformTags: labels[LabelTagTransform],
-		Watcher:       labels[LabelWatch],
 	}
 }
 

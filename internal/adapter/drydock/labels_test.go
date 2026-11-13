@@ -28,7 +28,6 @@ func TestParseLabels(t *testing.T) {
 		IncludeTags:   "^v\\d+\\.\\d+$",
 		ExcludeTags:   "beta",
 		TransformTags: "s/^v//",
-		Watcher:       "docker",
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -44,5 +43,17 @@ func TestParseLabelsWithNilMapReturnsZeroValues(t *testing.T) {
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParseLabels(nil) = %+v, want %+v", got, want)
+	}
+}
+
+func TestWatchLabelDoesNotSelectWatcher(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"true", "false", "docker", "custom", ""} {
+		t.Run(value, func(t *testing.T) {
+			got := ParseLabels(map[string]string{LabelWatch: value}).Watcher
+			if got != "" {
+				t.Fatalf("dd.watch=%q selected watcher %q, want default Docker watcher", value, got)
+			}
+		})
 	}
 }
