@@ -88,7 +88,7 @@ const expectedFloors = new Map([
   ["./internal/adapter/drydock", [82.5, 91.95]],
   ["./internal/audit", [90.53, 100]],
   ["./internal/auth", [91.77, 97.96]],
-  ["./internal/banner", [76.92, 99.00]],
+  ["./internal/banner", [76.92, 99.0]],
   ["./internal/config", [97.75, 100]],
   ["./internal/docker", [93.48, 93.68]],
   ["./internal/edge", [85.54, 91]],
