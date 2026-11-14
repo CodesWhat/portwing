@@ -22,6 +22,9 @@ nightly_fixture="${test_root}/nightly.yml"
 monthly_fixture="${test_root}/monthly.yml"
 
 reset_fixtures() {
+	mkdir -p "${test_root}/.github/actions/cflite-build" "${test_root}/.github/actions/cflite-run"
+	cp .github/actions/cflite-build/action.yml "${test_root}/.github/actions/cflite-build/action.yml"
+	cp .github/actions/cflite-run/action.yml "${test_root}/.github/actions/cflite-run/action.yml"
 	cp .github/workflows/quality-fuzz-cflite-pr.yml "${pr_fixture}"
 	cp .github/workflows/quality-fuzz-cflite-batch.yml "${batch_fixture}"
 	cp .github/workflows/quality-fuzz-cflite-prune.yml "${prune_fixture}"
@@ -108,7 +111,7 @@ assert_passes "the real ClusterFuzzLite configuration must pass its own contract
 # --- immutable runtime and action references ---------------------------------
 
 reset_fixtures
-sed -E -i.bak 's|(clusterfuzzlite-run-fuzzers:v1)@sha256:[0-9a-f]{64}|\1|' "${pr_fixture}"
+sed -E -i.bak 's|(clusterfuzzlite-run-fuzzers:v1)@sha256:[0-9a-f]{64}|\1|' "${test_root}/.github/actions/cflite-run/action.yml"
 assert_rejected \
 	"unpinned ClusterFuzzLite runtime image" \
 	"contract must reject a mutable runtime hidden behind a v1 label"
@@ -120,13 +123,13 @@ assert_rejected \
 	"contract must reject a pinned action SHA with no version comment"
 
 reset_fixtures
-sed -E -i.bak 's|@sha256:[0-9a-f]{64}|@sha256:deadbeef|' "${pr_fixture}"
+sed -E -i.bak 's|@sha256:[0-9a-f]{64}|@sha256:deadbeef|' "${test_root}/.github/actions/cflite-build/action.yml"
 assert_rejected \
 	"unpinned ClusterFuzzLite runtime image" \
 	"contract must reject a malformed runtime digest"
 
 reset_fixtures
-sed -i.bak 's|clusterfuzzlite-build-fuzzers:v1|clusterfuzzlite-run-fuzzers:v1|' "${pr_fixture}"
+sed -i.bak 's|uses: CodesWhat/portwing/.github/actions/cflite-build|uses: CodesWhat/portwing/.github/actions/cflite-run|' "${pr_fixture}"
 assert_rejected \
 	"build step must use its matching pinned runtime image" \
 	"contract must reject a run image in the build step"
@@ -142,6 +145,18 @@ insert_before "${pr_fixture}" "        env:" "        with:"
 assert_rejected \
 	"must not pass action inputs to a direct runtime image" \
 	"contract must reject wrapper inputs on a direct Docker action"
+
+reset_fixtures
+sed -i.bak 's|uses: CodesWhat/portwing/.github/actions/cflite-run@[0-9a-f]*.*|uses: ./.github/actions/cflite-run|' "${pr_fixture}"
+assert_rejected \
+	"must pin the run-fuzzers runtime image" \
+	"contract must reject workspace-relative runtime metadata"
+
+reset_fixtures
+sed -i.bak 's|uses: CodesWhat/portwing/.github/actions/cflite-run@[0-9a-f]*.*|uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1|' "${pr_fixture}"
+assert_rejected \
+	"runtime must use the repository-owned action allowed by org policy" \
+	"contract must reject an org-disallowed direct runtime reference"
 
 # --- the PR lane's trigger and permissions -----------------------------------
 

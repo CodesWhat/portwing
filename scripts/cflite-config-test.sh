@@ -117,6 +117,13 @@ assert_setting() {
 		fail "${workflow}: step '${step_id}' in job '${job}' must set ${line}"
 }
 
+# Direct Docker action references are rejected by the organization allow-list.
+for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
+	if grep -Eq '^[[:space:]]*uses: docker://' "${workflow}"; then
+		fail "${workflow}: runtime must use the repository-owned action allowed by org policy"
+	fi
+done
+
 # --- every action and runtime pinned to immutable content with a version -------
 #
 # The repo-wide convention, asserted per workflow rather than trusting a
@@ -125,13 +132,8 @@ assert_setting() {
 for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
 	while IFS= read -r line; do
 		[ -n "${line}" ] || continue
-		if [[ ${line} == *"uses: docker://"* ]]; then
-			grep -Eq '^[[:space:]]*uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-(build|run)-fuzzers:v1@sha256:[0-9a-f]{64}[[:space:]]+# v1$' <<<"${line}" ||
-				fail "${workflow}: unpinned ClusterFuzzLite runtime image"
-		else
-			grep -Eq '^[[:space:]]*uses: [^@]+@[0-9a-f]{40}[[:space:]]+# .+$' <<<"${line}" ||
-				fail "${workflow}: unpinned or uncommented action reference: ${line#"${line%%[![:space:]]*}"}"
-		fi
+		grep -Eq '^[[:space:]]*uses: [^@]+@[0-9a-f]{40}[[:space:]]+# .+$' <<<"${line}" ||
+			fail "${workflow}: unpinned or uncommented action reference: ${line#"${line%%[![:space:]]*}"}"
 	done < <(grep -E '^[[:space:]]*uses:' "${workflow}")
 
 	uses_count="$(grep -Ec '^[[:space:]]*uses:' "${workflow}" || true)"
@@ -142,10 +144,22 @@ done
 # --- both ClusterFuzzLite actions present in every fuzzing job ---------------
 
 for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
-	grep -Fq "uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1@sha256:" "${workflow}" ||
+	grep -Fq "uses: CodesWhat/portwing/.github/actions/cflite-build@" "${workflow}" ||
 		fail "${workflow}: must pin the build-fuzzers runtime image"
-	grep -Fq "uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1@sha256:" "${workflow}" ||
+	grep -Fq "uses: CodesWhat/portwing/.github/actions/cflite-run@" "${workflow}" ||
 		fail "${workflow}: must pin the run-fuzzers runtime image"
+done
+
+# Local metadata carries the immutable runtime, not a floating wrapper image.
+for runtime in build run; do
+	action=".github/actions/cflite-${runtime}/action.yml"
+	if [ ! -f "${action}" ]; then
+		fail "${action}: runtime action definition is missing"
+		continue
+	fi
+	grep -Eq "^  image: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-${runtime}-fuzzers:v1@sha256:[0-9a-f]{64}[[:space:]]+# v1$" "${action}" ||
+		fail "${action}: unpinned ClusterFuzzLite runtime image"
+	grep -Eq '^  using: docker$' "${action}" || fail "${action}: must use the official Docker runtime"
 done
 
 # The image entrypoints use upstream env names, not Docker action INPUT_* vars.
@@ -158,7 +172,7 @@ for pair in "${pr_workflow}:code-change-fuzz" "${batch_workflow}:batch-fuzz" "${
 		if grep -Fq "        with:" <<<"${block}"; then
 			fail "${workflow}: ${runtime} must not pass action inputs to a direct runtime image"
 		fi
-		grep -Fq "uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-${runtime}-fuzzers:v1@sha256:" <<<"${block}" ||
+		grep -Fq "uses: CodesWhat/portwing/.github/actions/cflite-${runtime}@" <<<"${block}" ||
 			fail "${workflow}: ${runtime} step must use its matching pinned runtime image"
 		assert_setting "${workflow}" "${job}" "${runtime}" "LANGUAGE: go"
 		assert_setting "${workflow}" "${job}" "${runtime}" "CFL_PLATFORM: github"
