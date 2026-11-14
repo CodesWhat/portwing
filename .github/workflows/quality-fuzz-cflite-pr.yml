@@ -51,14 +51,13 @@ run-name: >-
 # read-only no matter what this file asks for. That is deliberate: a fork PR can
 # read the public corpus branch and fuzz, and can do nothing else.
 #
-# --- What is NOT pinned ------------------------------------------------------
+# --- Runtime image pins ------------------------------------------------------
 #
-# Both ClusterFuzzLite actions are Docker container actions whose `runs.image`
-# is a floating `gcr.io/oss-fuzz-base/clusterfuzzlite-*:v1` tag written inside
-# Google's action definition. Pinning the action to a full commit SHA, as this
-# file does, pins the twelve-line wrapper and not the several-GB image that
-# actually executes. There is no input that changes this. The one image we can
-# pin is our own builder, and .clusterfuzzlite/Dockerfile pins it by digest.
+# Google's action metadata selects floating runtime images even when the action
+# is pinned by commit. These steps reference those runtime images by digest and
+# supply the same entrypoint environment explicitly. Our own builder is also
+# pinned in .clusterfuzzlite/Dockerfile. This does not pin every transitive input:
+# enabling an upstream alternate base OS needs a separate runtime-image review.
 #
 # --- If the egress allow-list is wrong ---------------------------------------
 #
