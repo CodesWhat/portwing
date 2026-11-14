@@ -185,7 +185,7 @@ Drydock expects these fields:
 | `displayName` | string | From `dd.display.name` label or falls back to `name` |
 | `displayIcon` | string? | From `dd.display.icon` label |
 | `status` | string | `running`, `stopped`, `paused`, `restarting`, `dead`, `created` |
-| `watcher` | string | Watcher name (Portwing: `"docker"` or from `dd.watch` label) |
+| `watcher` | string | Watcher name (`"docker"`); `dd.watch` controls monitoring, not watcher identity |
 | `agent` | string? | Agent name (set by Drydock controller, stripped in agent responses) |
 | `image.id` | string | Image SHA |
 | `image.registry` | object | `{name:"unknown", url:"docker.io"}`; Portwing knows the registry URL, while the controller assigns its configured registry component |

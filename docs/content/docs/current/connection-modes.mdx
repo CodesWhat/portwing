@@ -50,7 +50,7 @@ For the complete variable reference, see [Configuration](/configuration).
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.2.1
+    image: ghcr.io/codeswhat/portwing:1.2.2
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -176,7 +176,7 @@ On `SIGINT` or `SIGTERM` the agent closes all active exec sessions and sends a W
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.2.1
+    image: ghcr.io/codeswhat/portwing:1.2.2
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]

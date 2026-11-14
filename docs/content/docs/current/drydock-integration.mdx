@@ -144,7 +144,7 @@ Portwing's `GET /api/containers` and all container events return objects in this
 | `displayName` | string | From `dd.display.name` label, falls back to `name` |
 | `displayIcon` | string? | From `dd.display.icon` label |
 | `status` | string | `running`, `stopped`, `paused`, `restarting`, `dead`, `created` |
-| `watcher` | string | `"docker"` or value from `dd.watch` label |
+| `watcher` | string | `"docker"`; `dd.watch` controls monitoring, not watcher identity |
 | `agent` | string? | Set by the Drydock controller; stripped from agent responses |
 | `image.id` | string | Image SHA |
 | `image.registry` | object | `{name:"unknown", url:"docker.io"}`; the controller assigns its configured registry component |
@@ -264,7 +264,7 @@ Handshake sequence:
 {
   "type": "hello",
   "data": {
-    "version": "1.2.1",
+    "version": "1.2.2",
     "protocol": "portwing/1.0",
     "agentId": "uuid",
     "agentName": "my-server",
@@ -514,7 +514,7 @@ These are set in Drydock's agent component configuration, not environment variab
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.2.1
+    image: ghcr.io/codeswhat/portwing:1.2.2
     environment:
       TOKEN: "${DD_AGENT_SECRET}"
       PORT: "3000"

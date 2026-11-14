@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.2.1`.
+> Portwing is stable software. The current release line is `v1.2.2`.
 > The v1.2 line requires TLS for enrollment by default and uses a glibc-free
 > container runtime.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
