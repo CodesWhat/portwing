@@ -19,6 +19,8 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 | `ALLOW_INSECURE_EDGE_URL` | `false` | Dangerous opt-in to connect Edge mode to a plaintext `http://`/`ws://` `DRYDOCK_URL`. The controller's identity is otherwise verified by TLS alone, so this is for trusted local testing only. |
 | `TLS_CERT` | — | Path to server TLS certificate (Standard mode). Must be set together with `TLS_KEY`; partial configuration is a startup error. |
 | `TLS_KEY` | — | Path to server TLS private key (Standard mode). Must be set together with `TLS_CERT`; partial configuration is a startup error. |
+| `TLS_CLIENT_CA` | — | Development option, absent from v1.2.2: PEM trust bundle for inbound client certificates. Requires native Standard-mode `TLS_CERT` and `TLS_KEY`; rejected in Edge mode. Loaded at startup; restart to change trust. |
+| `HEALTHCHECK_TLS_CERT`, `HEALTHCHECK_TLS_KEY` | — | Development options, absent from v1.2.2: client certificate chain and private key used only by `portwing healthcheck`. Set together; required for the local probe when `TLS_CLIENT_CA` is enabled. |
 | `CA_CERT` | — | Path to a custom CA certificate used when verifying the Drydock server in Edge mode. |
 | `TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification on the outbound Edge connection. **Testing only.** |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | — | Standard proxy variables. The Edge connection to the controller goes through the proxy they select, using an HTTP CONNECT tunnel, and hosts matched by `NO_PROXY` connect directly. Credentials can be given in the proxy URL (`http://user:pass@proxy:3128`). Loopback controllers are never proxied. The proxy URL must use `http://` or `socks5://`; an `https://` proxy URL is rejected with an error. |
@@ -41,7 +43,37 @@ burn is treated as used.
 `ALLOWED_ORIGINS` and `ALLOWED_HOSTS` defend against DNS rebinding; they are not access lists for people. The `Origin` check covers a page's writes, WebSocket upgrades and MCP calls. The `Host` check covers its same-origin reads, which carry no `Origin`, and applies only when authentication is off (with auth on, a rebinding page can't present the secret, though `/health`, `/ready` and `/_portwing/health` stay readable without credentials). It does not help against an attacker who controls the victim's name resolution (single-label names pass) or behind a reverse proxy that rewrites `Host` to the upstream address; see the security model. Neither the Docker CLI, Drydock's agent client, curl nor most MCP clients send an `Origin`, so they need no entry. Some WebSocket libraries do (Python `websocket-client`, as used by docker-py `attach_socket(ws=True)`, and `golang.org/x/net/websocket`); list their origin. Portwing sends no `Access-Control-*` headers and doesn't answer `OPTIONS`, so an allowlisted origin doesn't enable cross-origin `fetch` from a page; it helps a same-origin reverse proxy and WebSocket clients. An `Origin` that matches the request `Host` is not allowed automatically: a page on a rebound hostname presents exactly that.
 </Callout>
 
-### Authentication variables
+### Optional client certificates
+
+This option was added after v1.2.2. Check [GitHub Releases](https://github.com/CodesWhat/portwing/releases) for published availability.
+
+Set `TLS_CLIENT_CA` to a PEM CA bundle and configure the native server's
+`TLS_CERT` and `TLS_KEY`. Every connection to that listener must present a
+currently valid certificate trusted by the bundle and suitable for TLS client
+authentication. This includes `/health`, metrics, enrollment and streaming routes.
+Leaving `TLS_CLIENT_CA` unset preserves ordinary server-only TLS.
+
+Client certificates add a transport requirement. Existing HTTP credential and
+Ed25519 verification still run, including their existing explicitly configured
+unauthenticated modes. A certificate does not become an application principal,
+change audit identity or reduce a credential's Docker authority. No forwarded
+certificate header is trusted. A reverse proxy that terminates TLS must enforce
+its own client-certificate policy and keep the backend private; this native TLS
+option does not verify the original peer behind such a proxy.
+
+CA bundles are loaded once. Missing, empty or invalid bundles fail startup.
+Restart Portwing after changing the trust bundle or its server certificates.
+There is no live CA reload or built-in certificate issuance/revocation service.
+
+For the container image's built-in healthcheck, also provide
+`HEALTHCHECK_TLS_CERT` and `HEALTHCHECK_TLS_KEY`: a client-authentication certificate
+chain trusted by the same CA and its private key. The probe still pins the exact
+server leaf from `TLS_CERT`; it does not disable client verification or bypass
+request authentication. Mount private keys read-only and make them readable by
+Portwing's configured UID, 65532 in the published image. Missing or mismatched
+probe credentials cause the healthcheck to fail, rather than fall back to HTTP.
+
+## Authentication variables
 
 The following variables govern how Portwing authenticates incoming requests. `TOKEN` and `TOKEN_HASH` are mutually exclusive — setting both causes startup to fail.
 

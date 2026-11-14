@@ -170,6 +170,16 @@ presents TLS with:
 TLS 1.3 cipher suites are controlled by Go's TLS stack, which selects only
 AEAD suites by design.
 
+Added after v1.2.2, optional `TLS_CLIENT_CA` requires a trusted client certificate
+on the entire native Standard HTTPS listener, including health endpoints. It is
+rejected without native TLS or in Edge mode. Trust loads at startup; rotation
+requires a restart. Existing HTTP credential/Ed25519 policies remain in force;
+certificates are not mapped to principals or narrower Docker permissions. The
+built-in probe uses separate `HEALTHCHECK_TLS_CERT`/`HEALTHCHECK_TLS_KEY` client
+credentials while retaining its exact server-leaf pin. Certificate headers from
+reverse proxies are not an authentication source. See the current configuration
+reference for deployment and published-availability details.
+
 ### 9. Resource Caps
 
 | Resource | Limit | Purpose |

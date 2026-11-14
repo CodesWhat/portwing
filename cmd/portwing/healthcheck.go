@@ -40,6 +40,24 @@ func runHealthcheck() error {
 	if err != nil {
 		return err
 	}
+	clientCert := os.Getenv("HEALTHCHECK_TLS_CERT")
+	clientKey := os.Getenv("HEALTHCHECK_TLS_KEY")
+	if (clientCert == "") != (clientKey == "") {
+		return fmt.Errorf("HEALTHCHECK_TLS_CERT and HEALTHCHECK_TLS_KEY must be set together")
+	}
+	if os.Getenv("TLS_CLIENT_CA") != "" && clientCert == "" {
+		return fmt.Errorf("TLS_CLIENT_CA requires HEALTHCHECK_TLS_CERT and HEALTHCHECK_TLS_KEY for the local probe")
+	}
+	if clientCert != "" {
+		if verification == nil {
+			return fmt.Errorf("healthcheck client certificate requires TLS_CERT")
+		}
+		certificate, err := tls.LoadX509KeyPair(clientCert, clientKey)
+		if err != nil {
+			return fmt.Errorf("loading healthcheck client certificate: %w", err)
+		}
+		verification.Certificates = []tls.Certificate{certificate}
+	}
 	transport := &http.Transport{
 		TLSClientConfig:        verification,
 		DisableKeepAlives:      true,
