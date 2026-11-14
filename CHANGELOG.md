@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional native Standard-mode client-certificate verification through
+  `TLS_CLIENT_CA`, with existing request authentication preserved.
+- Dedicated client-certificate credentials for the local healthcheck when mutual
+  TLS is enabled; keep server-leaf verification and fail on incomplete credentials.
+
 ## [v1.2.2] - 2026-11-13
 
 ### Fixed

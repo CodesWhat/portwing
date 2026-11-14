@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -194,6 +195,22 @@ type Server struct {
 // It returns an error if the TokenHash is set but cannot be parsed; the PHC
 // string is validated at startup so malformed configuration is caught early.
 func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.ServerAdapter) (*Server, error) {
+	var clientCAs *x509.CertPool
+	if cfg.TLSClientCA != "" {
+		if cfg.DrydockURL != "" || cfg.TLSCert == "" || cfg.TLSKey == "" {
+			return nil, fmt.Errorf("TLS_CLIENT_CA requires standard mode with native TLS_CERT and TLS_KEY")
+		}
+		// #nosec G304 G703 -- TLS_CLIENT_CA is operator configuration, never request input.
+		trust, err := os.ReadFile(cfg.TLSClientCA)
+		if err != nil {
+			return nil, fmt.Errorf("reading TLS_CLIENT_CA: %w", err)
+		}
+		clientCAs = x509.NewCertPool()
+		if !clientCAs.AppendCertsFromPEM(trust) {
+			return nil, fmt.Errorf("TLS_CLIENT_CA must contain a PEM certificate")
+		}
+	}
+
 	var verifier tokenVerifier
 	switch {
 	case cfg.Token != "":
@@ -411,6 +428,10 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 			},
+		}
+		if clientCAs != nil {
+			s.httpServer.TLSConfig.ClientCAs = clientCAs
+			s.httpServer.TLSConfig.ClientAuth = tls.RequireAndVerifyClientCert
 		}
 	}
 
