@@ -774,6 +774,7 @@ func (c *Client) sendHello(ctx context.Context) error {
 	if c.keyRotation != nil {
 		capabilities = append(capabilities, protocol.CapKeyRotation)
 	}
+	capabilities = protocol.MergeCapabilities(capabilities)
 
 	hello := protocol.HelloMessage{
 		Version:       protocol.AgentVersion,

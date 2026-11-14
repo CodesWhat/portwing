@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dedicated client-certificate credentials for the local healthcheck when mutual
   TLS is enabled; keep server-leaf verification and fail on incomplete credentials.
 
+### Fixed
+
+- Emit each capability once in Standard info and Edge hello while preserving
+  case-sensitive values and first-seen order, including managed rotation.
+
 ## [v1.2.2] - 2026-11-13
 
 ### Fixed

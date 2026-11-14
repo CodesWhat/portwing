@@ -272,7 +272,10 @@ components:
             dd:watch and dd:trigger capabilities are omitted. Use the watcher
             descriptor and empty trigger list to discover the v0.9.0
             controller-owned execution contract; the corresponding wire message
-            types remain reserved but unadvertised.
+            types remain reserved but unadvertised. Added after v1.2.2,
+            Standard info and Edge hello lists emit each case-sensitive
+            capability once, preserving its first occurrence across core,
+            adapter and optional feature declarations.
           items:
             type: string
           example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:logs"]

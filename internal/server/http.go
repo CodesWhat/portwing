@@ -576,7 +576,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"metrics",
 		"events",
 	}
-	capabilities = append(capabilities, s.adapter.Capabilities()...)
+	capabilities = protocol.MergeCapabilities(capabilities, s.adapter.Capabilities())
 
 	info := map[string]any{
 		"version":       protocol.AgentVersion,

@@ -13,6 +13,15 @@ assuming compatibility.** Product releases (portwing `vX.Y.Z`, Drydock
 `vX.Y.Z`, sockguard preset revisions) can ship any number of times between
 DrydockCompat bumps.
 
+## Development capability-list normalization
+
+Added after v1.2.2, Standard info and Edge hello lists emit each case-sensitive
+capability once in first-seen order. No distinct capability is added or removed,
+and the wire compatibility level is unchanged. Drydock's published v1.8.0-rc.1
+consumer uses membership checks for request streaming and key rotation; it does
+not require repeated entries. This is a development change until a later release
+is published. It does not claim compatibility testing of held Drydock1.9 work.
+
 ## Version matrix
 
 | Portwing version | Drydock wire connection | Watcher/update feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
