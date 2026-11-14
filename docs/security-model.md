@@ -180,7 +180,6 @@ credentials while retaining its exact server-leaf pin. Certificate headers from
 reverse proxies are not an authentication source. See the current configuration
 reference for deployment and published-availability details.
 
-
 ### 9. Resource Caps
 
 | Resource | Limit | Purpose |
