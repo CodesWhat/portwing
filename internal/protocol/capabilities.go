@@ -5,12 +5,8 @@ package protocol
 // MergeCapabilities preserves the first occurrence of each case-sensitive
 // capability across the supplied groups, without changing the input slices.
 func MergeCapabilities(groups ...[]string) []string {
-	size := 0
-	for _, group := range groups {
-		size += len(group)
-	}
-	merged := make([]string, 0, size)
-	seen := make(map[string]struct{}, size)
+	var merged []string
+	seen := make(map[string]struct{})
 	for _, group := range groups {
 		for _, capability := range group {
 			if _, exists := seen[capability]; exists {
