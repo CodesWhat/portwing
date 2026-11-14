@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes are shipped on the **latest stable release line**. The v1.2
+Security fixes are shipped on the **latest stable release line**. The v1.3
 line keeps the existing wire protocol. Enrollment requires TLS, either natively
 or through a trusted proxy reporting HTTPS; `ALLOW_INSECURE_ENROLLMENT=true`
 opts in to plaintext for trusted local testing. Review
@@ -10,7 +10,8 @@ opts in to plaintext for trusted local testing. Review
 
 | Version | Supported |
 | --- | --- |
-| 1.2.x (latest stable) | :white_check_mark: |
+| 1.3.x (latest stable) | :white_check_mark: |
+| 1.2.x | :x: |
 | 1.1.x | :x: |
 | 1.0.x | :x: |
 | < 1.0 | :x: |
