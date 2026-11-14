@@ -109,6 +109,11 @@ rejected with `signature-locked` (`signature-version-too-low` for the minimum).
 Sign version 3 only when `v3` is `true`. See
 [Authentication](/authentication#signature-version-3-audience-bound).
 
+Added after v1.2.2, Standard info and Edge hello capability lists contain each
+case-sensitive name once, preserving the first occurrence across core, adapter
+and optional feature declarations. Distinct capability names and their ordering
+remain; repeated names add no authority or feature support.
+
 Unsupported legacy `dd:watch` and `dd:trigger` capabilities are absent. The
 watcher descriptor declares controller ownership and the trigger list remains
 empty; their reserved wire message types are not feature advertisements.

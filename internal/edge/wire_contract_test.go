@@ -508,7 +508,7 @@ func TestSendHelloMergesAdapterCapabilities(t *testing.T) {
 	c, ctrl := newTestClient(t)
 	c.dockerClient = &fakeDocker{}
 	c.adapter = &fakeAdapter{
-		caps:     []string{"custom-cap"},
+		caps:     []string{"custom-cap", "events", "exec", "custom-cap", protocol.CapResponseBodyBase64},
 		helloExt: &adapter.HelloExtension{DrydockCompat: "2.0.0"},
 	}
 
@@ -529,6 +529,15 @@ func TestSendHelloMergesAdapterCapabilities(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Capabilities = %v, want to contain custom-cap", hello.Capabilities)
+	}
+	want := []string{"compose", "exec", "metrics", "events", protocol.CapResponseBodyBase64, protocol.CapRequestBodyStream, "custom-cap"}
+	if len(hello.Capabilities) != len(want) {
+		t.Fatalf("Capabilities = %v, want %v", hello.Capabilities, want)
+	}
+	for i, capability := range want {
+		if hello.Capabilities[i] != capability {
+			t.Fatalf("Capabilities = %v, want %v", hello.Capabilities, want)
+		}
 	}
 	if hello.DrydockCompat != "2.0.0" {
 		t.Errorf("DrydockCompat = %q, want 2.0.0", hello.DrydockCompat)

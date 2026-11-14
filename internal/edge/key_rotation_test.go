@@ -367,3 +367,18 @@ func TestEdgeInvalidManagedStorageFailsBeforeConnectionOrServing(t *testing.T) {
 		t.Fatalf("invalid storage response: %d", response.StatusCode)
 	}
 }
+
+func TestManagedHelloCapabilitiesPreserveFirstOccurrence(t *testing.T) {
+	t.Parallel()
+	c, ctrl, _ := managedEdgeClient(t)
+	c.adapter = &fakeAdapter{caps: []string{protocol.CapKeyRotation, "custom-cap", protocol.CapKeyRotation}}
+	if err := c.sendHello(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var hello protocol.HelloMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeHello), &hello)
+	want := []string{"compose", "exec", "metrics", "events", protocol.CapResponseBodyBase64, protocol.CapRequestBodyStream, protocol.CapKeyRotation, "custom-cap"}
+	if !slices.Equal(hello.Capabilities, want) {
+		t.Fatalf("capabilities=%v, want%v", hello.Capabilities, want)
+	}
+}
