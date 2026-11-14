@@ -67,10 +67,10 @@ job_permissions() {
 		grep -v '^[[:space:]]*$' || true
 }
 
-# Prints the `with:` block of the step whose `id:` is given, scoped to that
+# Prints the body of the step whose `id:` is given, scoped to that
 # step. Budgets and storage settings have to be on the step that actually runs
 # the fuzzers, not merely somewhere in the file.
-step_with() {
+step_block() {
 	local workflow="$1"
 	local job="$2"
 	local step_id="$3"
@@ -101,14 +101,14 @@ assert_permissions() {
 	fi
 }
 
-assert_with() {
+assert_setting() {
 	local workflow="$1"
 	local job="$2"
 	local step_id="$3"
 	local line="$4"
 	local block
 
-	block="$(step_with "${workflow}" "${job}" "${step_id}")"
+	block="$(step_block "${workflow}" "${job}" "${step_id}")"
 	if [ -z "${block}" ]; then
 		fail "${workflow}: job '${job}' must define a step with id: ${step_id}"
 		return
@@ -117,7 +117,7 @@ assert_with() {
 		fail "${workflow}: step '${step_id}' in job '${job}' must set ${line}"
 }
 
-# --- every `uses:` pinned to a full commit SHA with a version comment --------
+# --- every action and runtime pinned to immutable content with a version -------
 #
 # The repo-wide convention, asserted per workflow rather than trusting a
 # repo-wide sweep, because these two files are the ones that would tempt someone
@@ -125,8 +125,13 @@ assert_with() {
 for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
 	while IFS= read -r line; do
 		[ -n "${line}" ] || continue
-		grep -Eq '^[[:space:]]*uses: [^@]+@[0-9a-f]{40}[[:space:]]+# .+$' <<<"${line}" ||
-			fail "${workflow}: unpinned or uncommented action reference: ${line#"${line%%[![:space:]]*}"}"
+		if [[ ${line} == *"uses: docker://"* ]]; then
+			grep -Eq '^[[:space:]]*uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-(build|run)-fuzzers:v1@sha256:[0-9a-f]{64}[[:space:]]+# v1$' <<<"${line}" ||
+				fail "${workflow}: unpinned ClusterFuzzLite runtime image"
+		else
+			grep -Eq '^[[:space:]]*uses: [^@]+@[0-9a-f]{40}[[:space:]]+# .+$' <<<"${line}" ||
+				fail "${workflow}: unpinned or uncommented action reference: ${line#"${line%%[![:space:]]*}"}"
+		fi
 	done < <(grep -E '^[[:space:]]*uses:' "${workflow}")
 
 	uses_count="$(grep -Ec '^[[:space:]]*uses:' "${workflow}" || true)"
@@ -137,10 +142,44 @@ done
 # --- both ClusterFuzzLite actions present in every fuzzing job ---------------
 
 for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
-	grep -Fq "uses: google/clusterfuzzlite/actions/build_fuzzers@" "${workflow}" ||
-		fail "${workflow}: must build fuzzers with google/clusterfuzzlite/actions/build_fuzzers"
-	grep -Fq "uses: google/clusterfuzzlite/actions/run_fuzzers@" "${workflow}" ||
-		fail "${workflow}: must run fuzzers with google/clusterfuzzlite/actions/run_fuzzers"
+	grep -Fq "uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1@sha256:" "${workflow}" ||
+		fail "${workflow}: must pin the build-fuzzers runtime image"
+	grep -Fq "uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1@sha256:" "${workflow}" ||
+		fail "${workflow}: must pin the run-fuzzers runtime image"
+done
+
+# The image entrypoints use upstream env names, not Docker action INPUT_* vars.
+for pair in "${pr_workflow}:code-change-fuzz" "${batch_workflow}:batch-fuzz" "${prune_workflow}:prune-corpus"; do
+	workflow="${pair%:*}"
+	job="${pair##*:}"
+	for runtime in build run; do
+		block="$(step_block "${workflow}" "${job}" "${runtime}")"
+		grep -Fq "        env:" <<<"${block}" || fail "${workflow}: ${runtime} must configure runtime env"
+		if grep -Fq "        with:" <<<"${block}"; then
+			fail "${workflow}: ${runtime} must not pass action inputs to a direct runtime image"
+		fi
+		grep -Fq "uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-${runtime}-fuzzers:v1@sha256:" <<<"${block}" ||
+			fail "${workflow}: ${runtime} step must use its matching pinned runtime image"
+		assert_setting "${workflow}" "${job}" "${runtime}" "LANGUAGE: go"
+		assert_setting "${workflow}" "${job}" "${runtime}" "CFL_PLATFORM: github"
+		assert_setting "${workflow}" "${job}" "${runtime}" 'LOW_DISK_SPACE: "True"'
+		assert_setting "${workflow}" "${job}" "${runtime}" 'DRY_RUN: "false"'
+		# shellcheck disable=SC2016 # This is the literal workflow expression.
+		assert_setting "${workflow}" "${job}" "${runtime}" 'GITHUB_TOKEN: ${{ github.token }}'
+		assert_setting "${workflow}" "${job}" "${runtime}" "SANITIZER: address"
+		if [ "${runtime}" = build ]; then
+			for setting in 'ALLOWED_BROKEN_TARGETS_PERCENTAGE: ""' 'BAD_BUILD_CHECK: "true"' 'UPLOAD_BUILD: "false"' 'PROJECT_SRC_PATH: ""' 'GIT_STORE_REPO: ""' 'GIT_STORE_BRANCH: ""' 'GIT_STORE_BRANCH_COVERAGE: ""'; do
+				assert_setting "${workflow}" "${job}" "${runtime}" "${setting}"
+			done
+			if [ "${job}" != code-change-fuzz ]; then
+				assert_setting "${workflow}" "${job}" "${runtime}" 'KEEP_UNAFFECTED_FUZZ_TARGETS: "false"'
+			fi
+		else
+			for setting in 'REPORT_UNREPRODUCIBLE_CRASHES: "False"' 'OUTPUT_SARIF: "false"' 'MINIMIZE_CRASHES: "False"' 'PARALLEL_FUZZING: "false"'; do
+				assert_setting "${workflow}" "${job}" "${runtime}" "${setting}"
+			done
+		fi
+	done
 done
 
 # --- harden-runner, consistent with every other workflow in the repo --------
@@ -166,7 +205,7 @@ for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
 		fi
 	done
 
-	# The artifact hosts @actions/artifact needs. storage-repo does not remove
+	# The artifact hosts @actions/artifact needs. GIT_STORE_REPO does not remove
 	# the GitHub Actions filestore: get_filestore wraps a GithubActionsFilestore
 	# in the GitFilestore, and upload_crashes delegates back to it, so a crash
 	# reproducer leaves as a workflow artifact on every lane here. Blocked, the
@@ -196,13 +235,13 @@ grep -Eq '^permissions:$' "${pr_workflow}" ||
 assert_permissions "${pr_workflow}" code-change-fuzz \
 	$'      contents: read\n      actions: read'
 
-assert_with "${pr_workflow}" code-change-fuzz run "fuzz-seconds: 300"
-assert_with "${pr_workflow}" code-change-fuzz run "mode: code-change"
-assert_with "${pr_workflow}" code-change-fuzz run "sanitizer: address"
-assert_with "${pr_workflow}" code-change-fuzz build "sanitizer: address"
+assert_setting "${pr_workflow}" code-change-fuzz run 'FUZZ_SECONDS: "300"'
+assert_setting "${pr_workflow}" code-change-fuzz run "MODE: code-change"
+assert_setting "${pr_workflow}" code-change-fuzz run "SANITIZER: address"
+assert_setting "${pr_workflow}" code-change-fuzz build "SANITIZER: address"
 # Without this, build_fuzzers drops targets it cannot prove the diff reaches,
 # using coverage reports this repo does not generate.
-assert_with "${pr_workflow}" code-change-fuzz build "keep-unaffected-fuzz-targets: true"
+assert_setting "${pr_workflow}" code-change-fuzz build 'KEEP_UNAFFECTED_FUZZ_TARGETS: "true"'
 
 # --- scheduled lanes: schedules, budgets, write scope -----------------------
 
@@ -261,19 +300,19 @@ assert_permissions "${batch_workflow}" batch-fuzz \
 assert_permissions "${prune_workflow}" prune-corpus \
 	$'      contents: write\n      actions: read'
 
-assert_with "${batch_workflow}" batch-fuzz run "fuzz-seconds: 600"
-assert_with "${batch_workflow}" batch-fuzz run "mode: batch"
-assert_with "${batch_workflow}" batch-fuzz run "sanitizer: address"
-assert_with "${prune_workflow}" prune-corpus run "fuzz-seconds: 600"
-assert_with "${prune_workflow}" prune-corpus run "mode: prune"
-assert_with "${prune_workflow}" prune-corpus run "sanitizer: address"
+assert_setting "${batch_workflow}" batch-fuzz run 'FUZZ_SECONDS: "600"'
+assert_setting "${batch_workflow}" batch-fuzz run "MODE: batch"
+assert_setting "${batch_workflow}" batch-fuzz run "SANITIZER: address"
+assert_setting "${prune_workflow}" prune-corpus run 'FUZZ_SECONDS: "600"'
+assert_setting "${prune_workflow}" prune-corpus run "MODE: prune"
+assert_setting "${prune_workflow}" prune-corpus run "SANITIZER: address"
 
 # The old hour-long budget sustained near-100% CPU past the runner's measured
 # 14-19 minute shutdown ceiling and killed the job twice. A regression back to
 # it must fail loudly rather than pass because the new value merely coexists
 # with the old one somewhere in the file.
-if grep -Fq "fuzz-seconds: 3600" "${batch_workflow}"; then
-	fail "${batch_workflow}: fuzz-seconds: 3600 exceeds the measured runner ceiling; batch must fuzz 600s total"
+if grep -Fq 'FUZZ_SECONDS: "3600"' "${batch_workflow}"; then
+	fail "${batch_workflow}: FUZZ_SECONDS: 3600 exceeds the measured runner ceiling; batch must fuzz 600s total"
 fi
 
 # --- batch and prune must never run together --------------------------------
@@ -328,26 +367,26 @@ fi
 # --- corpus storage: this repo, that branch, no new secret ------------------
 
 for workflow in "${pr_workflow}" "${batch_workflow}" "${prune_workflow}"; do
-	# One run_fuzzers step per mode, counted at the `with:` indent so the
+	# One run_fuzzers step per mode, counted at the `env:` indent so the
 	# workflow_dispatch input named `mode` cannot inflate it.
-	run_steps="$(grep -Ec '^          mode: ' "${workflow}" || true)"
+	run_steps="$(grep -Ec '^          MODE: ' "${workflow}" || true)"
 
 	# shellcheck disable=SC2016 # Asserting the literal text of the file under test.
-	storage_repos="$(grep -Fc 'storage-repo: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' "${workflow}" || true)"
+	storage_repos="$(grep -Fc 'GIT_STORE_REPO: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' "${workflow}" || true)"
 	if [ "${storage_repos}" -ne "${run_steps}" ]; then
 		fail "${workflow}: every run_fuzzers step must store the corpus in THIS repo with github.token (${storage_repos} of ${run_steps})"
 	fi
 
-	branches="$(grep -Fc "storage-repo-branch: ${corpus_branch}" "${workflow}" || true)"
+	branches="$(grep -Fc "GIT_STORE_BRANCH: ${corpus_branch}" "${workflow}" || true)"
 	if [ "${branches}" -ne "${run_steps}" ]; then
-		fail "${workflow}: every run_fuzzers step must use storage-repo-branch: ${corpus_branch} (${branches} of ${run_steps})"
+		fail "${workflow}: every run_fuzzers step must use GIT_STORE_BRANCH: ${corpus_branch} (${branches} of ${run_steps})"
 	fi
 
 	# Left at its default this is `gh-pages`, and a coverage run would create a
 	# GitHub Pages branch in this repository as a side effect.
-	coverage_branches="$(grep -Fc "storage-repo-branch-coverage: ${corpus_branch}" "${workflow}" || true)"
+	coverage_branches="$(grep -Fc "GIT_STORE_BRANCH_COVERAGE: ${corpus_branch}" "${workflow}" || true)"
 	if [ "${coverage_branches}" -ne "${run_steps}" ]; then
-		fail "${workflow}: every run_fuzzers step must pin storage-repo-branch-coverage to ${corpus_branch} (${coverage_branches} of ${run_steps})"
+		fail "${workflow}: every run_fuzzers step must pin GIT_STORE_BRANCH_COVERAGE to ${corpus_branch} (${coverage_branches} of ${run_steps})"
 	fi
 
 	# No PAT, no repository secret, no second repo. That is the design.

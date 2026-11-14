@@ -69,21 +69,39 @@ jobs:
 
       - name: Build fuzzers
         id: build
-        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
-        with:
-          language: go
-          sanitizer: address
-          github-token: ${{ github.token }}
+        uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1@sha256:7321896d954e0a91af88b35527a5429fcb9990acb0e72782392bcd49d34c526c  # v1
+        env:
+          LANGUAGE: go
+          SANITIZER: address
+          GITHUB_TOKEN: ${{ github.token }}
+          LOW_DISK_SPACE: "True"
+          CFL_PLATFORM: github
+          DRY_RUN: "false"
+          ALLOWED_BROKEN_TARGETS_PERCENTAGE: ""
+          BAD_BUILD_CHECK: "true"
+          UPLOAD_BUILD: "false"
+          PROJECT_SRC_PATH: ""
+          GIT_STORE_REPO: ""
+          GIT_STORE_BRANCH: ""
+          GIT_STORE_BRANCH_COVERAGE: ""
+          KEEP_UNAFFECTED_FUZZ_TARGETS: "false"
 
       - name: Run fuzzers
         id: run
-        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
-        with:
-          language: go
-          github-token: ${{ github.token }}
-          fuzz-seconds: 600
-          mode: prune
-          sanitizer: address
-          storage-repo: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
-          storage-repo-branch: clusterfuzzlite-corpus
-          storage-repo-branch-coverage: clusterfuzzlite-corpus
+        uses: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-run-fuzzers:v1@sha256:32af8937086deaad780a5a61619a0d7fb6a43cf39daa717d5fcbb4da82a29cc3  # v1
+        env:
+          LANGUAGE: go
+          GITHUB_TOKEN: ${{ github.token }}
+          FUZZ_SECONDS: "600"
+          MODE: prune
+          SANITIZER: address
+          GIT_STORE_REPO: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+          GIT_STORE_BRANCH: clusterfuzzlite-corpus
+          GIT_STORE_BRANCH_COVERAGE: clusterfuzzlite-corpus
+          LOW_DISK_SPACE: "True"
+          CFL_PLATFORM: github
+          DRY_RUN: "false"
+          REPORT_UNREPRODUCIBLE_CRASHES: "False"
+          OUTPUT_SARIF: "false"
+          MINIMIZE_CRASHES: "False"
+          PARALLEL_FUZZING: "false"

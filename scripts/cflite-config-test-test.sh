@@ -105,22 +105,43 @@ assert_rejected() {
 reset_fixtures
 assert_passes "the real ClusterFuzzLite configuration must pass its own contract"
 
-# --- pinning -----------------------------------------------------------------
+# --- immutable runtime and action references ---------------------------------
 
-# The upstream docs only ever show `@v1`, so this is the mistake most likely to
-# be made by someone copying from them.
 reset_fixtures
-sed -i.bak 's|uses: google/clusterfuzzlite/actions/run_fuzzers@[0-9a-f]*  # v1|uses: google/clusterfuzzlite/actions/run_fuzzers@v1|' "${pr_fixture}"
+sed -E -i.bak 's|(clusterfuzzlite-run-fuzzers:v1)@sha256:[0-9a-f]{64}|\1|' "${pr_fixture}"
+assert_rejected \
+	"unpinned ClusterFuzzLite runtime image" \
+	"contract must reject a mutable runtime hidden behind a v1 label"
+
+reset_fixtures
+sed -E -i.bak 's|(uses: step-security/harden-runner@[0-9a-f]{40})[[:space:]]+#.*|\1|' "${batch_fixture}"
 assert_rejected \
 	"unpinned or uncommented action reference" \
-	"contract must reject a floating @v1 action reference"
+	"contract must reject a pinned action SHA with no version comment"
 
-# A SHA with no version comment leaves nobody able to tell what it is.
 reset_fixtures
-sed -i.bak 's|@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1|@884713a6c30a92e5e8544c39945cd7cb630abcd1|' "${batch_fixture}"
+sed -E -i.bak 's|@sha256:[0-9a-f]{64}|@sha256:deadbeef|' "${pr_fixture}"
 assert_rejected \
-	"unpinned or uncommented action reference" \
-	"contract must reject a pinned SHA with no version comment"
+	"unpinned ClusterFuzzLite runtime image" \
+	"contract must reject a malformed runtime digest"
+
+reset_fixtures
+sed -i.bak 's|clusterfuzzlite-build-fuzzers:v1|clusterfuzzlite-run-fuzzers:v1|' "${pr_fixture}"
+assert_rejected \
+	"build step must use its matching pinned runtime image" \
+	"contract must reject a run image in the build step"
+
+reset_fixtures
+sed -i.bak '/CFL_PLATFORM: github/d' "${pr_fixture}"
+assert_rejected \
+	"must set CFL_PLATFORM: github" \
+	"contract must preserve the platform expected by the image entrypoint"
+
+reset_fixtures
+insert_before "${pr_fixture}" "        env:" "        with:"
+assert_rejected \
+	"must not pass action inputs to a direct runtime image" \
+	"contract must reject wrapper inputs on a direct Docker action"
 
 # --- the PR lane's trigger and permissions -----------------------------------
 
@@ -147,21 +168,21 @@ assert_rejected \
 # --- budgets, mode, sanitizer ------------------------------------------------
 
 reset_fixtures
-sed -i.bak 's|fuzz-seconds: 300|fuzz-seconds: 30|' "${pr_fixture}"
+sed -i.bak 's|FUZZ_SECONDS: "300"|FUZZ_SECONDS: "30"|' "${pr_fixture}"
 assert_rejected \
-	"must set fuzz-seconds: 300" \
+	"must set FUZZ_SECONDS:" \
 	"contract must reject a changed code-change budget"
 
 reset_fixtures
-sed -i.bak 's|fuzz-seconds: 600|fuzz-seconds: 300|' "${batch_fixture}"
+sed -i.bak 's|FUZZ_SECONDS: "600"|FUZZ_SECONDS: "300"|' "${batch_fixture}"
 assert_rejected \
-	"must set fuzz-seconds: 600" \
+	"must set FUZZ_SECONDS:" \
 	"contract must reject a batch budget that is no longer 600s"
 
 # The old hour-long budget is not merely "some other value"; it is the exact
 # value that was measured to exceed the runner's CPU ceiling and kill the job.
 reset_fixtures
-sed -i.bak 's|fuzz-seconds: 600|fuzz-seconds: 3600|' "${batch_fixture}"
+sed -i.bak 's|FUZZ_SECONDS: "600"|FUZZ_SECONDS: "3600"|' "${batch_fixture}"
 assert_rejected \
 	"exceeds the measured runner ceiling" \
 	"contract must reject a batch budget reverted to the old 3600s"
@@ -169,46 +190,46 @@ assert_rejected \
 # Swapping the two scheduled modes reads plausible and silently stops the corpus
 # ever growing: prune only minimizes what batch found.
 reset_fixtures
-sed -i.bak 's|^          mode: batch$|          mode: prune|' "${batch_fixture}"
+sed -i.bak 's|^          MODE: batch$|          MODE: prune|' "${batch_fixture}"
 assert_rejected \
-	"must set mode: batch" \
+	"must set MODE: batch" \
 	"contract must reject a batch lane that runs the prune mode"
 
 # Go builds only support the address sanitizer; anything else builds nothing.
 reset_fixtures
-sed -i.bak 's|^          sanitizer: address$|          sanitizer: undefined|' "${pr_fixture}"
+sed -i.bak 's|^          SANITIZER: address$|          SANITIZER: undefined|' "${pr_fixture}"
 assert_rejected \
-	"must set sanitizer: address" \
+	"must set SANITIZER: address" \
 	"contract must reject a sanitizer Go cannot build"
 
 # Without this, build_fuzzers drops targets it cannot prove the diff reaches,
 # from coverage reports this repo does not produce.
 reset_fixtures
-sed -i.bak '/keep-unaffected-fuzz-targets: true/d' "${pr_fixture}"
+sed -i.bak '/KEEP_UNAFFECTED_FUZZ_TARGETS:/d' "${pr_fixture}"
 assert_rejected \
-	"must set keep-unaffected-fuzz-targets: true" \
+	"must set KEEP_UNAFFECTED_FUZZ_TARGETS:" \
 	"contract must reject a PR build that can silently drop every target"
 
 # --- corpus persistence ------------------------------------------------------
 
 reset_fixtures
-sed -i.bak 's|storage-repo-branch: clusterfuzzlite-corpus|storage-repo-branch: main|' "${batch_fixture}"
+sed -i.bak 's|GIT_STORE_BRANCH: clusterfuzzlite-corpus|GIT_STORE_BRANCH: main|' "${batch_fixture}"
 assert_rejected \
-	"must use storage-repo-branch: clusterfuzzlite-corpus" \
+	"must use GIT_STORE_BRANCH: clusterfuzzlite-corpus" \
 	"contract must reject a corpus written to a branch that is not the corpus branch"
 
 # Left at its default this is gh-pages, and a coverage run would create a
 # GitHub Pages branch in this repository as a side effect.
 reset_fixtures
-sed -i.bak '/storage-repo-branch-coverage: clusterfuzzlite-corpus/d' "${pr_fixture}"
+sed -i.bak '/GIT_STORE_BRANCH_COVERAGE: clusterfuzzlite-corpus/d' "${pr_fixture}"
 assert_rejected \
-	"must pin storage-repo-branch-coverage to clusterfuzzlite-corpus" \
+	"must pin GIT_STORE_BRANCH_COVERAGE to clusterfuzzlite-corpus" \
 	"contract must reject a coverage branch left at its gh-pages default"
 
 # One lane keeping its storage repo while another loses it is the realistic
 # version of this, and it would leave prune minimizing an empty local corpus.
 reset_fixtures
-sed -i.bak '/storage-repo: https:\/\/x-access-token/d' "${prune_fixture}"
+sed -i.bak '/GIT_STORE_REPO: https:\/\/x-access-token/d' "${prune_fixture}"
 assert_rejected \
 	"must store the corpus in THIS repo with github.token" \
 	"contract must reject a run step that lost its storage repo"
@@ -311,7 +332,7 @@ assert_rejected \
 	"contract must reject an egress policy that only audits"
 
 # The artifact hosts are the easiest ones to think this lane does not need,
-# because storage-repo makes the corpus go to a branch. The crash reproducer
+# because GIT_STORE_REPO makes the corpus go to a branch. The crash reproducer
 # still leaves as a workflow artifact, on every lane, including the read-only
 # PR one.
 reset_fixtures
