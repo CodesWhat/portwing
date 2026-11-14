@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Emit each capability once in Standard info and Edge hello while preserving
   case-sensitive values and first-seen order, including managed rotation.
+### Changed
+
+- Pin the ClusterFuzzLite build and run containers by digest, preserving upstream
+  runtime environment defaults, corpus destinations and job permissions.
+- Raise the audit/auth mutation efficacy floors and banner mutator-coverage floor
+  from seven qualified measurements. Package source is unchanged since the latest
+  measurement. Timeouts remain unkilled, and other package floors are unchanged.
 
 ## [v1.2.2] - 2026-11-13
 
