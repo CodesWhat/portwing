@@ -52,7 +52,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
   "live": true,
   "ready": false,
   "mode": "standard",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "uptimeSeconds": 3842.7,
   "docker": "unknown",
   "controller": "not_applicable"
@@ -67,7 +67,7 @@ No authentication is required for the health endpoints. Use them for Docker `HEA
   "live": true,
   "ready": true,
   "mode": "standard",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "uptimeSeconds": 3842.7,
   "docker": "connected",
   "controller": "not_applicable"
@@ -81,7 +81,7 @@ edge mode, when the controller WebSocket is disconnected.
 
 ```json
 {
-  "version": "1.2.2",
+  "version": "1.3.0",
   "dockerVersion": "27.0.3",
   "mode": "standard",
   "uptime": "2h34m56.789s",
@@ -109,7 +109,7 @@ rejected with `signature-locked` (`signature-version-too-low` for the minimum).
 Sign version 3 only when `v3` is `true`. See
 [Authentication](/authentication#signature-version-3-audience-bound).
 
-Added after v1.2.2, Standard info and Edge hello capability lists contain each
+Since v1.3.0, Standard info and Edge hello capability lists contain each
 case-sensitive name once, preserving the first occurrence across core, adapter
 and optional feature declarations. Distinct capability names and their ordering
 remain; repeated names add no authority or feature support.
@@ -380,7 +380,7 @@ Available when `ADAPTER=generic`. These endpoints expose container management wi
 
 ```json
 {
-  "agentVersion": "1.2.2",
+  "agentVersion": "1.3.0",
   "protocolName": "portwing",
   "protocolVersion": "1.0",
   "adapter": "generic"

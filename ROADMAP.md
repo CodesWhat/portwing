@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.2.2`.
+> Portwing is stable software. The current release line is `v1.3.0`.
 > The v1.2 line requires TLS for enrollment by default and uses a glibc-free
 > container runtime.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
@@ -145,11 +145,21 @@ required, unless `ALLOW_INSECURE_ENROLLMENT=true` opts in to plaintext for
 trusted local testing. The proxy must overwrite the header and the backend
 listener must stay private. Version 1.1.x only warns at startup.
 
-Post-v1 candidates are intentionally demand-driven: controller-managed
-Portwing upgrade/rollback waves, optional client-certificate authentication,
-and polling/intermittent edge transport.
-None should expand the base socket policy or add an unaudited
-self-update path merely for feature-table parity.
+**In v1.3: optional client certificates.** Native Standard HTTPS can require an
+operator-managed client certificate through `TLS_CLIENT_CA`, in addition to
+existing request authentication. The local healthcheck supports a dedicated
+client certificate and preserves server-leaf verification. Trust changes require
+a restart; Edge mode and reverse-proxy certificate headers are outside this option.
+
+**In v1.3: unique capability advertisements.** Standard info and Edge hello keep
+each case-sensitive capability once, in first-seen order. Wire compatibility is
+unchanged.
+
+Controller-managed upgrade/rollback waves remain controller-owned. Existing
+Portwing Docker API operations cover the verified Standard-mode replacement and
+rollback sequence. Reconnect verification found no failure requiring another Edge
+transport. New transport work needs a concrete failing case. Neither direction
+expands the socket policy or introduces an agent self-update path.
 
 ## Non-goals
 

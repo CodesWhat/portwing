@@ -78,7 +78,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.2.2
+    image: ghcr.io/codeswhat/portwing:1.3.0
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -210,7 +210,7 @@ startup error. When configured, Portwing presents TLS with:
 
 All TLS 1.2 suites are AEAD modes; CBC and RC4 suites are excluded. TLS 1.3 cipher suites are managed by Go's TLS stack, which selects only AEAD suites by design.
 
-Added after v1.2.2, optional `TLS_CLIENT_CA` requires a trusted client certificate
+Since v1.3.0, optional `TLS_CLIENT_CA` requires a trusted client certificate
 on the entire native Standard HTTPS listener, including health endpoints. It is
 rejected without native TLS or in Edge mode. Trust loads at startup; rotation
 requires a restart. Existing HTTP credential/Ed25519 policies remain in force;
@@ -347,7 +347,7 @@ Every release is built in GitHub Actions with reproducible flags (`CGO_ENABLED=0
 Verify a release before running it:
 
 ```bash
-VERSION=1.2.2
+VERSION=1.3.0
 
 # Verify the checksums file
 cosign verify-blob \

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.3.0] - 2026-11-14
+
 ### Added
 
 - Optional native Standard-mode client-certificate verification through
