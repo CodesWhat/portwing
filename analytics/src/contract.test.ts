@@ -10,6 +10,7 @@ import {
   buildWebVitalsEvent,
   canonicalizeAnalyticsRoute,
   createPostHogOptions,
+  isTrackingRefused,
   POSTHOG_PROXY_HOST,
   POSTHOG_UI_HOST,
   sanitizeEvent,
@@ -501,8 +502,10 @@ type WebVitalsReporterFactory = (
   canonicalizePath: typeof canonicalizeAnalyticsRoute,
   schedule: (callback: () => void, delayMs: number) => number,
   cancel: (timer: number) => void,
+  subscribeHidden: (onHidden: () => void) => () => void,
 ) => {
   record: (name: string, value: number) => void;
+  dispose: () => void;
 };
 
 async function loadWebVitalsReporterFactory(): Promise<WebVitalsReporterFactory> {
@@ -510,6 +513,22 @@ async function loadWebVitalsReporterFactory(): Promise<WebVitalsReporterFactory>
   const factory = "createWebVitalsReporter" in module ? module.createWebVitalsReporter : undefined;
   assert.equal(typeof factory, "function", "createWebVitalsReporter must exist");
   return factory as WebVitalsReporterFactory;
+}
+
+function fakeHidden() {
+  const listeners = new Set<() => void>();
+  return {
+    hide() {
+      for (const listener of [...listeners]) listener();
+    },
+    listeners,
+    subscribeHidden(onHidden: () => void) {
+      listeners.add(onHidden);
+      return () => {
+        listeners.delete(onHidden);
+      };
+    },
+  };
 }
 
 function fakeTimers() {
@@ -539,6 +558,7 @@ function fakeTimers() {
 test("web vitals reporter emits one complete canonical envelope", async () => {
   const createWebVitalsReporter = await loadWebVitalsReporterFactory();
   const timers = fakeTimers();
+  const hidden = fakeHidden();
   const emitted: BufferedEvent[] = [];
   const reporter = createWebVitalsReporter(
     "/docs/security-model?customer=secret#private",
@@ -547,6 +567,7 @@ test("web vitals reporter emits one complete canonical envelope", async () => {
     canonicalizeAnalyticsRoute,
     timers.schedule,
     timers.cancel,
+    hidden.subscribeHidden,
   );
 
   reporter.record("CLS", 0.01);
@@ -572,13 +593,17 @@ test("web vitals reporter emits one complete canonical envelope", async () => {
   ]);
 
   reporter.record("LCP", 999);
-  timers.fire();
   assert.equal(emitted.length, 1);
+  hidden.hide();
+  assert.equal(emitted.length, 2);
+  assert.equal(timers.pending.size, 0);
+  assert.equal(emitted[1]?.properties.$web_vitals_LCP_value, 999);
 });
 
-test("web vitals reporter flushes one partial envelope and ignores late metrics", async () => {
+test("web vitals reporter flushes a partial envelope and batches late metrics separately", async () => {
   const createWebVitalsReporter = await loadWebVitalsReporterFactory();
   const timers = fakeTimers();
+  const hidden = fakeHidden();
   const emitted: BufferedEvent[] = [];
   const reporter = createWebVitalsReporter(
     "/?customer=secret#private",
@@ -587,6 +612,7 @@ test("web vitals reporter flushes one partial envelope and ignores late metrics"
     canonicalizeAnalyticsRoute,
     timers.schedule,
     timers.cancel,
+    hidden.subscribeHidden,
   );
 
   reporter.record("TTFB", 8);
@@ -614,11 +640,17 @@ test("web vitals reporter flushes one partial envelope and ignores late metrics"
   reporter.record("FCP", 111);
   reporter.record("INP", 42);
   assert.equal(emitted.length, 1);
+  timers.fire();
+  assert.equal(emitted.length, 2);
+  assert.equal(emitted[1]?.properties.$web_vitals_FCP_value, 111);
+  assert.equal(emitted[1]?.properties.$web_vitals_INP_value, 42);
+  assert.equal("$web_vitals_CLS_value" in (emitted[1]?.properties ?? {}), false);
 });
 
 test("web vitals reporters stay page-load scoped across navigation and revisits", async () => {
   const createWebVitalsReporter = await loadWebVitalsReporterFactory();
   const timers = fakeTimers();
+  const hidden = fakeHidden();
   const emitted: BufferedEvent[] = [];
   const firstLoad = createWebVitalsReporter(
     "/docs/security-model?customer=secret#private",
@@ -627,6 +659,7 @@ test("web vitals reporters stay page-load scoped across navigation and revisits"
     canonicalizeAnalyticsRoute,
     timers.schedule,
     timers.cancel,
+    hidden.subscribeHidden,
   );
 
   firstLoad.record("CLS", 0.03);
@@ -658,7 +691,8 @@ test("web vitals reporters stay page-load scoped across navigation and revisits"
 
   firstLoad.record("FCP", 111);
   timers.fire();
-  assert.equal(emitted.length, 1);
+  assert.equal(emitted.length, 2);
+  assert.deepEqual(emitted[1]?.properties.$web_vitals_FCP_value, 111);
 
   const revisit = createWebVitalsReporter(
     "/docs/security-model/",
@@ -667,11 +701,12 @@ test("web vitals reporters stay page-load scoped across navigation and revisits"
     canonicalizeAnalyticsRoute,
     timers.schedule,
     timers.cancel,
+    hidden.subscribeHidden,
   );
   revisit.record("INP", 42);
   timers.fire();
 
-  assert.deepEqual(emitted[1], {
+  assert.deepEqual(emitted[2], {
     event: "$web_vitals",
     properties: {
       ...BASE_PROPERTIES,
@@ -680,6 +715,72 @@ test("web vitals reporters stay page-load scoped across navigation and revisits"
       $web_vitals_INP_value: 42,
     },
   });
+});
+
+test("web vitals reporter flushes on page hide, including late CLS and INP", async () => {
+  const createWebVitalsReporter = await loadWebVitalsReporterFactory();
+  const timers = fakeTimers();
+  const hidden = fakeHidden();
+  const emitted: BufferedEvent[] = [];
+  const reporter = createWebVitalsReporter(
+    "/docs/security-model",
+    (event) => emitted.push(event),
+    buildWebVitalsEvent,
+    canonicalizeAnalyticsRoute,
+    timers.schedule,
+    timers.cancel,
+    hidden.subscribeHidden,
+  );
+
+  hidden.hide();
+  assert.equal(emitted.length, 0);
+
+  reporter.record("FCP", 100);
+  reporter.record("LCP", 200);
+  hidden.hide();
+  assert.equal(emitted.length, 1);
+  assert.equal(timers.pending.size, 0);
+  assert.equal(emitted[0]?.properties.$web_vitals_FCP_value, 100);
+  assert.equal(emitted[0]?.properties.$web_vitals_LCP_value, 200);
+
+  reporter.record("FCP", 100);
+  timers.fire();
+  assert.equal(emitted.length, 2);
+  reporter.record("CLS", 0.1);
+  reporter.record("INP", 50);
+  hidden.hide();
+  assert.equal(emitted.length, 3);
+  assert.equal(emitted[2]?.properties.$web_vitals_CLS_value, 0.1);
+  assert.equal(emitted[2]?.properties.$web_vitals_INP_value, 50);
+  assert.equal("$web_vitals_FCP_value" in (emitted[2]?.properties ?? {}), false);
+  hidden.hide();
+  assert.equal(emitted.length, 3);
+});
+
+test("web vitals reporter dispose flushes and unsubscribes", async () => {
+  const createWebVitalsReporter = await loadWebVitalsReporterFactory();
+  const timers = fakeTimers();
+  const hidden = fakeHidden();
+  const emitted: BufferedEvent[] = [];
+  const reporter = createWebVitalsReporter(
+    "/",
+    (event) => emitted.push(event),
+    buildWebVitalsEvent,
+    canonicalizeAnalyticsRoute,
+    timers.schedule,
+    timers.cancel,
+    hidden.subscribeHidden,
+  );
+
+  assert.equal(hidden.listeners.size, 1);
+  reporter.record("LCP", 300);
+  reporter.dispose();
+  assert.equal(emitted.length, 1);
+  assert.equal(timers.pending.size, 0);
+  assert.equal(hidden.listeners.size, 0);
+
+  hidden.hide();
+  assert.equal(emitted.length, 1);
 });
 
 test("PostHog initializes only with the exact production proxy contract", () => {
@@ -730,7 +831,7 @@ test("PostHog initializes only with the exact production proxy contract", () => 
     },
   );
   assert.equal("disable_external_dependency_loading" in options, false);
-  assert.equal(options.before_send, sanitizeEvent);
+  assert.equal(typeof options.before_send, "function");
 });
 
 test("pageleave mirrors the pageview contract and canonicalizes the same way", () => {
@@ -803,4 +904,53 @@ test("$pathname never diverges from the allowlisted path", () => {
       );
     }
   }
+});
+
+test("isTrackingRefused honors GPC and DNT signals only when affirmative", () => {
+  assert.equal(isTrackingRefused({ globalPrivacyControl: true }), true);
+  assert.equal(isTrackingRefused({ doNotTrack: "1" }), true);
+  assert.equal(isTrackingRefused({ doNotTrack: "yes" }), true);
+  assert.equal(isTrackingRefused({ doNotTrack: " YES " }), true);
+  assert.equal(isTrackingRefused({ windowDoNotTrack: "1" }), true);
+  assert.equal(isTrackingRefused({ msDoNotTrack: "1" }), true);
+
+  assert.equal(isTrackingRefused(undefined), false);
+  assert.equal(isTrackingRefused({}), false);
+  assert.equal(isTrackingRefused({ doNotTrack: "0" }), false);
+  assert.equal(isTrackingRefused({ doNotTrack: "unspecified" }), false);
+  assert.equal(isTrackingRefused({ doNotTrack: null }), false);
+  assert.equal(isTrackingRefused({ globalPrivacyControl: false }), false);
+  assert.equal(isTrackingRefused({ globalPrivacyControl: "true" }), false);
+});
+
+test("before_send drops events when tracking is refused and sanitizes otherwise", () => {
+  const envelope = {
+    uuid: "00000000-0000-4000-8000-000000000000",
+    event: "$pageview",
+    properties: { ...BASE_PROPERTIES, surface: "marketing", path: "/", $pathname: "/" },
+  };
+  const refused = createPostHogOptions(
+    "phc_project-token",
+    POSTHOG_PROXY_HOST,
+    POSTHOG_UI_HOST,
+    () => true,
+  );
+  assert.ok(refused);
+  assert.equal(refused.before_send(envelope as never), null);
+
+  let isRefused = false;
+  const live = createPostHogOptions(
+    "phc_project-token",
+    POSTHOG_PROXY_HOST,
+    POSTHOG_UI_HOST,
+    () => isRefused,
+  );
+  assert.ok(live);
+  assert.deepEqual(live.before_send(envelope as never), sanitizeEvent(envelope as never));
+  isRefused = true;
+  assert.equal(live.before_send(envelope as never), null);
+
+  const defaults = createPostHogOptions("phc_project-token", POSTHOG_PROXY_HOST, POSTHOG_UI_HOST);
+  assert.ok(defaults);
+  assert.deepEqual(defaults.before_send(envelope as never), sanitizeEvent(envelope as never));
 });
