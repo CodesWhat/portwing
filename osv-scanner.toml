@@ -1,0 +1,8 @@
+# Narrow, expiring waivers for osv-scanner (run through Qlty).
+# Each entry names one advisory and lapses on its own date. Remove an entry as
+# soon as a fixed version is published and the lockfile picks it up.
+
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-17T00:00:00Z
+reason = "picomatch ReDoS, vulnerable <=4.0.7 with no patched release. It only runs at build time in the website and docs toolchain on our own glob patterns, never on untrusted input, and is not in the Go agent image. Matches Mouthtype's waiver. Remove once a fixed version is published."

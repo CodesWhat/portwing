@@ -11,10 +11,26 @@ import {
   type CtaPlacement,
   canonicalizeAnalyticsRoute,
   createPostHogOptions,
+  isTrackingRefused,
+  type PrivacySignals,
 } from "./contract";
 import { createWebVitalsReporter as createBufferedWebVitalsReporter } from "./web-vitals-buffer";
 
 let initialized = false;
+
+function readSignals(): PrivacySignals {
+  const nav = typeof navigator === "undefined" ? undefined : navigator;
+  const win = typeof window === "undefined" ? undefined : window;
+  return {
+    doNotTrack: nav?.doNotTrack,
+    globalPrivacyControl: (nav as { globalPrivacyControl?: unknown } | undefined)
+      ?.globalPrivacyControl,
+    windowDoNotTrack: (win as { doNotTrack?: unknown } | undefined)?.doNotTrack,
+    msDoNotTrack: (nav as { msDoNotTrack?: unknown } | undefined)?.msDoNotTrack,
+  };
+}
+
+const trackingRefused = (): boolean => isTrackingRefused(readSignals());
 
 export function initializeAnalytics(
   projectToken: string | undefined,
@@ -22,14 +38,15 @@ export function initializeAnalytics(
   uiHost: string | undefined,
 ): void {
   if (initialized) return;
-  const options = createPostHogOptions(projectToken, proxyHost, uiHost);
+  if (trackingRefused()) return;
+  const options = createPostHogOptions(projectToken, proxyHost, uiHost, trackingRefused);
   if (!options || !projectToken) return;
   posthog.init(projectToken, options);
   initialized = true;
 }
 
 function capture(event: AnalyticsEvent | null): void {
-  if (!initialized || !event) return;
+  if (!initialized || !event || trackingRefused()) return;
   posthog.capture(event.event, event.properties);
 }
 
