@@ -69,16 +69,23 @@ test("CI has one fail-closed root web lane", () => {
 
 test("root web inputs cannot be satisfied by an unrelated job", () => {
   let mutated = workflow;
-  for (const input of ["test-check-name: Web Contract", "run-test: true", `node-version: ${nodeMajor}`]) {
+  for (const input of [
+    "test-check-name: Web Contract",
+    "run-test: true",
+    `node-version: ${nodeMajor}`,
+  ]) {
     mutated = mutated.replace(`      ${input}\n`, "");
   }
-  mutated +=
-    `\n  decoy-node-inputs:\n    test-check-name: Web Contract\n    run-test: true\n    node-version: ${nodeMajor}\n`;
+  mutated += `\n  decoy-node-inputs:\n    test-check-name: Web Contract\n    run-test: true\n    node-version: ${nodeMajor}\n`;
   assert.throws(() => assertRootWebLane(mutated));
 });
 
 test("root web inputs must be exact YAML lines", () => {
-  for (const input of ["test-check-name: Web Contract", "run-test: true", `node-version: ${nodeMajor}`]) {
+  for (const input of [
+    "test-check-name: Web Contract",
+    "run-test: true",
+    `node-version: ${nodeMajor}`,
+  ]) {
     assert.throws(() => assertRootWebLane(workflow.replace(`      ${input}`, `      # ${input}`)));
     assert.throws(() =>
       assertRootWebLane(workflow.replace(`      ${input}`, `      decoy-${input}`)),

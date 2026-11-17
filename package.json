@@ -24,19 +24,19 @@
     "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run knip && npm run build && npm run docs:export-contract && npm run budget:web && npm run lighthouse"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.6",
-    "@playwright/test": "1.65.0",
+    "@biomejs/biome": "2.6.7",
+    "@playwright/test": "1.65.1",
     "chrome-launcher": "1.2.3",
-    "knip": "6.44.2",
+    "knip": "6.45.1",
     "lighthouse": "13.5.0",
     "remark-mdx": "3.1.1",
     "remark-parse": "11.0.0",
     "remark-stringify": "11.0.0",
-    "turbo": "2.11.10",
+    "turbo": "2.11.11",
     "unified": "11.0.5"
   },
   "overrides": {
-    "postcss": "^8.5.32",
+    "postcss": "8.5.33",
     "next": {
       "sharp": "^0.35.4"
     }
