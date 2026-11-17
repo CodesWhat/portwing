@@ -133,7 +133,7 @@ jobs:
       contents: read
     uses: CodesWhat/.github/.github/workflows/node-ci.yml@29a963e6df100295bdd88c3d87dc1f73ceb30f65  # main, 2026-10-31
     with:
-      node-version: 24
+      node-version: 26
       lockfile-path: package-lock.json
       test-check-name: Web Contract
       run-test: true
