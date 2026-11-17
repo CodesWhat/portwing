@@ -418,7 +418,7 @@ flowchart LR
 <tr><td>Inbound (controller-to-agent) connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Outbound edge connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Request-bound, replay-resistant HTTP signing</td><td align="center">✅ (Ed25519 path)</td><td align="center">❌ (fixed-message signatures)</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
-<tr><td>Optional mTLS for the agent link</td><td align="center">❌</td><td align="center">⚠️</td><td align="center">?</td><td align="center">✅</td><td align="center">?</td></tr>
+<tr><td>Optional mTLS for the agent link</td><td align="center">✅ Native Standard HTTPS only; not Edge</td><td align="center">⚠️</td><td align="center">?</td><td align="center">✅</td><td align="center">?</td></tr>
 <tr><td>Default-deny socket filter in the documented deployment</td><td align="center">✅ (with Sockguard)</td><td align="center">❌</td><td align="center">❌</td><td align="center">⚠️ (manager proxy)</td><td align="center">❌</td></tr>
 <tr><td>Agent-level structured audit log</td><td align="center">✅</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td><td align="center">⚠️</td></tr>
 <tr><td>Prometheus scrape endpoint on the agent</td><td align="center">✅</td><td align="center">⚠️ (local Kubernetes Edge)</td><td align="center">?</td><td align="center">✅ (opt-in)</td><td align="center">?</td></tr>
@@ -486,7 +486,8 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v1.0** ✅ | Binding Stability | `STABILITY.md` guarantees are binding semver commitments, opt-in controller-assisted two-key rotation (first available in rc.2, Drydock `v1.8.0-rc.1+`), competitive review refreshed against primary sources, final v0.9 docs archived from its release tag |
 | **v1.1** ✅ | Audience-Bound Signatures | Ed25519 signature version 3 binds each request to one agent (Drydock 1.9+), stable persistent agent ID under `/data/credentials`, `SIGNATURE_MIN_VERSION`, `portwing signature-lock` for downgrade locks |
 | **v1.2** ✅ | Enrollment TLS and Container Runtime | Enrollment requires native TLS or HTTPS reported by a trusted proxy unless `ALLOW_INSECURE_ENROLLMENT=true` opts in for trusted testing. Static Docker/Compose clients remove the glibc runtime package on all three architectures |
-| **Post-v1** | Demand-Driven | Controller-managed Portwing upgrade and rollback waves, optional client-certificate authentication, polling/intermittent edge transport |
+| **v1.3** | Native Client Certificates | Opt-in native Standard HTTPS client certificates, dedicated healthcheck credentials and unique capability advertisements. Existing request authentication is preserved |
+| **Post-v1** | Demand-Driven | Controller-owned upgrade and rollback waves; transport changes require a demonstrated deployment failure |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.
 
