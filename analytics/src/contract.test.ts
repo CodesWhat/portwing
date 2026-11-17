@@ -10,6 +10,7 @@ import {
   buildWebVitalsEvent,
   canonicalizeAnalyticsRoute,
   createPostHogOptions,
+  isTrackingRefused,
   POSTHOG_PROXY_HOST,
   POSTHOG_UI_HOST,
   sanitizeEvent,
@@ -730,7 +731,7 @@ test("PostHog initializes only with the exact production proxy contract", () => 
     },
   );
   assert.equal("disable_external_dependency_loading" in options, false);
-  assert.equal(options.before_send, sanitizeEvent);
+  assert.equal(typeof options.before_send, "function");
 });
 
 test("pageleave mirrors the pageview contract and canonicalizes the same way", () => {
@@ -803,4 +804,53 @@ test("$pathname never diverges from the allowlisted path", () => {
       );
     }
   }
+});
+
+test("isTrackingRefused honors GPC and DNT signals only when affirmative", () => {
+  assert.equal(isTrackingRefused({ globalPrivacyControl: true }), true);
+  assert.equal(isTrackingRefused({ doNotTrack: "1" }), true);
+  assert.equal(isTrackingRefused({ doNotTrack: "yes" }), true);
+  assert.equal(isTrackingRefused({ doNotTrack: " YES " }), true);
+  assert.equal(isTrackingRefused({ windowDoNotTrack: "1" }), true);
+  assert.equal(isTrackingRefused({ msDoNotTrack: "1" }), true);
+
+  assert.equal(isTrackingRefused(undefined), false);
+  assert.equal(isTrackingRefused({}), false);
+  assert.equal(isTrackingRefused({ doNotTrack: "0" }), false);
+  assert.equal(isTrackingRefused({ doNotTrack: "unspecified" }), false);
+  assert.equal(isTrackingRefused({ doNotTrack: null }), false);
+  assert.equal(isTrackingRefused({ globalPrivacyControl: false }), false);
+  assert.equal(isTrackingRefused({ globalPrivacyControl: "true" }), false);
+});
+
+test("before_send drops events when tracking is refused and sanitizes otherwise", () => {
+  const envelope = {
+    uuid: "00000000-0000-4000-8000-000000000000",
+    event: "$pageview",
+    properties: { ...BASE_PROPERTIES, surface: "marketing", path: "/", $pathname: "/" },
+  };
+  const refused = createPostHogOptions(
+    "phc_project-token",
+    POSTHOG_PROXY_HOST,
+    POSTHOG_UI_HOST,
+    () => true,
+  );
+  assert.ok(refused);
+  assert.equal(refused.before_send(envelope as never), null);
+
+  let isRefused = false;
+  const live = createPostHogOptions(
+    "phc_project-token",
+    POSTHOG_PROXY_HOST,
+    POSTHOG_UI_HOST,
+    () => isRefused,
+  );
+  assert.ok(live);
+  assert.deepEqual(live.before_send(envelope as never), sanitizeEvent(envelope as never));
+  isRefused = true;
+  assert.equal(live.before_send(envelope as never), null);
+
+  const defaults = createPostHogOptions("phc_project-token", POSTHOG_PROXY_HOST, POSTHOG_UI_HOST);
+  assert.ok(defaults);
+  assert.deepEqual(defaults.before_send(envelope as never), sanitizeEvent(envelope as never));
 });

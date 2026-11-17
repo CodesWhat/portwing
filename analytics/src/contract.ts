@@ -375,10 +375,36 @@ export const sanitizeEvent: BeforeSendFn = (envelope): CaptureResult | null => {
   return output;
 };
 
+export type PrivacySignals = {
+  doNotTrack?: unknown;
+  globalPrivacyControl?: unknown;
+  windowDoNotTrack?: unknown;
+  msDoNotTrack?: unknown;
+};
+
+function isDoNotTrackOn(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "yes";
+}
+
+// posthog-js's is_capturing() returns true in cookieless "always" mode before
+// any consent check, so respect_dnt alone does nothing. Callers enforce this.
+export function isTrackingRefused(signals: PrivacySignals | undefined): boolean {
+  if (!signals) return false;
+  return (
+    signals.globalPrivacyControl === true ||
+    isDoNotTrackOn(signals.doNotTrack) ||
+    isDoNotTrackOn(signals.windowDoNotTrack) ||
+    isDoNotTrackOn(signals.msDoNotTrack)
+  );
+}
+
 export function createPostHogOptions(
   projectToken: string | undefined,
   proxyHost: string | undefined,
   uiHost: string | undefined,
+  trackingRefused: () => boolean = () => false,
 ): PostHogOptions | null {
   if (
     !projectToken ||
@@ -416,6 +442,7 @@ export function createPostHogOptions(
     mask_all_element_attributes: true,
     mask_all_text: true,
     capture_performance: false,
-    before_send: sanitizeEvent,
+    before_send: ((envelope) =>
+      trackingRefused() ? null : sanitizeEvent(envelope)) as BeforeSendFn,
   };
 }
