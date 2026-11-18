@@ -167,6 +167,14 @@ type ComposeManager struct {
 	// releases them.
 	stackLocksMu sync.Mutex
 	stackLocks   map[string]*stackLockEntry
+
+	// lister finds containers left by stacks deployed under the old
+	// directory-basename project name so they can be adopted. Optional: nil
+	// means no adoption.
+	lister ContainerLister
+	// adoptionLogged records project directories already announced as adopted
+	// so the info log fires once per stack, not per operation.
+	adoptionLogged sync.Map
 }
 
 type stackLockEntry struct {
@@ -184,6 +192,21 @@ func NewComposeManager(stacksDir, apiVersion, dockerSocket string) *ComposeManag
 	}
 	cm.detectCompose()
 	return cm
+}
+
+// NewComposeManagerWithLister is NewComposeManager plus adoption of stacks
+// deployed by Portwing <= 1.3.0 under their directory-basename project name,
+// discovered through lister.
+func NewComposeManagerWithLister(stacksDir, apiVersion, dockerSocket string, lister ContainerLister) *ComposeManager {
+	cm := NewComposeManager(stacksDir, apiVersion, dockerSocket)
+	cm.SetContainerLister(lister)
+	return cm
+}
+
+// SetContainerLister enables adoption of stacks deployed by Portwing <= 1.3.0
+// under their directory-basename project name. Call before serving requests.
+func (cm *ComposeManager) SetContainerLister(l ContainerLister) {
+	cm.lister = l
 }
 
 // detectCompose checks for Compose v2 first, then falls back to v1.
@@ -715,6 +738,18 @@ func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) 
 
 	if cm.isV2 {
 		args = append(args, "compose")
+	}
+
+	// Project name. Compose would otherwise derive it from the directory
+	// basename, so customer-a/v2 and customer-b/v2 would both become "v2" and
+	// "up --remove-orphans" on one would remove the other's containers. An
+	// empty name means the compose file sets its own, which -p would override.
+	projectName, err := cm.projectNameFor(ctx, stackDir, projectDir)
+	if err != nil {
+		return nil, err
+	}
+	if projectName != "" {
+		args = append(args, "-p", projectName)
 	}
 
 	// Project directory.

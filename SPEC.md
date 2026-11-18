@@ -319,6 +319,15 @@ type DockerClient struct {
 | `logs` | `--tail N` |
 | `restart` / `stop` / `start` | -- |
 
+Every operation passes `-p <project>` before the subcommand. The project name is
+`<normalized-relative-dir>-<10 hex of SHA-256(relative dir)>`, unique per
+`STACKS_DIR`-relative stack directory, so nested stacks with the same basename
+don't share a project (and `--remove-orphans` can't remove each other's
+containers). `-p` is omitted when a compose file sets a top-level `name:`. A
+stack with existing containers labeled `com.docker.compose.project=<basename>` and
+`com.docker.compose.project.working_dir=<stack dir>` (deployed by <= 1.3.0) keeps
+the basename.
+
 ### 6.2 Security
 
 - **Path traversal protection:** All file paths resolved to absolute, verified within stack directory

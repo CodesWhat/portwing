@@ -375,7 +375,7 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 		cfg:          cfg,
 		dockerClient: dockerClient,
 		adapter:      a,
-		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
+		compose:      docker.NewComposeManagerWithLister(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket, dockerClient),
 		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
 		metrics:      registry,
 		auditor:      auditor,
