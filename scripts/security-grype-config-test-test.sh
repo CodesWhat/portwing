@@ -25,9 +25,15 @@ resolve_range='/^  resolve-latest-release:/,/^  grype-published-release:/'
 # trailing file-level comment after it contains none of the patterns mutated
 # below.
 scan_range='/^  grype-published-release:/,$'
+deps_range='/^  grype-deps:/,/^  gosec:/'
 
 reset_fixture() {
 	cp .github/workflows/security-grype.yml "${fixture}"
+	# The contract also reads the grype and qlty configs from the working
+	# directory, so the fixture tree carries pristine copies of them.
+	mkdir -p "${test_root}/.qlty"
+	cp .grype.yaml .grype-shipped.yaml "${test_root}/"
+	cp .qlty/qlty.toml "${test_root}/.qlty/"
 }
 
 # sed -i and sed's own append syntax differ between GNU and BSD, so insertions
@@ -367,5 +373,98 @@ sed -i.bak 's/^  grype-image:$/  grype-image-renamed:/' "${fixture}"
 assert_rejected \
 	"pre-existing 'grype-image' job must remain" \
 	"contract must reject removal of the in-repo image scan"
+
+# --- grype-deps: hard-gate what ships, scope the web toolchain ---------------
+
+# The required context renamed: the ruleset would wait forever on the old name.
+reset_fixture
+sed -i.bak 's/name: "Security: Grype Dependency Scan (Go + npm)"/name: "Security: Grype Dependency Scan"/' "${fixture}"
+assert_rejected \
+	"grype-deps must keep the exact job name" \
+	"contract must reject a renamed required check"
+
+# A path filter on the trigger: the required check would skip some PR shapes.
+reset_fixture
+insert_after "  pull_request:" "    paths: ['**.go']"
+assert_rejected \
+	"must not path-filter any trigger" \
+	"contract must reject a path-filtered workflow trigger"
+
+# The shipped-surface step demoted from a hard gate.
+reset_fixture
+sed -i.bak "${deps_range} s/^          fail-build: true\$/          fail-build: false/" "${fixture}"
+assert_rejected \
+	"the shipped-surface step must hard-gate with fail-build: true" \
+	"contract must reject a shipped-surface step that stops failing the build"
+
+# The shipped-surface step stops layering the npm exclusions.
+reset_fixture
+sed -i.bak "${deps_range} s/^            \.grype-shipped\.yaml\$//" "${fixture}"
+assert_rejected \
+	"must layer .grype-shipped.yaml" \
+	"contract must reject a shipped-surface step that scans npm content again"
+
+# The exclusion list loses node_modules, or grows its own ignore list.
+reset_fixture
+sed -i.bak '/node_modules/d' "${test_root}/.grype-shipped.yaml"
+assert_rejected \
+	".grype-shipped.yaml must exclude **/node_modules/**" \
+	"contract must reject an exclusion list that scans node_modules"
+reset_fixture
+printf 'ignore:\n  - vulnerability: GHSA-x\n' >>"${test_root}/.grype-shipped.yaml"
+assert_rejected \
+	"must hold exclusions only" \
+	"contract must reject a second, drifting ignore list"
+
+# The web step's failure policy detached from the diff-based gate.
+reset_fixture
+# shellcheck disable=SC2016 # Literal workflow text.
+sed -i.bak 's/fail-build: ${{ steps.web-gate.outputs.enforce }}/fail-build: true/' "${fixture}"
+assert_rejected \
+	"fail-build must come from the web-gate step output" \
+	"contract must reject a web step with a hardcoded failure policy"
+
+# The gate stops recognizing npm dependency files, so npm-changing PRs pass.
+reset_fixture
+sed -i.bak 's/package.json | package-lock.json | \*\/package.json | \*\/package-lock.json)/NOMATCH)/' "${fixture}"
+assert_rejected \
+	"web gate (PR touching website/package.json)" \
+	"contract must reject a gate that ignores package.json changes"
+
+# The gate defaults to not enforcing, so scheduled and manual runs stop failing.
+reset_fixture
+sed -i.bak "${deps_range} s/^          enforce=true\$/          enforce=false/" "${fixture}"
+assert_rejected \
+	"web gate (scheduled run)" \
+	"contract must reject a gate that lets scheduled runs pass"
+
+# An npm install added to the job would put node_modules in scope for the scan.
+reset_fixture
+insert_after "      - name: Setup Go" "        run: npm ci"
+assert_rejected \
+	"must not install npm dependencies" \
+	"contract must reject an npm install in the scan job"
+
+# The picomatch waiver and its expiry.
+reset_fixture
+sed -i.bak 's/2026-12-17/2027-01-01/g' "${test_root}/.grype.yaml"
+assert_rejected \
+	"expiring picomatch 4.0.7 (npm) waiver" \
+	"contract must reject a waiver that lost its expiry"
+
+# The old repo-root osv waiver file returns.
+reset_fixture
+touch "${test_root}/osv-scanner.toml"
+assert_rejected \
+	"osv-scanner.toml must stay deleted" \
+	"contract must reject a resurrected osv-scanner.toml"
+rm -f "${test_root}/osv-scanner.toml"
+
+# Qlty's osv-scanner scans package-lock.json again.
+reset_fixture
+sed -i.bak '/^\[\[exclude\]\]$/,/^file_patterns/d' "${test_root}/.qlty/qlty.toml"
+assert_rejected \
+	"must exclude package-lock.json for the osv-scanner plugin" \
+	"contract must reject an osv-scanner plugin that scans package-lock.json"
 
 echo "Security grype published-release contract self-tests passed."

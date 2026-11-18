@@ -329,6 +329,187 @@ check_gosec_report pass '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"g
 check_gosec_report pass '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"gosec"}},"results":[{"level":"warning"}]}]}'
 check_gosec_report fail '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"gosec"}},"results":[{"level":"error","ruleId":"G101"}]}]}'
 
+# --- grype-deps: hard-gate what ships, scope the web toolchain ---------------
+#
+# 2026-11-18 split. "Security: Grype Dependency Scan (Go + npm)" is a required
+# context on main, so it keeps its exact name and reports on every PR shape.
+# Inside it, a Go-only step is the hard gate and an npm-lockfile step fails only
+# when the PR changes npm dependencies or the run is scheduled/manual.
+
+deps_block="$(job_block grype-deps)"
+[ -n "${deps_block}" ] || fail "expected a top-level 'grype-deps' job"
+
+# A single step's block, from its `- name:` line to the next step.
+step_block() {
+	awk -v prefix="      - name: $1" '
+        index($0, prefix) == 1 { in_step = 1; print; next }
+        in_step && /^      - name: / { in_step = 0 }
+        in_step { print }
+    ' <<<"${deps_block}"
+}
+
+grep -Fxq '    name: "Security: Grype Dependency Scan (Go + npm)"' <<<"${deps_block}" ||
+	fail "grype-deps must keep the exact job name 'Security: Grype Dependency Scan (Go + npm)', a required context on main"
+
+# The check has to report on every PR shape, so the trigger is never filtered.
+# Matches a YAML key at any indent, not comments.
+if grep -Eq '^[[:space:]]*paths(-ignore)?:' "${workflow}"; then
+	fail "security-grype.yml must not path-filter any trigger; a required check that skips a PR shape blocks it forever"
+fi
+
+if grep -Fq "continue-on-error" <<<"${deps_block}"; then
+	fail "grype-deps must not use continue-on-error; it would neutralize fail-build"
+fi
+
+shipped_step="$(step_block 'Run Grype on the shipped surface')"
+[ -n "${shipped_step}" ] || fail "grype-deps must have a 'Run Grype on the shipped surface' step"
+grep -Fxq '          fail-build: true' <<<"${shipped_step}" ||
+	fail "the shipped-surface step must hard-gate with fail-build: true"
+grep -Fxq '          severity-cutoff: high' <<<"${shipped_step}" ||
+	fail "the shipped-surface step must use severity-cutoff: high"
+grep -Fxq '            .grype.yaml' <<<"${shipped_step}" ||
+	fail "the shipped-surface step must load .grype.yaml for the Go suppressions"
+grep -Fxq '            .grype-shipped.yaml' <<<"${shipped_step}" ||
+	fail "the shipped-surface step must layer .grype-shipped.yaml to exclude npm content"
+grep -Fxq '          path: .' <<<"${shipped_step}" ||
+	fail "the shipped-surface step must scan the repository root"
+
+# npm content is excluded by that layered config. Read the exclude list as data.
+if [ ! -f .grype-shipped.yaml ]; then
+	fail ".grype-shipped.yaml must exist"
+else
+	for pattern in '**/node_modules/**' '**/package-lock.json'; do
+		grep -Fxq "  - \"${pattern}\"" .grype-shipped.yaml ||
+			fail ".grype-shipped.yaml must exclude ${pattern}"
+	done
+	if grep -Eq '^[[:space:]]*ignore:' .grype-shipped.yaml; then
+		fail ".grype-shipped.yaml must hold exclusions only; ignore entries live in .grype.yaml so the lists cannot drift"
+	fi
+fi
+
+# The web step reads only a staged copy of the lockfile and follows the gate.
+web_step="$(step_block 'Run Grype on the web toolchain lockfile')"
+[ -n "${web_step}" ] || fail "grype-deps must have a 'Run Grype on the web toolchain lockfile' step"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fxq '          fail-build: ${{ steps.web-gate.outputs.enforce }}' <<<"${web_step}" ||
+	fail "the web toolchain step's fail-build must come from the web-gate step output"
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fxq '          path: ${{ runner.temp }}/web-lock' <<<"${web_step}" ||
+	fail "the web toolchain step must scan the staged lockfile copy, not the repository"
+grep -Fxq '          config: .grype.yaml' <<<"${web_step}" ||
+	fail "the web toolchain step must load .grype.yaml for the picomatch waiver"
+grep -Fq 'cp package-lock.json' <<<"$(step_block 'Stage the npm lockfile')" ||
+	fail "the staging step must copy the root package-lock.json"
+if grep -v '^[[:space:]]*#' <<<"${deps_block}" | grep -Eq 'npm (ci|install)|setup-node'; then
+	fail "grype-deps must not install npm dependencies; node_modules toolchain binaries are never scanned"
+fi
+
+# Each scan uploads under its own category.
+grep -Fxq '          category: grype-deps' <<<"$(step_block 'Upload Grype dependency SARIF')" ||
+	fail "the shipped-surface SARIF must upload under category grype-deps"
+grep -Fxq '          category: grype-web' <<<"$(step_block 'Upload Grype web toolchain SARIF')" ||
+	fail "the web toolchain SARIF must upload under category grype-web"
+
+# The one npm waiver is expiring and lives in .grype.yaml.
+picomatch_entry="$(grep -n -A6 -F -- '- vulnerability: GHSA-fc5q-39xc-vjpf' .grype.yaml || true)"
+if ! grep -Fq 'name: picomatch' <<<"${picomatch_entry}" ||
+	! grep -Fq 'version: 4.0.7' <<<"${picomatch_entry}" ||
+	! grep -Fq 'type: npm' <<<"${picomatch_entry}" ||
+	! grep -Fq '2026-12-17' <<<"${picomatch_entry}"; then
+	fail ".grype.yaml must carry the expiring picomatch 4.0.7 (npm) waiver for GHSA-fc5q-39xc-vjpf, with its 2026-12-17 expiry"
+fi
+if grep -Fq 'GO-2026-5970' .grype.yaml; then
+	fail ".grype.yaml must not waive GO-2026-5970; node_modules is out of scope instead"
+fi
+
+# osv-scanner is scoped to Go dependency files in Qlty, so the old repo-root
+# waiver file is gone and package-lock.json is excluded for that plugin.
+[ ! -e osv-scanner.toml ] || fail "osv-scanner.toml must stay deleted; package-lock.json is excluded from the Qlty osv-scanner plugin"
+osv_plugin="$(grep -Fx 'name = "osv-scanner"' .qlty/qlty.toml || true)"
+grep -Fq 'name = "osv-scanner"' <<<"${osv_plugin}" ||
+	fail ".qlty/qlty.toml must keep the osv-scanner plugin enabled"
+osv_exclude="$(awk '
+    /^\[\[/ { in_exclude = ($0 == "[[exclude]]") }
+    in_exclude { print }
+' .qlty/qlty.toml | grep -F -A3 'plugins = ["osv-scanner"]' || true)"
+grep -Fq 'package-lock.json' <<<"${osv_exclude}" ||
+	fail ".qlty/qlty.toml must exclude package-lock.json for the osv-scanner plugin"
+
+# Execute the actual web gate against real merge commits. HEAD^1 is the base
+# the PR merges into, so a base branch that moved (and touched package.json)
+# must not count against a PR that did not.
+gate_fixture="${gosec_fixture}/web-gate"
+mkdir -p "${gate_fixture}"
+awk '
+	/^      - name: Decide whether web toolchain findings fail this run$/ { inside = 1; next }
+	inside && /^        run: \|$/ { run = 1; next }
+	run && /^          / { sub(/^          /, ""); print; next }
+	run && NF { exit }
+' "${workflow}" >"${gate_fixture}/gate.sh"
+[ -s "${gate_fixture}/gate.sh" ] || fail "the actual web-gate script must be extractable for regression fixtures"
+
+# Run git with no inherited repo selection; a hook may export GIT_DIR.
+fixture_git() {
+	local repo="$1"
+	shift
+	env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX \
+		git -C "${repo}" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false "$@"
+}
+
+# build_merge_repo <dir> <file the PR changes> [moved]: main moves on after the
+# PR branched when `moved` is given, by changing package.json on the base side.
+build_merge_repo() {
+	local repo="$1" changed_file="$2" moved="${3:-}"
+	mkdir -p "${repo}/website"
+	env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX git init -q -b main "${repo}"
+	printf 'a\n' >"${repo}/README.md"
+	printf '{}\n' >"${repo}/package.json"
+	printf '{}\n' >"${repo}/package-lock.json"
+	printf '{}\n' >"${repo}/website/package.json"
+	fixture_git "${repo}" add -A
+	fixture_git "${repo}" commit -q -m base
+	fixture_git "${repo}" checkout -q -b pr
+	printf 'changed\n' >>"${repo}/${changed_file}"
+	fixture_git "${repo}" add -A
+	fixture_git "${repo}" commit -q -m pr
+	fixture_git "${repo}" checkout -q main
+	if [ -n "${moved}" ]; then
+		printf '{"moved":true}\n' >"${repo}/package.json"
+		fixture_git "${repo}" add -A
+		fixture_git "${repo}" commit -q -m base-moved
+	fi
+	fixture_git "${repo}" checkout -q --detach main
+	fixture_git "${repo}" merge -q --no-ff -m merge pr
+}
+
+# check_web_gate <expected true|false> <event> <repo> <label>
+check_web_gate() {
+	local expected="$1" event="$2" repo="$3" label="$4" out="${gate_fixture}/out.txt" status=0 got
+	: >"${out}"
+	(cd "${repo}" &&
+		env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX \
+			EVENT_NAME="${event}" GITHUB_OUTPUT="${out}" bash "${gate_fixture}/gate.sh") \
+		>"${gate_fixture}/gate.log" 2>&1 || status=$?
+	got="$(sed -n 's/^enforce=//p' "${out}")"
+	if [ "${status}" -ne 0 ] || [ "${got}" != "${expected}" ]; then
+		fail "web gate (${label}): expected enforce=${expected}, got '${got}' (exit ${status})"
+	fi
+}
+
+build_merge_repo "${gate_fixture}/readme" README.md
+build_merge_repo "${gate_fixture}/pkg" website/package.json
+build_merge_repo "${gate_fixture}/lock" package-lock.json
+build_merge_repo "${gate_fixture}/moved" README.md moved
+check_web_gate false pull_request "${gate_fixture}/readme" "PR touching only README.md"
+check_web_gate true pull_request "${gate_fixture}/pkg" "PR touching website/package.json"
+check_web_gate true pull_request "${gate_fixture}/lock" "PR touching package-lock.json"
+check_web_gate false pull_request "${gate_fixture}/moved" "base moved package.json but the PR did not"
+check_web_gate true schedule "${gate_fixture}/readme" "scheduled run"
+check_web_gate true workflow_dispatch "${gate_fixture}/readme" "manual run"
+# A checkout that is not a merge commit cannot be diffed against a base: fail closed.
+fixture_git "${gate_fixture}/readme" checkout -q --detach pr
+check_web_gate true pull_request "${gate_fixture}/readme" "HEAD is not a merge commit"
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} security-grype contract check(s) failed" >&2
 	exit 1
