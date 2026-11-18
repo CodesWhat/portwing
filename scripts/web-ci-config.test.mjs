@@ -13,6 +13,7 @@ const vercelConfigPath = path.join(ROOT, "vercel.json");
 const vercelConfig = fs.existsSync(vercelConfigPath)
   ? JSON.parse(fs.readFileSync(vercelConfigPath, "utf8"))
   : {};
+const nodeMajor = fs.readFileSync(path.join(ROOT, ".node-version"), "utf8").trim();
 const nodeAdapter = fs.readFileSync(path.join(ROOT, "scripts/ci/node-test.sh"), "utf8");
 
 function jobSection(source, jobId) {
@@ -53,7 +54,7 @@ function assertRootWebLane(source) {
   const nodeWithLines = new Set(nodeWith.split("\n"));
   assert.ok(nodeWithLines.has("      test-check-name: Web Contract"));
   assert.ok(nodeWithLines.has("      run-test: true"));
-  assert.ok(nodeWithLines.has("      node-version: 24"));
+  assert.ok(nodeWithLines.has(`      node-version: ${nodeMajor}`));
 }
 
 test("CI has one fail-closed root web lane", () => {
@@ -68,16 +69,23 @@ test("CI has one fail-closed root web lane", () => {
 
 test("root web inputs cannot be satisfied by an unrelated job", () => {
   let mutated = workflow;
-  for (const input of ["test-check-name: Web Contract", "run-test: true", "node-version: 24"]) {
+  for (const input of [
+    "test-check-name: Web Contract",
+    "run-test: true",
+    `node-version: ${nodeMajor}`,
+  ]) {
     mutated = mutated.replace(`      ${input}\n`, "");
   }
-  mutated +=
-    "\n  decoy-node-inputs:\n    test-check-name: Web Contract\n    run-test: true\n    node-version: 24\n";
+  mutated += `\n  decoy-node-inputs:\n    test-check-name: Web Contract\n    run-test: true\n    node-version: ${nodeMajor}\n`;
   assert.throws(() => assertRootWebLane(mutated));
 });
 
 test("root web inputs must be exact YAML lines", () => {
-  for (const input of ["test-check-name: Web Contract", "run-test: true", "node-version: 24"]) {
+  for (const input of [
+    "test-check-name: Web Contract",
+    "run-test: true",
+    `node-version: ${nodeMajor}`,
+  ]) {
     assert.throws(() => assertRootWebLane(workflow.replace(`      ${input}`, `      # ${input}`)));
     assert.throws(() =>
       assertRootWebLane(workflow.replace(`      ${input}`, `      decoy-${input}`)),
@@ -93,9 +101,9 @@ test("root web inputs must be exact YAML lines", () => {
 test("pre-push mirrors the root web lane", () => {
   assert.equal((lefthook.match(/^ {4}web:\s*$/gm) ?? []).length, 1);
   assert.match(lefthook, /run: npm run check:web/);
-  assert.equal(fs.readFileSync(path.join(ROOT, ".node-version"), "utf8").trim(), "24");
+  assert.match(nodeMajor, /^\d+$/u);
   assert.match(packageJson.scripts["check:web"], /^node scripts\/node-version-contract\.mjs && /);
-  assert.equal(packageJson.engines.node, ">=24.0.0");
+  assert.equal(packageJson.engines.node, `>=${nodeMajor}.0.0`);
 });
 
 test("check:web runs knip so dead-code coverage travels with the same gate", () => {

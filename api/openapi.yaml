@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Portwing Agent API
-  version: 1.2.2
+  version: 1.3.0
   description: |
     Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
@@ -201,7 +201,7 @@ components:
         version:
           type: string
           description: Portwing agent version.
-          example: "1.2.2"
+          example: "1.3.0"
         uptimeSeconds:
           type: number
           minimum: 0
@@ -222,7 +222,7 @@ components:
         version:
           type: string
           description: Portwing agent version
-          example: "1.2.2"
+          example: "1.3.0"
         dockerVersion:
           type: string
           description: Docker Engine version string
@@ -272,7 +272,7 @@ components:
             dd:watch and dd:trigger capabilities are omitted. Use the watcher
             descriptor and empty trigger list to discover the v0.9.0
             controller-owned execution contract; the corresponding wire message
-            types remain reserved but unadvertised. Added after v1.2.2,
+            types remain reserved but unadvertised. Since v1.3.0,
             Standard info and Edge hello lists emit each case-sensitive
             capability once, preserving its first occurrence across core,
             adapter and optional feature declarations.
@@ -619,7 +619,7 @@ components:
       properties:
         agentVersion:
           type: string
-          example: "1.2.2"
+          example: "1.3.0"
         protocolName:
           type: string
           example: "portwing"
@@ -855,7 +855,7 @@ paths:
                 live: true
                 ready: true
                 mode: standard
-                version: "1.2.2"
+                version: "1.3.0"
                 uptimeSeconds: 120
                 docker: connected
                 controller: not_applicable
@@ -870,7 +870,7 @@ paths:
                 live: true
                 ready: false
                 mode: standard
-                version: "1.2.2"
+                version: "1.3.0"
                 uptimeSeconds: 120
                 docker: disconnected
                 controller: not_applicable
@@ -1443,7 +1443,7 @@ paths:
 
         **Example stream:**
         ```
-        data: {"type":"dd:ack","data":{"version":"1.2.2","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+        data: {"type":"dd:ack","data":{"version":"1.3.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
 
         data: {"type":"dd:watcher-snapshot","data":{"watcher":{...WatcherComponent...},"containers":[{...Container...}]}}
 

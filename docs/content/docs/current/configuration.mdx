@@ -19,8 +19,8 @@ For auth-method selection and key-enrollment flows, see [Authentication](/authen
 | `ALLOW_INSECURE_EDGE_URL` | `false` | Dangerous opt-in to connect Edge mode to a plaintext `http://`/`ws://` `DRYDOCK_URL`. The controller's identity is otherwise verified by TLS alone, so this is for trusted local testing only. |
 | `TLS_CERT` | — | Path to server TLS certificate (Standard mode). Must be set together with `TLS_KEY`; partial configuration is a startup error. |
 | `TLS_KEY` | — | Path to server TLS private key (Standard mode). Must be set together with `TLS_CERT`; partial configuration is a startup error. |
-| `TLS_CLIENT_CA` | — | Development option, absent from v1.2.2: PEM trust bundle for inbound client certificates. Requires native Standard-mode `TLS_CERT` and `TLS_KEY`; rejected in Edge mode. Loaded at startup; restart to change trust. |
-| `HEALTHCHECK_TLS_CERT`, `HEALTHCHECK_TLS_KEY` | — | Development options, absent from v1.2.2: client certificate chain and private key used only by `portwing healthcheck`. Set together; required for the local probe when `TLS_CLIENT_CA` is enabled. |
+| `TLS_CLIENT_CA` | — | Since v1.3.0: PEM trust bundle for inbound client certificates. Requires native Standard-mode `TLS_CERT` and `TLS_KEY`; rejected in Edge mode. Loaded at startup; restart to change trust. |
+| `HEALTHCHECK_TLS_CERT`, `HEALTHCHECK_TLS_KEY` | — | Since v1.3.0: client certificate chain and private key used only by `portwing healthcheck`. Set together; required for the local probe when `TLS_CLIENT_CA` is enabled. |
 | `CA_CERT` | — | Path to a custom CA certificate used when verifying the Drydock server in Edge mode. |
 | `TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification on the outbound Edge connection. **Testing only.** |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | — | Standard proxy variables. The Edge connection to the controller goes through the proxy they select, using an HTTP CONNECT tunnel, and hosts matched by `NO_PROXY` connect directly. Credentials can be given in the proxy URL (`http://user:pass@proxy:3128`). Loopback controllers are never proxied. The proxy URL must use `http://` or `socks5://`; an `https://` proxy URL is rejected with an error. |
@@ -45,7 +45,7 @@ burn is treated as used.
 
 ### Optional client certificates
 
-This option was added after v1.2.2. Check [GitHub Releases](https://github.com/CodesWhat/portwing/releases) for published availability.
+This option is available since v1.3.0. Check [GitHub Releases](https://github.com/CodesWhat/portwing/releases) for published availability.
 
 Set `TLS_CLIENT_CA` to a PEM CA bundle and configure the native server's
 `TLS_CERT` and `TLS_KEY`. Every connection to that listener must present a

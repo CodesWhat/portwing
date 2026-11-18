@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@codeswhat/public-analytics": "*",
-    "next": "16.4.5",
+    "next": "16.4.6",
     "postcss": "^8.5.31",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
@@ -23,7 +23,8 @@
     "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "postcss": "8.5.33"
   },
   "overrides": {
     "next": {

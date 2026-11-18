@@ -170,7 +170,7 @@ presents TLS with:
 TLS 1.3 cipher suites are controlled by Go's TLS stack, which selects only
 AEAD suites by design.
 
-Added after v1.2.2, optional `TLS_CLIENT_CA` requires a trusted client certificate
+Since v1.3.0, optional `TLS_CLIENT_CA` requires a trusted client certificate
 on the entire native Standard HTTPS listener, including health endpoints. It is
 rejected without native TLS or in Edge mode. Trust loads at startup; rotation
 requires a restart. Existing HTTP credential/Ed25519 policies remain in force;
