@@ -185,11 +185,11 @@ reference for deployment and published-availability details.
 | Resource | Limit | Purpose |
 |----------|-------|---------|
 | WebSocket read | 16 MB | Prevent memory exhaustion from large WebSocket frames |
-| HTTP response body read | 100 MB | Bound buffered Docker API responses |
-| Legacy edge log response | 100 MB | Bound a buffered `dd:container_log_response` for older controllers |
+| HTTP response body read | 16 MiB | Bound buffered Docker API responses in edge mode; a larger body gets a `TypeError` telling the controller to stream, never a truncated success |
+| Legacy edge log response | 16 MiB | Bound a buffered `dd:container_log_response` for older controllers |
 | Decoded Docker log chunk | 256 KiB | Stream larger Docker log frames in bounded chunks before the controller queue |
 | Concurrent edge log streams | 128 | Bound Docker readers and per-stream goroutines independently of message handlers |
-| Edge outbound queue | 256 frames | Evict and reconnect a stalled controller instead of growing memory without limit |
+| Edge outbound queue | 256 frames / 128 MiB | Bulk frames (stream data, exec output, log chunks) wait above 192 frames or 96 MiB; control frames use the headroom. A controller that makes no progress for 30 s is evicted and reconnected instead of growing memory without limit |
 | Legacy edge follow-log window | ~7s | Bound a non-streaming `follow=true` request so it can't hold a message-handler slot indefinitely |
 | Exec request body | 10 MB | Limit exec payload size |
 | Ed25519 signed-request body | 1 MB | Bound the request body buffered for signature verification |

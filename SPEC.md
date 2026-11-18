@@ -564,7 +564,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 | Resource | Limit |
 |----------|-------|
 | WebSocket read | 16 MB |
-| Response body read | 100 MB |
+| Response body read (edge, buffered) | 16 MiB |
 | Streamed request body (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every streamed body held in memory, reassembling and already dispatched alike, the latter until its Docker round trip ends; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
@@ -587,7 +587,8 @@ Attempt 1: connect -> fail -> wait 1s (+/-25% jitter)
 Attempt 2: connect -> fail -> wait 2s (+/-25% jitter)
 ...
 Attempt N: connect -> fail -> wait min(2^N, 60s) (+/-25% jitter)
-On success: reset backoff to 1s
+On success: reset backoff to 1s, but only once the connection has stayed up for 30s
+(a connection that drops right after the welcome keeps backing off)
 ```
 
 A hello rejection (`error` frame in place of `welcome`) is classified before

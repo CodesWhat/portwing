@@ -64,8 +64,8 @@ func TestPackageConstantValues(t *testing.T) {
 	if maxReadSize != 16*1024*1024 {
 		t.Errorf("maxReadSize = %d, want %d", maxReadSize, 16*1024*1024)
 	}
-	if maxResponseBody != 100*1024*1024 {
-		t.Errorf("maxResponseBody = %d, want %d", maxResponseBody, 100*1024*1024)
+	if maxResponseBody != 16*1024*1024 {
+		t.Errorf("maxResponseBody = %d, want %d", maxResponseBody, 16*1024*1024)
 	}
 	if writeWait != 10*time.Second {
 		t.Errorf("writeWait = %v, want %v", writeWait, 10*time.Second)

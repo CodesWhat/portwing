@@ -90,6 +90,10 @@ type ExecSession struct {
 	done   chan struct{}
 	once   sync.Once
 	cancel context.CancelFunc
+	// ctx is the session context cancel ends. readLoop's blocking sends wait on
+	// it so Close unblocks a read loop parked on a full send queue. StartExec
+	// always sets it; a session that runs readLoop must have one.
+	ctx context.Context
 
 	// startErrWritten keeps a failed bring-up to one error record. It is set
 	// once the write has returned, with startErrMu held across the write. A
@@ -133,6 +137,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		inbox:     make(chan execItem, execInputQueue),
 		done:      make(chan struct{}),
 		cancel:    sessionCancel,
+		ctx:       sessionCtx,
 	}
 	admitted := false
 	defer func() {
@@ -695,10 +700,20 @@ func (s *ExecSession) readLoop() {
 				Data:   encoded,
 			})
 			if marshalErr == nil {
-				s.client.sendMessageTo(s.target, protocol.Envelope{
+				// Blocking bulk send: when the controller reads slower than
+				// the exec produces, this stops reading the Docker stream
+				// (so the exec itself backs up) instead of overflowing the
+				// send queue and evicting the tunnel. A failed send means the
+				// session was closed or the connection is gone, and nobody is
+				// left to receive an exec_end, so the loop just ends.
+				if sendErr := s.client.sendBulkMessageTo(s.ctx, s.target, protocol.Envelope{
 					Type: protocol.TypeExecOutput,
 					Data: json.RawMessage(data),
-				})
+				}); sendErr != nil {
+					pool.PutBuffer(buf)
+					slog.Debug("exec output send abandoned", "execID", applog.Sanitize(s.execID), "error", applog.Sanitize(sendErr.Error()))
+					return
+				}
 			}
 		}
 
