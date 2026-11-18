@@ -92,7 +92,7 @@ export function FeaturePalette() {
             <li
               key={`${group.id}-h`}
               className="gh micro"
-              role="presentation"
+              aria-hidden="true"
               hidden={!shown.length}
             >
               {group.label}
