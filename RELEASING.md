@@ -71,6 +71,16 @@ trigger. A job that always skips (`Security: Grype Container Scan` carries
 `if: github.event_name != 'pull_request'`) must never be required, because
 a skipped check is not a passing one.
 
+**The dependency scan hard-gates what ships and scopes the web toolchain.**
+Inside `Security: Grype Dependency Scan (Go + npm)`, the Go step scans the
+repo with npm content excluded (`.grype-shipped.yaml` layered on
+`.grype.yaml`) and fails every PR at HIGH. The npm step scans a copy of the
+root `package-lock.json` and fails only when the PR diff (computed inside the
+job, never a workflow path filter) touches a `package.json` or
+`package-lock.json`, or when the run is scheduled or manual. Otherwise its
+findings are a warning. Qlty's osv-scanner excludes `package-lock.json` the
+same way. Expiring npm waivers live in `.grype.yaml`.
+
 **Renaming a job renames its check-run context**, so a rename and the
 ruleset update have to be sequenced. The promotion PR cannot merge before
 the PATCH, because GitHub reads workflow files from the head branch: the PR
