@@ -51,8 +51,46 @@ bad="${test_root}/bad.yaml"
 sed 's/expires: 2026-12-17/expires: soon/' "${config}" >"${bad}"
 expect fail 2026-01-01 "${bad}" "malformed expiry" "expires: YYYY-MM-DD"
 
+# `expires:` may sit on a later line of a block-scalar reason.
+mkentry() {
+	# $1 = file, rest = the lines of the reason field
+	local file="$1"
+	shift
+	{
+		printf 'ignore:\n  - vulnerability: GHSA-fc5q-39xc-vjpf\n'
+		printf '%s\n' "$@"
+		printf '    package:\n      name: picomatch\n'
+	} >"${file}"
+}
+folded="${test_root}/folded.yaml"
+mkentry "${folded}" '    reason: >-' '      Build-time only. Approved 2026-11-18,' '      expires: 2026-11-17 or when fixed.'
+expect fail 2026-11-18 "${folded}" "folded block scalar, past expiry"
+literal="${test_root}/literal.yaml"
+mkentry "${literal}" '    reason: |' '      Build-time only.' '      expires: 2026-12-17'
+expect pass 2026-11-18 "${literal}" "literal block scalar, future expiry"
+expect fail 2026-12-17 "${literal}" "literal block scalar, on the deadline"
+quoted="${test_root}/quoted.yaml"
+mkentry "${quoted}" "    reason: 'Single-quoted. expires: 2026-11-17'"
+expect fail 2026-11-18 "${quoted}" "single-quoted reason, past expiry"
+
+# Two expiries in one entry are ambiguous.
+dup="${test_root}/dup.yaml"
+mkentry "${dup}" '    reason: >-' '      expires: 2026-12-17' '      expires: 2027-12-17'
+expect fail 2026-11-18 "${dup}" "two expires in one entry" "ambiguous"
+
+# Impossible calendar dates fail, real leap days pass.
+for d in 2026-11-31 2027-02-29 2026-04-31; do
+	inv="${test_root}/inv-${d}.yaml"
+	mkentry "${inv}" "    reason: \"expires: ${d}\""
+	expect fail 2026-01-01 "${inv}" "impossible date ${d}" "invalid calendar date"
+done
+leap="${test_root}/leap.yaml"
+mkentry "${leap}" '    reason: "expires: 2028-02-29"'
+expect pass 2026-11-18 "${leap}" "valid leap day in the future"
+
 # The real config is valid today's-date-independent in shape: pre-deadline passes.
 expect pass 2026-11-18 .grype.yaml "real .grype.yaml before its deadline"
+expect pass 2026-12-16 .grype.yaml "real .grype.yaml the day before its deadline"
 
 if [ "${failures}" -ne 0 ]; then
 	exit 1
