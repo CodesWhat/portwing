@@ -2,7 +2,6 @@
 
 import type { Metadata, Viewport } from "next";
 import { AnalyticsRuntime } from "@/components/analytics-runtime";
-import { IconSprite } from "@/components/icons";
 import { BASE_URL, SITE_CONFIG } from "@/lib/site-config";
 import "./skin-portwing.css";
 import "./suite.css";
@@ -85,7 +84,6 @@ export default function RootLayout({
         <a className="skip" href="#main-content">
           Skip to content
         </a>
-        <IconSprite />
         {children}
         <AnalyticsRuntime />
       </body>
