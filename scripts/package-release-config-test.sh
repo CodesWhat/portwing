@@ -336,6 +336,22 @@ require_text ".goreleaser.yml" "dst: /usr/lib/systemd/system/portwing.service" "
 require_text ".goreleaser.yml" "homebrew_casks:" "GoReleaser must publish a Homebrew cask"
 require_text ".goreleaser.yml" "skip_upload: auto" "prereleases must not update the stable Homebrew channel"
 require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebrew publishing must use the dedicated tap token"
+# Tap main is protected, so the cask goes out as a push to a version-specific
+# head branch. The tap's own workflow opens and auto-merges the PR, which keeps
+# HOMEBREW_TAP_TOKEN at contents write; a pull_request block here would need
+# pull-requests write too.
+require_exactly_one_active ".goreleaser.yml" \
+	'^      branch:' \
+	'      branch: portwing-{{ .Version }}' \
+	"Homebrew publishing must push a version-specific head branch, never tap main"
+if active_lines ".goreleaser.yml" | grep -qE '^      branch: main$'; then
+	echo "FAIL: Homebrew publishing must not push directly to tap main (.goreleaser.yml has an active head 'branch: main')" >&2
+	failures=$((failures + 1))
+fi
+if active_lines ".goreleaser.yml" | grep -qE '^[[:space:]]+pull_request:'; then
+	echo "FAIL: Homebrew publishing must not open the pull request itself, the tap workflow does (.goreleaser.yml has an active pull_request block that would need pull-requests write on the tap credential)" >&2
+	failures=$((failures + 1))
+fi
 public_site="https://portwing.codeswhat.com"
 protected_site="https://getportwing-codeswhat.vercel.app"
 

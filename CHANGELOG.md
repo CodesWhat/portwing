@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   toolchain lockfile findings fail only PRs that change npm dependencies, plus
   scheduled scans.
 
+- Homebrew cask updates are pushed to a `portwing-<version>` branch on
+  CodesWhat/homebrew-tap instead of directly to main. The tap opens and
+  auto-merges the pull request.
+
 ## [v1.3.0] - 2026-11-17
 
 ### Added

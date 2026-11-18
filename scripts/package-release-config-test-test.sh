@@ -130,6 +130,32 @@ expect_release_contract_failure \
 	"a different build must not satisfy the Portwing binary timestamp pin"
 cp .goreleaser.yml "${fixture}/.goreleaser.yml"
 
+# Restoring the direct push to tap main, or adding a pull_request block that
+# would need extra credential permissions, must fail the contract.
+sed 's/^      branch: portwing-{{ .Version }}$/      branch: main/' .goreleaser.yml >"${fixture}/.goreleaser.yml"
+if cmp -s .goreleaser.yml "${fixture}/.goreleaser.yml"; then
+	echo "FAIL: the tap head-branch mutation changed nothing" >&2
+	exit 1
+fi
+expect_release_contract_failure \
+	"Homebrew publishing must not push directly to tap main" \
+	"restoring branch: main as the tap head branch must fail"
+awk '
+	{ print }
+	/^      token: "\{\{ \.Env\.HOMEBREW_TAP_TOKEN \}\}"$/ {
+		print "      pull_request:"
+		print "        enabled: true"
+	}
+' .goreleaser.yml >"${fixture}/.goreleaser.yml"
+if cmp -s .goreleaser.yml "${fixture}/.goreleaser.yml"; then
+	echo "FAIL: the tap pull_request mutation changed nothing" >&2
+	exit 1
+fi
+expect_release_contract_failure \
+	"Homebrew publishing must not open the pull request itself" \
+	"adding a pull_request block must fail"
+cp .goreleaser.yml "${fixture}/.goreleaser.yml"
+
 for recipe in Dockerfile Dockerfile.armv7 Dockerfile.release; do
 	cp "${recipe}" "${fixture}/${recipe}"
 	sed -i.bak 's/compress@v1.20.2/compress@v1.19.2/' "${fixture}/${recipe}"
