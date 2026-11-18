@@ -5,8 +5,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -135,4 +139,74 @@ func TestForwardContainerEventsSkipsAdapterWithoutSupport(t *testing.T) {
 		return nil, nil
 	}}
 	s.forwardContainerEvents(context.Background())
+}
+
+func TestForwardContainerEventsDefaultsToDockerEventStream(t *testing.T) {
+	t.Parallel()
+
+	fw := &eventForwardingAdapter{got: make(chan struct{}, 4)}
+	s := &Server{
+		adapter:      fw,
+		dockerClient: fakeEventDaemon(t, `{"Type":"container","Action":"die","Actor":{"ID":"abc","Attributes":{"name":"web"}}}`),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.forwardContainerEvents(ctx)
+	}()
+
+	select {
+	case <-fw.got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("event from the default Docker event stream not forwarded")
+	}
+	fw.mu.Lock()
+	if len(fw.events) != 1 || fw.events[0].Action != "die" || fw.events[0].Actor.ID != "abc" {
+		t.Errorf("events = %+v, want one die for abc", fw.events)
+	}
+	fw.mu.Unlock()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwardContainerEvents did not stop on cancel")
+	}
+}
+
+// fakeEventDaemon serves one Docker event on /events over a unix socket, then
+// holds the stream open until the test ends.
+func fakeEventDaemon(t *testing.T, eventJSON string) *docker.Client {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "d.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, eventJSON+"\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() {
+		close(release)
+		_ = srv.Close()
+	})
+	client, err := docker.NewClient(sock, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
 }

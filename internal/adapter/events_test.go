@@ -5,6 +5,11 @@ package adapter
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -95,5 +100,71 @@ func TestRunContainerEventsEndCases(t *testing.T) {
 				t.Fatalf("handler calls = %d, want %d", calls.Load(), tt.wantCalls)
 			}
 		})
+	}
+}
+
+// fakeEventDaemon serves one Docker event on /events over a unix socket, then
+// holds the stream open until the test ends.
+func fakeEventDaemon(t *testing.T, eventJSON string) *docker.Client {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "d.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, eventJSON+"\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() {
+		close(release)
+		_ = srv.Close()
+	})
+	client, err := docker.NewClient(sock, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func TestDockerEventSubscriberStreamsDaemonEventsAndClosesOnCancel(t *testing.T) {
+	t.Parallel()
+
+	client := fakeEventDaemon(t, `{"Type":"container","Action":"die","Actor":{"ID":"abc","Attributes":{"name":"web"}}}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	events, err := DockerEventSubscriber(client)(ctx)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	select {
+	case ev := <-events:
+		if ev.Action != "die" || ev.Actor.ID != "abc" {
+			t.Fatalf("event = %+v, want die for abc", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no event from the daemon stream")
+	}
+
+	cancel()
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("expected the channel to close after cancel")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("event channel did not close after cancel")
 	}
 }

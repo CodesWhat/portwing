@@ -4,8 +4,12 @@ package edge
 
 import (
 	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -173,4 +177,94 @@ func TestRunSubscribesToContainerEventsOnceAcrossReconnects(t *testing.T) {
 	if got := subscribes.Load(); got != 1 {
 		t.Fatalf("subscribed %d times across reconnects, want 1", got)
 	}
+}
+
+func TestForwardContainerEventsDefaultsToDockerEventStream(t *testing.T) {
+	t.Parallel()
+
+	c := newEventClient(t, nil, new(atomic.Int32))
+	c.eventSubscribe = nil
+	c.rawDockerClient = fakeEventDaemon(t, `{"Type":"container","Action":"die","Actor":{"ID":"abc","Attributes":{"name":"web"}}}`)
+
+	sendCh := make(chan protocol.Envelope, 8)
+	c.connMu.Lock()
+	c.sendCh = sendCh
+	c.sendState = &outboundQueueState{}
+	c.connMu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.forwardContainerEvents(ctx)
+	}()
+
+	select {
+	case env := <-sendCh:
+		if env.Type != protocol.TypeDDContainerEvent {
+			t.Fatalf("type = %s, want %s", env.Type, protocol.TypeDDContainerEvent)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no dd:container_event from the default Docker event stream")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwardContainerEvents did not stop on cancel")
+	}
+}
+
+func TestForwardContainerEventsWithoutDockerClientReturns(t *testing.T) {
+	t.Parallel()
+
+	c := newEventClient(t, nil, new(atomic.Int32))
+	c.eventSubscribe = nil
+	c.rawDockerClient = nil
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.forwardContainerEvents(context.Background())
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("forwardContainerEvents blocked with no Docker client and no subscriber")
+	}
+}
+
+// fakeEventDaemon serves one Docker event on /events over a unix socket, then
+// holds the stream open until the test ends.
+func fakeEventDaemon(t *testing.T, eventJSON string) *docker.Client {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "d.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, eventJSON+"\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() {
+		close(release)
+		_ = srv.Close()
+	})
+	client, err := docker.NewClient(sock, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
 }
