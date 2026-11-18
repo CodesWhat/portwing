@@ -415,7 +415,7 @@ flowchart LR
 </thead>
 <tbody>
 <tr><td>Transparent Docker API proxy</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">✅</td></tr>
-<tr><td>Inbound (controller-to-agent) connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Inbound (controller-to-agent) connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌ (removed in v3.0.0)</td><td align="center">✅</td></tr>
 <tr><td>Outbound edge connection</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
 <tr><td>Request-bound, replay-resistant HTTP signing</td><td align="center">✅ (Ed25519 path)</td><td align="center">❌ (fixed-message signatures)</td><td align="center">?</td><td align="center">?</td><td align="center">?</td></tr>
 <tr><td>Optional mTLS for the agent link</td><td align="center">✅ Native Standard HTTPS only; not Edge</td><td align="center">⚠️</td><td align="center">?</td><td align="center">✅</td><td align="center">?</td></tr>
@@ -457,7 +457,7 @@ flowchart LR
 
 > Watchtower's upstream project is archived. Diun and Watchtower can connect to remote Docker endpoints, but do not expose a general-purpose management proxy. Portwing provides that access and leaves update decisions to Drydock.
 >
-> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.45.3, Komodo Periphery v2.3.4, Arcane Agent v2.17.1, Hawser v0.2.52, Diun v4.33.1 and Watchtower v1.7.1. Reviewed 2026-10-26. The canonical page records edition limits, source-inspection scope and artifact discovery limits. Portainer uses fixed-message signature headers; Arcane documents method/path filtering for its manager and agent Prometheus export. A GitHub release attestation is different from build provenance.
+> The remote-agent table is compiled from the published [competitive landscape](https://portwing.codeswhat.com/docs/competitive-landscape), which lists its primary sources and records unknown competitor behavior as "not documented" rather than guessing it absent. Compared versions: Portainer 2.45.3, Komodo Periphery v2.3.4, Arcane Agent v3.1.0, Hawser v0.2.53, Diun v4.33.1 and Watchtower v1.7.1. Reviewed 2026-11-18. The canonical page records edition limits, source-inspection scope and artifact discovery limits. Portainer uses fixed-message signature headers; Arcane documents method/path filtering for its manager and agent Prometheus export. A GitHub release attestation is different from build provenance.
 > Contributions welcome if any information is inaccurate.
 
 </details>
