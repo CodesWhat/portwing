@@ -681,6 +681,21 @@ require_text ".github/workflows/release.yml" 'HOMEBREW_TAP_TOKEN: ${{ secrets.HO
 require_text ".github/workflows/release.yml" "Verify deb package install" "the release must install-test the deb package"
 require_text ".github/workflows/release.yml" "Verify rpm package install" "the release must install-test the rpm package"
 require_text ".github/workflows/release.yml" "Verify Homebrew cask install" "the release must install-test the published Homebrew cask"
+require_text ".github/workflows/release.yml" "Wait for the tap PR to merge" "verify-homebrew must wait for the tap PR to merge before installing the cask"
+verify_homebrew_job="$(awk '/^  verify-homebrew:/ { in_job = 1; print; next } in_job && /^  [A-Za-z0-9_-]+:/ { in_job = 0 } in_job { print }' .github/workflows/release.yml)"
+# shellcheck disable=SC2016 # the patterns are literal workflow text
+if ! grep -qF 'max_attempts=40' <<<"${verify_homebrew_job}" ||
+	! grep -qF 'for attempt in $(seq 1 "${max_attempts}")' <<<"${verify_homebrew_job}" ||
+	! grep -qF 'sleep 30' <<<"${verify_homebrew_job}" ||
+	grep -qE 'while (true|:)|until ' <<<"${verify_homebrew_job}"; then
+	echo "FAIL: verify-homebrew's tap wait must be a bounded loop (40 attempts, 30 s apart, no while/until)" >&2
+	failures=$((failures + 1))
+fi
+homebrew_timeout="$(grep -E '^    timeout-minutes:' <<<"${verify_homebrew_job}" | head -n 1 | tr -dc '0-9')"
+if [ -z "${homebrew_timeout}" ] || [ "${homebrew_timeout}" -le 20 ]; then
+	echo "FAIL: verify-homebrew timeout-minutes (${homebrew_timeout:-unset}) must exceed the 20 minute tap wait" >&2
+	failures=$((failures + 1))
+fi
 require_text ".github/workflows/release.yml" "ubuntu:24.04@sha256:" "the deb smoke image must be digest-pinned"
 require_text ".github/workflows/release.yml" "fedora:42@sha256:" "the rpm smoke image must be digest-pinned"
 # shellcheck disable=SC2016 # The workflow expands GITHUB_REF_NAME.
