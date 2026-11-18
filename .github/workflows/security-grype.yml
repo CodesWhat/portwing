@@ -198,6 +198,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          # Depth 2 so a PR's merge commit has both parents, which the web
+          # toolchain gate diffs.
+          fetch-depth: 2
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
@@ -216,12 +219,28 @@ jobs:
         # duplicate govulncheck job was retired.
         run: ./scripts/verify-scanner-exclusions.sh
 
-      - name: Run Grype across the repository (Go modules + npm lockfiles)
-        # Scanning the repo root catalogs go.mod/go.sum and package-lock.json,
-        # so a single pass covers both ecosystems. Grype matches the
-        # lockfile-resolved versions (not the full module requirement graph),
-        # so it does not emit the phantom-dependency findings a manifest-graph
-        # SCA reports for modules the binary never links in.
+      - name: Enforce waiver expiry
+        # Grype has no expiry field, so a waiver would suppress its finding
+        # forever. This fails the job once any `expires: YYYY-MM-DD` in
+        # .grype.yaml is today (UTC) or past, before either scan runs, on every
+        # event.
+        run: ./scripts/check-grype-waiver-expiry.sh .grype.yaml
+
+      - name: Run Grype on the shipped surface (Go modules)
+        # The hard gate. Go modules, binaries and images are what users run, so
+        # a HIGH finding here fails every PR shape. Scanning the repo root
+        # catalogs go.mod/go.sum; grype matches the lockfile-resolved versions
+        # (not the full module requirement graph), so it does not emit the
+        # phantom-dependency findings a manifest-graph SCA reports for modules
+        # the binary never links in.
+        #
+        # npm content is excluded by .grype-shipped.yaml, layered on top of
+        # .grype.yaml (scan-action accepts several config files, newline
+        # separated, and grype merges them), so the Go suppressions stay in one
+        # file. This job never runs `npm ci`, so node_modules (native toolchain
+        # binaries such as the TypeScript compiler) is absent on CI and is never
+        # scanned; the exclusion keeps it out for local runs and if an install
+        # step is ever added.
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
         id: grype-deps
         with:
@@ -229,23 +248,119 @@ jobs:
           severity-cutoff: high
           fail-build: true
           output-format: sarif
-          config: .grype.yaml
+          config: |
+            .grype.yaml
+            .grype-shipped.yaml
 
       - name: Upload Grype dependency SARIF
-        if: always() && github.event.repository.visibility == 'public'
+        if: always() && github.event.repository.visibility == 'public' && steps.grype-deps.outputs.sarif != ''
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
         with:
           sarif_file: ${{ steps.grype-deps.outputs.sarif }}
           category: grype-deps
 
+      - name: Decide whether web toolchain findings fail this run
+        # The website and docs build toolchain (the npm lockfile) never ships in
+        # the agent binary or the image, so its advisories must not block
+        # unrelated PRs. They fail the job only when the PR itself changes npm
+        # dependencies, and on scheduled and manual runs. The decision is made
+        # here, inside the job, from the PR diff; the workflow trigger stays
+        # unfiltered so this required check reports on every PR shape.
+        #
+        # On a pull_request event HEAD is GitHub's merge commit, so HEAD^1 is
+        # the base branch tip the PR merges into and the first-parent diff is
+        # exactly the PR's change set. Checkout above fetches depth 2 so both
+        # parents exist. Anything unexpected fails closed (enforce).
+        id: web-gate
+        if: always()
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          enforce=true
+          reason="event ${EVENT_NAME}: web toolchain findings always fail"
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            if git rev-parse --verify --quiet 'HEAD^2' >/dev/null && git rev-parse --verify --quiet 'HEAD^1' >/dev/null; then
+              changed="$(git diff --name-only --no-renames 'HEAD^1' HEAD)"
+              npm_changes=""
+              while IFS= read -r file; do
+                case "${file}" in
+                  package.json | package-lock.json | */package.json | */package-lock.json)
+                    npm_changes="${npm_changes}${file} "
+                    ;;
+                  *) ;;
+                esac
+              done <<<"${changed}"
+              if [ -n "${npm_changes}" ]; then
+                reason="PR changes npm dependency files: ${npm_changes}"
+              else
+                enforce=false
+                reason="PR changes no package.json or package-lock.json"
+              fi
+            else
+              reason="could not compute the PR diff (HEAD is not a merge commit); failing closed"
+            fi
+          fi
+          echo "enforce=${enforce}" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          echo "Web toolchain gate: enforce=${enforce} (${reason})"
+
+      - name: Stage the npm lockfile for the web toolchain scan
+        # Only the lockfile is scanned, from a copy outside the workspace, so
+        # nothing else in the tree can widen it. The Go step above is the
+        # only one that reads the repo root.
+        if: always()
+        run: |
+          mkdir -p "${RUNNER_TEMP}/web-lock"
+          cp package-lock.json "${RUNNER_TEMP}/web-lock/package-lock.json"
+
+      - name: Run Grype on the web toolchain lockfile (npm)
+        # fail-build follows the gate above: true on npm-changing PRs and on
+        # schedule/dispatch, false otherwise. With false, scan-action turns a
+        # HIGH finding into a warning annotation instead of failing the job.
+        # .grype.yaml carries the expiring picomatch waiver.
+        if: always()
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
+        id: grype-web
+        with:
+          path: ${{ runner.temp }}/web-lock
+          severity-cutoff: high
+          fail-build: ${{ steps.web-gate.outputs.enforce }}
+          output-format: sarif
+          config: .grype.yaml
+
+      - name: Upload Grype web toolchain SARIF
+        if: always() && github.event.repository.visibility == 'public' && steps.grype-web.outputs.sarif != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
+        with:
+          sarif_file: ${{ steps.grype-web.outputs.sarif }}
+          # The scan ran on a staged copy, so findings carry absolute paths
+          # under it. Relativize them against that copy so they resolve to the
+          # tracked package-lock.json.
+          checkout_path: ${{ runner.temp }}/web-lock
+          category: grype-web
+
       - name: Summarize
         if: always()
+        env:
+          WEB_SARIF: ${{ steps.grype-web.outputs.sarif }}
+          WEB_ENFORCE: ${{ steps.web-gate.outputs.enforce }}
+          WEB_REASON: ${{ steps.web-gate.outputs.reason }}
         run: |
           {
             echo "### Grype Dependency Scan (Go + npm)"
-            echo "- Scanned Go modules and npm lockfiles across the repo for HIGH/CRITICAL CVEs"
+            echo "- Shipped surface (hard gate): Go modules scanned for HIGH/CRITICAL CVEs on every run; npm content excluded via .grype-shipped.yaml"
             echo "- Matches lockfile-resolved versions (no module-graph false positives)"
+            echo "- Web toolchain (package-lock.json only): fails the job on PRs that change a package.json or package-lock.json, and on scheduled and manual runs; otherwise findings are reported as warnings"
+            echo "- Web toolchain gate this run: enforce=${WEB_ENFORCE:-unknown} (${WEB_REASON:-not computed})"
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${WEB_SARIF:-}" ] && [ -f "${WEB_SARIF}" ]; then
+            high="$(jq '[.runs[].results[]? | select(.level == "error")] | length' "${WEB_SARIF}")"
+            echo "- Web toolchain HIGH/CRITICAL findings after waivers: ${high}" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${high}" != "0" ] && [ "${WEB_ENFORCE:-}" != "true" ]; then
+              echo "::warning title=Web toolchain advisories::${high} HIGH/CRITICAL finding(s) in package-lock.json. Not blocking: this PR changes no npm dependency files."
+            fi
+          fi
 
   gosec:
     name: "Security: Gosec SAST"

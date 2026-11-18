@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Forward container die, oom, stop, start and restart events to Drydock as `dd:container_event` for state alerts, in Standard and Edge mode.
 
+### Changed
+
+- Vulnerability gates now hard-fail on what ships (Go modules and images). Web
+  toolchain lockfile findings fail only PRs that change npm dependencies, plus
+  scheduled scans.
+
 ## [v1.3.0] - 2026-11-17
 
 ### Added

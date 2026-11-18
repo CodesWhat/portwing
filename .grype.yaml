@@ -3,6 +3,14 @@
 # location-scoped so dependency updates automatically force a new review. CI
 # separately rejects any source dependency or shipped binary that links openpgp.
 #
+# 2026-11-18 split: the hard gate now covers what ships (Go modules, binaries
+# and images) and layers .grype-shipped.yaml on top of this file to leave npm
+# content out. The website and docs build toolchain is scanned by its own step
+# against a copy of package-lock.json, loading this file as-is, and fails only
+# PRs that change a package.json or package-lock.json, plus scheduled and
+# manual runs. The one npm entry below (picomatch) is only ever matched by that
+# step; the shipped scan and the published-image scan never see an npm package.
+#
 # 2026-10-31 review: x/crypto is v0.58.0. The source dependency graph and a
 # freshly built Portwing binary still exclude openpgp, verified with
 # scripts/verify-scanner-exclusions.sh. Re-pin both Portwing-owned entries.
@@ -115,3 +123,15 @@ ignore:
       version: v0.58.0
       type: go-module
       location: "**/usr/bin/portwing"
+  # picomatch ReDoS, vulnerable <=4.0.7 with no patched release. It runs only at
+  # build time in the website and docs toolchain on our own glob patterns, never
+  # on untrusted input, and is not in the agent binary or image. Only the
+  # web-toolchain step can match it. Approved 2026-11-18, expires 2026-12-17. The date is
+  # enforced: the reason's `expires: YYYY-MM-DD` is read by
+  # scripts/check-grype-waiver-expiry.sh, which fails the scan job on or after it.
+  - vulnerability: GHSA-fc5q-39xc-vjpf
+    reason: "picomatch ReDoS, no patched release. Build-time only, not shipped. Approved 2026-11-18, expires: 2026-12-17 or remove sooner when a fixed version is published."
+    package:
+      name: picomatch
+      version: 4.0.7
+      type: npm

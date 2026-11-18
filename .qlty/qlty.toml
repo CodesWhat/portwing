@@ -83,6 +83,15 @@ version = "0.46.0"
 [[plugin]]
 name = "osv-scanner"
 
+# osv-scanner covers Go dependency files only (go.mod, go.sum). The root
+# package-lock.json belongs to the website and docs build toolchain, which never
+# ships in the agent binary or image, so its advisories are handled by the
+# web-toolchain step in security-grype.yml (it fails only npm-changing PRs and
+# scheduled scans) instead of blocking every pre-push and Go CI Qlty run.
+[[exclude]]
+plugins = ["osv-scanner"]
+file_patterns = ["package-lock.json", "**/package-lock.json"]
+
 [[plugin]]
 name = "radarlint-iac"
 mode = "monitor"
