@@ -29,6 +29,9 @@ module.exports = {
   // locally and Node CI / Web Contract on a GitHub runner. They do not agree:
   // byte weight is higher locally (script bytes are identical, the delta is
   // non-script assets), while the performance score is lower on the runner.
+  // Total byte weight moved between 1,027,188 and 1,098,156 across runs of the
+  // same build (the badge and star-chart images are third-party), so the
+  // higher one is recorded.
   // The last runner reading was 0.71 against 0.72 locally; this pass measured
   // 0.77 locally, so the recorded 0.74 keeps that offset and then some. It is
   // an estimate until Web Contract reports its own number for this build.
@@ -37,7 +40,7 @@ module.exports = {
   baseline: {
     performance: 0.74,
     accessibility: 1,
-    totalByteWeight: 1_027_188,
+    totalByteWeight: 1_098_156,
     scriptTransferBytes: 518_672,
   },
   // performanceMin tracks the baseline within 0.05, asserted by
@@ -49,6 +52,6 @@ module.exports = {
   // page scores 1.00; the gate stays at the standard bar so a regression has
   // room to show up before it fails.
   accessibilityMin: 0.9,
-  totalByteWeightMax: 1_099_000,
+  totalByteWeightMax: 1_175_000,
   scriptTransferBytesMax: 555_000,
 };

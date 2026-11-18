@@ -42,7 +42,7 @@ test("marketing Lighthouse budget admits the recorded GitHub runner baseline", a
   const githubRunnerBaseline = {
     performance: 0.74,
     accessibility: 1,
-    totalByteWeight: 1_027_188,
+    totalByteWeight: 1_098_156,
     scriptTransferBytes: 518_672,
   };
   assert.doesNotThrow(() =>
