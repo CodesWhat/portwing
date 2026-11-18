@@ -126,9 +126,11 @@ ignore:
   # picomatch ReDoS, vulnerable <=4.0.7 with no patched release. It runs only at
   # build time in the website and docs toolchain on our own glob patterns, never
   # on untrusted input, and is not in the agent binary or image. Only the
-  # web-toolchain step can match it. Approved 2026-11-18, expires 2026-12-17.
+  # web-toolchain step can match it. Approved 2026-11-18, expires 2026-12-17. The date is
+  # enforced: the reason's `expires: YYYY-MM-DD` is read by
+  # scripts/check-grype-waiver-expiry.sh, which fails the scan job on or after it.
   - vulnerability: GHSA-fc5q-39xc-vjpf
-    reason: "picomatch ReDoS, no patched release. Build-time only, not shipped. Approved 2026-11-18, remove by 2026-12-17 or when a fixed version is published."
+    reason: "picomatch ReDoS, no patched release. Build-time only, not shipped. Approved 2026-11-18, expires: 2026-12-17 or remove sooner when a fixed version is published."
     package:
       name: picomatch
       version: 4.0.7

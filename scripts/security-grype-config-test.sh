@@ -415,9 +415,32 @@ picomatch_entry="$(grep -n -A6 -F -- '- vulnerability: GHSA-fc5q-39xc-vjpf' .gry
 if ! grep -Fq 'name: picomatch' <<<"${picomatch_entry}" ||
 	! grep -Fq 'version: 4.0.7' <<<"${picomatch_entry}" ||
 	! grep -Fq 'type: npm' <<<"${picomatch_entry}" ||
-	! grep -Fq '2026-12-17' <<<"${picomatch_entry}"; then
-	fail ".grype.yaml must carry the expiring picomatch 4.0.7 (npm) waiver for GHSA-fc5q-39xc-vjpf, with its 2026-12-17 expiry"
+	! grep -Eq 'reason:.*expires: 2026-12-17([^0-9]|")' <<<"${picomatch_entry}"; then
+	fail ".grype.yaml must carry the expiring picomatch 4.0.7 (npm) waiver for GHSA-fc5q-39xc-vjpf, with 'expires: 2026-12-17' in its reason"
 fi
+
+# The expiry is enforced, not just recorded: a script reads every ignore
+# entry's 'expires: YYYY-MM-DD', and the scan job runs it before either scan.
+[ -x scripts/check-grype-waiver-expiry.sh ] ||
+	fail "scripts/check-grype-waiver-expiry.sh must exist and be executable"
+expiry_step="$(step_block 'Enforce waiver expiry')"
+[ -n "${expiry_step}" ] || fail "grype-deps must have an 'Enforce waiver expiry' step"
+grep -Fxq '        run: ./scripts/check-grype-waiver-expiry.sh .grype.yaml' <<<"${expiry_step}" ||
+	fail "the expiry step must run scripts/check-grype-waiver-expiry.sh against .grype.yaml"
+if grep -Eq '^[[:space:]]+(if|continue-on-error):' <<<"${expiry_step}"; then
+	fail "the expiry step must run on every event and must not continue on error"
+fi
+expiry_line="$(grep -n -F -- '- name: Enforce waiver expiry' <<<"${deps_block}" | head -n1 | cut -d: -f1)"
+first_scan_line="$(grep -n -F -- 'uses: anchore/scan-action@' <<<"${deps_block}" | head -n1 | cut -d: -f1)"
+if [ -z "${expiry_line}" ] || [ -z "${first_scan_line}" ] || [ "${expiry_line}" -ge "${first_scan_line}" ]; then
+	fail "the expiry step must run before the first Grype scan"
+fi
+
+# The web SARIF came from a staged copy; relativize its paths against it so
+# they resolve to the tracked package-lock.json.
+# shellcheck disable=SC2016 # Asserting the literal text of the workflow.
+grep -Fxq '          checkout_path: ${{ runner.temp }}/web-lock' <<<"$(step_block 'Upload Grype web toolchain SARIF')" ||
+	fail "the web toolchain SARIF upload must set checkout_path to the staged copy"
 if grep -Fq 'GO-2026-5970' .grype.yaml; then
 	fail ".grype.yaml must not waive GO-2026-5970; node_modules is out of scope instead"
 fi

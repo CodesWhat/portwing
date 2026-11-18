@@ -33,6 +33,7 @@ bash scripts/codeql-trigger-config-test-test.sh
 bash scripts/codeql-trigger-config-test.sh
 bash scripts/quality-lane-notify-config-test-test.sh
 bash scripts/quality-lane-notify-config-test.sh
+bash scripts/check-grype-waiver-expiry-test.sh
 bash scripts/security-grype-config-test-test.sh
 bash scripts/security-grype-config-test.sh
 bash scripts/quality-integration-engines-config-test-test.sh

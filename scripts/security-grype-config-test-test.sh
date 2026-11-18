@@ -33,6 +33,7 @@ reset_fixture() {
 	# directory, so the fixture tree carries pristine copies of them.
 	mkdir -p "${test_root}/.qlty"
 	cp .grype.yaml .grype-shipped.yaml "${test_root}/"
+	cp scripts/check-grype-waiver-expiry.sh "${test_root}/scripts/"
 	cp .qlty/qlty.toml "${test_root}/.qlty/"
 }
 
@@ -447,10 +448,44 @@ assert_rejected \
 
 # The picomatch waiver and its expiry.
 reset_fixture
-sed -i.bak 's/2026-12-17/2027-01-01/g' "${test_root}/.grype.yaml"
+sed -i.bak 's/expires: 2026-12-17/expires: 2027-01-01/g' "${test_root}/.grype.yaml"
 assert_rejected \
 	"expiring picomatch 4.0.7 (npm) waiver" \
-	"contract must reject a waiver that lost its expiry"
+	"contract must reject a waiver whose expiry date changed"
+
+# The date moves out of the parseable 'expires:' convention.
+reset_fixture
+sed -i.bak 's/expires: 2026-12-17/remove by 2026-12-17/g' "${test_root}/.grype.yaml"
+assert_rejected \
+	"with 'expires: 2026-12-17' in its reason" \
+	"contract must reject a date outside the enforced expires: convention"
+
+# The expiry step is dropped from the scan job.
+reset_fixture
+sed -i.bak "${deps_range} s/^      - name: Enforce waiver expiry\$/      - name: Something else/" "${fixture}"
+assert_rejected \
+	"must have an 'Enforce waiver expiry' step" \
+	"contract must reject a scan job without the expiry step"
+
+reset_fixture
+sed -i.bak "${deps_range} s#^        run: ./scripts/check-grype-waiver-expiry.sh .grype.yaml\$#        run: true#" "${fixture}"
+assert_rejected \
+	"must run scripts/check-grype-waiver-expiry.sh" \
+	"contract must reject an expiry step that no longer runs the checker"
+
+# The expiry step may not be skipped by a condition.
+reset_fixture
+insert_after "      - name: Enforce waiver expiry" "        if: github.event_name == 'schedule'"
+assert_rejected \
+	"must run on every event" \
+	"contract must reject a conditional expiry step"
+
+# The web SARIF upload loses its checkout_path.
+reset_fixture
+sed -i.bak "${deps_range} { /^          checkout_path: /d; }" "${fixture}"
+assert_rejected \
+	"must set checkout_path to the staged copy" \
+	"contract must reject a web SARIF upload without checkout_path"
 
 # The old repo-root osv waiver file returns.
 reset_fixture

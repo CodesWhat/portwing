@@ -219,6 +219,13 @@ jobs:
         # duplicate govulncheck job was retired.
         run: ./scripts/verify-scanner-exclusions.sh
 
+      - name: Enforce waiver expiry
+        # Grype has no expiry field, so a waiver would suppress its finding
+        # forever. This fails the job once any `expires: YYYY-MM-DD` in
+        # .grype.yaml is today (UTC) or past, before either scan runs, on every
+        # event.
+        run: ./scripts/check-grype-waiver-expiry.sh .grype.yaml
+
       - name: Run Grype on the shipped surface (Go modules)
         # The hard gate. Go modules, binaries and images are what users run, so
         # a HIGH finding here fails every PR shape. Scanning the repo root
@@ -327,6 +334,10 @@ jobs:
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
         with:
           sarif_file: ${{ steps.grype-web.outputs.sarif }}
+          # The scan ran on a staged copy, so findings carry absolute paths
+          # under it. Relativize them against that copy so they resolve to the
+          # tracked package-lock.json.
+          checkout_path: ${{ runner.temp }}/web-lock
           category: grype-web
 
       - name: Summarize
