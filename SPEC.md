@@ -540,6 +540,10 @@ data: {"type":"dd:container-updated","data":{...Container...}}
 data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 ```
 
+The stream also carries a `: heartbeat` comment line every 15 s. Drydock arms
+its 45 s stalled-stream watchdog only after the first one, and it keeps
+proxies with short idle timeouts from cutting a quiet stream.
+
 ## 11. Security Model
 
 ### 11.1 Authentication

@@ -72,6 +72,10 @@ The 501 responses on `POST /api/watchers/*` and `POST /api/triggers/*` are inten
 
 Drydock parses SSE frames as `data: <json>\n\n`. Each frame is a JSON object with `type` and `data` fields (`AgentClient.ts:659`).
 
+### Heartbeat
+
+Every 15 seconds Portwing writes a `: heartbeat` comment line (followed by a blank line) on the stream. Drydock arms its 45 s stalled-stream watchdog only after the first heartbeat, so this lets it detect a half-open stream, and it keeps proxies with short idle timeouts from cutting a quiet one. The comment isn't an event, so `AgentClient` ignores it when parsing.
+
 ### `dd:ack`
 
 Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, `lastSeen`, `logLevel`, and `pollInterval` from the payload.

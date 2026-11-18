@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Edge mode applies backpressure to bulk streams (Docker streams, exec output, Drydock log chunks) instead of evicting the whole tunnel when the controller reads slower than the source writes; only a controller that makes no progress for 30 s is dropped. Buffered responses over 16 MiB now fail with an error instead of being truncated, and reconnect backoff resets only after a connection stays up for 30 s.
 
+### Fixed
+
+- Drydock-mode SSE sends a `: heartbeat` every 15 s so Drydock's stalled-stream watchdog arms and proxies don't cut idle streams.
+
 ## [v1.3.0] - 2026-11-17
 
 ### Added

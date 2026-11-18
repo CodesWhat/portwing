@@ -17,6 +17,13 @@ import (
 	"github.com/codeswhat/portwing/internal/metrics"
 )
 
+// sseHeartbeatInterval is how often ServeHTTP writes a `: heartbeat` comment.
+// Drydock arms its 45 s stalled-stream watchdog only after the first
+// heartbeat (AgentClient.ts), so 15 s gives it three chances before it
+// declares the stream dead, and keeps idle-timeout proxies from cutting a
+// quiet stream.
+const sseHeartbeatInterval = 15 * time.Second
+
 type SSEClient struct {
 	id     string
 	events chan []byte
@@ -42,6 +49,10 @@ type SSEBroadcaster struct {
 	agentInfo    AgentInfo
 	memoryGB     float64
 	startTime    time.Time
+
+	// heartbeatInterval controls how often ServeHTTP writes the keepalive
+	// comment. Overridable per-instance in tests.
+	heartbeatInterval time.Duration
 }
 
 func NewSSEBroadcaster(manager ContainerProvider, agentVersion string, info AgentInfo) *SSEBroadcaster {
@@ -52,6 +63,8 @@ func NewSSEBroadcaster(manager ContainerProvider, agentVersion string, info Agen
 		agentInfo:    info,
 		memoryGB:     metrics.MemoryTotalGB(),
 		startTime:    time.Now(),
+
+		heartbeatInterval: sseHeartbeatInterval,
 	}
 }
 
@@ -103,12 +116,21 @@ func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Stream events until client disconnects.
 	ctx := r.Context()
+	heartbeat := time.NewTicker(b.heartbeatInterval)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			slog.Info("SSE client disconnected", "clientId", client.id)
 			b.removeClient(client.id)
 			return
+		case <-heartbeat.C:
+			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+				b.removeClient(client.id)
+				return
+			}
+			flusher.Flush()
 		case data, ok := <-client.events:
 			if !ok {
 				return
