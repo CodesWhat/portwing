@@ -46,6 +46,12 @@ const (
 
 	CapKeyRotation  = "edge-key-rotation"
 	KeyRotationPath = "/_portwing/auth/rotation"
+
+	// ErrorCodeResponseTooLarge is the stable, machine-readable code carried
+	// by an over-cap buffered response: the edge `error` frame's code, and the
+	// code on a legacy dd:container_log_response. Match on it, not on the
+	// human-readable message.
+	ErrorCodeResponseTooLarge = "response_too_large"
 )
 
 // AgentVersion is the agent build version. It must be a var, not a const:

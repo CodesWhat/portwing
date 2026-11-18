@@ -1558,6 +1558,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("response exceeds %d bytes; use a streaming request", int64(maxResponseBody)),
+				Code:      protocol.ErrorCodeResponseTooLarge,
 				RequestID: req.RequestID,
 			})
 			return

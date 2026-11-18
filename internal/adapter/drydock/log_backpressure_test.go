@@ -73,4 +73,7 @@ func TestLegacyLogRequestOverCapReturnsError(t *testing.T) {
 	if !strings.HasPrefix(resp.Logs, "error: logs exceed ") || len(resp.Logs) > 200 {
 		t.Fatalf("response = %.120q, want a short over-cap error", resp.Logs)
 	}
+	if resp.Code != "response_too_large" {
+		t.Fatalf("code = %q, want response_too_large", resp.Code)
+	}
 }

@@ -218,6 +218,14 @@ endpoint; the caller's cutoff does not constrain the stream.
 Continuous tailing uses the `request`/`stream`/`stream_end` path against
 `GET /containers/{id}/logs?follow=1`.
 
+Logs over the 16 MiB buffered cap are not truncated. The agent sends a
+`dd:container_log_response` whose `logs` is a short `error: logs exceed ...`
+string and whose optional `code` is `response_too_large`. The same code is the
+stable signal for an over-cap non-stream edge response: the `error` frame
+carries `code: "response_too_large"` alongside the human-readable `message`
+(`{"message":"response exceeds 16777216 bytes; use a streaming request","code":"response_too_large","requestId":"..."}`).
+Match on `code`; the message text can change.
+
 ## 4. Standard Mode HTTP API
 
 ### 4.1 Agent Endpoints

@@ -557,6 +557,9 @@ func TestOverCapNonStreamBodyYieldsErrorNotTruncation(t *testing.T) {
 	if e.RequestID != "over" || !strings.Contains(e.Message, "exceeds") || !strings.Contains(e.Message, "streaming") {
 		t.Fatalf("error = %+v, want an exceeds-cap error for request over", e)
 	}
+	if e.Code != "response_too_large" {
+		t.Fatalf("code = %q, want response_too_large", e.Code)
+	}
 	requireTunnelUp(t, c, ctrl)
 }
 

@@ -411,6 +411,7 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 			RequestID:   msg.RequestID,
 			ContainerID: msg.ContainerID,
 			Logs:        fmt.Sprintf("error: logs exceed %d bytes; use a streaming log request", maxContainerLogBytes),
+			Code:        protocol.ErrorCodeResponseTooLarge,
 		})
 		return
 	}
