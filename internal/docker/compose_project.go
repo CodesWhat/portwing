@@ -234,7 +234,7 @@ func (cm *ComposeManager) projectNameFor(ctx context.Context, stackDir, projectD
 	if adopt {
 		if _, seen := cm.adoptionLogged.LoadOrStore(projectDir, struct{}{}); !seen {
 			slog.Info("adopting existing compose project for stack deployed by an earlier Portwing version",
-				"stack_dir", applog.Sanitize(stackDir), "project", legacy)
+				"stack_dir", applog.Sanitize(stackDir), "project", applog.Sanitize(legacy))
 		}
 		return legacy, nil
 	}

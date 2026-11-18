@@ -1884,7 +1884,7 @@ func (c *Client) writeDirect(target outboundTarget, env protocol.Envelope) {
 	}
 	_ = target.conn.SetWriteDeadline(time.Now().Add(writeWait))
 	if err := target.conn.WriteJSON(env); err != nil {
-		slog.Warn("websocket write failed", "type", env.Type, "error", err)
+		slog.Warn("websocket write failed", "type", applog.Sanitize(env.Type), "error", applog.Sanitize(err.Error()))
 	}
 }
 
