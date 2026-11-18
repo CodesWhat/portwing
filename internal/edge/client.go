@@ -165,9 +165,15 @@ type hostCollector interface {
 type edgeMessageSender struct {
 	client *Client
 	target *outboundTarget
+	// lossy drops the message when the target queue is full or closed instead
+	// of evicting the connection. Only best-effort lifecycle events set it.
+	lossy bool
 }
 
 func (s *edgeMessageSender) SendTypedMessage(msgType string, data any) error {
+	if s.lossy && s.target != nil {
+		return s.client.sendLossyTypedMessageTo(*s.target, msgType, data)
+	}
 	if s.target != nil {
 		return s.client.sendTypedMessageTo(*s.target, msgType, data)
 	}
@@ -454,16 +460,16 @@ func (c *Client) forwardContainerEvents(ctx context.Context) {
 	})
 }
 
-// connectedMessageSender returns the live sender only once the send pump is up,
-// so events are never written during the handshake or between connections.
+// connectedMessageSender returns a lossy sender bound to one captured outbound
+// target, only once that target's send pump is up. Capturing the target once
+// means an event can't be written directly during a later connection's
+// handshake, and a queue that has since closed just drops the event.
 func (c *Client) connectedMessageSender() (adapter.MessageSender, bool) {
-	c.connMu.Lock()
-	up := c.sendCh != nil
-	c.connMu.Unlock()
-	if !up {
+	target := c.currentOutboundTarget()
+	if target.ch == nil {
 		return nil, false
 	}
-	return c.currentMessageSender(), true
+	return &edgeMessageSender{client: c, target: &target, lossy: true}, true
 }
 
 // proxyFunc returns the proxy selector for the controller dial: the injected
@@ -1858,6 +1864,39 @@ func (c *Client) sendMessageTo(target outboundTarget, env protocol.Envelope) {
 		}
 		c.failConn(target.conn, "send queue full")
 	}
+}
+
+// sendLossyTypedMessageTo enqueues a best-effort message on target without
+// blocking. A full, byte-limited or closed queue drops the message; it never
+// evicts the connection, unlike sendMessageTo. A target with no queue (the
+// handshake phase) is dropped too, never written directly.
+func (c *Client) sendLossyTypedMessageTo(target outboundTarget, msgType string, data any) error {
+	rawData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshaling %s: %w", msgType, err)
+	}
+	env := protocol.Envelope{Type: msgType, Data: json.RawMessage(rawData)}
+
+	if target.ch == nil || target.state == nil {
+		slog.Debug("dropping best-effort message, no send queue", "type", msgType)
+		return nil
+	}
+	var reason string
+	switch target.state.enqueue(target.ch, env) {
+	case outboundEnqueued:
+		return nil
+	case outboundQueueClosed:
+		reason = "send queue closed"
+	case outboundByteLimitExceeded:
+		reason = "send queue byte limit exceeded"
+	case outboundFrameLimitExceeded:
+		reason = "send queue full"
+	}
+	if c.metrics != nil {
+		c.metrics.IncDroppedEvent()
+	}
+	slog.Debug("dropping best-effort message", "type", msgType, "reason", reason)
+	return nil
 }
 
 func (s *outboundQueueState) enqueue(ch chan protocol.Envelope, env protocol.Envelope) outboundEnqueueResult {

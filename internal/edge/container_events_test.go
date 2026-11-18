@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -267,4 +268,106 @@ func fakeEventDaemon(t *testing.T, eventJSON string) *docker.Client {
 		t.Fatal(err)
 	}
 	return client
+}
+
+func eventSender(t *testing.T, c *Client) adapter.MessageSender {
+	t.Helper()
+	sender, ok := c.connectedMessageSender()
+	if !ok {
+		t.Fatal("connectedMessageSender not connected")
+	}
+	return sender
+}
+
+func TestContainerEventsDropOnFullQueueWithoutEviction(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newHandshakeTestClient(t)
+	registry := newEdgeMetricsForBackpressureTest()
+	c.metrics = registry
+	sendCh := make(chan protocol.Envelope, 2)
+	c.connMu.Lock()
+	c.sendCh = sendCh
+	c.sendState = &outboundQueueState{}
+	c.connMu.Unlock()
+
+	sender := eventSender(t, c)
+	for i := 0; i < cap(sendCh); i++ {
+		if err := sender.SendTypedMessage(protocol.TypeDDContainerEvent, map[string]int{"n": i}); err != nil {
+			t.Fatalf("send %d: %v", i, err)
+		}
+	}
+	// Queue is full: further events are dropped, not evicting the connection.
+	for i := 0; i < 3; i++ {
+		if err := sender.SendTypedMessage(protocol.TypeDDContainerEvent, map[string]int{"n": 99}); err != nil {
+			t.Fatalf("overflow send: %v", err)
+		}
+	}
+	if len(sendCh) != cap(sendCh) {
+		t.Fatalf("queue len = %d, want %d", len(sendCh), cap(sendCh))
+	}
+	requireBackpressureCount(t, registry, 0)
+	var out strings.Builder
+	registry.WritePrometheus(&out, func(v string) string { return v })
+	if !strings.Contains(out.String(), "portwing_edge_dropped_events_total 3\n") {
+		t.Fatalf("dropped counter missing:\n%s", out.String())
+	}
+
+	// The connection stays up: a reliable message still enqueues after a drain.
+	<-sendCh
+	if err := c.sendTypedMessage(protocol.TypePong, protocol.PongMessage{Timestamp: 1}); err != nil {
+		t.Fatalf("reliable send: %v", err)
+	}
+	if got := len(sendCh); got != cap(sendCh) {
+		t.Fatalf("queue len after reliable send = %d, want %d", got, cap(sendCh))
+	}
+	_ = ctrl
+	c.connMu.Lock()
+	stillUp := c.sendCh != nil && c.conn != nil
+	c.connMu.Unlock()
+	if !stillUp {
+		t.Fatal("connection was evicted")
+	}
+}
+
+func TestContainerEventsDropOnClosedQueue(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newHandshakeTestClient(t)
+	sendCh := make(chan protocol.Envelope, 2)
+	state := &outboundQueueState{}
+	c.connMu.Lock()
+	c.sendCh = sendCh
+	c.sendState = state
+	c.connMu.Unlock()
+
+	sender := eventSender(t, c)
+	state.closeAndDiscard(sendCh)
+	if err := sender.SendTypedMessage(protocol.TypeDDContainerEvent, map[string]int{"n": 1}); err != nil {
+		t.Fatalf("send on closed queue: %v", err)
+	}
+	if len(sendCh) != 0 {
+		t.Fatal("event enqueued on a closed queue")
+	}
+}
+
+func TestContainerEventSenderNeverWritesDirectlyDuringHandshake(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newHandshakeTestClient(t)
+	if _, ok := c.connectedMessageSender(); ok {
+		t.Fatal("connectedMessageSender connected with a nil queue")
+	}
+
+	// A sender captured with a nil queue (as if connection B were mid-handshake)
+	// must drop, not fall through to the direct handshake write.
+	target := c.currentOutboundTarget()
+	sender := &edgeMessageSender{client: c, target: &target, lossy: true}
+	if err := sender.SendTypedMessage(protocol.TypeDDContainerEvent, map[string]int{"n": 1}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	_ = ctrl.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	if _, _, err := ctrl.ReadMessage(); err == nil {
+		t.Fatal("event was written directly during the handshake")
+	}
 }
