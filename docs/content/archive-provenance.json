@@ -1,4 +1,10 @@
 {
+  "v1.2": {
+    "sourceTag": "v1.2.2",
+    "sourceCommit": "b7f94b8fb23152b3c5ea1650384af34083512ec0",
+    "sourcePath": "docs/content/docs/current",
+    "sourceTree": "e319088dfc269d4ea141d42286cb721a0406af4b"
+  },
   "v1.1": {
     "sourceTag": "v1.1.2",
     "sourceCommit": "87cdc66fac177db0ffc80ac765ed86d1e0400d3c",

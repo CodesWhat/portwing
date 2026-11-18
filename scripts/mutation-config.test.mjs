@@ -86,9 +86,9 @@ const expectedFloors = new Map([
   ["./internal/server", [84.74, 96.37]],
   ["./internal/adapter", [93.78, 93.28]],
   ["./internal/adapter/drydock", [82.5, 91.95]],
-  ["./internal/audit", [88.31, 100]],
-  ["./internal/auth", [88.58, 97.96]],
-  ["./internal/banner", [76.92, 38.24]],
+  ["./internal/audit", [90.53, 100]],
+  ["./internal/auth", [91.77, 97.96]],
+  ["./internal/banner", [76.92, 99.0]],
   ["./internal/config", [97.75, 100]],
   ["./internal/docker", [93.48, 93.68]],
   ["./internal/edge", [85.54, 91]],
@@ -1152,14 +1152,14 @@ test("mutation contract rejects an undiscovered production package", () => {
 
 test("mutation contract rejects a missing numeric floor", () => {
   assertMutationFailure(
-    workflow.replace("            efficacy: 88.58\n", ""),
+    workflow.replace("            efficacy: 91.77\n", ""),
     "auth is missing efficacy",
   );
 });
 
 test("mutation contract rejects a weakened numeric floor", () => {
   assertMutationFailure(
-    workflow.replace("            efficacy: 88.58\n", "            efficacy: 0\n"),
+    workflow.replace("            efficacy: 91.77\n", "            efficacy: 0\n"),
     "auth efficacy floor is weakened",
   );
 });
@@ -1396,7 +1396,7 @@ test("mutation contract rejects continue-on-error on the advisory step", () => {
 
 test("mutation contract rejects an advisory floor that drifts from the matrix", () => {
   assertMutationFailure(
-    workflow.replace("./internal/auth|auth|88.58", "./internal/auth|auth|88.57"),
+    workflow.replace("./internal/auth|auth|91.77", "./internal/auth|auth|91.76"),
     "auth's advisory row must carry the efficacy floor the matrix measured",
   );
 });
@@ -1711,7 +1711,7 @@ test("mutation contract rejects an advisory job that reverts to a single job", (
       '    name: "Quality: Gremlins advisory mutators"\n    runs-on: ubuntu-24.04\n    timeout-minutes: 120\n',
     )
     .replace(
-      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run\n            # 33901506579 (2026-09-04): killed 68, lived 3 across\n            # ./internal/server. Floor is floor(measured) - 2pp of slack.\n            floor: 93\n            packages: |\n              ./internal/server|server|84.74\n          - group: edge\n            # Measured 82.56% in run 33901506579 (2026-09-04): killed 71,\n            # lived 15 across ./internal/edge.\n            floor: 80\n            packages: |\n              ./internal/edge|edge|85.54\n          - group: generic\n            # Measured 83.33% in run 33901506579 (2026-09-04): killed 5,\n            # lived 1 across ./internal/generic.\n            floor: 81\n            packages: |\n              ./internal/generic|generic|99.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock's tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            #\n            # Measured 94.02% in run 33901506579 (2026-09-04): killed 110,\n            # lived 7 summed across adapter, adapter-drydock, auth and audit.\n            floor: 92\n            packages: |\n              ./internal/adapter|adapter|93.78\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|88.58\n              ./internal/audit|audit|88.31\n          - group: misc-b\n            # Measured 94.52% in run 33901506579 (2026-09-04): killed 138,\n            # lived 8 summed across docker, mcp and metrics.\n            floor: 92\n            packages: |\n              ./internal/docker|docker|93.48\n              ./internal/mcp|mcp|93.78\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            # Measured 92.86% in run 33901506579 (2026-09-04): killed 39,\n            # lived 3 summed across portwing, banner, config, log, pool and\n            # protocol.\n            floor: 90\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|97.75\n              ./internal/log|log|100\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
+      "\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - group: server\n            # PW-6.8: measured 95.77% efficacy on the 6 extra mutators in run\n            # 33901506579 (2026-09-04): killed 68, lived 3 across\n            # ./internal/server. Floor is floor(measured) - 2pp of slack.\n            floor: 93\n            packages: |\n              ./internal/server|server|84.74\n          - group: edge\n            # Measured 82.56% in run 33901506579 (2026-09-04): killed 71,\n            # lived 15 across ./internal/edge.\n            floor: 80\n            packages: |\n              ./internal/edge|edge|85.54\n          - group: generic\n            # Measured 83.33% in run 33901506579 (2026-09-04): killed 5,\n            # lived 1 across ./internal/generic.\n            floor: 81\n            packages: |\n              ./internal/generic|generic|99.00\n          - group: misc-a\n            # adapter-drydock hit the same cliff as pool and protocol: run\n            # 33848880338 generated 32 extra mutants and TIMED OUT 30 of\n            # them under the default timeout coefficient (coverage-gather\n            # time x 3), scoring 0 killed/0 lived with efficacy unmeasured.\n            # drydock's tests are slow relative to its coverage gather, so\n            # it gets the same |40 coefficient.\n            #\n            # Measured 94.02% in run 33901506579 (2026-09-04): killed 110,\n            # lived 7 summed across adapter, adapter-drydock, auth and audit.\n            floor: 92\n            packages: |\n              ./internal/adapter|adapter|93.78\n              ./internal/adapter/drydock|adapter-drydock|82.50|40\n              ./internal/auth|auth|91.77\n              ./internal/audit|audit|90.53\n          - group: misc-b\n            # Measured 94.52% in run 33901506579 (2026-09-04): killed 138,\n            # lived 8 summed across docker, mcp and metrics.\n            floor: 92\n            packages: |\n              ./internal/docker|docker|93.48\n              ./internal/mcp|mcp|93.78\n              ./internal/metrics|metrics|90.00\n          - group: misc-c\n            # Measured 92.86% in run 33901506579 (2026-09-04): killed 39,\n            # lived 3 summed across portwing, banner, config, log, pool and\n            # protocol.\n            floor: 90\n            packages: |\n              ./cmd/portwing|portwing|100\n              ./internal/banner|banner|76.92\n              ./internal/config|config|97.75\n              ./internal/log|log|100\n              ./internal/pool|pool|50.00|40\n              ./internal/protocol|protocol|100|40\n",
       "",
     );
   assertMutationFailure(source, "the advisory job must be a matrix of package groups");

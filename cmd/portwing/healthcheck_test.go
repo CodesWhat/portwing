@@ -216,3 +216,67 @@ func TestHealthcheckCertificateVerificationMissingPeer(t *testing.T) {
 		t.Fatal("accepted absent peer certificate")
 	}
 }
+
+func TestRunHealthcheckWithClientCertificate(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "local health probe"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+	encoded, err := x509.CreateCertificate(rand.Reader, template, template, public, private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: encoded})
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(certificate) {
+		t.Fatal("cannot load probe trust")
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots}
+	server.StartTLS()
+	defer server.Close()
+	_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+	t.Setenv("PORT", port)
+	t.Setenv("TLS_CERT", writeHealthCertificate(t, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})))
+	t.Setenv("TLS_CLIENT_CA", writeHealthCertificate(t, certificate))
+	certFile := writeHealthCertificate(t, certificate)
+	keyBytes, err := x509.MarshalPKCS8PrivateKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(t.TempDir(), "health-key.pem")
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, cert, key, reason string
+		want                    int
+	}{
+		{name: "valid client", cert: certFile, key: keyFile, want: 0},
+		{name: "missing pair", reason: "HEALTHCHECK_TLS_CERT", want: 1},
+		{name: "certificate only", cert: certFile, reason: "HEALTHCHECK_TLS_CERT", want: 1},
+		{name: "key only", key: keyFile, reason: "HEALTHCHECK_TLS_CERT", want: 1},
+		{name: "missing files", cert: certFile, key: filepath.Join(t.TempDir(), "absent.pem"), reason: "healthcheck client certificate", want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HEALTHCHECK_TLS_CERT", tc.cert)
+			t.Setenv("HEALTHCHECK_TLS_KEY", tc.key)
+			var out bytes.Buffer
+			code := run([]string{"portwing", "healthcheck"}, strings.NewReader(""), &out, &out)
+			if code != tc.want || (tc.reason != "" && !strings.Contains(out.String(), tc.reason)) {
+				t.Fatalf("exit=%d want=%d: %s", code, tc.want, &out)
+			}
+		})
+	}
+}
+
+func TestHealthcheckClientCredentialsRequireNativeTLS(t *testing.T) {
+	t.Setenv("TLS_CERT", "")
+	t.Setenv("TLS_CLIENT_CA", "")
+	t.Setenv("HEALTHCHECK_TLS_CERT", "client.crt")
+	t.Setenv("HEALTHCHECK_TLS_KEY", "client.key")
+	if err := runHealthcheck(); err == nil || !strings.Contains(err.Error(), "requires TLS_CERT") {
+		t.Fatalf("error=%v, want native TLS required", err)
+	}
+}

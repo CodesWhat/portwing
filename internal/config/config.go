@@ -24,6 +24,7 @@ type Config struct {
 	Port           string
 	BindAddress    string
 	TLSCert        string
+	TLSClientCA    string
 	TLSKey         string
 	TrustedProxies []string
 	// AllowedOrigins lists the browser Origin values the HTTP listeners accept
@@ -226,6 +227,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("TLS_CERT and TLS_KEY must either both be set or both be empty")
 	}
 
+	tlsClientCA := getEnv("TLS_CLIENT_CA", "")
+	if tlsClientCA != "" && (drydockURL != "" || tlsCert == "" || tlsKey == "") {
+		return nil, fmt.Errorf("TLS_CLIENT_CA requires standard mode with native TLS_CERT and TLS_KEY")
+	}
+
 	// Standard mode must accept inbound controller traffic by default. Edge
 	// mode's HTTP listener is operational-only and intentionally unauthenticated,
 	// so keep its health, metrics, and audit-export surface on loopback unless an
@@ -245,6 +251,7 @@ func Load() (*Config, error) {
 		BindAddress:                getEnv("BIND_ADDRESS", bindAddressDefault),
 		TLSCert:                    tlsCert,
 		TLSKey:                     tlsKey,
+		TLSClientCA:                tlsClientCA,
 		TrustedProxies:             splitCSV(getEnv("TRUSTED_PROXIES", "")),
 		AllowedOrigins:             splitCSV(getEnv("ALLOWED_ORIGINS", "")),
 		AllowedHosts:               splitCSV(getEnv("ALLOWED_HOSTS", "")),

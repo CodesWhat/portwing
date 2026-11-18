@@ -51,14 +51,13 @@ run-name: >-
 # read-only no matter what this file asks for. That is deliberate: a fork PR can
 # read the public corpus branch and fuzz, and can do nothing else.
 #
-# --- What is NOT pinned ------------------------------------------------------
+# --- Runtime image pins ------------------------------------------------------
 #
-# Both ClusterFuzzLite actions are Docker container actions whose `runs.image`
-# is a floating `gcr.io/oss-fuzz-base/clusterfuzzlite-*:v1` tag written inside
-# Google's action definition. Pinning the action to a full commit SHA, as this
-# file does, pins the twelve-line wrapper and not the several-GB image that
-# actually executes. There is no input that changes this. The one image we can
-# pin is our own builder, and .clusterfuzzlite/Dockerfile pins it by digest.
+# Google's action metadata selects floating runtime images even when the action
+# is pinned by commit. The local action definitions pin those runtime images by
+# digest and these steps supply the same entrypoint environment explicitly. Our own builder is also
+# pinned in .clusterfuzzlite/Dockerfile. This does not pin every transitive input:
+# enabling an upstream alternate base OS needs a separate runtime-image review.
 #
 # --- If the egress allow-list is wrong ---------------------------------------
 #
@@ -92,6 +91,7 @@ on:
       - go.mod
       - go.sum
       - .clusterfuzzlite/**
+      - .github/actions/cflite-*/**
       - .github/workflows/quality-fuzz-cflite-pr.yml
   workflow_dispatch:
 
@@ -136,39 +136,55 @@ jobs:
             storage.googleapis.com:443
             sum.golang.org:443
 
-      # No actions/checkout: ClusterFuzzLite clones the repository itself and
-      # checks out the PR merge ref (ExternalGithub.prepare_for_fuzzer_build in
-      # infra/cifuzz/continuous_integration.py). A checkout step here would be
-      # ignored, and its credentials would sit on disk for the whole job.
+      # Repository-owned runtime metadata is pinned independently by commit,
+      # without a source checkout or persisted checkout credentials. The runtime
+      # independently clones the source merge ref before building targets.
       - name: Build fuzzers
         id: build
-        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
-        with:
-          language: go
-          sanitizer: address
-          github-token: ${{ github.token }}
+        uses: CodesWhat/portwing/.github/actions/cflite-build@44ff5baf85bc2b2635937e9aecd48dc1bafab590  # pinned runtime metadata
+        env:
+          LANGUAGE: go
+          SANITIZER: address
+          GITHUB_TOKEN: ${{ github.token }}
           # Without this, build_fuzzers drops every target it cannot prove the
           # diff reaches, and it proves that from coverage reports. We run no
           # coverage lane, so there are none, and the honest configuration is to
           # run all ten rather than to depend on how the upstream code happens to
           # fail when the report is missing.
-          keep-unaffected-fuzz-targets: true
+          KEEP_UNAFFECTED_FUZZ_TARGETS: "true"
+          LOW_DISK_SPACE: "True"
+          CFL_PLATFORM: github
+          DRY_RUN: "false"
+          ALLOWED_BROKEN_TARGETS_PERCENTAGE: ""
+          BAD_BUILD_CHECK: "true"
+          UPLOAD_BUILD: "false"
+          PROJECT_SRC_PATH: ""
+          GIT_STORE_REPO: ""
+          GIT_STORE_BRANCH: ""
+          GIT_STORE_BRANCH_COVERAGE: ""
 
       - name: Run fuzzers
         id: run
-        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
-        with:
-          language: go
-          github-token: ${{ github.token }}
+        uses: CodesWhat/portwing/.github/actions/cflite-run@44ff5baf85bc2b2635937e9aecd48dc1bafab590  # pinned runtime metadata
+        env:
+          LANGUAGE: go
+          GITHUB_TOKEN: ${{ github.token }}
           # Total across all ten targets, not per target: run_fuzzers.py splits
           # the budget with fuzz_seconds // len(targets), so this is 30s each.
-          fuzz-seconds: 300
-          mode: code-change
-          sanitizer: address
-          storage-repo: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
-          storage-repo-branch: clusterfuzzlite-corpus
+          FUZZ_SECONDS: "300"
+          MODE: code-change
+          SANITIZER: address
+          GIT_STORE_REPO: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+          GIT_STORE_BRANCH: clusterfuzzlite-corpus
           # Pinned to the corpus branch rather than left at its `gh-pages`
           # default. Nothing here generates coverage, but a default of gh-pages
           # means any future coverage mode would create a GitHub Pages branch in
           # this repository as a side effect.
-          storage-repo-branch-coverage: clusterfuzzlite-corpus
+          GIT_STORE_BRANCH_COVERAGE: clusterfuzzlite-corpus
+          LOW_DISK_SPACE: "True"
+          CFL_PLATFORM: github
+          DRY_RUN: "false"
+          REPORT_UNREPRODUCIBLE_CRASHES: "False"
+          OUTPUT_SARIF: "false"
+          MINIMIZE_CRASHES: "False"
+          PARALLEL_FUZZING: "false"

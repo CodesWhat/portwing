@@ -1,0 +1,5 @@
+name: ClusterFuzzLite build runtime
+description: Run the official ClusterFuzzLite build entrypoint at a fixed image digest.
+runs:
+  using: docker
+  image: docker://gcr.io/oss-fuzz-base/clusterfuzzlite-build-fuzzers:v1@sha256:7321896d954e0a91af88b35527a5429fcb9990acb0e72782392bcd49d34c526c  # v1

@@ -18,8 +18,23 @@ type CanonicalizePath = (path: string) => {
   surface: string;
 };
 
+type SubscribeHidden = (onHidden: () => void) => () => void;
+
 const defaultSchedule: Schedule = (callback, delayMs) => setTimeout(callback, delayMs);
 const defaultCancel: Cancel = (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>);
+
+const defaultSubscribeHidden: SubscribeHidden = (onHidden) => {
+  if (typeof document === "undefined" || typeof window === "undefined") return () => {};
+  const onVisibility = () => {
+    if (document.visibilityState === "hidden") onHidden();
+  };
+  document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("pagehide", onHidden);
+  return () => {
+    document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("pagehide", onHidden);
+  };
+};
 
 export function createWebVitalsReporter(
   initialPath: string,
@@ -28,33 +43,43 @@ export function createWebVitalsReporter(
   canonicalizePath: CanonicalizePath,
   schedule: Schedule = defaultSchedule,
   cancel: Cancel = defaultCancel,
+  subscribeHidden: SubscribeHidden = defaultSubscribeHidden,
 ) {
   const path = canonicalizePath(initialPath).normalizedPath;
-  const metrics: Partial<Record<WebVitalName, number>> = {};
+  let pending: Partial<Record<WebVitalName, number>> = {};
   let timer: unknown;
-  let sent = false;
 
   const flush = () => {
-    if (sent) return;
-    sent = true;
     if (timer !== undefined) {
       cancel(timer);
       timer = undefined;
     }
-    const event = buildEvent(path, metrics);
+    if (Object.keys(pending).length === 0) return;
+    const batch = pending;
+    pending = {};
+    const event = buildEvent(path, batch);
     if (event) emit(event);
   };
 
+  const unsubscribe = subscribeHidden(flush);
+
   return {
     record(name: string, value: number): void {
-      if (sent || !WEB_VITAL_NAMES.has(name as WebVitalName)) return;
+      if (!WEB_VITAL_NAMES.has(name as WebVitalName)) return;
       if (!Number.isFinite(value) || value < 0) return;
 
-      metrics[name as WebVitalName] = value;
+      pending[name as WebVitalName] = value;
+      if (WEB_VITAL_NAMES.size === Object.keys(pending).length) {
+        flush();
+        return;
+      }
       if (timer === undefined) {
         timer = schedule(flush, WEB_VITALS_FLUSH_DELAY_MS);
       }
-      if (WEB_VITAL_NAMES.size === Object.keys(metrics).length) flush();
+    },
+    dispose(): void {
+      flush();
+      unsubscribe();
     },
   };
 }

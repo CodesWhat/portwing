@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.3.0] - 2026-11-17
+
+### Added
+
+- Optional native Standard-mode client-certificate verification through
+  `TLS_CLIENT_CA`, with existing request authentication preserved.
+- Dedicated client-certificate credentials for the local healthcheck when mutual
+  TLS is enabled; keep server-leaf verification and fail on incomplete credentials.
+
+### Fixed
+
+- Emit each capability once in Standard info and Edge hello while preserving
+  case-sensitive values and first-seen order, including managed rotation.
+- Website and docs analytics honor Do Not Track and Global Privacy Control,
+  and report CLS, INP and short-visit web vitals at page hide.
+
+### Changed
+
+- Waive picomatch GHSA-fc5q-39xc-vjpf in osv-scanner until 2026-12-17. It has no
+  patched release and only runs at web build time on our own globs.
+- Pin the ClusterFuzzLite build and run containers by digest, preserving upstream
+  runtime environment defaults, corpus destinations and job permissions.
+- Raise the audit/auth mutation efficacy floors and banner mutator-coverage floor
+  from seven qualified measurements. Package source is unchanged since the latest
+  measurement. Timeouts remain unkilled, and other package floors are unchanged.
+
 ## [v1.2.2] - 2026-11-13
 
 ### Fixed

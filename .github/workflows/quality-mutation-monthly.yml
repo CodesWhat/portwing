@@ -65,23 +65,23 @@ jobs:
             mcover: 91.95
           - name: audit
             package: ./internal/audit
-            efficacy: 88.31
+            # Run43346075905: seven qualified samples, min91.53 minus1pp.
+            efficacy: 90.53
             mcover: 100
           - name: auth
             package: ./internal/auth
-            # efficacy ratcheted in run 33839463545 (2026-09-04): measured
-            # 89.58 across 3 samples, basis 89.58, 1.00pp buffer. mcover is
-            # untouched.
-            efficacy: 88.58
+            # Run43346075905: seven qualified samples. Conservative min92.77
+            # includes the timed-out verdict as unkilled; minus1pp. No timeout
+            # is counted as a kill. Mutator coverage is unchanged.
+            efficacy: 91.77
             mcover: 97.96
           - name: banner
             package: ./internal/banner
-            # Historical 38.24 coverage included 42 generator-only mutants.
-            # The generator is now excluded; runtime banner/tty files remain
-            # measured. Keep both existing floors until real runs justify a
-            # ratchet, never lower them to hide newly exposed survivors.
+            # Run43346075905: seven qualified samples measured100% runtime
+            # mutator coverage; minus1pp. Generator-only mutants stay excluded.
+            # Efficacy is unchanged, so existing survivors remain visible.
             efficacy: 76.92
-            mcover: 38.24
+            mcover: 99.00
           - name: config
             package: ./internal/config
             efficacy: 97.75
@@ -764,8 +764,8 @@ jobs:
             packages: |
               ./internal/adapter|adapter|93.78
               ./internal/adapter/drydock|adapter-drydock|82.50|40
-              ./internal/auth|auth|88.58
-              ./internal/audit|audit|88.31
+              ./internal/auth|auth|91.77
+              ./internal/audit|audit|90.53
           - group: misc-b
             # Measured 94.52% in run 33901506579 (2026-09-04): killed 138,
             # lived 8 summed across docker, mcp and metrics.
