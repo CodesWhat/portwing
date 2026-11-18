@@ -1,0 +1,19 @@
+# Layered on top of .grype.yaml by the shipped-surface step of
+# security-grype.yml (scan-action takes both files, newline-separated, and
+# grype merges them), so the Go suppressions live in one place only.
+#
+# This file only narrows what the hard gate looks at: Go modules. npm content
+# (the website and docs build toolchain) never ships in the agent binary or the
+# image, so it is scanned separately by the web-toolchain step with its own
+# policy (.grype-web.yaml). Anything that can catalog npm packages is excluded
+# here: installed packages under node_modules (including the native TypeScript
+# compiler binaries) and every npm-family lockfile.
+exclude:
+  - "**/node_modules/**"
+  - "**/package.json"
+  - "**/package-lock.json"
+  - "**/npm-shrinkwrap.json"
+  - "**/yarn.lock"
+  - "**/pnpm-lock.yaml"
+  - "**/bun.lock"
+  - "**/bun.lockb"

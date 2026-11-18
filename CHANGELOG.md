@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Vulnerability gates now hard-fail on what ships (Go modules and images). Web
+  toolchain lockfile findings fail only PRs that change npm dependencies, plus
+  scheduled scans.
+
 ## [v1.3.0] - 2026-11-17
 
 ### Added

@@ -680,15 +680,16 @@ scan_action_count="$(awk -v expected="${expected_scan_action_ref}" \
 # the shape a partial bump actually takes. Count every scan-action use as well,
 # so an added lane has to be at the reviewed pin or fail here.
 #
-# Three lanes since the published-release re-scan landed: grype-image (built
-# from the branch), grype-deps (lockfiles), and grype-published-release (the
-# GHCR manifest users actually pull). The count is deliberately exact rather
+# Four uses across three lanes: grype-image (built from the branch), grype-deps
+# (twice since the 2026-11-18 split: the shipped-surface Go gate and the web
+# toolchain lockfile scan), and grype-published-release (the GHCR manifest users
+# actually pull). The count is deliberately exact rather
 # than a floor — a lane silently dropped is as much a regression as one added
 # off-pin, and this is the only place that would notice.
 scan_action_total="$(awk \
 	'$1 == "uses:" && $2 ~ /^anchore\/scan-action@/ { count++ } END { print count + 0 }' \
 	.github/workflows/security-grype.yml)"
-if [ "${scan_action_count}" -ne 3 ] || [ "${scan_action_total}" -ne 3 ]; then
+if [ "${scan_action_count}" -ne 4 ] || [ "${scan_action_total}" -ne 4 ]; then
 	echo "FAIL: security-grype.yml must use anchore/scan-action v7.4.2 at the reviewed pin in all three scanner lanes" >&2
 	failures=$((failures + 1))
 fi
