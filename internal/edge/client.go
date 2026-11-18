@@ -188,13 +188,19 @@ type Client struct {
 	signedHelloKeyID string
 	cfg              *config.Config
 	dockerClient     dockerAPI
-	readiness        docker.HealthProbe
-	adapter          adapter.EdgeAdapter
-	compose          *docker.ComposeManager
-	collector        hostCollector
-	metrics          *metrics.Registry
-	auditor          *audit.Logger
-	startTime        time.Time
+	// eventSubscribe opens the Docker event subscription for dd:container_event
+	// forwarding; tests replace it. Nil falls back to the real event stream.
+	eventSubscribe adapter.EventSubscribe
+	// rawDockerClient is the concrete client behind dockerClient, kept for the
+	// event stream, which dockerAPI does not cover.
+	rawDockerClient *docker.Client
+	readiness       docker.HealthProbe
+	adapter         adapter.EdgeAdapter
+	compose         *docker.ComposeManager
+	collector       hostCollector
+	metrics         *metrics.Registry
+	auditor         *audit.Logger
+	startTime       time.Time
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
@@ -330,15 +336,16 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 	registry := metrics.NewRegistry()
 	registry.SetEdgeMode(true)
 	return &Client{
-		cfg:          cfg,
-		dockerClient: dockerClient,
-		adapter:      a,
-		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
-		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
-		metrics:      registry,
-		auditor:      auditor,
-		startTime:    time.Now(),
-		streamSem:    make(chan struct{}, maxStreams),
+		cfg:             cfg,
+		dockerClient:    dockerClient,
+		rawDockerClient: dockerClient,
+		adapter:         a,
+		compose:         docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
+		collector:       metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
+		metrics:         registry,
+		auditor:         auditor,
+		startTime:       time.Now(),
+		streamSem:       make(chan struct{}, maxStreams),
 	}
 }
 
@@ -358,6 +365,11 @@ func (c *Client) Run(ctx context.Context) error {
 			slog.Warn("health server shutdown error", "error", err)
 		}
 	}()
+
+	// One Docker event subscription per Run, outside the reconnect loop. It
+	// outlives controller reconnects; events that fire while the tunnel is down
+	// are dropped and the poll-diff inventory covers final state.
+	go c.forwardContainerEvents(ctx)
 
 	delay := time.Duration(c.cfg.ReconnectDelay) * time.Second
 	maxDelay := time.Duration(c.cfg.MaxReconnectDelay) * time.Second
@@ -416,6 +428,42 @@ func (c *Client) Run(ctx context.Context) error {
 			delay = maxDelay
 		}
 	}
+}
+
+// forwardContainerEvents streams raw Docker container events to the adapter
+// while the tunnel is up. It is a no-op when the adapter doesn't forward events.
+func (c *Client) forwardContainerEvents(ctx context.Context) {
+	fw, ok := c.adapter.(adapter.ContainerEventAdapter)
+	if !ok {
+		return
+	}
+	subscribe := c.eventSubscribe
+	if subscribe == nil {
+		if c.rawDockerClient == nil {
+			return
+		}
+		subscribe = adapter.DockerEventSubscriber(c.rawDockerClient)
+	}
+	adapter.RunContainerEvents(ctx, subscribe, func(ev docker.DockerEvent) {
+		sender, connected := c.connectedMessageSender()
+		if !connected {
+			slog.Debug("controller not connected, dropping container event", "action", ev.Action)
+			return
+		}
+		fw.OnDockerEvent(ctx, sender, ev)
+	})
+}
+
+// connectedMessageSender returns the live sender only once the send pump is up,
+// so events are never written during the handshake or between connections.
+func (c *Client) connectedMessageSender() (adapter.MessageSender, bool) {
+	c.connMu.Lock()
+	up := c.sendCh != nil
+	c.connMu.Unlock()
+	if !up {
+		return nil, false
+	}
+	return c.currentMessageSender(), true
 }
 
 // proxyFunc returns the proxy selector for the controller dial: the injected

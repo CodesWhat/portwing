@@ -278,7 +278,7 @@ components:
             adapter and optional feature declarations.
           items:
             type: string
-          example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:logs"]
+          example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:container-event", "dd:logs"]
 
     ComposeRequest:
       type: object

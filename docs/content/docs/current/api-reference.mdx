@@ -88,7 +88,7 @@ edge mode, when the controller WebSocket is disconnected.
   "hostname": "my-server",
   "agentId": "0123456789abcdef0123456789abcdef",
   "agentName": "my-server",
-  "capabilities": ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:logs"],
+  "capabilities": ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:container-event", "dd:logs"],
   "v3": true
 }
 ```
@@ -342,6 +342,7 @@ Registry checks (`/api/watchers/.../container/...`) are performed by the Drydock
 | `dd:container-added` | New container discovered. |
 | `dd:container-updated` | Container state or metadata changed. |
 | `dd:container-removed` | Container removed. |
+| `dd:container-event` | Raw Docker lifecycle event (`die`, `oom`, `stop`, `start`, `restart`). |
 
 ### curl examples
 

@@ -8,7 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 type capabilityListAdapter struct {
@@ -55,4 +61,78 @@ func TestInfoCapabilitiesPreserveFirstOccurrence(t *testing.T) {
 			}
 		})
 	}
+}
+
+type eventForwardingAdapter struct {
+	stubServerAdapter
+	mu      sync.Mutex
+	events  []docker.DockerEvent
+	senders []adapter.MessageSender
+	got     chan struct{}
+}
+
+func (a *eventForwardingAdapter) OnDockerEvent(_ context.Context, sender adapter.MessageSender, ev docker.DockerEvent) {
+	a.mu.Lock()
+	a.events = append(a.events, ev)
+	a.senders = append(a.senders, sender)
+	a.mu.Unlock()
+	a.got <- struct{}{}
+}
+
+func TestForwardContainerEventsStandardMode(t *testing.T) {
+	t.Parallel()
+
+	fw := &eventForwardingAdapter{got: make(chan struct{}, 4)}
+	ch := make(chan docker.DockerEvent, 4)
+	var subscribes atomic.Int32
+	s := &Server{adapter: fw, eventSubscribe: func(context.Context) (<-chan docker.DockerEvent, error) {
+		subscribes.Add(1)
+		return ch, nil
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.forwardContainerEvents(ctx)
+	}()
+
+	ch <- docker.DockerEvent{Action: "die"}
+	ch <- docker.DockerEvent{Action: "stop"}
+	for range 2 {
+		select {
+		case <-fw.got:
+		case <-time.After(time.Second):
+			t.Fatal("event not forwarded to adapter")
+		}
+	}
+	fw.mu.Lock()
+	if len(fw.events) != 2 || fw.events[0].Action != "die" || fw.events[1].Action != "stop" {
+		t.Errorf("events = %+v, want die then stop", fw.events)
+	}
+	for _, sender := range fw.senders {
+		if sender != nil {
+			t.Errorf("standard mode passed sender %v, want nil", sender)
+		}
+	}
+	fw.mu.Unlock()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("forwardContainerEvents did not stop on cancel")
+	}
+	if subscribes.Load() != 1 {
+		t.Fatalf("subscribed %d times, want 1", subscribes.Load())
+	}
+}
+
+func TestForwardContainerEventsSkipsAdapterWithoutSupport(t *testing.T) {
+	t.Parallel()
+	s := &Server{adapter: &stubServerAdapter{}, eventSubscribe: func(context.Context) (<-chan docker.DockerEvent, error) {
+		t.Error("subscribed for an adapter that does not forward events")
+		return nil, nil
+	}}
+	s.forwardContainerEvents(context.Background())
 }
