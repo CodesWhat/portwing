@@ -32,7 +32,7 @@
 <hr>
 
 > [!NOTE]
-> **The current release line is `v1.3.0`; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published.** The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **The current release line is `v1.4.0`; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published.** The stable container `latest` tag and Homebrew cask follow the latest published stable release. The semver guarantees in [STABILITY.md](STABILITY.md) already apply to the stable v1 line. v1.0 is the first stable line under the MIT license; v0.9.x and earlier remain AGPL-3.0 and are no longer supported. Wire compatibility remains `portwing/1.0` and `DrydockCompat` 1.4.0; full watcher/update feature compatibility requires Drydock `v1.6.0-rc.11+`. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
 Controller-assisted two-key rotation requires Portwing `v1.0` or later
 and Drydock `v1.8.0-rc.1` or later on the v1.8 line. Both sides require explicit
@@ -165,7 +165,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.3.0
+    image: ghcr.io/codeswhat/portwing:1.4.0
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -229,7 +229,7 @@ The image runs as UID 65532, so `group_add` with the Docker socket's group ID is
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.3.0
+    image: ghcr.io/codeswhat/portwing:1.4.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -274,10 +274,10 @@ Stable releases also ship a Homebrew cask plus signed/checksummed `deb` and
 brew install --cask codeswhat/tap/portwing
 
 # Debian/Ubuntu (after downloading the matching release asset)
-sudo apt install ./portwing_1.3.0_linux_amd64.deb
+sudo apt install ./portwing_1.4.0_linux_amd64.deb
 
 # Fedora/RHEL (after downloading the matching release asset)
-sudo rpm --install ./portwing_1.3.0_linux_amd64.rpm
+sudo rpm --install ./portwing_1.4.0_linux_amd64.rpm
 ```
 
 Packages install the command and, on Linux, a hardened `portwing.service`; they
@@ -301,7 +301,7 @@ docker run -d \
   -v portwing-state:/data/credentials \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.3.0
+  ghcr.io/codeswhat/portwing:1.4.0
 ```
 
 Portwing now fails closed: Standard mode refuses to start without `TOKEN`,
@@ -486,7 +486,8 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v1.0** ✅ | Binding Stability | `STABILITY.md` guarantees are binding semver commitments, opt-in controller-assisted two-key rotation (first available in rc.2, Drydock `v1.8.0-rc.1+`), competitive review refreshed against primary sources, final v0.9 docs archived from its release tag |
 | **v1.1** ✅ | Audience-Bound Signatures | Ed25519 signature version 3 binds each request to one agent (Drydock 1.9+), stable persistent agent ID under `/data/credentials`, `SIGNATURE_MIN_VERSION`, `portwing signature-lock` for downgrade locks |
 | **v1.2** ✅ | Enrollment TLS and Container Runtime | Enrollment requires native TLS or HTTPS reported by a trusted proxy unless `ALLOW_INSECURE_ENROLLMENT=true` opts in for trusted testing. Static Docker/Compose clients remove the glibc runtime package on all three architectures |
-| **v1.3** | Native Client Certificates | Opt-in native Standard HTTPS client certificates, dedicated healthcheck credentials and unique capability advertisements. Existing request authentication is preserved |
+| **v1.3** ✅ | Native Client Certificates | Opt-in native Standard HTTPS client certificates, dedicated healthcheck credentials and unique capability advertisements. Existing request authentication is preserved |
+| **v1.4** | Container Lifecycle Events | Container die, oom, stop, start and restart events are forwarded to Drydock as `dd:container_event` for state alerts, in Standard and Edge mode |
 | **Post-v1** | Demand-Driven | Controller-owned upgrade and rollback waves; transport changes require a demonstrated deployment failure |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.
