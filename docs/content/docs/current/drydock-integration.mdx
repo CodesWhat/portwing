@@ -235,7 +235,8 @@ define the integration contract:
    `DD_POLL_INTERVAL`. In Standard Mode each cycle also broadcasts a full
    snapshot over SSE. In Edge Mode the added, updated and removed events go over
    the WebSocket as individual messages and the full snapshot goes only to the
-   SSE broadcaster. It does not forward raw Docker lifecycle events.
+   SSE broadcaster. Raw Docker lifecycle events (`die`, `oom`, `stop`, `start`,
+   `restart`) are forwarded separately as `dd:container-event`, described below.
    `events: "portwing"` prevents Drydock from opening a second Docker event
    stream through the proxy.
 4. Drydock records the watcher result and owns update orchestration and update
