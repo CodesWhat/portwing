@@ -2016,7 +2016,8 @@ func (s *outboundQueueState) isClosed() bool {
 }
 
 // sendLossyTypedMessageTo enqueues a best-effort message on target without
-// blocking. A full, byte-limited or closed queue drops the message; it never
+// blocking. A queue at or above the bulk high-water marks (the control-frame
+// reserve), byte-limited or closed drops the message; it never
 // evicts the connection, unlike sendMessageTo. A target with no queue (the
 // handshake phase) is dropped too, never written directly.
 func (c *Client) sendLossyTypedMessageTo(target outboundTarget, msgType string, data any) error {
@@ -2031,7 +2032,7 @@ func (c *Client) sendLossyTypedMessageTo(target outboundTarget, msgType string, 
 		return nil
 	}
 	var reason string
-	switch target.state.enqueue(target.ch, env) {
+	switch target.state.enqueueBelowBulkMark(target.ch, env) {
 	case outboundEnqueued:
 		return nil
 	case outboundQueueClosed:
@@ -2058,6 +2059,35 @@ func (s *outboundQueueState) enqueue(ch chan protocol.Envelope, env protocol.Env
 	}
 	if size > maxOutboundQueuedBytes-s.bytes {
 		return outboundByteLimitExceeded
+	}
+
+	s.bytes += size
+	select {
+	case ch <- env:
+		return outboundEnqueued
+	default:
+		s.bytes -= size
+		return outboundFrameLimitExceeded
+	}
+}
+
+// enqueueBelowBulkMark is the non-blocking enqueue for lossy messages. It only
+// queues env while both the frame and byte bulk high-water marks leave room, so
+// best-effort traffic never consumes the headroom reserved for control frames.
+// The check and the send happen under one lock hold.
+func (s *outboundQueueState) enqueueBelowBulkMark(ch chan protocol.Envelope, env protocol.Envelope) outboundEnqueueResult {
+	size := outboundEnvelopeBytes(env)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return outboundQueueClosed
+	}
+	if size > bulkQueuedBytesLimit-s.bytes {
+		return outboundByteLimitExceeded
+	}
+	if len(ch) >= bulkFrameLimit(ch) {
+		return outboundFrameLimitExceeded
 	}
 
 	s.bytes += size
