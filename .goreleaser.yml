@@ -188,7 +188,7 @@ homebrew_casks:
     repository:
       owner: CodesWhat
       name: homebrew-tap
-      branch: main
+      branch: portwing-{{ .Version }}
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     commit_author:
       name: goreleaserbot

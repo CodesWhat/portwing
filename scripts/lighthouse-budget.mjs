@@ -22,12 +22,18 @@ export function verifyLighthouseRuns(config, runs) {
   if (runs.length === 0) throw new Error(`expected Lighthouse runs for ${config.site}`);
   const result = {
     performance: median(runs.map((run) => run.performance)),
+    accessibility: median(runs.map((run) => run.accessibility)),
     totalByteWeight: median(runs.map((run) => run.totalByteWeight)),
     scriptTransferBytes: median(runs.map((run) => run.scriptTransferBytes)),
   };
   if (result.performance < config.performanceMin) {
     throw new Error(
       `${config.site} performance budget exceeded: ${result.performance} < ${config.performanceMin}`,
+    );
+  }
+  if (result.accessibility < config.accessibilityMin) {
+    throw new Error(
+      `${config.site} accessibility budget exceeded: ${result.accessibility} < ${config.accessibilityMin}`,
     );
   }
   if (result.totalByteWeight > config.totalByteWeightMax) {
@@ -95,18 +101,25 @@ function serveStatic(outputRoot, mountPath) {
 function metrics(lhr) {
   if (lhr.runtimeError?.code) throw new Error(`Lighthouse runtime error: ${lhr.runtimeError.code}`);
   const performance = lhr.categories.performance?.score;
+  const accessibility = lhr.categories.accessibility?.score;
   const totalByteWeight = lhr.audits["total-byte-weight"]?.numericValue;
   const scripts = lhr.audits["resource-summary"]?.details?.items?.find(
     (item) => item.resourceType === "script",
   );
   if (
     typeof performance !== "number" ||
+    typeof accessibility !== "number" ||
     typeof totalByteWeight !== "number" ||
     typeof scripts?.transferSize !== "number"
   ) {
     throw new Error("Lighthouse report is missing required performance metrics");
   }
-  return { performance, totalByteWeight, scriptTransferBytes: scripts.transferSize };
+  return {
+    performance,
+    accessibility,
+    totalByteWeight,
+    scriptTransferBytes: scripts.transferSize,
+  };
 }
 
 export async function withLighthouseResources({ startServer, startChrome, run }) {
@@ -355,14 +368,14 @@ async function run(configPath) {
             ...options,
             output: "json",
             logLevel: "error",
-            onlyCategories: ["performance"],
+            onlyCategories: ["performance", "accessibility"],
           }),
       });
     },
   });
   const verified = verifyLighthouseRuns(config, runs);
   process.stdout.write(
-    `${config.site}: five-run median performance=${verified.performance.toFixed(2)}, total=${verified.totalByteWeight}, scripts=${verified.scriptTransferBytes}\n`,
+    `${config.site}: five-run median performance=${verified.performance.toFixed(2)}, accessibility=${verified.accessibility.toFixed(2)}, total=${verified.totalByteWeight}, scripts=${verified.scriptTransferBytes}\n`,
   );
 }
 

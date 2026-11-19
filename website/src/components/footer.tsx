@@ -124,7 +124,7 @@ export function Footer({ full = false }: { full?: boolean }) {
       <div className="wrap">
         <div className="fgrid">
           <div>
-            <Link className="brand" href="/">
+            <Link className="brand" href="/" aria-label={`${SITE_CONFIG.name} home`}>
               <img
                 src="/brand/pigeon-64.webp"
                 alt=""
