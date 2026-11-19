@@ -702,3 +702,109 @@ func runWelcomeThenDropReconnectsClock(t *testing.T, n int, stable time.Duration
 	}
 	return delays[:n]
 }
+
+// startBlockedExecOutput returns a session whose read loop is parked in a bulk
+// send because the (undrained) queue sits at its bulk high-water mark, plus the
+// queue and a channel closed when the loop exits.
+func startBlockedExecOutput(t *testing.T, c *Client) (*ExecSession, chan protocol.Envelope, *outboundQueueState, chan struct{}) {
+	t.Helper()
+
+	ch, state := installUndrainedQueue(c, 4)
+	for i := 0; i < bulkFrameLimit(ch); i++ {
+		state.enqueue(ch, bulkEnvelope())
+	}
+	readBlock := make(chan struct{})
+	t.Cleanup(func() { close(readBlock) })
+	conn := &fakeConn{reads: [][]byte{[]byte("output")}, blockRead: readBlock}
+	session := newExecSession(c, "blocked", conn)
+	session.ctx, session.cancel = context.WithCancel(context.Background())
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		session.readLoop()
+	}()
+	waitForBulkWaiter(t, state)
+	return session, ch, state, exited
+}
+
+func drainQueue(ch chan protocol.Envelope) []protocol.Envelope {
+	var out []protocol.Envelope
+	for {
+		select {
+		case env := <-ch:
+			out = append(out, env)
+		default:
+			return out
+		}
+	}
+}
+
+// When the input writer gives up and closes the session while the read loop is
+// blocked in a bulk send, the tunnel is still up, so the controller still gets
+// its exec_end instead of a session that never ends.
+func TestExecEndSentWhenOutputCancelledUnderBackpressure(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	session, ch, _, exited := startBlockedExecOutput(t, c)
+
+	session.Close()
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("read loop did not exit after the session closed")
+	}
+
+	var ends []protocol.ExecEndMessage
+	for _, env := range drainQueue(ch) {
+		if env.Type == protocol.TypeExecEnd {
+			var end protocol.ExecEndMessage
+			decodeData(t, env.Data, &end)
+			ends = append(ends, end)
+		}
+	}
+	if len(ends) != 1 || ends[0].ExecID != "blocked" || ends[0].Reason != "exec session closed" {
+		t.Fatalf("exec_end frames = %+v, want exactly one for blocked with reason %q", ends, "exec session closed")
+	}
+}
+
+// A session the controller or a tunnel drop ended owns its own exec_end, so a
+// cancelled output send adds none.
+func TestExecEndNotSentWhenOutputCancelledByPeer(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	session, ch, _, exited := startBlockedExecOutput(t, c)
+
+	session.endByPeer()
+	<-exited
+
+	for _, env := range drainQueue(ch) {
+		if env.Type == protocol.TypeExecEnd {
+			t.Fatal("exec_end sent for a peer-ended session")
+		}
+	}
+}
+
+// With the queue closed the connection is gone, so there is nowhere to send an
+// exec_end and nothing may be enqueued.
+func TestExecEndNotSentWhenQueueClosed(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newTestClient(t)
+	session, ch, state, exited := startBlockedExecOutput(t, c)
+
+	// Hold the state lock so the queue is marked closed before the loop wakes:
+	// the cancel lands first, then the close, then the loop re-checks.
+	state.mu.Lock()
+	session.cancel()
+	state.closed = true
+	state.mu.Unlock()
+	<-exited
+
+	for _, env := range drainQueue(ch) {
+		if env.Type == protocol.TypeExecEnd {
+			t.Fatal("exec_end enqueued on a closed queue")
+		}
+	}
+}

@@ -1955,6 +1955,12 @@ func (c *Client) sendBulkMessageTo(ctx context.Context, target outboundTarget, e
 	}
 }
 
+func (s *outboundQueueState) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 func (s *outboundQueueState) enqueue(ch chan protocol.Envelope, env protocol.Envelope) outboundEnqueueResult {
 	size := outboundEnvelopeBytes(env)
 
