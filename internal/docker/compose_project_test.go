@@ -121,34 +121,46 @@ func TestLegacyProjectName(t *testing.T) {
 	}
 }
 
-func TestComposeFileDeclaresName(t *testing.T) {
+func TestComposeFileName(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
 		yaml string
-		want bool
+		want string
+		err  bool
 	}{
-		{"plain", "name: custom\nservices: {}\n", true},
-		{"after services", "services: {}\nname: custom\n", true},
-		{"quoted key", "\"name\": custom\n", true},
-		{"quoted value", "name: \"custom\"\n", true},
-		{"interpolated", "name: ${STACK}\n", true},
-		{"crlf", "name: custom\r\nservices: {}\r\n", true},
-		{"service named name", "services:\n  name:\n    image: x\n", false},
-		{"nested key", "services:\n  web:\n    name: foo\n", false},
-		{"container_name", "container_name: x\n", false},
-		{"null value", "name:\nservices: {}\n", false},
-		{"comment only value", "name: # none\n", false},
-		{"commented out", "# name: custom\n", false},
-		{"prefix key", "names: x\n", false},
-		{"empty", "", false},
+		{"plain", "name: custom\nservices: {}\n", "custom", false},
+		{"after services", "services: {}\nname: custom\n", "custom", false},
+		{"quoted key", "\"name\": custom\n", "custom", false},
+		{"quoted value", "name: \"custom\"\n", "custom", false},
+		{"interpolated", "name: ${STACK}\n", "${STACK}", false},
+		{"crlf", "name: custom\r\nservices: {}\r\n", "custom", false},
+		{"indented root", "  name: custom\n  services: {}\n", "custom", false},
+		{"next-line scalar", "name:\n  custom\nservices: {}\n", "custom", false},
+		{"flow mapping", "{name: custom, services: {}}\n", "custom", false},
+		{"document marker", "---\nname: custom\n", "custom", false},
+		{"service named name", "services:\n  name:\n    image: x\n", "", false},
+		{"nested key", "services:\n  web:\n    name: foo\n", "", false},
+		{"container_name", "container_name: x\n", "", false},
+		{"null value", "name:\nservices: {}\n", "", false},
+		{"empty string", "name: \"\"\n", "", false},
+		{"comment only value", "name: # none\n", "", false},
+		{"commented out", "# name: custom\n", "", false},
+		{"prefix key", "names: x\n", "", false},
+		{"empty", "", "", false},
+		{"invalid yaml", "name: [unterminated\n", "", true},
+		{"root is a list", "- name: custom\n", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := composeFileDeclaresName([]byte(tt.yaml)); got != tt.want {
-				t.Fatalf("composeFileDeclaresName(%q) = %v, want %v", tt.yaml, got, tt.want)
+			got, err := composeFileName([]byte(tt.yaml))
+			if (err != nil) != tt.err {
+				t.Fatalf("composeFileName(%q) error = %v, want error %v", tt.yaml, err, tt.err)
+			}
+			if got != tt.want {
+				t.Fatalf("composeFileName(%q) = %q, want %q", tt.yaml, got, tt.want)
 			}
 		})
 	}
@@ -170,6 +182,12 @@ func TestStackDeclaresName(t *testing.T) {
 		{"override sets name", map[string]string{"compose.yaml": "services: {}\n", "compose.override.yaml": "name: custom\n"}, true},
 		{"no name anywhere", map[string]string{"compose.yaml": "services: {}\n", "compose.override.yaml": "services: {}\n"}, false},
 		{"unrelated file ignored", map[string]string{"other.yaml": "name: custom\n"}, false},
+		{"stale lower-priority file ignored", map[string]string{"compose.yaml": "services: {}\n", "docker-compose.yml": "name: custom\n"}, false},
+		{"stale lowest-priority file ignored", map[string]string{"compose.yml": "services: {}\n", "docker-compose.yaml": "name: custom\n"}, false},
+		{"stale lower-priority override ignored", map[string]string{"compose.yaml": "services: {}\n", "compose.override.yml": "services: {}\n", "docker-compose.override.yml": "name: custom\n"}, false},
+		{"first base wins", map[string]string{"compose.yaml": "name: custom\n", "docker-compose.yml": "services: {}\n"}, true},
+		{"indented root", map[string]string{"compose.yaml": "  name: custom\n"}, true},
+		{"next-line scalar", map[string]string{"compose.yaml": "name:\n  custom\n"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,6 +208,21 @@ func TestStackDeclaresName(t *testing.T) {
 				t.Fatalf("stackDeclaresName = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStackDeclaresName_UnparseableFails(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeStack(t, root, "grp/app", "compose.yaml", "name: [unterminated\n")
+	cm := &ComposeManager{stacksDir: root, composeBin: "docker", isV2: true}
+	_, err := cm.stackDeclaresName("grp/app")
+	if err == nil || !strings.Contains(err.Error(), "parsing compose.yaml") {
+		t.Fatalf("err = %v, want a parsing compose.yaml error", err)
+	}
+	if _, err := cm.projectNameFor(t.Context(), "grp/app", filepath.Join(root, "grp/app")); err == nil {
+		t.Fatal("projectNameFor accepted an unparseable compose file")
 	}
 }
 
@@ -427,6 +460,59 @@ func TestComposeConfig_RealCLI(t *testing.T) {
 	}
 	if got := composeConfigProject(t, cm, "named/v2"); got != "custom" {
 		t.Fatalf("explicit name: project = %q, want custom", got)
+	}
+}
+
+// TestComposeNameDetection_MatchesRealCLI checks that stackDeclaresName agrees
+// with what the real docker CLI does for the same files: a declared name must
+// reach the CLI untouched (project "custom"), an undeclared one gets the derived
+// -p name. Each stack directory is called "v2" so a missed explicit name can't
+// hide behind the basename default.
+func TestComposeNameDetection_MatchesRealCLI(t *testing.T) {
+	if out, err := exec.Command("docker", "compose", "version").CombinedOutput(); err != nil {
+		t.Skipf("docker compose plugin unavailable: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	const svc = "services:\n  web:\n    image: nginx:alpine\n"
+	tests := []struct {
+		name      string
+		files     map[string]string
+		wantExtra bool // an explicit name is expected to win
+	}{
+		{"plain", map[string]string{"compose.yaml": "name: custom\n" + svc}, true},
+		{"indented root", map[string]string{"compose.yaml": "  name: custom\n  services:\n    web:\n      image: nginx:alpine\n"}, true},
+		{"next-line scalar", map[string]string{"compose.yaml": "name:\n  custom\n" + svc}, true},
+		{"quoted name", map[string]string{"compose.yaml": "name: \"custom\"\n" + svc}, true},
+		{"stale unused file", map[string]string{"compose.yaml": svc, "docker-compose.yml": "name: custom\n" + svc}, false},
+		{"override sets name", map[string]string{"compose.yaml": svc, "compose.override.yaml": "name: custom\n"}, true},
+		{"override beats base", map[string]string{"compose.yaml": "name: base\n" + svc, "compose.override.yaml": "name: custom\n"}, true},
+		{"stale unused override", map[string]string{"compose.yaml": svc, "compose.override.yml": svc, "docker-compose.override.yml": "name: custom\n"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := writeStack(t, root, "grp/v2", "", "")
+			for f, c := range tt.files {
+				if err := os.WriteFile(filepath.Join(dir, f), []byte(c), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cm := &ComposeManager{stacksDir: root, composeBin: "docker", isV2: true}
+			declared, err := cm.stackDeclaresName("grp/v2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if declared != tt.wantExtra {
+				t.Fatalf("stackDeclaresName = %v, want %v", declared, tt.wantExtra)
+			}
+			want := deriveProjectName("grp/v2")
+			if declared {
+				want = "custom"
+			}
+			if got := composeConfigProject(t, cm, "grp/v2"); got != want {
+				t.Fatalf("CLI project = %q, want %q", got, want)
+			}
+		})
 	}
 }
 

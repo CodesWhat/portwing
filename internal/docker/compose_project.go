@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	applog "github.com/codeswhat/portwing/internal/log"
 )
@@ -27,7 +30,7 @@ const (
 	// projectNamePrefixMax bounds the readable part of a derived name.
 	projectNamePrefixMax = 40
 	// maxComposeFileBytes bounds how much of one compose file is scanned for a
-	// top-level name key.
+	// name.
 	maxComposeFileBytes = 4 * 1024 * 1024
 )
 
@@ -44,14 +47,13 @@ var (
 	// from a directory basename: lowercase, then drop everything outside
 	// [a-z0-9_-].
 	composeNameInvalid = regexp.MustCompile(`[^-_a-z0-9]+`)
-	// topLevelNameKey matches a top-level (column 0) "name:" key, optionally
-	// quoted.
-	topLevelNameKey = regexp.MustCompile(`^(?:name|"name"|'name')[ \t]*:(?:[ \t]|$)`)
 
-	// Files Compose loads by default from a project directory. Every one is
-	// checked, so a name set in any base or override file counts.
-	composeBaseFiles     = []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"}
-	composeOverrideFiles = []string{"compose.override.yaml", "compose.override.yml", "docker-compose.override.yaml", "docker-compose.override.yml"}
+	// Compose's default discovery (compose-go cli.DefaultFileNames and
+	// DefaultOverrideFileNames, in order of preference): the first base file
+	// that exists wins and the rest are ignored, then the first override file
+	// that exists is layered on top. Only those two files are loaded.
+	composeBaseFiles     = []string{"compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml"}
+	composeOverrideFiles = []string{"compose.override.yml", "compose.override.yaml", "docker-compose.override.yml", "docker-compose.override.yaml"}
 )
 
 // deriveProjectName returns a unique, deterministic Compose project name for a
@@ -90,16 +92,22 @@ func legacyProjectName(projectDir string) string {
 	return strings.TrimLeft(name, "-_")
 }
 
-// stackDeclaresName reports whether any compose file Compose would load by
-// default from the project directory sets a top-level "name:". When it does,
-// Portwing must not pass -p, because -p overrides the user's explicit name.
+// stackDeclaresName reports whether the compose files Compose would load from
+// the project directory set a top-level "name:". When they do, Portwing must
+// not pass -p, because -p overrides the user's explicit name.
 //
 // Compose itself can't answer this: "docker compose config" always reports a
 // name, defaulting to the directory basename, so an explicit "name: v2" is
-// indistinguishable from the default in a directory called v2. Scanning the
-// files for a column-0 "name:" key needs no subprocess or daemon, and a
-// top-level key can't be confused with nested keys because those are
-// indented. Reads go through os.Root so they stay beneath STACKS_DIR.
+// indistinguishable from the default in a directory called v2. So the files
+// are parsed as YAML, with no subprocess or daemon.
+//
+// Only the files Compose loads count: buildCommand passes no -f, so Compose
+// uses default discovery, which is one base file plus one override file (see
+// composeBaseFiles). A stale docker-compose.yml next to a compose.yaml is never
+// loaded and must not be read. COMPOSE_FILE would change that set, but
+// buildEnv passes the process environment through unfiltered, so a COMPOSE_FILE
+// set on the agent is not modeled here. Reads go through os.Root so they stay
+// beneath STACKS_DIR. An unparseable file is an error rather than a guess.
 func (cm *ComposeManager) stackDeclaresName(stackDir string) (bool, error) {
 	absDir, err := cm.resolveStackRoot(stackDir)
 	if err != nil {
@@ -120,21 +128,29 @@ func (cm *ComposeManager) stackDeclaresName(stackDir string) (bool, error) {
 	}
 	defer func() { _ = root.Close() }()
 
-	candidates := append(append([]string{}, composeBaseFiles...), composeOverrideFiles...)
-
-	for _, file := range candidates {
-		data, err := readRootedFile(root, filepath.Join(relDir, file))
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
+	declared := false
+	for _, names := range [][]string{composeBaseFiles, composeOverrideFiles} {
+		for _, file := range names {
+			data, err := readRootedFile(root, filepath.Join(relDir, file))
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return false, fmt.Errorf("reading %s: %w", file, err)
 			}
-			return false, fmt.Errorf("reading %s: %w", file, err)
-		}
-		if composeFileDeclaresName(data) {
-			return true, nil
+			name, err := composeFileName(data)
+			if err != nil {
+				return false, fmt.Errorf("parsing %s: %w", file, err)
+			}
+			// Later files override earlier ones; an absent or empty name
+			// leaves the earlier one in place.
+			if name != "" {
+				declared = true
+			}
+			break // only the first existing file of each group is loaded
 		}
 	}
-	return false, nil
+	return declared, nil
 }
 
 func readRootedFile(root *os.Root, name string) ([]byte, error) {
@@ -153,22 +169,20 @@ func readRootedFile(root *os.Root, name string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, maxComposeFileBytes))
 }
 
-// composeFileDeclaresName scans YAML text for a top-level name key with a
-// value. A bare "name:" with nothing after it (null) doesn't count.
-func composeFileDeclaresName(data []byte) bool {
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimRight(line, "\r")
-		loc := topLevelNameKey.FindStringIndex(line)
-		if loc == nil {
-			continue
+// composeFileName returns the top-level "name" of a compose file: the value of
+// the root mapping's name key when it is a non-empty string, otherwise "". An
+// empty document has no name. Invalid YAML, or a root that isn't a mapping, is
+// an error.
+func composeFileName(data []byte) (string, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		if errors.Is(err, io.EOF) {
+			return "", nil
 		}
-		value := strings.TrimSpace(line[loc[1]:])
-		if value == "" || strings.HasPrefix(value, "#") {
-			continue
-		}
-		return true
+		return "", err
 	}
-	return false
+	name, _ := doc["name"].(string)
+	return strings.TrimSpace(name), nil
 }
 
 // hasLegacyDeployment reports whether containers already exist from a stack
