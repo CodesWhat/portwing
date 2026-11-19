@@ -604,3 +604,38 @@ func TestStackDeclaresName_UnreadableFileFails(t *testing.T) {
 		t.Fatalf("err = %v, want a reading compose.yaml error", err)
 	}
 }
+
+func TestNewComposeManagerWithListerWiresLister(t *testing.T) {
+	lister := fakeLister{}
+	cm := NewComposeManagerWithLister(t.TempDir(), "1.45", "/nonexistent.sock", lister)
+	if cm.lister == nil {
+		t.Fatal("lister was not wired by NewComposeManagerWithLister")
+	}
+	if _, ok := cm.lister.(fakeLister); !ok {
+		t.Fatalf("lister has type %T, want fakeLister", cm.lister)
+	}
+
+	other := fakeLister{err: errors.New("other")}
+	cm.SetContainerLister(other)
+	got, ok := cm.lister.(fakeLister)
+	if !ok || got.err == nil || got.err.Error() != "other" {
+		t.Fatalf("SetContainerLister did not replace the lister: %#v", cm.lister)
+	}
+}
+
+func TestStackDeclaresNameOpenRootError(t *testing.T) {
+	cm := &ComposeManager{stacksDir: filepath.Join(t.TempDir(), "missing")}
+	declared, err := cm.stackDeclaresName("stack")
+	if err == nil {
+		t.Fatal("expected error for a missing stacks directory")
+	}
+	if declared {
+		t.Error("declared = true on error")
+	}
+	if !strings.Contains(err.Error(), "opening stacks directory") {
+		t.Errorf("error = %v, want it to wrap \"opening stacks directory\"", err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("error = %v, want it to wrap os.ErrNotExist", err)
+	}
+}
