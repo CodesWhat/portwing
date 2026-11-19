@@ -49,6 +49,7 @@ const THIRD_PARTY_GITHUB_OWNERS = new Set([
   "finsys",
   "containrrr",
   "crazy-max",
+  "dockmesh",
   "sigstore",
 ]);
 
