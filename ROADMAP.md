@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.3.0`.
+> Portwing is stable software. The current release line is `v1.4.0`.
 > The v1.2 line requires TLS for enrollment by default and uses a glibc-free
 > container runtime.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
@@ -154,6 +154,10 @@ a restart; Edge mode and reverse-proxy certificate headers are outside this opti
 **In v1.3: unique capability advertisements.** Standard info and Edge hello keep
 each case-sensitive capability once, in first-seen order. Wire compatibility is
 unchanged.
+
+**In v1.4: container lifecycle events.** Container die, oom, stop, start and
+restart events are forwarded to Drydock as `dd:container_event` for state
+alerts, in Standard and Edge mode.
 
 Controller-managed upgrade/rollback waves remain controller-owned. Existing
 Portwing Docker API operations cover the verified Standard-mode replacement and

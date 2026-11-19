@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.4.0] - 2026-11-19
+
 ### Added
 
 - Forward container die, oom, stop, start and restart events to Drydock as `dd:container_event` for state alerts, in Standard and Edge mode.

@@ -334,7 +334,7 @@ Every operation passes `-p <project>` before the subcommand. The project name is
 don't share a project (and `--remove-orphans` can't remove each other's
 containers). `-p` is omitted when a compose file sets a top-level `name:`. A
 stack with existing containers labeled `com.docker.compose.project=<basename>` and
-`com.docker.compose.project.working_dir=<stack dir>` (deployed by <= 1.3.0) keeps
+`com.docker.compose.project.working_dir=<stack dir>` (deployed by <= 1.3) keeps
 the basename.
 
 ### 6.2 Security
