@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -603,6 +604,32 @@ func TestBackoffNotResetByConnectionDroppingRightAfterWelcome(t *testing.T) {
 	}
 }
 
+// The stability window starts at the welcome, not at connect: a connection
+// whose handshake took longer than minStableConnection but that drops 2s after
+// the welcome is not stable and must not reset the backoff.
+func TestBackoffWindowStartsAtWelcomeNotConnect(t *testing.T) {
+	// Deliberately NOT t.Parallel(): overrides package-level vars.
+	// The clock is read twice per connection, at the welcome and after the
+	// connection ends, so scripted readings model a welcome 40s into the
+	// handshake followed by a drop 2s later.
+	var calls atomic.Int64
+	readings := []time.Duration{40 * time.Second, 42 * time.Second}
+	base := time.Now()
+	clock := func() time.Time {
+		i := calls.Add(1) - 1
+		return base.Add(readings[i%int64(len(readings))])
+	}
+	delays := runWelcomeThenDropReconnectsClock(t, 4, minStableConnection, clock)
+
+	nominal := time.Second
+	for i, d := range delays {
+		if d < time.Duration(float64(nominal)*0.75) || d > time.Duration(float64(nominal)*1.25) {
+			t.Fatalf("delay[%d] = %v, want about %v (a 2s-old connection is not stable)", i, d, nominal)
+		}
+		nominal = min(nominal*2, 4*time.Second)
+	}
+}
+
 // A connection that stayed up for minStableConnection does reset the backoff.
 func TestBackoffResetAfterStableConnection(t *testing.T) {
 	// Deliberately NOT t.Parallel(): overrides package-level vars.
@@ -619,6 +646,13 @@ func TestBackoffResetAfterStableConnection(t *testing.T) {
 // welcomes and then immediately closes, with the stability threshold set to
 // stable, and returns the first n reconnect delays.
 func runWelcomeThenDropReconnects(t *testing.T, n int, stable time.Duration) []time.Duration {
+	t.Helper()
+	return runWelcomeThenDropReconnectsClock(t, n, stable, nil)
+}
+
+// runWelcomeThenDropReconnectsClock is runWelcomeThenDropReconnects with an
+// injected client clock (nil keeps the real one).
+func runWelcomeThenDropReconnectsClock(t *testing.T, n int, stable time.Duration, clock func() time.Time) []time.Duration {
 	t.Helper()
 
 	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
@@ -658,6 +692,7 @@ func runWelcomeThenDropReconnects(t *testing.T, n int, stable time.Duration) []t
 		Port:              portFrom(addr),
 		SkipDFCollection:  true,
 	})
+	c.now = clock
 	_ = c.Run(ctx)
 
 	mu.Lock()

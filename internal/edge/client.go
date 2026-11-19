@@ -224,6 +224,11 @@ func (c *Client) currentMessageSender() *edgeMessageSender {
 // Client is the edge-mode WebSocket client that connects to a controller
 // and tunnels Docker API requests over the WebSocket.
 type Client struct {
+	// now is the clock for the stable-connection window; nil means time.Now.
+	now func() time.Time
+	// welcomedAt is when the current connection's welcome was accepted. It is
+	// written by connect and read by Run on the same goroutine.
+	welcomedAt       time.Time
 	keyRotationOnce  sync.Once
 	keyRotation      *auth.EdgeKeyRotation
 	keyRotationErr   error
@@ -409,7 +414,7 @@ func (c *Client) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		connectStart := time.Now()
+		c.welcomedAt = time.Time{}
 		established, err := c.connect(ctx)
 		if ctx.Err() != nil {
 			// Shutting down - send close frame if we still have a connection.
@@ -436,12 +441,13 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 
 		// Reset backoff after a connection that was established and stayed up
-		// for minStableConnection, so a long-lived session that later drops
+		// for minStableConnection after the welcome (a slow handshake doesn't
+		// count toward it), so a long-lived session that later drops
 		// reconnects from RECONNECT_DELAY instead of inheriting stale backoff
 		// from earlier failures (SPEC §13.1). A connection that drops right
 		// after the welcome keeps backing off, or a repeating trigger flaps
 		// about once a second.
-		if established && time.Since(connectStart) >= minStableConnection {
+		if established && !c.welcomedAt.IsZero() && c.clock().Sub(c.welcomedAt) >= minStableConnection {
 			delay = time.Duration(c.cfg.ReconnectDelay) * time.Second
 		}
 
@@ -710,6 +716,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	}
 
 	slog.Info("connected to controller")
+	c.welcomedAt = c.clock()
 	c.metrics.SetControllerConnected(true)
 	defer c.metrics.SetControllerConnected(false)
 
@@ -782,6 +789,14 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	// Reaching here means the welcome handshake succeeded, so the connection
 	// counts as established even if the read pump later returned an error.
 	return true, readErr
+}
+
+// clock returns the current time from the injectable clock.
+func (c *Client) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 // sendHello sends the hello handshake message. When PRIVATE_KEY_FILE is
