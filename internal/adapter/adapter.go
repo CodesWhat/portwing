@@ -5,13 +5,26 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+
+	"github.com/codeswhat/portwing/internal/docker"
 )
 
 // MessageSender allows adapters to send typed messages over the active
 // transport (WebSocket in edge mode, SSE in standard mode, etc.).
 type MessageSender interface {
 	SendTypedMessage(msgType string, data any) error
+}
+
+// BulkMessageSender is implemented by senders that can apply backpressure to
+// high-volume frames. SendBulkTypedMessage blocks until the transport has room
+// (or ctx ends, or the transport stalls) instead of failing the whole
+// connection when it is momentarily full. Producers that loop over a source
+// (log lines, stream chunks) use it when available and stop on error.
+type BulkMessageSender interface {
+	MessageSender
+	SendBulkTypedMessage(ctx context.Context, msgType string, data any) error
 }
 
 // LabelParser extracts adapter-specific metadata from container labels.
@@ -121,4 +134,50 @@ type ServerAdapter interface {
 type Adapter interface {
 	EdgeAdapter
 	ServerAdapter
+}
+
+// ContainerEventAdapter is an optional capability for adapters that forward raw
+// Docker container events. The server and edge client check for it with a type
+// assertion, so adapters that don't forward events need no change.
+type ContainerEventAdapter interface {
+	// OnDockerEvent maps and forwards one Docker event. In edge mode sender is
+	// the live tunnel sender; in standard mode it is nil and the adapter uses
+	// its in-process transport. It must not block the caller.
+	OnDockerEvent(ctx context.Context, sender MessageSender, event docker.DockerEvent)
+}
+
+// EventSubscribe opens a Docker event subscription that ends with ctx.
+type EventSubscribe func(ctx context.Context) (<-chan docker.DockerEvent, error)
+
+// DockerEventSubscriber returns an EventSubscribe backed by the reconnecting
+// docker.EventStream.
+func DockerEventSubscriber(client *docker.Client) EventSubscribe {
+	return func(ctx context.Context) (<-chan docker.DockerEvent, error) {
+		return docker.NewEventStream(client).Subscribe(ctx)
+	}
+}
+
+// RunContainerEvents subscribes once and calls handle for every event until ctx
+// is cancelled or the stream closes. It blocks; callers run it in a goroutine,
+// once per process.
+func RunContainerEvents(ctx context.Context, subscribe EventSubscribe, handle func(docker.DockerEvent)) {
+	if subscribe == nil || ctx.Err() != nil {
+		return
+	}
+	events, err := subscribe(ctx)
+	if err != nil {
+		slog.Warn("docker container event subscription failed", "error", err)
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			handle(ev)
+		}
+	}
 }

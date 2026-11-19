@@ -90,6 +90,10 @@ type ExecSession struct {
 	done   chan struct{}
 	once   sync.Once
 	cancel context.CancelFunc
+	// ctx is the session context cancel ends. readLoop's blocking sends wait on
+	// it so Close unblocks a read loop parked on a full send queue. StartExec
+	// always sets it; a session that runs readLoop must have one.
+	ctx context.Context
 
 	// startErrWritten keeps a failed bring-up to one error record. It is set
 	// once the write has returned, with startErrMu held across the write. A
@@ -133,6 +137,7 @@ func (c *Client) StartExec(ctx context.Context, msg protocol.ExecStartMessage) {
 		inbox:     make(chan execItem, execInputQueue),
 		done:      make(chan struct{}),
 		cancel:    sessionCancel,
+		ctx:       sessionCtx,
 	}
 	admitted := false
 	defer func() {
@@ -695,10 +700,21 @@ func (s *ExecSession) readLoop() {
 				Data:   encoded,
 			})
 			if marshalErr == nil {
-				s.client.sendMessageTo(s.target, protocol.Envelope{
+				// Blocking bulk send: when the controller reads slower than
+				// the exec produces, this stops reading the Docker stream
+				// (so the exec itself backs up) instead of overflowing the
+				// send queue and evicting the tunnel. A failed send ends the
+				// loop; endAfterFailedSend decides whether the controller
+				// still is owed an exec_end.
+				if sendErr := s.client.sendBulkMessageTo(s.ctx, s.target, protocol.Envelope{
 					Type: protocol.TypeExecOutput,
 					Data: json.RawMessage(data),
-				})
+				}); sendErr != nil {
+					pool.PutBuffer(buf)
+					slog.Debug("exec output send abandoned", "execID", applog.Sanitize(s.execID), "error", applog.Sanitize(sendErr.Error()))
+					s.endAfterFailedSend(sendErr)
+					return
+				}
 			}
 		}
 
@@ -726,6 +742,29 @@ func (s *ExecSession) readLoop() {
 			return
 		}
 	}
+}
+
+// endAfterFailedSend sends the exec_end a read loop still owes after its bulk
+// output send failed. A cancelled send is the session's own context ending
+// while the tunnel is still up, which is what the input writer does when its
+// retries run out. The controller's session would otherwise hang, so the
+// exec_end goes out on the control path, which doesn't wait for capacity. It is
+// skipped when the controller or a tunnel drop ended the session (they own the
+// exec_end), when the send failed for any other reason (the queue is closed,
+// stalled or over its limit, and failConn has already ended the connection),
+// and when the queue is closed by the time it is checked.
+func (s *ExecSession) endAfterFailedSend(sendErr error) {
+	if !errors.Is(sendErr, context.Canceled) || s.endedByPeer() {
+		return
+	}
+	if s.target.state != nil && s.target.state.isClosed() {
+		return
+	}
+	// Best-effort; connection loss will surface on the read pump.
+	_ = s.client.sendTypedMessageTo(s.target, protocol.TypeExecEnd, protocol.ExecEndMessage{
+		ExecID: s.execID,
+		Reason: "exec session closed",
+	})
 }
 
 // panicEnd sends the exec_end a read loop that panicked still owes. The read

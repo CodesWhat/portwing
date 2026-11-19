@@ -2431,9 +2431,13 @@ func TestReadPumpDispatchesRequestViaStreamSem(t *testing.T) {
 // Run — backoff reset after established connection (line 181-183)
 // ---------------------------------------------------------------------------
 
-// TestRunBackoffResetAfterEstablished covers line 181-183: when a connection
-// that was established drops (for a non-ctx reason), the backoff resets to
-// ReconnectDelay. We hold the second connection open until the test cancels.
+// TestRunBackoffResetAfterEstablished covers the reset branch: an established
+// connection that drops (for a non-ctx reason) resets the backoff to
+// ReconnectDelay only if it stayed up for minStableConnection; the drop-right-
+// after-welcome case is pinned by
+// TestBackoffNotResetByConnectionDroppingRightAfterWelcome. With
+// ReconnectDelay 0 this test only proves the second dial happens and Run
+// exits cleanly. We hold the second connection open until the test cancels.
 func TestRunBackoffResetAfterEstablished(t *testing.T) {
 	t.Parallel()
 

@@ -201,6 +201,7 @@ func newExecSession(c *Client, execID string, conn net.Conn) *ExecSession {
 		// covering the non-TTY (stdcopy-multiplexed) path clear this before
 		// starting readLoop.
 		tty:       true,
+		ctx:       context.Background(),
 		connReady: make(chan struct{}),
 		inbox:     make(chan execItem, execInputQueue),
 		done:      make(chan struct{}),

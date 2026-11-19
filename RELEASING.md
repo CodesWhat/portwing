@@ -71,6 +71,16 @@ trigger. A job that always skips (`Security: Grype Container Scan` carries
 `if: github.event_name != 'pull_request'`) must never be required, because
 a skipped check is not a passing one.
 
+**The dependency scan hard-gates what ships and scopes the web toolchain.**
+Inside `Security: Grype Dependency Scan (Go + npm)`, the Go step scans the
+repo with npm content excluded (`.grype-shipped.yaml` layered on
+`.grype.yaml`) and fails every PR at HIGH. The npm step scans a copy of the
+root `package-lock.json` and fails only when the PR diff (computed inside the
+job, never a workflow path filter) touches a `package.json` or
+`package-lock.json`, or when the run is scheduled or manual. Otherwise its
+findings are a warning. Qlty's osv-scanner excludes `package-lock.json` the
+same way. Expiring npm waivers live in `.grype.yaml`.
+
 **Renaming a job renames its check-run context**, so a rename and the
 ruleset update have to be sequenced. The promotion PR cannot merge before
 the PATCH, because GitHub reads workflow files from the head branch: the PR
@@ -160,7 +170,7 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
-For a release candidate, pass an explicit version such as `1.3.0-rc.1`.
+For a release candidate, pass an explicit version such as `1.4.0-rc.1`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag and
@@ -201,8 +211,11 @@ permissions before those checks pass.
 
 The release job also requires **`HOMEBREW_TAP_TOKEN`** in the **`Production`**
 environment, a fine-grained token with Contents read/write access to
-`CodesWhat/homebrew-tap`. The default
-`GITHUB_TOKEN` cannot publish to a different repository. Prerelease tags render
+`CodesWhat/homebrew-tap`; nothing beyond contents write is needed. The default
+`GITHUB_TOKEN` cannot publish to a different repository. The release pushes the
+cask to a `portwing-<version>` branch on the tap. The tap's own workflow opens
+the pull request and auto-merges it once its cask audit passes, so the cask is
+not on tap `main` the moment the release job ends. Prerelease tags render
 the cask for validation but do not upload it (`skip_upload: auto`).
 
 **Manual path** (if you need to override the computed version):
@@ -255,7 +268,7 @@ the Git-backed deployment or update its GitHub status.
 
 `release.yml` runs on the tag push:
 
-1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; publishes the stable Homebrew cask; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
+1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; pushes the stable Homebrew cask to a version branch on the tap; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
 2. **Attestations** — SLSA Build L2 provenance for every checksummed release asset (archives, native packages, and per-archive SBOMs) and for the container manifest (`gh attestation verify <asset> --repo CodesWhat/portwing`)
 3. **grype-published-image** — scans the pushed manifest by digest with Grype, once per published platform (`linux/amd64`, `linux/arm64`, `linux/arm/v7`), using `.grype.yaml` for suppressions. This checks what users actually pull at release time; `security-grype.yml` also rescans the latest published release and builds source images for all three platforms. Unlike `verify-published` this job is **not** gated on repository visibility; only its SARIF upload is, so the gate keeps working if the repo ever goes private.
 

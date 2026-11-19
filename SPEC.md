@@ -98,7 +98,7 @@ sequenceDiagram
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
                       "edge-response-body-b64", "edge-request-body-stream",
-                      "dd:container-sync", "dd:logs"],
+                      "dd:container-sync", "dd:container-event", "dd:logs"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
     "triggerTypes": []
@@ -190,6 +190,7 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 | `dd:container_added` | Agent -> Server | New container discovered |
 | `dd:container_updated` | Agent -> Server | Container state/metadata changed |
 | `dd:container_removed` | Agent -> Server | Container removed |
+| `dd:container_event` | Agent -> Server | Raw Docker container lifecycle event (`die`, `oom`, `stop`, `start`, `restart`) for controller state alerts; advertised as `dd:container-event` |
 | `dd:component_sync` | Agent -> Server | Watcher + trigger component descriptors |
 | `dd:watch_request` | Server -> Agent | Reserved legacy remote-watcher message; not advertised by the controller-owned contract |
 | `dd:watch_response` | Agent -> Server | Reserved legacy remote-watcher response |
@@ -217,6 +218,14 @@ is `true`, the handler replaces any caller-supplied `until` with that five-secon
 endpoint; the caller's cutoff does not constrain the stream.
 Continuous tailing uses the `request`/`stream`/`stream_end` path against
 `GET /containers/{id}/logs?follow=1`.
+
+Logs over the 16 MiB buffered cap are not truncated. The agent sends a
+`dd:container_log_response` whose `logs` is a short `error: logs exceed ...`
+string and whose optional `code` is `response_too_large`. The same code is the
+stable signal for an over-cap non-stream edge response: the `error` frame
+carries `code: "response_too_large"` alongside the human-readable `message`
+(`{"message":"response exceeds 16777216 bytes; use a streaming request","code":"response_too_large","requestId":"..."}`).
+Match on `code`; the message text can change.
 
 ## 4. Standard Mode HTTP API
 
@@ -318,6 +327,15 @@ type DockerClient struct {
 | `ps` | `--format json` |
 | `logs` | `--tail N` |
 | `restart` / `stop` / `start` | -- |
+
+Every operation passes `-p <project>` before the subcommand. The project name is
+`<normalized-relative-dir>-<10 hex of SHA-256(relative dir)>`, unique per
+`STACKS_DIR`-relative stack directory, so nested stacks with the same basename
+don't share a project (and `--remove-orphans` can't remove each other's
+containers). `-p` is omitted when a compose file sets a top-level `name:`. A
+stack with existing containers labeled `com.docker.compose.project=<basename>` and
+`com.docker.compose.project.working_dir=<stack dir>` (deployed by <= 1.3) keeps
+the basename.
 
 ### 6.2 Security
 
@@ -538,7 +556,31 @@ data: {"type":"dd:ack","data":{"version":"0.9.0","os":"linux","arch":"amd64",...
 data: {"type":"dd:container-added","data":{...Container...}}
 data: {"type":"dd:container-updated","data":{...Container...}}
 data: {"type":"dd:container-removed","data":{"id":"abc123"}}
+data: {"type":"dd:container-event","data":{...ContainerEvent...}}
 ```
+
+The stream also carries a `: heartbeat` comment line every 15 s. Drydock arms
+its 45 s stalled-stream watchdog only after the first one, and it keeps
+proxies with short idle timeouts from cutting a quiet stream.
+
+`dd:container_event` (Edge) and `dd:container-event` (SSE) carry one raw Docker
+event each, with no coalescing or classification:
+
+```json
+{"containerId":"abc123","name":"web","action":"die","exitCode":137,"time":1749820800123}
+```
+
+`action` is Docker's own name and is one of `die`, `oom`, `stop`, `start`,
+`restart`; every other action (including `kill`) and every non-container event
+is ignored. `exitCode` appears only on `die`, parsed from the event's `exitCode`
+attribute, and is omitted when absent. `oomKilled` (`true`) appears only on
+`oom`. `time` is Unix milliseconds from Docker's `timeNano` (or `time` x 1000
+when `timeNano` is 0). `name` has no leading slash. A user stop emits `kill`,
+`die`, `stop`; Portwing forwards the `die` and the `stop` as two messages and
+never dedupes a `stop` that follows a `die`. Events are sent as they happen
+and are not replayed after a Docker event-stream reconnect or while no
+controller is connected; the inventory poll still reports final state. Older
+controllers ignore the unknown type.
 
 ## 11. Security Model
 
@@ -564,7 +606,7 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 | Resource | Limit |
 |----------|-------|
 | WebSocket read | 16 MB |
-| Response body read | 100 MB |
+| Response body read (edge, buffered) | 16 MiB |
 | Streamed request body (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every streamed body held in memory, reassembling and already dispatched alike, the latter until its Docker round trip ends; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
@@ -587,7 +629,8 @@ Attempt 1: connect -> fail -> wait 1s (+/-25% jitter)
 Attempt 2: connect -> fail -> wait 2s (+/-25% jitter)
 ...
 Attempt N: connect -> fail -> wait min(2^N, 60s) (+/-25% jitter)
-On success: reset backoff to 1s
+On success: reset backoff to 1s, but only once the connection has stayed up for 30s
+(a connection that drops right after the welcome keeps backing off)
 ```
 
 A hello rejection (`error` frame in place of `welcome`) is classified before

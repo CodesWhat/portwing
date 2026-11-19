@@ -280,6 +280,17 @@ func TestRegistryOperationalMetrics(t *testing.T) {
 	}
 }
 
+func TestRegistryDroppedEvents(t *testing.T) {
+	reg := metrics.NewRegistry()
+	reg.SetEdgeMode(true)
+	reg.IncDroppedEvent()
+
+	body := output(reg)
+	if want := "portwing_edge_dropped_events_total 1"; !strings.Contains(body, want) {
+		t.Errorf("missing %q; output:\n%s", want, body)
+	}
+}
+
 // TestRegistryConcurrency exercises all mutation methods concurrently and then
 // asserts exact totals. Run with -race to catch data races.
 func TestRegistryConcurrency(t *testing.T) {

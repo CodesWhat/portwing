@@ -15,7 +15,15 @@ import (
 
 	"github.com/codeswhat/portwing/internal/adapter"
 	"github.com/codeswhat/portwing/internal/metrics"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
+
+// sseHeartbeatInterval is how often ServeHTTP writes a `: heartbeat` comment.
+// Drydock arms its 45 s stalled-stream watchdog only after the first
+// heartbeat (AgentClient.ts), so 15 s gives it three chances before it
+// declares the stream dead, and keeps idle-timeout proxies from cutting a
+// quiet stream.
+const sseHeartbeatInterval = 15 * time.Second
 
 type SSEClient struct {
 	id     string
@@ -42,6 +50,10 @@ type SSEBroadcaster struct {
 	agentInfo    AgentInfo
 	memoryGB     float64
 	startTime    time.Time
+
+	// heartbeatInterval controls how often ServeHTTP writes the keepalive
+	// comment. Overridable per-instance in tests.
+	heartbeatInterval time.Duration
 }
 
 func NewSSEBroadcaster(manager ContainerProvider, agentVersion string, info AgentInfo) *SSEBroadcaster {
@@ -52,6 +64,8 @@ func NewSSEBroadcaster(manager ContainerProvider, agentVersion string, info Agen
 		agentInfo:    info,
 		memoryGB:     metrics.MemoryTotalGB(),
 		startTime:    time.Now(),
+
+		heartbeatInterval: sseHeartbeatInterval,
 	}
 }
 
@@ -103,12 +117,21 @@ func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Stream events until client disconnects.
 	ctx := r.Context()
+	heartbeat := time.NewTicker(b.heartbeatInterval)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			slog.Info("SSE client disconnected", "clientId", client.id)
 			b.removeClient(client.id)
 			return
+		case <-heartbeat.C:
+			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+				b.removeClient(client.id)
+				return
+			}
+			flusher.Flush()
 		case data, ok := <-client.events:
 			if !ok {
 				return
@@ -270,6 +293,27 @@ func (b *SSEBroadcaster) BroadcastContainerRemoved(id, name string) {
 		slog.Error("failed to marshal container-removed event", "error", err)
 		return
 	}
+	b.broadcast(data)
+}
+
+// BroadcastContainerEvent sends a dd:container-event event to all clients. With
+// no connected client the event is dropped with a debug log; a client whose
+// buffer is full drops it too (see broadcast), so the Docker event reader never
+// blocks.
+func (b *SSEBroadcaster) BroadcastContainerEvent(msg protocol.DDContainerEventMessage) {
+	b.mu.RLock()
+	n := len(b.clients)
+	b.mu.RUnlock()
+	if n == 0 {
+		slog.Debug("no SSE client connected, dropping container event", "action", msg.Action, "containerId", msg.ContainerID)
+		return
+	}
+	event := map[string]any{
+		"type": "dd:container-event",
+		"data": msg,
+	}
+	// The payload holds only strings, ints and pointers, so Marshal can't fail.
+	data, _ := json.Marshal(event)
 	b.broadcast(data)
 }
 

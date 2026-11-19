@@ -35,6 +35,7 @@ const (
 	TypeDDContainerAdded          = "dd:container_added"
 	TypeDDContainerUpdated        = "dd:container_updated"
 	TypeDDContainerRemoved        = "dd:container_removed"
+	TypeDDContainerEvent          = "dd:container_event"
 	TypeDDComponentSync           = "dd:component_sync"
 	TypeDDWatchRequest            = "dd:watch_request"
 	TypeDDWatchResponse           = "dd:watch_response"
@@ -269,6 +270,19 @@ type DDContainerRemovedMessage struct {
 	Name string `json:"name"`
 }
 
+// DDContainerEventMessage is a raw Docker container lifecycle event (die, oom,
+// stop, start, restart) forwarded one-to-one for controller-side state alerts.
+// ExitCode is set only on die and OOMKilled only on oom. Time is Unix
+// milliseconds.
+type DDContainerEventMessage struct {
+	ContainerID string `json:"containerId"`
+	Name        string `json:"name"`
+	Action      string `json:"action"`
+	ExitCode    *int   `json:"exitCode,omitempty"`
+	OOMKilled   *bool  `json:"oomKilled,omitempty"`
+	Time        int64  `json:"time"`
+}
+
 type DDComponentSyncMessage struct {
 	Watchers []ComponentDescriptor `json:"watchers"`
 	Triggers []ComponentDescriptor `json:"triggers"`
@@ -334,6 +348,9 @@ type DDContainerLogResponseMessage struct {
 	RequestID   string `json:"requestId,omitempty"`
 	ContainerID string `json:"containerId"`
 	Logs        string `json:"logs"`
+	// Code is set only on an error response (currently
+	// protocol.ErrorCodeResponseTooLarge); absent on success.
+	Code string `json:"code,omitempty"`
 }
 
 type DDContainerLogChunkMessage struct {

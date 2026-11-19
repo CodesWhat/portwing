@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes are shipped on the **latest stable release line**. The v1.3
+Security fixes are shipped on the **latest stable release line**. The v1.4
 line keeps the existing wire protocol. Enrollment requires TLS, either natively
 or through a trusted proxy reporting HTTPS; `ALLOW_INSECURE_ENROLLMENT=true`
 opts in to plaintext for trusted local testing. Review
@@ -10,7 +10,8 @@ opts in to plaintext for trusted local testing. Review
 
 | Version | Supported |
 | --- | --- |
-| 1.3.x (latest stable) | :white_check_mark: |
+| 1.4.x (latest stable) | :white_check_mark: |
+| 1.3.x | :x: |
 | 1.2.x | :x: |
 | 1.1.x | :x: |
 | 1.0.x | :x: |
@@ -74,7 +75,7 @@ Portwing implements the following:
 - **Audit log**: structured JSON audit trail (`AUDIT_LOG`) of auth failures, enrollment attempts, and mutating operations.
 - **TLS**: TLS 1.2+ with modern AEAD cipher suites only; certificate and key must be configured together or startup fails.
 - **Docker Compose security**: root-confined symlink-resistant file writes, path traversal protection, env var validation and denylist, service name injection prevention.
-- **Resource limits**: WebSocket read (16 MB), response body (100 MB), exec body (10 MB), signed-request body (1 MB), enrollment body (64 KiB / 10 seconds), concurrent enrollment handlers (32 agent-wide / 2 per client), concurrent sessions (100), cold Argon2 derivations (2), nonce LRU (10,000).
+- **Resource limits**: WebSocket read (16 MB), buffered response body (16 MiB), exec body (10 MB), signed-request body (1 MB), enrollment body (64 KiB / 10 seconds), concurrent enrollment handlers (32 agent-wide / 2 per client), concurrent sessions (100), cold Argon2 derivations (2), nonce LRU (10,000).
 
 ### Nonce cache capacity
 
@@ -89,6 +90,7 @@ The nonce LRU cache (capacity controlled by `NONCE_LRU_SIZE`, default 10,000) tr
 
 - **Minimal attack surface**: static binary, three direct dependencies, stdlib crypto only, scratch runtime with Alpine certificates/metadata and static Docker/Compose clients, without a runtime package manager.
 - **Supply chain**: SHA-pinned GitHub Actions with harden-runner on every job, weekly govulncheck/grype/gosec scans, OpenSSF Scorecard, cosign-signed images, SLSA Build L2 provenance, per-archive CycloneDX SBOMs, and a container-image SBOM attestation on every release.
+- **Vulnerability gates**: what ships is hard-gated. Grype fails every PR on HIGH/CRITICAL findings in Go modules, the pre-push and Go CI Qlty osv-scanner check covers `go.mod`/`go.sum`, and the image scans cover the built and published images. The website and docs build toolchain (`package-lock.json`) never ships in the binary or image, so its findings fail only PRs that change a `package.json` or `package-lock.json`, plus the scheduled and manual runs; on other PRs they show up as warnings.
 - **Published-image rescan**: every Monday, Grype rescans the currently published GHCR release image (the latest non-prerelease tag, all three platforms: `linux/amd64`, `linux/arm64`, and `linux/arm/v7`) at the same HIGH/CRITICAL cutoff and `.grype.yaml` suppressions used at release time, so a CVE disclosed after a release ships doesn't go unnoticed until the next one. A failing scan fails the workflow run and uploads SARIF results to the Security tab; the lane runs on the Monday cron and on manual dispatch, and isn't wired into the automated quality-lane tracking-issue notifier, so a red run has to be caught in the Actions tab.
 
 ## What to include in a report

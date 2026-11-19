@@ -58,11 +58,14 @@ func TestSendPumpDeliversQueuedFrame(t *testing.T) {
 	}
 }
 
-// TestSendMessageEvictsConnectionWhenQueueFull pins the core backpressure
-// invariant: when sendCh is full and no pump is draining it, the next
-// sendMessage call takes the default branch and calls failConn, which closes
-// the agent-side WebSocket. The controller observes the close as a read error,
-// proving eviction rather than silent frame drop or deadlock.
+// TestSendMessageEvictsConnectionWhenQueueFull pins the control-frame side of
+// the backpressure contract: a control frame (ping, pong, response, stream_end,
+// exec_ready/exec_end, dd:* control) never blocks, so when sendCh is full and
+// no pump is draining it, sendMessage takes the default branch and calls
+// failConn, which closes the agent-side WebSocket. The controller observes the
+// close as a read error, proving eviction rather than silent frame drop or
+// deadlock. Bulk frames take the opposite branch (see
+// TestBulkSendBlocksInsteadOfEvictingWhenQueueFull): they block.
 func TestSendMessageEvictsConnectionWhenQueueFull(t *testing.T) {
 	t.Parallel()
 
@@ -90,6 +93,34 @@ func TestSendMessageEvictsConnectionWhenQueueFull(t *testing.T) {
 		t.Fatal("expected read error after eviction, got nil")
 	}
 	requireBackpressureCount(t, c.metrics, 1)
+}
+
+// The same full queue that evicts on a control frame only makes a bulk frame
+// wait: no eviction, no backpressure event, and the frame goes in as soon as
+// the pump releases a slot.
+func TestBulkSendBlocksInsteadOfEvictingWhenQueueFull(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newHandshakeTestClient(t)
+	c.metrics = newEdgeMetricsForBackpressureTest()
+	ch, state := installUndrainedQueue(c, 1)
+	ch <- protocol.Envelope{Type: protocol.TypePing}
+	target := c.currentOutboundTarget()
+
+	done := make(chan error, 1)
+	go func() { done <- c.sendBulkMessageTo(context.Background(), target, bulkEnvelope()) }()
+	waitForBulkWaiter(t, state)
+
+	if err := c.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("connection evicted while a bulk frame waited: %v", err)
+	}
+	requireBackpressureCount(t, c.metrics, 0)
+
+	state.release(<-ch)
+	if err := <-done; err != nil {
+		t.Fatalf("bulk send after the queue drained: %v", err)
+	}
+	requireBackpressureCount(t, c.metrics, 0)
 }
 
 // A frame-count limit alone still permits a blocked writer to retain several

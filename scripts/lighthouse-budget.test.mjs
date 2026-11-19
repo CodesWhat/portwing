@@ -16,9 +16,9 @@ import {
   withLighthouseResources,
 } from "./lighthouse-budget.mjs";
 
-function fixtureLhr({ performance, totalByteWeight, scriptTransferBytes }) {
+function fixtureLhr({ performance, accessibility = 1, totalByteWeight, scriptTransferBytes }) {
   return {
-    categories: { performance: { score: performance } },
+    categories: { performance: { score: performance }, accessibility: { score: accessibility } },
     audits: {
       "total-byte-weight": { numericValue: totalByteWeight },
       "resource-summary": {
@@ -42,19 +42,26 @@ test("Lighthouse budgets use the median and fail closed", () => {
   const config = {
     site: "fixture",
     performanceMin: 0.9,
+    accessibilityMin: 0.9,
     totalByteWeightMax: 1_000,
     scriptTransferBytesMax: 500,
   };
   const good = [
-    { performance: 0.91, totalByteWeight: 900, scriptTransferBytes: 400 },
-    { performance: 0.93, totalByteWeight: 800, scriptTransferBytes: 300 },
-    { performance: 0.89, totalByteWeight: 1_200, scriptTransferBytes: 600 },
+    { performance: 0.91, accessibility: 0.95, totalByteWeight: 900, scriptTransferBytes: 400 },
+    { performance: 0.93, accessibility: 0.9, totalByteWeight: 800, scriptTransferBytes: 300 },
+    { performance: 0.89, accessibility: 0.98, totalByteWeight: 1_200, scriptTransferBytes: 600 },
   ];
   assert.deepEqual(verifyLighthouseRuns(config, good), {
     performance: 0.91,
+    accessibility: 0.95,
     totalByteWeight: 900,
     scriptTransferBytes: 400,
   });
+  const inaccessible = good.map((run) => ({ ...run, accessibility: 0.89 }));
+  assert.throws(
+    () => verifyLighthouseRuns(config, inaccessible),
+    /accessibility budget exceeded: 0.89 < 0.9/,
+  );
   assert.throws(
     () => verifyLighthouseRuns(config, good.slice(0, 1).concat(good.slice(2))),
     /total byte weight budget exceeded/,
@@ -286,7 +293,9 @@ test("collectLighthouseRuns retries a run after Chrome drops the connection", as
       maxAttempts: 3,
       log: (message) => logs.push(message),
     });
-    assert.deepEqual(runs, [{ performance: 0.95, totalByteWeight: 900, scriptTransferBytes: 400 }]);
+    assert.deepEqual(runs, [
+      { performance: 0.95, accessibility: 1, totalByteWeight: 900, scriptTransferBytes: 400 },
+    ]);
     assert.equal(lighthouseCalls, 2);
     assert.equal(startChromeCalls, 1);
     assert.deepEqual(killedPorts, [1]);

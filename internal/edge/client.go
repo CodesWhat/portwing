@@ -47,11 +47,17 @@ import (
 var errFatal = errors.New("fatal connection error")
 
 const (
-	maxReadSize            = 16 * 1024 * 1024  // 16 MB — WebSocket read limit
-	maxResponseBody        = 100 * 1024 * 1024 // 100 MB — proxied response body cap
-	maxExecSessions        = 100               // concurrent exec sessions
-	maxStreams             = 100               // concurrent in-flight tunneled requests
-	maxOutboundQueuedBytes = 128 << 20         // aggregate queued and in-flight WebSocket bytes
+	maxReadSize = 16 * 1024 * 1024 // 16 MB — WebSocket read limit
+	// maxResponseBody caps a buffered (non-stream) proxied response. It is
+	// base64'd into one envelope that has to fit the outbound byte budget and
+	// finish writing within writeWait: 16 MiB becomes ~21.4 MiB on the wire,
+	// which a 20 Mbps uplink clears in under 10 s and which leaves the budget
+	// room for concurrent control frames. Larger bodies are not truncated; the
+	// request fails with a TypeError telling the controller to stream instead.
+	maxResponseBody        = 16 * 1024 * 1024
+	maxExecSessions        = 100       // concurrent exec sessions
+	maxStreams             = 100       // concurrent in-flight tunneled requests
+	maxOutboundQueuedBytes = 128 << 20 // aggregate queued and in-flight WebSocket bytes
 
 	// sendQueueSize bounds outbound frames buffered for the sendPump. A full
 	// queue means the controller can't keep up, so the connection is evicted
@@ -61,7 +67,26 @@ const (
 	// a frame within this window is treated as wedged and the connection is
 	// evicted, instead of blocking the writer forever.
 	writeWait = 10 * time.Second
+
+	// bulkQueuedBytesLimit is the byte high-water mark for bulk producers
+	// (stream data, exec output, log chunks): 75% of maxOutboundQueuedBytes.
+	// Bulk producers block above it; control frames may still use the rest up
+	// to the hard maxOutboundQueuedBytes limit. The matching frame high-water
+	// mark is bulkFrameLimit (75% of the queue capacity, 192 of 256).
+	bulkQueuedBytesLimit = 96 << 20
 )
+
+// streamStallTimeout is how long a bulk producer waits without the sendPump
+// making any progress before the connection is evicted as stalled. Backpressure
+// itself never evicts: a slow-but-moving controller just slows the producer. A
+// var, not a const, so tests can shrink it instead of waiting 30 s.
+var streamStallTimeout = 30 * time.Second
+
+// minStableConnection is how long a connection must stay up after the welcome
+// before Run resets the reconnect backoff. Resetting on welcome alone let a
+// trigger that reliably killed the tunnel right after the handshake flap about
+// once a second. A var so tests can shrink it.
+var minStableConnection = 30 * time.Second
 
 // maxRequestBodyStream caps the in-memory reassembly buffer for a
 // request.bodyStream=true request (CapRequestBodyStream). This is a simple
@@ -117,6 +142,10 @@ type outboundQueueState struct {
 	mu     sync.Mutex
 	bytes  int64
 	closed bool
+	// wake is closed (and cleared) whenever the sendPump finishes a frame or
+	// the queue closes, so blocked bulk producers re-check capacity without
+	// polling. Created lazily by the first waiter.
+	wake chan struct{}
 }
 
 type outboundTarget struct {
@@ -132,6 +161,8 @@ const (
 	outboundQueueClosed
 	outboundByteLimitExceeded
 	outboundFrameLimitExceeded
+	outboundStalled
+	outboundCanceled
 )
 
 // dockerAPI is the subset of *docker.Client the edge Client depends on. It is
@@ -165,13 +196,30 @@ type hostCollector interface {
 type edgeMessageSender struct {
 	client *Client
 	target *outboundTarget
+	// lossy drops the message when the target queue is full or closed instead
+	// of evicting the connection. Only best-effort lifecycle events set it.
+	lossy bool
 }
 
 func (s *edgeMessageSender) SendTypedMessage(msgType string, data any) error {
+	if s.lossy && s.target != nil {
+		return s.client.sendLossyTypedMessageTo(*s.target, msgType, data)
+	}
 	if s.target != nil {
 		return s.client.sendTypedMessageTo(*s.target, msgType, data)
 	}
 	return s.client.sendTypedMessage(msgType, data)
+}
+
+// SendBulkTypedMessage is the blocking, backpressured send for bulk frames
+// (adapter.BulkMessageSender). It waits for queue capacity instead of evicting
+// the connection, and returns an error once ctx ends or the queue stalls.
+func (s *edgeMessageSender) SendBulkTypedMessage(ctx context.Context, msgType string, data any) error {
+	target := s.client.currentOutboundTarget()
+	if s.target != nil {
+		target = *s.target
+	}
+	return s.client.sendBulkTypedMessageTo(ctx, target, msgType, data)
 }
 
 func (c *Client) currentMessageSender() *edgeMessageSender {
@@ -182,19 +230,30 @@ func (c *Client) currentMessageSender() *edgeMessageSender {
 // Client is the edge-mode WebSocket client that connects to a controller
 // and tunnels Docker API requests over the WebSocket.
 type Client struct {
+	// now is the clock for the stable-connection window; nil means time.Now.
+	now func() time.Time
+	// welcomedAt is when the current connection's welcome was accepted. It is
+	// written by connect and read by Run on the same goroutine.
+	welcomedAt       time.Time
 	keyRotationOnce  sync.Once
 	keyRotation      *auth.EdgeKeyRotation
 	keyRotationErr   error
 	signedHelloKeyID string
 	cfg              *config.Config
 	dockerClient     dockerAPI
-	readiness        docker.HealthProbe
-	adapter          adapter.EdgeAdapter
-	compose          *docker.ComposeManager
-	collector        hostCollector
-	metrics          *metrics.Registry
-	auditor          *audit.Logger
-	startTime        time.Time
+	// eventSubscribe opens the Docker event subscription for dd:container_event
+	// forwarding; tests replace it. Nil falls back to the real event stream.
+	eventSubscribe adapter.EventSubscribe
+	// rawDockerClient is the concrete client behind dockerClient, kept for the
+	// event stream, which dockerAPI does not cover.
+	rawDockerClient *docker.Client
+	readiness       docker.HealthProbe
+	adapter         adapter.EdgeAdapter
+	compose         *docker.ComposeManager
+	collector       hostCollector
+	metrics         *metrics.Registry
+	auditor         *audit.Logger
+	startTime       time.Time
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
@@ -330,15 +389,16 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 	registry := metrics.NewRegistry()
 	registry.SetEdgeMode(true)
 	return &Client{
-		cfg:          cfg,
-		dockerClient: dockerClient,
-		adapter:      a,
-		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
-		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
-		metrics:      registry,
-		auditor:      auditor,
-		startTime:    time.Now(),
-		streamSem:    make(chan struct{}, maxStreams),
+		cfg:             cfg,
+		dockerClient:    dockerClient,
+		rawDockerClient: dockerClient,
+		adapter:         a,
+		compose:         docker.NewComposeManagerWithLister(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket, dockerClient),
+		collector:       metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
+		metrics:         registry,
+		auditor:         auditor,
+		startTime:       time.Now(),
+		streamSem:       make(chan struct{}, maxStreams),
 	}
 }
 
@@ -359,6 +419,11 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 	}()
 
+	// One Docker event subscription per Run, outside the reconnect loop. It
+	// outlives controller reconnects; events that fire while the tunnel is down
+	// are dropped and the poll-diff inventory covers final state.
+	go c.forwardContainerEvents(ctx)
+
 	delay := time.Duration(c.cfg.ReconnectDelay) * time.Second
 	maxDelay := time.Duration(c.cfg.MaxReconnectDelay) * time.Second
 
@@ -367,6 +432,7 @@ func (c *Client) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 
+		c.welcomedAt = time.Time{}
 		established, err := c.connect(ctx)
 		if ctx.Err() != nil {
 			// Shutting down - send close frame if we still have a connection.
@@ -392,10 +458,14 @@ func (c *Client) Run(ctx context.Context) error {
 			slog.Warn("connection lost", "error", applog.SanitizeURLError(err))
 		}
 
-		// Reset backoff after a connection that was actually established, so a
-		// long-lived session that later drops reconnects from RECONNECT_DELAY
-		// instead of inheriting stale backoff from earlier failures (SPEC §13.1).
-		if established {
+		// Reset backoff after a connection that was established and stayed up
+		// for minStableConnection after the welcome (a slow handshake doesn't
+		// count toward it), so a long-lived session that later drops
+		// reconnects from RECONNECT_DELAY instead of inheriting stale backoff
+		// from earlier failures (SPEC §13.1). A connection that drops right
+		// after the welcome keeps backing off, or a repeating trigger flaps
+		// about once a second.
+		if established && !c.welcomedAt.IsZero() && c.clock().Sub(c.welcomedAt) >= minStableConnection {
 			delay = time.Duration(c.cfg.ReconnectDelay) * time.Second
 		}
 
@@ -416,6 +486,42 @@ func (c *Client) Run(ctx context.Context) error {
 			delay = maxDelay
 		}
 	}
+}
+
+// forwardContainerEvents streams raw Docker container events to the adapter
+// while the tunnel is up. It is a no-op when the adapter doesn't forward events.
+func (c *Client) forwardContainerEvents(ctx context.Context) {
+	fw, ok := c.adapter.(adapter.ContainerEventAdapter)
+	if !ok {
+		return
+	}
+	subscribe := c.eventSubscribe
+	if subscribe == nil {
+		if c.rawDockerClient == nil {
+			return
+		}
+		subscribe = adapter.DockerEventSubscriber(c.rawDockerClient)
+	}
+	adapter.RunContainerEvents(ctx, subscribe, func(ev docker.DockerEvent) {
+		sender, connected := c.connectedMessageSender()
+		if !connected {
+			slog.Debug("controller not connected, dropping container event", "action", ev.Action)
+			return
+		}
+		fw.OnDockerEvent(ctx, sender, ev)
+	})
+}
+
+// connectedMessageSender returns a lossy sender bound to one captured outbound
+// target, only once that target's send pump is up. Capturing the target once
+// means an event can't be written directly during a later connection's
+// handshake, and a queue that has since closed just drops the event.
+func (c *Client) connectedMessageSender() (adapter.MessageSender, bool) {
+	target := c.currentOutboundTarget()
+	if target.ch == nil {
+		return nil, false
+	}
+	return &edgeMessageSender{client: c, target: &target, lossy: true}, true
 }
 
 // proxyFunc returns the proxy selector for the controller dial: the injected
@@ -664,6 +770,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	}
 
 	slog.Info("connected to controller")
+	c.welcomedAt = c.clock()
 	c.metrics.SetControllerConnected(true)
 	defer c.metrics.SetControllerConnected(false)
 
@@ -736,6 +843,14 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	// Reaching here means the welcome handshake succeeded, so the connection
 	// counts as established even if the read pump later returned an error.
 	return true, readErr
+}
+
+// clock returns the current time from the injectable clock.
+func (c *Client) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 // sendHello sends the hello handshake message. When PRIVATE_KEY_FILE is
@@ -1437,16 +1552,31 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 
 		// Stream body in chunks using a pooled 32 KiB buffer so the per-request
 		// stream buffer is reused instead of freshly allocated each time.
+		//
+		// Each chunk goes through the blocking bulk path, so a controller that
+		// reads slower than dockerd writes throttles this loop (and therefore
+		// dockerd) instead of overflowing the send queue. If the send fails the
+		// connection is gone or stalled: stop reading upstream, let the deferred
+		// Body.Close release dockerd, and exit without a stream_end that has no
+		// connection left to carry it.
 		buf := pool.GetStreamBuffer()
 		var streamErr error
 		for {
 			n, readErr := resp.Body.Read(buf)
 			if n > 0 {
 				encoded := base64.StdEncoding.EncodeToString(buf[:n])
-				_ = c.sendTypedMessageTo(target, protocol.TypeStream, protocol.StreamMessage{
+				if sendErr := c.sendBulkTypedMessageTo(ctx, target, protocol.TypeStream, protocol.StreamMessage{
 					RequestID: req.RequestID,
 					Data:      encoded,
-				})
+				}); sendErr != nil {
+					pool.PutStreamBuffer(buf)
+					slog.Warn("abandoning docker response stream: send failed",
+						"requestId", applog.Sanitize(req.RequestID),
+						"path", applog.Sanitize(req.Path),
+						"error", applog.Sanitize(sendErr.Error()))
+					c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
+					return
+				}
 			}
 			if readErr != nil {
 				if !errors.Is(readErr, io.EOF) {
@@ -1481,12 +1611,23 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			Reason:    reason,
 		})
 	} else {
-		// Read body (capped).
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+		// Read body (capped). One byte past the cap is read so an oversized
+		// body is detected and rejected instead of silently truncated and sent
+		// as a successful response.
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 		if err != nil {
 			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("reading Docker response: %v", err),
+				RequestID: req.RequestID,
+			})
+			return
+		}
+		if int64(len(body)) > maxResponseBody {
+			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
+			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
+				Message:   fmt.Sprintf("response exceeds %d bytes; use a streaming request", int64(maxResponseBody)),
+				Code:      protocol.ErrorCodeResponseTooLarge,
 				RequestID: req.RequestID,
 			})
 			return
@@ -1783,14 +1924,7 @@ func (c *Client) currentOutboundTarget() outboundTarget {
 
 func (c *Client) sendMessageTo(target outboundTarget, env protocol.Envelope) {
 	if target.ch == nil {
-		// Handshake phase: synchronous direct write, provably single-writer.
-		if target.conn == nil {
-			return
-		}
-		_ = target.conn.SetWriteDeadline(time.Now().Add(writeWait))
-		if err := target.conn.WriteJSON(env); err != nil {
-			slog.Warn("websocket write failed", "type", env.Type, "error", err)
-		}
+		c.writeDirect(target, env)
 		return
 	}
 
@@ -1810,6 +1944,109 @@ func (c *Client) sendMessageTo(target outboundTarget, env protocol.Envelope) {
 		}
 		c.failConn(target.conn, "send queue full")
 	}
+}
+
+// writeDirect is the handshake-phase write: synchronous and provably
+// single-writer because no send queue exists yet.
+func (c *Client) writeDirect(target outboundTarget, env protocol.Envelope) {
+	if target.conn == nil {
+		return
+	}
+	_ = target.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	if err := target.conn.WriteJSON(env); err != nil {
+		slog.Warn("websocket write failed", "type", applog.Sanitize(env.Type), "error", applog.Sanitize(err.Error()))
+	}
+}
+
+var (
+	errSendQueueStalled = errors.New("send queue stalled")
+	errSendQueueClosed  = errors.New("send queue closed")
+	errSendFrameTooBig  = errors.New("bulk frame exceeds send queue byte budget")
+)
+
+// sendBulkTypedMessageTo is sendTypedMessageTo for bulk frames (stream data,
+// exec output, log chunks). Unlike the control path it blocks until the queue
+// has room, so a slow controller throttles the producer instead of evicting
+// the tunnel. A non-nil return means the frame was not queued and the producer
+// should stop reading upstream.
+func (c *Client) sendBulkTypedMessageTo(ctx context.Context, target outboundTarget, msgType string, data any) error {
+	rawData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshaling %s: %w", msgType, err)
+	}
+	return c.sendBulkMessageTo(ctx, target, protocol.Envelope{Type: msgType, Data: json.RawMessage(rawData)})
+}
+
+// sendBulkMessageTo queues env once the bulk high-water marks leave room for
+// it, waiting until ctx ends, the queue closes, or streamStallTimeout passes
+// with no sendPump progress. Only a stall evicts the connection.
+func (c *Client) sendBulkMessageTo(ctx context.Context, target outboundTarget, env protocol.Envelope) error {
+	if target.ch == nil {
+		c.writeDirect(target, env)
+		return nil
+	}
+
+	switch target.state.enqueueWait(ctx, target.ch, env, streamStallTimeout) {
+	case outboundEnqueued:
+		return nil
+	case outboundCanceled:
+		return ctx.Err()
+	case outboundStalled:
+		if c.metrics != nil {
+			c.metrics.IncBackpressure()
+		}
+		c.failConn(target.conn, "send queue stalled")
+		return errSendQueueStalled
+	case outboundByteLimitExceeded:
+		if c.metrics != nil {
+			c.metrics.IncBackpressure()
+		}
+		c.failConn(target.conn, "send queue byte limit exceeded")
+		return errSendFrameTooBig
+	default:
+		c.failConn(target.conn, "send queue closed")
+		return errSendQueueClosed
+	}
+}
+
+func (s *outboundQueueState) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
+// sendLossyTypedMessageTo enqueues a best-effort message on target without
+// blocking. A queue at or above the bulk high-water marks (the control-frame
+// reserve), byte-limited or closed drops the message; it never
+// evicts the connection, unlike sendMessageTo. A target with no queue (the
+// handshake phase) is dropped too, never written directly.
+func (c *Client) sendLossyTypedMessageTo(target outboundTarget, msgType string, data any) error {
+	rawData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshaling %s: %w", msgType, err)
+	}
+	env := protocol.Envelope{Type: msgType, Data: json.RawMessage(rawData)}
+
+	if target.ch == nil || target.state == nil {
+		slog.Debug("dropping best-effort message, no send queue", "type", msgType)
+		return nil
+	}
+	var reason string
+	switch target.state.enqueueBelowBulkMark(target.ch, env) {
+	case outboundEnqueued:
+		return nil
+	case outboundQueueClosed:
+		reason = "send queue closed"
+	case outboundByteLimitExceeded:
+		reason = "send queue byte limit exceeded"
+	case outboundFrameLimitExceeded:
+		reason = "send queue full"
+	}
+	if c.metrics != nil {
+		c.metrics.IncDroppedEvent()
+	}
+	slog.Debug("dropping best-effort message", "type", msgType, "reason", reason)
+	return nil
 }
 
 func (s *outboundQueueState) enqueue(ch chan protocol.Envelope, env protocol.Envelope) outboundEnqueueResult {
@@ -1834,6 +2071,107 @@ func (s *outboundQueueState) enqueue(ch chan protocol.Envelope, env protocol.Env
 	}
 }
 
+// enqueueBelowBulkMark is the non-blocking enqueue for lossy messages. It only
+// queues env while both the frame and byte bulk high-water marks leave room, so
+// best-effort traffic never consumes the headroom reserved for control frames.
+// The check and the send happen under one lock hold.
+func (s *outboundQueueState) enqueueBelowBulkMark(ch chan protocol.Envelope, env protocol.Envelope) outboundEnqueueResult {
+	size := outboundEnvelopeBytes(env)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return outboundQueueClosed
+	}
+	if size > bulkQueuedBytesLimit-s.bytes {
+		return outboundByteLimitExceeded
+	}
+	if len(ch) >= bulkFrameLimit(ch) {
+		return outboundFrameLimitExceeded
+	}
+
+	s.bytes += size
+	select {
+	case ch <- env:
+		return outboundEnqueued
+	default:
+		s.bytes -= size
+		return outboundFrameLimitExceeded
+	}
+}
+
+// bulkFrameLimit is the queue depth at which bulk producers block: 75% of the
+// channel capacity (192 of 256). The remaining frames are headroom that only
+// control frames use, so pings, pongs, responses and stream_end are never
+// starved behind a saturated bulk stream.
+func bulkFrameLimit(ch chan protocol.Envelope) int {
+	return cap(ch) - cap(ch)/4
+}
+
+// enqueueWait is enqueue for bulk frames. It queues env once both the frame
+// and byte high-water marks leave room, and otherwise waits for the sendPump to
+// release a frame. It returns outboundCanceled when ctx ends, outboundStalled
+// when stall passes without any release (a consumer making progress keeps
+// restarting the window), and outboundByteLimitExceeded for a frame that can
+// never fit under the bulk byte limit.
+func (s *outboundQueueState) enqueueWait(ctx context.Context, ch chan protocol.Envelope, env protocol.Envelope, stall time.Duration) outboundEnqueueResult {
+	size := outboundEnvelopeBytes(env)
+	if size > bulkQueuedBytesLimit {
+		return outboundByteLimitExceeded
+	}
+	frameLimit := bulkFrameLimit(ch)
+
+	timer := time.NewTimer(stall)
+	defer timer.Stop()
+	for {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return outboundQueueClosed
+		}
+		if len(ch) < frameLimit && size <= bulkQueuedBytesLimit-s.bytes {
+			s.bytes += size
+			select {
+			case ch <- env:
+				s.mu.Unlock()
+				return outboundEnqueued
+			default:
+				s.bytes -= size
+			}
+		}
+		if s.wake == nil {
+			s.wake = make(chan struct{})
+		}
+		wake := s.wake
+		s.mu.Unlock()
+
+		select {
+		case <-wake:
+			// The pump made progress; restart the stall window.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(stall)
+		case <-ctx.Done():
+			return outboundCanceled
+		case <-timer.C:
+			return outboundStalled
+		}
+	}
+}
+
+// signalLocked wakes every bulk producer waiting in enqueueWait. s.mu must be
+// held.
+func (s *outboundQueueState) signalLocked() {
+	if s.wake != nil {
+		close(s.wake)
+		s.wake = nil
+	}
+}
+
 func (s *outboundQueueState) release(env protocol.Envelope) {
 	s.mu.Lock()
 	s.bytes -= outboundEnvelopeBytes(env)
@@ -1842,6 +2180,7 @@ func (s *outboundQueueState) release(env protocol.Envelope) {
 		// production queue path always reserves through enqueue.
 		s.bytes = 0
 	}
+	s.signalLocked()
 	s.mu.Unlock()
 }
 
@@ -1849,6 +2188,7 @@ func (s *outboundQueueState) closeAndDiscard(ch chan protocol.Envelope) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
+	s.signalLocked()
 	for {
 		select {
 		case env := <-ch:

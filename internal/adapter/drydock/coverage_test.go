@@ -47,8 +47,9 @@ func TestCapabilities(t *testing.T) {
 		t.Fatal("Capabilities() returned empty slice")
 	}
 	want := map[string]bool{
-		"dd:container-sync": true,
-		"dd:logs":           true,
+		"dd:container-sync":  true,
+		"dd:container-event": true,
+		"dd:logs":            true,
 	}
 	for _, c := range caps {
 		if !want[c] {

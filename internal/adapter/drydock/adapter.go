@@ -34,7 +34,11 @@ const (
 	maxContainerLogStreams           = 128
 
 	// maxContainerLogBytes caps a single dd:container_log_response payload.
-	maxContainerLogBytes = 100 * 1024 * 1024 // 100 MiB
+	// It travels as one JSON envelope that must fit the edge outbound byte
+	// budget and finish writing within the per-frame write deadline, so it
+	// matches the edge's buffered-response cap. Over the cap the request errors
+	// out; streaming dd:container_log_chunk requests have no such limit.
+	maxContainerLogBytes = 16 * 1024 * 1024 // 16 MiB
 )
 
 // followLogWindow and followLogGrace bound a dd:container_log_request with
@@ -97,6 +101,7 @@ func (a *Adapter) Name() string { return "drydock" }
 func (a *Adapter) Capabilities() []string {
 	return []string{
 		"dd:container-sync",
+		"dd:container-event",
 		"dd:logs",
 	}
 }
@@ -165,6 +170,22 @@ func (a *Adapter) OnContainerRefresh(ctx context.Context, sender adapter.Message
 	// to prune containers that disappeared without a removal event.
 	a.sse.BroadcastWatcherSnapshot()
 	return nil
+}
+
+// OnDockerEvent forwards one raw Docker container event as dd:container_event.
+// Edge mode (sender non-nil) sends it over the tunnel; standard mode broadcasts
+// it over SSE. Neither path blocks. The forwarded set matches the inventory:
+// BuildInventory and Refresh apply no filter, so neither does this.
+func (a *Adapter) OnDockerEvent(_ context.Context, sender adapter.MessageSender, event docker.DockerEvent) {
+	msg, ok := ContainerEventFromDocker(event)
+	if !ok {
+		return
+	}
+	if sender != nil {
+		a.sendTypedMessage(sender, protocol.TypeDDContainerEvent, msg)
+		return
+	}
+	a.sse.BroadcastContainerEvent(msg)
 }
 
 // HandleMessage handles Drydock-specific WebSocket message types.
@@ -398,6 +419,19 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 	if err != nil {
 		slog.Debug("decoding container logs", "container", msg.ContainerID, "error", err)
 	}
+	// The limiter stops at the cap without saying whether more was waiting.
+	// Probe one byte so an oversized log errors out instead of being sent
+	// silently truncated as if it were the whole log.
+	var probe [1]byte
+	if n, _ := body.Read(probe[:]); n > 0 {
+		a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
+			RequestID:   msg.RequestID,
+			ContainerID: msg.ContainerID,
+			Logs:        fmt.Sprintf("error: logs exceed %d bytes; use a streaming log request", maxContainerLogBytes),
+			Code:        protocol.ErrorCodeResponseTooLarge,
+		})
+		return
+	}
 
 	a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
 		RequestID:   msg.RequestID,
@@ -546,12 +580,21 @@ func (a *Adapter) sendContainerLogStreamChunk(
 	if sender == nil {
 		return errors.New("container log stream sender is nil")
 	}
-	if err := sender.SendTypedMessage(protocol.TypeDDContainerLogChunk, protocol.DDContainerLogChunkMessage{
+	chunk := protocol.DDContainerLogChunkMessage{
 		RequestID:   msg.RequestID,
 		ContainerID: msg.ContainerID,
 		Stream:      stream,
 		Logs:        string(logs),
-	}); err != nil {
+	}
+	// Chunks are bulk traffic: a sender that supports backpressure blocks here
+	// until the transport has room, which stops this stream reading Docker.
+	var err error
+	if bulk, ok := sender.(adapter.BulkMessageSender); ok {
+		err = bulk.SendBulkTypedMessage(ctx, protocol.TypeDDContainerLogChunk, chunk)
+	} else {
+		err = sender.SendTypedMessage(protocol.TypeDDContainerLogChunk, chunk)
+	}
+	if err != nil {
 		return fmt.Errorf("sending container log chunk: %w", err)
 	}
 	return nil
