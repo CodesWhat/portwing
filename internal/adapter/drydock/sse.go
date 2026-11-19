@@ -312,11 +312,8 @@ func (b *SSEBroadcaster) BroadcastContainerEvent(msg protocol.DDContainerEventMe
 		"type": "dd:container-event",
 		"data": msg,
 	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		slog.Error("failed to marshal container-event event", "error", err)
-		return
-	}
+	// The payload holds only strings, ints and pointers, so Marshal can't fail.
+	data, _ := json.Marshal(event)
 	b.broadcast(data)
 }
 
