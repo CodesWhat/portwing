@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -109,18 +108,12 @@ func legacyProjectName(projectDir string) string {
 // set on the agent is not modeled here. Reads go through os.Root so they stay
 // beneath STACKS_DIR. An unparseable file is an error rather than a guess.
 func (cm *ComposeManager) stackDeclaresName(stackDir string) (bool, error) {
-	absDir, err := cm.resolveStackRoot(stackDir)
-	if err != nil {
+	if _, err := cm.resolveStackRoot(stackDir); err != nil {
 		return false, err
 	}
-	absRoot, err := filepath.Abs(cm.stacksDir)
-	if err != nil {
-		return false, fmt.Errorf("resolving stacks directory: %w", err)
-	}
-	relDir, err := filepath.Rel(absRoot, absDir)
-	if err != nil {
-		return false, fmt.Errorf("resolving stack directory: %w", err)
-	}
+	// resolveStackRoot already rejected absolute and escaping paths, so the
+	// cleaned input is the directory's path relative to the stacks root.
+	relDir := filepath.Clean(stackDir)
 
 	root, err := os.OpenRoot(cm.stacksDir)
 	if err != nil {
@@ -154,18 +147,18 @@ func (cm *ComposeManager) stackDeclaresName(stackDir string) (bool, error) {
 }
 
 func readRootedFile(root *os.Root, name string) ([]byte, error) {
-	f, err := root.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
+	info, err := root.Stat(name)
 	if err != nil {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
 		return nil, os.ErrNotExist
 	}
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
 	return io.ReadAll(io.LimitReader(f, maxComposeFileBytes))
 }
 
@@ -176,9 +169,6 @@ func readRootedFile(root *os.Root, name string) ([]byte, error) {
 func composeFileName(data []byte) (string, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		if errors.Is(err, io.EOF) {
-			return "", nil
-		}
 		return "", err
 	}
 	name, _ := doc["name"].(string)

@@ -808,3 +808,100 @@ func TestExecEndNotSentWhenQueueClosed(t *testing.T) {
 		}
 	}
 }
+
+// With no send queue (the handshake phase) a bulk frame is written straight to
+// the connection instead of queued.
+func TestSendBulkMessageWritesDirectlyWithoutQueue(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newHandshakeTestClient(t)
+	if err := c.sendBulkMessageTo(context.Background(), c.currentOutboundTarget(), bulkEnvelope()); err != nil {
+		t.Fatalf("direct bulk send: %v", err)
+	}
+	if got := readFlowEnvelope(t, ctrl); got.Type != protocol.TypeStream {
+		t.Fatalf("direct frame type = %q, want %q", got.Type, protocol.TypeStream)
+	}
+}
+
+// A frame larger than the bulk byte limit can never fit, so the send fails with
+// errSendFrameTooBig and the connection is evicted and counted.
+func TestSendBulkMessageByteLimitEvictsConnection(t *testing.T) {
+	t.Parallel()
+
+	c, ctrl := newHandshakeTestClient(t)
+	c.metrics = newEdgeMetricsForBackpressureTest()
+	installUndrainedQueue(c, 4)
+
+	huge := protocol.Envelope{Type: protocol.TypeStream, Data: make(json.RawMessage, 97<<20)}
+	err := c.sendBulkMessageTo(context.Background(), c.currentOutboundTarget(), huge)
+	if !errors.Is(err, errSendFrameTooBig) {
+		t.Fatalf("oversized bulk send = %v, want %v", err, errSendFrameTooBig)
+	}
+	requireBackpressureCount(t, c.metrics, 1)
+	if err := ctrl.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	if _, _, err := ctrl.ReadMessage(); err == nil {
+		t.Fatal("connection stayed open after the byte limit was exceeded")
+	}
+}
+
+// A queue that has been closed rejects bulk frames with errSendQueueClosed.
+func TestSendBulkMessageClosedQueueFails(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newHandshakeTestClient(t)
+	ch, state := installUndrainedQueue(c, 4)
+	state.closeAndDiscard(ch)
+
+	err := c.sendBulkMessageTo(context.Background(), c.currentOutboundTarget(), bulkEnvelope())
+	if !errors.Is(err, errSendQueueClosed) {
+		t.Fatalf("bulk send on closed queue = %v, want %v", err, errSendQueueClosed)
+	}
+}
+
+// Payloads that can't be marshaled are reported, not queued.
+func TestTypedSendsReportMarshalErrors(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newHandshakeTestClient(t)
+	installUndrainedQueue(c, 4)
+	target := c.currentOutboundTarget()
+
+	if err := c.sendBulkTypedMessageTo(context.Background(), target, protocol.TypeStream, make(chan int)); err == nil || !strings.Contains(err.Error(), "marshaling") {
+		t.Fatalf("bulk marshal error = %v, want a marshaling error", err)
+	}
+	if err := c.sendLossyTypedMessageTo(target, protocol.TypeDDContainerEvent, make(chan int)); err == nil || !strings.Contains(err.Error(), "marshaling") {
+		t.Fatalf("lossy marshal error = %v, want a marshaling error", err)
+	}
+	if len(target.ch) != 0 {
+		t.Fatalf("queue depth = %d, want 0", len(target.ch))
+	}
+}
+
+// When a stream chunk can't be queued the proxy stops reading dockerd: the body
+// is read once, closed, and no further chunk or stream_end is attempted.
+func TestStreamResponseAbandonedWhenBulkSendFails(t *testing.T) {
+	t.Parallel()
+
+	c, _ := newHandshakeTestClient(t)
+	ch, state := installUndrainedQueue(c, 4)
+	state.closeAndDiscard(ch)
+
+	body := &multiChunkReader{chunks: [][]byte{[]byte("one"), []byte("two"), []byte("three")}}
+	//nolint:bodyclose // consumed and closed by handleRequest, the code under test.
+	c.dockerClient = &fakeDocker{streamResp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       nopReadCloser{body},
+	}}
+
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "abandon",
+		Method:    "GET",
+		Path:      "/containers/abc/logs",
+	})
+	if body.i != 1 {
+		t.Fatalf("body reads = %d, want 1 (stream must stop after the failed send)", body.i)
+	}
+}

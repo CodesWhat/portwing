@@ -555,3 +555,52 @@ func TestExecute_FakeBinaryReceivesProjectName(t *testing.T) {
 		}
 	}
 }
+
+func TestStackDeclaresName_RejectsEscapingStackDir(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir(), composeBin: "docker", isV2: true}
+	if _, err := cm.stackDeclaresName("../outside"); err == nil || !strings.Contains(err.Error(), "escapes stacks directory") {
+		t.Fatalf("err = %v, want an escapes-stacks-directory error", err)
+	}
+}
+
+// A directory named like a compose file isn't one Compose would load, so it is
+// skipped and the next candidate in the group is read instead.
+func TestStackDeclaresName_NonRegularFileSkipped(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dir := writeStack(t, root, "grp/app", "docker-compose.yml", "name: custom\n")
+	if err := os.Mkdir(filepath.Join(dir, "compose.yaml"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	cm := &ComposeManager{stacksDir: root, composeBin: "docker", isV2: true}
+	got, err := cm.stackDeclaresName("grp/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Fatal("stackDeclaresName = false, want true from the fallback file")
+	}
+}
+
+func TestStackDeclaresName_UnreadableFileFails(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("file permissions don't apply to root")
+	}
+	root := t.TempDir()
+	dir := writeStack(t, root, "grp/app", "compose.yaml", "name: custom\n")
+	path := filepath.Join(dir, "compose.yaml")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	cm := &ComposeManager{stacksDir: root, composeBin: "docker", isV2: true}
+	if _, err := cm.stackDeclaresName("grp/app"); err == nil || !strings.Contains(err.Error(), "reading compose.yaml") {
+		t.Fatalf("err = %v, want a reading compose.yaml error", err)
+	}
+}
