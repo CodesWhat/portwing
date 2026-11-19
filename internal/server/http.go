@@ -315,7 +315,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		cfg:          cfg,
 		dockerClient: dockerClient,
 		adapter:      a,
-		compose:      docker.NewComposeManager(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket),
+		compose:      docker.NewComposeManagerWithLister(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket, dockerClient),
 		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
 		metrics:      metrics.NewRegistry(),
 		rateLimiter:  NewRateLimiter(),

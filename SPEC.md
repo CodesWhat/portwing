@@ -219,6 +219,14 @@ endpoint; the caller's cutoff does not constrain the stream.
 Continuous tailing uses the `request`/`stream`/`stream_end` path against
 `GET /containers/{id}/logs?follow=1`.
 
+Logs over the 16 MiB buffered cap are not truncated. The agent sends a
+`dd:container_log_response` whose `logs` is a short `error: logs exceed ...`
+string and whose optional `code` is `response_too_large`. The same code is the
+stable signal for an over-cap non-stream edge response: the `error` frame
+carries `code: "response_too_large"` alongside the human-readable `message`
+(`{"message":"response exceeds 16777216 bytes; use a streaming request","code":"response_too_large","requestId":"..."}`).
+Match on `code`; the message text can change.
+
 ## 4. Standard Mode HTTP API
 
 ### 4.1 Agent Endpoints
@@ -319,6 +327,15 @@ type DockerClient struct {
 | `ps` | `--format json` |
 | `logs` | `--tail N` |
 | `restart` / `stop` / `start` | -- |
+
+Every operation passes `-p <project>` before the subcommand. The project name is
+`<normalized-relative-dir>-<10 hex of SHA-256(relative dir)>`, unique per
+`STACKS_DIR`-relative stack directory, so nested stacks with the same basename
+don't share a project (and `--remove-orphans` can't remove each other's
+containers). `-p` is omitted when a compose file sets a top-level `name:`. A
+stack with existing containers labeled `com.docker.compose.project=<basename>` and
+`com.docker.compose.project.working_dir=<stack dir>` (deployed by <= 1.3.0) keeps
+the basename.
 
 ### 6.2 Security
 
@@ -542,6 +559,10 @@ data: {"type":"dd:container-removed","data":{"id":"abc123"}}
 data: {"type":"dd:container-event","data":{...ContainerEvent...}}
 ```
 
+The stream also carries a `: heartbeat` comment line every 15 s. Drydock arms
+its 45 s stalled-stream watchdog only after the first one, and it keeps
+proxies with short idle timeouts from cutting a quiet stream.
+
 `dd:container_event` (Edge) and `dd:container-event` (SSE) carry one raw Docker
 event each, with no coalescing or classification:
 
@@ -585,7 +606,7 @@ controllers ignore the unknown type.
 | Resource | Limit |
 |----------|-------|
 | WebSocket read | 16 MB |
-| Response body read | 100 MB |
+| Response body read (edge, buffered) | 16 MiB |
 | Streamed request body (`edge-request-body-stream`) | 512 MB in-memory buffer per request; 1 GB summed across every streamed body held in memory, reassembling and already dispatched alike, the latter until its Docker round trip ends; 100 concurrent reassemblies; 30s idle timeout between chunks, re-armed by each chunk |
 | Exec request body | 10 MB |
 | Enrollment request body | 64 KiB / 10 seconds |
@@ -608,7 +629,8 @@ Attempt 1: connect -> fail -> wait 1s (+/-25% jitter)
 Attempt 2: connect -> fail -> wait 2s (+/-25% jitter)
 ...
 Attempt N: connect -> fail -> wait min(2^N, 60s) (+/-25% jitter)
-On success: reset backoff to 1s
+On success: reset backoff to 1s, but only once the connection has stayed up for 30s
+(a connection that drops right after the welcome keeps backing off)
 ```
 
 A hello rejection (`error` frame in place of `welcome`) is classified before

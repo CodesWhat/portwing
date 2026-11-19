@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   toolchain lockfile findings fail only PRs that change npm dependencies, plus
   scheduled scans.
 
+### Fixed
+
+- Edge mode applies backpressure to bulk streams (Docker streams, exec output, Drydock log chunks) instead of evicting the whole tunnel when the controller reads slower than the source writes; only a controller that makes no progress for 30 s is dropped. Buffered responses over 16 MiB now fail with an error instead of being truncated, and reconnect backoff resets only after a connection stays up for 30 s.
+- Drydock-mode SSE sends a `: heartbeat` every 15 s so Drydock's stalled-stream watchdog arms and proxies don't cut idle streams.
+- Give each Compose stack a unique project name derived from its `STACKS_DIR`
+  directory. Stacks sharing a final directory name (such as `customer-a/v2` and
+  `customer-b/v2`) used to share a project, so `up` or `down` with
+  `--remove-orphans` on one removed the other's containers. A top-level `name:`
+  in the stack's Compose file is still honored, and stacks already running under
+  the old directory-name project are adopted rather than orphaned.
+
 ## [v1.3.0] - 2026-11-17
 
 ### Added

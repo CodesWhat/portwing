@@ -76,7 +76,7 @@ func loggedFor(output, message, containerID string) bool {
 
 // TestMaxContainerLogBytesValue pins the computed value of
 // maxContainerLogBytes against the two ARITHMETIC_BASE mutants on its
-// `100 * 1024 * 1024` literal (adapter.go:35:29, adapter.go:35:36). Either
+// `16 * 1024 * 1024` literal (adapter.go:35:29, adapter.go:35:36). Either
 // multiplication turned into a division collapses the cap to 0 or to 100
 // bytes; the second survives every behavioural test, none of which sends a
 // buffered log response larger than that.
@@ -87,7 +87,7 @@ func loggedFor(output, message, containerID string) bool {
 func TestMaxContainerLogBytesValue(t *testing.T) {
 	t.Parallel()
 
-	const want = 100 * 1024 * 1024
+	const want = 16 * 1024 * 1024
 	if maxContainerLogBytes != want {
 		t.Fatalf("maxContainerLogBytes = %d, want %d", maxContainerLogBytes, want)
 	}

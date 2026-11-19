@@ -74,7 +74,7 @@ Portwing implements the following:
 - **Audit log**: structured JSON audit trail (`AUDIT_LOG`) of auth failures, enrollment attempts, and mutating operations.
 - **TLS**: TLS 1.2+ with modern AEAD cipher suites only; certificate and key must be configured together or startup fails.
 - **Docker Compose security**: root-confined symlink-resistant file writes, path traversal protection, env var validation and denylist, service name injection prevention.
-- **Resource limits**: WebSocket read (16 MB), response body (100 MB), exec body (10 MB), signed-request body (1 MB), enrollment body (64 KiB / 10 seconds), concurrent enrollment handlers (32 agent-wide / 2 per client), concurrent sessions (100), cold Argon2 derivations (2), nonce LRU (10,000).
+- **Resource limits**: WebSocket read (16 MB), buffered response body (16 MiB), exec body (10 MB), signed-request body (1 MB), enrollment body (64 KiB / 10 seconds), concurrent enrollment handlers (32 agent-wide / 2 per client), concurrent sessions (100), cold Argon2 derivations (2), nonce LRU (10,000).
 
 ### Nonce cache capacity
 

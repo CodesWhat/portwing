@@ -555,7 +555,7 @@ func TestComposeManagerExecute_ConcurrentSameStackSerializes(t *testing.T) {
 	cm := &ComposeManager{stacksDir: dir, composeBin: scriptPath, isV2: false}
 
 	const runs = 5
-	contents := []string{"content-A", "content-B"}
+	contents := []string{"x-content: A", "x-content: B"}
 	for i := 0; i < runs; i++ {
 		start := make(chan struct{})
 		var wg sync.WaitGroup
@@ -620,7 +620,7 @@ func TestComposeManagerExecute_ConcurrentSameStackDirDifferentNamesSerializes(t 
 
 	const runs = 5
 	names := []string{"app-a", "app-b"}
-	contents := []string{"content-A", "content-B"}
+	contents := []string{"x-content: A", "x-content: B"}
 	for i := 0; i < runs; i++ {
 		start := make(chan struct{})
 		var wg sync.WaitGroup

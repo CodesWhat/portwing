@@ -371,3 +371,64 @@ func TestContainerEventSenderNeverWritesDirectlyDuringHandshake(t *testing.T) {
 		t.Fatal("event was written directly during the handshake")
 	}
 }
+
+func lossyTestSender(t *testing.T, size int) (*edgeMessageSender, outboundTarget) {
+	t.Helper()
+	c, _ := newHandshakeTestClient(t)
+	target := outboundTarget{ch: make(chan protocol.Envelope, size), state: &outboundQueueState{}}
+	return &edgeMessageSender{client: c, target: &target, lossy: true}, target
+}
+
+func TestLossyEventDropsAtFrameHighWaterMark(t *testing.T) {
+	t.Parallel()
+
+	sender, target := lossyTestSender(t, 256)
+	for i := 0; i < bulkFrameLimit(target.ch); i++ {
+		if r := target.state.enqueue(target.ch, protocol.Envelope{Type: "bulk"}); r != outboundEnqueued {
+			t.Fatalf("seed bulk frame %d: %v", i, r)
+		}
+	}
+	if err := sender.SendTypedMessage(protocol.TypeDDContainerEvent, map[string]int{"n": 1}); err != nil {
+		t.Fatalf("lossy send: %v", err)
+	}
+	if got := len(target.ch); got != 192 {
+		t.Fatalf("queue depth = %d, want 192 (event must be dropped)", got)
+	}
+	if r := target.state.enqueue(target.ch, protocol.Envelope{Type: "pong"}); r != outboundEnqueued {
+		t.Fatalf("control frame after dropped event: %v", r)
+	}
+	if got := len(target.ch); got != 193 {
+		t.Fatalf("queue depth = %d, want 193", got)
+	}
+}
+
+func TestLossyEventDropsAtByteHighWaterMark(t *testing.T) {
+	t.Parallel()
+
+	sender, target := lossyTestSender(t, 256)
+	target.state.bytes = bulkQueuedBytesLimit - 4
+	if err := sender.SendTypedMessage(protocol.TypeDDContainerEvent, map[string]int{"n": 1}); err != nil {
+		t.Fatalf("lossy send: %v", err)
+	}
+	if len(target.ch) != 0 || target.state.bytes != bulkQueuedBytesLimit-4 {
+		t.Fatalf("event enqueued past the byte mark: depth=%d bytes=%d", len(target.ch), target.state.bytes)
+	}
+	if r := target.state.enqueue(target.ch, protocol.Envelope{Type: "pong"}); r != outboundEnqueued {
+		t.Fatalf("control frame after dropped event: %v", r)
+	}
+}
+
+func TestLossyEventEnqueuesBelowBulkMarks(t *testing.T) {
+	t.Parallel()
+
+	sender, target := lossyTestSender(t, 256)
+	for i := 0; i < bulkFrameLimit(target.ch)-1; i++ {
+		target.state.enqueue(target.ch, protocol.Envelope{Type: "bulk"})
+	}
+	if err := sender.SendTypedMessage(protocol.TypeDDContainerEvent, map[string]int{"n": 1}); err != nil {
+		t.Fatalf("lossy send: %v", err)
+	}
+	if got := len(target.ch); got != 192 {
+		t.Fatalf("queue depth = %d, want 192 (event should enqueue)", got)
+	}
+}

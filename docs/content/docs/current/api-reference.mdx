@@ -479,6 +479,28 @@ dump is never the default. Combined stdout and stderr from any compose
 operation is capped at 10 MB; output past the cap is dropped and the captured
 output ends with an `[output truncated: ...]` marker.
 
+### Project names
+
+Every Compose command runs under a project name that is unique to the stack
+directory, so stacks that share a final path component (for example
+`customer-a/v2` and `customer-b/v2`) never see each other's containers as
+orphans. The agent passes `-p <name>` on every operation, where `<name>` is the
+`STACKS_DIR`-relative directory lowercased with invalid characters collapsed to
+`-`, followed by a short hash of the exact path (`customer-a-v2-3f9c1a7b2e`).
+
+Two cases keep a different name:
+
+- If the stack's Compose file (`compose.yaml`, `compose.yml`,
+  `docker-compose.yaml`, `docker-compose.yml`, or an override file) sets a
+  top-level `name:`, the agent passes no `-p` and Compose uses that name.
+- Stacks deployed by Portwing 1.3.0 or earlier ran under the directory's
+  basename. If containers already exist with `com.docker.compose.project` equal
+  to that basename and `com.docker.compose.project.working_dir` equal to this
+  stack's directory, the agent keeps using the basename so the running stack
+  isn't orphaned by an upgrade. The working directory label is what stops one
+  stack adopting another's project. Once such a stack is brought `down`, its next
+  `up` uses the new unique name.
+
 ### Response
 
 ```json

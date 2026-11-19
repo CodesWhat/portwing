@@ -17,6 +17,16 @@ type MessageSender interface {
 	SendTypedMessage(msgType string, data any) error
 }
 
+// BulkMessageSender is implemented by senders that can apply backpressure to
+// high-volume frames. SendBulkTypedMessage blocks until the transport has room
+// (or ctx ends, or the transport stalls) instead of failing the whole
+// connection when it is momentarily full. Producers that loop over a source
+// (log lines, stream chunks) use it when available and stop on error.
+type BulkMessageSender interface {
+	MessageSender
+	SendBulkTypedMessage(ctx context.Context, msgType string, data any) error
+}
+
 // LabelParser extracts adapter-specific metadata from container labels.
 type LabelParser func(labels map[string]string) LabelResult
 

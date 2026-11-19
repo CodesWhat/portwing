@@ -348,6 +348,9 @@ type DDContainerLogResponseMessage struct {
 	RequestID   string `json:"requestId,omitempty"`
 	ContainerID string `json:"containerId"`
 	Logs        string `json:"logs"`
+	// Code is set only on an error response (currently
+	// protocol.ErrorCodeResponseTooLarge); absent on success.
+	Code string `json:"code,omitempty"`
 }
 
 type DDContainerLogChunkMessage struct {
