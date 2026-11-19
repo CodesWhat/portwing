@@ -61,12 +61,12 @@ const FRAMEWORK_PAGES = new Set(["404.html", "_not-found.html"]);
 
 export function decodeEntities(value) {
   return value
-    .replaceAll("&amp;", "&")
     .replaceAll("&quot;", '"')
     .replaceAll("&#x27;", "'")
     .replaceAll("&#39;", "'")
     .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">");
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
 }
 
 export function parseSitemapLocs(xml) {
