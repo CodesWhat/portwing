@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vulnerability gates now hard-fail on what ships (Go modules and images). Web
   toolchain lockfile findings fail only PRs that change npm dependencies, plus
   scheduled scans.
+- Homebrew cask updates are pushed to a `portwing-<version>` branch on
+  CodesWhat/homebrew-tap instead of directly to main. The tap opens and
+  auto-merges the pull request.
+- Website and docs: accessibility fixes (Lighthouse accessibility 1.00), PostHog
+  loads after the page, the icon sprite is served as a static file, and new
+  checks cover the sitemap, robots.txt and every exported link and CTA.
 
 ### Fixed
 

@@ -45,7 +45,7 @@ export function Footer() {
       <div className="wrap">
         <div className="fgrid">
           <div>
-            <a className="brand" href="/">
+            <a className="brand" href="/" aria-label={`${SITE_CONFIG.name} home`}>
               {/* biome-ignore lint/performance/noImgElement: basePath="/docs" makes next/image prepend /docs to root-relative src; this asset lives at the marketing-site origin root, so a plain <img> is required. */}
               <img
                 src="/brand/pigeon-64.webp"

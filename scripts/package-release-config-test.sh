@@ -336,6 +336,22 @@ require_text ".goreleaser.yml" "dst: /usr/lib/systemd/system/portwing.service" "
 require_text ".goreleaser.yml" "homebrew_casks:" "GoReleaser must publish a Homebrew cask"
 require_text ".goreleaser.yml" "skip_upload: auto" "prereleases must not update the stable Homebrew channel"
 require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebrew publishing must use the dedicated tap token"
+# Tap main is protected, so the cask goes out as a push to a version-specific
+# head branch. The tap's own workflow opens and auto-merges the PR, which keeps
+# HOMEBREW_TAP_TOKEN at contents write; a pull_request block here would need
+# pull-requests write too.
+require_exactly_one_active ".goreleaser.yml" \
+	'^      branch:' \
+	'      branch: portwing-{{ .Version }}' \
+	"Homebrew publishing must push a version-specific head branch, never tap main"
+if active_lines ".goreleaser.yml" | grep -qE '^      branch: main$'; then
+	echo "FAIL: Homebrew publishing must not push directly to tap main (.goreleaser.yml has an active head 'branch: main')" >&2
+	failures=$((failures + 1))
+fi
+if active_lines ".goreleaser.yml" | grep -qE '^[[:space:]]+pull_request:'; then
+	echo "FAIL: Homebrew publishing must not open the pull request itself, the tap workflow does (.goreleaser.yml has an active pull_request block that would need pull-requests write on the tap credential)" >&2
+	failures=$((failures + 1))
+fi
 public_site="https://portwing.codeswhat.com"
 protected_site="https://getportwing-codeswhat.vercel.app"
 
@@ -665,6 +681,21 @@ require_text ".github/workflows/release.yml" 'HOMEBREW_TAP_TOKEN: ${{ secrets.HO
 require_text ".github/workflows/release.yml" "Verify deb package install" "the release must install-test the deb package"
 require_text ".github/workflows/release.yml" "Verify rpm package install" "the release must install-test the rpm package"
 require_text ".github/workflows/release.yml" "Verify Homebrew cask install" "the release must install-test the published Homebrew cask"
+require_text ".github/workflows/release.yml" "Wait for the tap PR to merge" "verify-homebrew must wait for the tap PR to merge before installing the cask"
+verify_homebrew_job="$(awk '/^  verify-homebrew:/ { in_job = 1; print; next } in_job && /^  [A-Za-z0-9_-]+:/ { in_job = 0 } in_job { print }' .github/workflows/release.yml)"
+# shellcheck disable=SC2016 # the patterns are literal workflow text
+if ! grep -qF 'max_attempts=40' <<<"${verify_homebrew_job}" ||
+	! grep -qF 'for attempt in $(seq 1 "${max_attempts}")' <<<"${verify_homebrew_job}" ||
+	! grep -qF 'sleep 30' <<<"${verify_homebrew_job}" ||
+	grep -qE 'while (true|:)|until ' <<<"${verify_homebrew_job}"; then
+	echo "FAIL: verify-homebrew's tap wait must be a bounded loop (40 attempts, 30 s apart, no while/until)" >&2
+	failures=$((failures + 1))
+fi
+homebrew_timeout="$(grep -E '^    timeout-minutes:' <<<"${verify_homebrew_job}" | head -n 1 | tr -dc '0-9')"
+if [ -z "${homebrew_timeout}" ] || [ "${homebrew_timeout}" -le 20 ]; then
+	echo "FAIL: verify-homebrew timeout-minutes (${homebrew_timeout:-unset}) must exceed the 20 minute tap wait" >&2
+	failures=$((failures + 1))
+fi
 require_text ".github/workflows/release.yml" "ubuntu:24.04@sha256:" "the deb smoke image must be digest-pinned"
 require_text ".github/workflows/release.yml" "fedora:42@sha256:" "the rpm smoke image must be digest-pinned"
 # shellcheck disable=SC2016 # The workflow expands GITHUB_REF_NAME.
