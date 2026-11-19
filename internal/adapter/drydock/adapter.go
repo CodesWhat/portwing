@@ -97,6 +97,7 @@ func (a *Adapter) Name() string { return "drydock" }
 func (a *Adapter) Capabilities() []string {
 	return []string{
 		"dd:container-sync",
+		"dd:container-event",
 		"dd:logs",
 	}
 }
@@ -165,6 +166,22 @@ func (a *Adapter) OnContainerRefresh(ctx context.Context, sender adapter.Message
 	// to prune containers that disappeared without a removal event.
 	a.sse.BroadcastWatcherSnapshot()
 	return nil
+}
+
+// OnDockerEvent forwards one raw Docker container event as dd:container_event.
+// Edge mode (sender non-nil) sends it over the tunnel; standard mode broadcasts
+// it over SSE. Neither path blocks. The forwarded set matches the inventory:
+// BuildInventory and Refresh apply no filter, so neither does this.
+func (a *Adapter) OnDockerEvent(_ context.Context, sender adapter.MessageSender, event docker.DockerEvent) {
+	msg, ok := ContainerEventFromDocker(event)
+	if !ok {
+		return
+	}
+	if sender != nil {
+		a.sendTypedMessage(sender, protocol.TypeDDContainerEvent, msg)
+		return
+	}
+	a.sse.BroadcastContainerEvent(msg)
 }
 
 // HandleMessage handles Drydock-specific WebSocket message types.

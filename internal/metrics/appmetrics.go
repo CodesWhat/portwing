@@ -51,6 +51,7 @@ type Registry struct {
 	controllerConnected atomic.Bool
 	reconnectsTotal     atomic.Uint64
 	backpressureTotal   atomic.Uint64
+	droppedEventsTotal  atomic.Uint64
 
 	// Audit export health is sampled when metrics or export endpoints run.
 	auditBufferRecords  atomic.Int64
@@ -150,6 +151,12 @@ func (reg *Registry) IncReconnect() {
 // backpressure.
 func (reg *Registry) IncBackpressure() {
 	reg.backpressureTotal.Add(1)
+}
+
+// IncDroppedEvent records a best-effort lifecycle event dropped because the
+// outbound queue was full or closed.
+func (reg *Registry) IncDroppedEvent() {
+	reg.droppedEventsTotal.Add(1)
 }
 
 // SetAuditState updates the current in-memory audit buffer and sink gauges.
@@ -278,6 +285,9 @@ func (reg *Registry) WritePrometheus(b *strings.Builder, escapeLabel func(string
 		fmt.Fprintf(b, "# HELP portwing_edge_backpressure_events_total Total edge connections evicted because the outbound queue was full.\n")
 		fmt.Fprintf(b, "# TYPE portwing_edge_backpressure_events_total counter\n")
 		fmt.Fprintf(b, "portwing_edge_backpressure_events_total %d\n", reg.backpressureTotal.Load())
+		fmt.Fprintf(b, "# HELP portwing_edge_dropped_events_total Total container events dropped because the outbound queue was full or closed.\n")
+		fmt.Fprintf(b, "# TYPE portwing_edge_dropped_events_total counter\n")
+		fmt.Fprintf(b, "portwing_edge_dropped_events_total %d\n", reg.droppedEventsTotal.Load())
 	}
 
 	auditSinkEnabled := 0

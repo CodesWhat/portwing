@@ -98,7 +98,7 @@ sequenceDiagram
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
                       "edge-response-body-b64", "edge-request-body-stream",
-                      "dd:container-sync", "dd:logs"],
+                      "dd:container-sync", "dd:container-event", "dd:logs"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
     "triggerTypes": []
@@ -190,6 +190,7 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 | `dd:container_added` | Agent -> Server | New container discovered |
 | `dd:container_updated` | Agent -> Server | Container state/metadata changed |
 | `dd:container_removed` | Agent -> Server | Container removed |
+| `dd:container_event` | Agent -> Server | Raw Docker container lifecycle event (`die`, `oom`, `stop`, `start`, `restart`) for controller state alerts; advertised as `dd:container-event` |
 | `dd:component_sync` | Agent -> Server | Watcher + trigger component descriptors |
 | `dd:watch_request` | Server -> Agent | Reserved legacy remote-watcher message; not advertised by the controller-owned contract |
 | `dd:watch_response` | Agent -> Server | Reserved legacy remote-watcher response |
@@ -538,7 +539,27 @@ data: {"type":"dd:ack","data":{"version":"0.9.0","os":"linux","arch":"amd64",...
 data: {"type":"dd:container-added","data":{...Container...}}
 data: {"type":"dd:container-updated","data":{...Container...}}
 data: {"type":"dd:container-removed","data":{"id":"abc123"}}
+data: {"type":"dd:container-event","data":{...ContainerEvent...}}
 ```
+
+`dd:container_event` (Edge) and `dd:container-event` (SSE) carry one raw Docker
+event each, with no coalescing or classification:
+
+```json
+{"containerId":"abc123","name":"web","action":"die","exitCode":137,"time":1749820800123}
+```
+
+`action` is Docker's own name and is one of `die`, `oom`, `stop`, `start`,
+`restart`; every other action (including `kill`) and every non-container event
+is ignored. `exitCode` appears only on `die`, parsed from the event's `exitCode`
+attribute, and is omitted when absent. `oomKilled` (`true`) appears only on
+`oom`. `time` is Unix milliseconds from Docker's `timeNano` (or `time` x 1000
+when `timeNano` is 0). `name` has no leading slash. A user stop emits `kill`,
+`die`, `stop`; Portwing forwards the `die` and the `stop` as two messages and
+never dedupes a `stop` that follows a `die`. Events are sent as they happen
+and are not replayed after a Docker event-stream reconnect or while no
+controller is connected; the inventory poll still reports final state. Older
+controllers ignore the unknown type.
 
 ## 11. Security Model
 
