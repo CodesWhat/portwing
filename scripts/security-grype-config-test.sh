@@ -397,7 +397,7 @@ grep -Fxq '          fail-build: ${{ steps.web-gate.outputs.enforce }}' <<<"${we
 grep -Fxq '          path: ${{ runner.temp }}/web-lock' <<<"${web_step}" ||
 	fail "the web toolchain step must scan the staged lockfile copy, not the repository"
 grep -Fxq '          config: .grype.yaml' <<<"${web_step}" ||
-	fail "the web toolchain step must load .grype.yaml for the picomatch waiver"
+	fail "the web toolchain step must load .grype.yaml for any npm waivers"
 grep -Fq 'cp package-lock.json' <<<"$(step_block 'Stage the npm lockfile')" ||
 	fail "the staging step must copy the root package-lock.json"
 if grep -v '^[[:space:]]*#' <<<"${deps_block}" | grep -Eq 'npm (ci|install)|setup-node'; then
@@ -410,13 +410,9 @@ grep -Fxq '          category: grype-deps' <<<"$(step_block 'Upload Grype depend
 grep -Fxq '          category: grype-web' <<<"$(step_block 'Upload Grype web toolchain SARIF')" ||
 	fail "the web toolchain SARIF must upload under category grype-web"
 
-# The one npm waiver is expiring and lives in .grype.yaml.
-picomatch_entry="$(grep -n -A6 -F -- '- vulnerability: GHSA-fc5q-39xc-vjpf' .grype.yaml || true)"
-if ! grep -Fq 'name: picomatch' <<<"${picomatch_entry}" ||
-	! grep -Fq 'version: 4.0.7' <<<"${picomatch_entry}" ||
-	! grep -Fq 'type: npm' <<<"${picomatch_entry}" ||
-	! grep -Eq 'reason:.*expires: 2026-12-17([^0-9]|")' <<<"${picomatch_entry}"; then
-	fail ".grype.yaml must carry the expiring picomatch 4.0.7 (npm) waiver for GHSA-fc5q-39xc-vjpf, with 'expires: 2026-12-17' in its reason"
+# The withdrawn picomatch advisory must not come back as a waiver.
+if grep -Fq 'GHSA-fc5q-39xc-vjpf' <(grep -v '^[[:space:]]*#' .grype.yaml); then
+	fail ".grype.yaml must not carry a GHSA-fc5q-39xc-vjpf entry; GitHub withdrew that advisory"
 fi
 
 # The expiry is enforced, not just recorded: a script reads every ignore

@@ -446,19 +446,12 @@ assert_rejected \
 	"must not install npm dependencies" \
 	"contract must reject an npm install in the scan job"
 
-# The picomatch waiver and its expiry.
+# The withdrawn picomatch waiver is re-added.
 reset_fixture
-sed -i.bak 's/expires: 2026-12-17/expires: 2027-01-01/g' "${test_root}/.grype.yaml"
+printf '  - vulnerability: GHSA-fc5q-39xc-vjpf\n    package:\n      name: picomatch\n' >>"${test_root}/.grype.yaml"
 assert_rejected \
-	"expiring picomatch 4.0.7 (npm) waiver" \
-	"contract must reject a waiver whose expiry date changed"
-
-# The date moves out of the parseable 'expires:' convention.
-reset_fixture
-sed -i.bak 's/expires: 2026-12-17/remove by 2026-12-17/g' "${test_root}/.grype.yaml"
-assert_rejected \
-	"with 'expires: 2026-12-17' in its reason" \
-	"contract must reject a date outside the enforced expires: convention"
+	"must not carry a GHSA-fc5q-39xc-vjpf entry" \
+	"contract must reject a re-added picomatch waiver"
 
 # The expiry step is dropped from the scan job.
 reset_fixture
