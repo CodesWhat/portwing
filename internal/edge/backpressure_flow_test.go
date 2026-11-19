@@ -459,20 +459,45 @@ func TestStalledConsumerIsEvictedAfterStallDeadline(t *testing.T) {
 
 // A consumer that is slow but moving restarts the stall window with every
 // frame it takes, so a producer well past the deadline in total is not evicted.
+// Capacity stays unavailable throughout: each wake comes from a release that
+// leaves the queue at its frame limit, so the producer can only survive the
+// original deadline because the window was reset, not because room appeared.
 func TestSlowButMovingConsumerIsNotEvicted(t *testing.T) {
 	t.Parallel()
 
+	const (
+		stall    = 200 * time.Millisecond
+		interval = 40 * time.Millisecond
+		beats    = 8 // 320ms of progress, past the original 200ms deadline
+	)
 	ch := make(chan protocol.Envelope, 4)
 	state := &outboundQueueState{}
 	for i := 0; i < bulkFrameLimit(ch); i++ {
 		state.enqueue(ch, bulkEnvelope())
 	}
 	done := make(chan outboundEnqueueResult, 1)
-	go func() { done <- state.enqueueWait(context.Background(), ch, bulkEnvelope(), time.Minute) }()
+	go func() { done <- state.enqueueWait(context.Background(), ch, bulkEnvelope(), stall) }()
 	waitForBulkWaiter(t, state)
+
+	for i := 0; i < beats; i++ {
+		time.Sleep(interval)
+		// Progress signal without freeing a slot: len(ch) stays at the limit.
+		state.release(bulkEnvelope())
+		select {
+		case got := <-done:
+			t.Fatalf("producer returned %d after %d progress signals with no capacity free", got, i+1)
+		default:
+		}
+	}
+
 	state.release(<-ch)
-	if got := <-done; got != outboundEnqueued {
-		t.Fatalf("enqueue after progress = %d, want outboundEnqueued", got)
+	select {
+	case got := <-done:
+		if got != outboundEnqueued {
+			t.Fatalf("enqueue after sustained progress = %d, want outboundEnqueued", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("producer never enqueued once capacity freed")
 	}
 }
 
