@@ -227,9 +227,17 @@ define the integration contract:
 2. Docker inspection and update calls traverse Portwing's authenticated,
    transparent proxy: inbound HTTP in Standard Mode or correlated
    `request`/`response` messages over the outbound WebSocket in Edge Mode.
-3. Portwing reports inventory, reads `dd.*` labels, and emits Docker lifecycle
-   events. `events: "portwing"` prevents Drydock from opening a second Docker
-   event stream through the proxy.
+3. Portwing reports inventory, reads `dd.*` labels, and emits container
+   inventory events. In Drydock mode these are poll-diffed: Portwing refreshes
+   the container list every `DD_POLL_INTERVAL` and emits added, updated and
+   removed events when a container's name, status or health changes. In Edge
+   Mode a positive `pollInterval` in the controller's welcome frame overrides
+   `DD_POLL_INTERVAL`. In Standard Mode each cycle also broadcasts a full
+   snapshot over SSE. In Edge Mode the added, updated and removed events go over
+   the WebSocket as individual messages and the full snapshot goes only to the
+   SSE broadcaster. It does not forward raw Docker lifecycle events.
+   `events: "portwing"` prevents Drydock from opening a second Docker event
+   stream through the proxy.
 4. Drydock records the watcher result and owns update orchestration and update
    operation events.
 
