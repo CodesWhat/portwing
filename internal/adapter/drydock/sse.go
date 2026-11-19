@@ -15,6 +15,7 @@ import (
 
 	"github.com/codeswhat/portwing/internal/adapter"
 	"github.com/codeswhat/portwing/internal/metrics"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 // sseHeartbeatInterval is how often ServeHTTP writes a `: heartbeat` comment.
@@ -290,6 +291,30 @@ func (b *SSEBroadcaster) BroadcastContainerRemoved(id, name string) {
 	data, err := json.Marshal(event)
 	if err != nil {
 		slog.Error("failed to marshal container-removed event", "error", err)
+		return
+	}
+	b.broadcast(data)
+}
+
+// BroadcastContainerEvent sends a dd:container-event event to all clients. With
+// no connected client the event is dropped with a debug log; a client whose
+// buffer is full drops it too (see broadcast), so the Docker event reader never
+// blocks.
+func (b *SSEBroadcaster) BroadcastContainerEvent(msg protocol.DDContainerEventMessage) {
+	b.mu.RLock()
+	n := len(b.clients)
+	b.mu.RUnlock()
+	if n == 0 {
+		slog.Debug("no SSE client connected, dropping container event", "action", msg.Action, "containerId", msg.ContainerID)
+		return
+	}
+	event := map[string]any{
+		"type": "dd:container-event",
+		"data": msg,
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		slog.Error("failed to marshal container-event event", "error", err)
 		return
 	}
 	b.broadcast(data)

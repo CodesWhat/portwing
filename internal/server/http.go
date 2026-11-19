@@ -168,8 +168,11 @@ type Server struct {
 	// pollCtx bounds the pollContainers goroutine started by ListenAndServe;
 	// pollCancel stops it on Shutdown. Both are set at construction so a
 	// Shutdown racing server startup never sees a half-written field.
-	pollCtx    context.Context
-	pollCancel context.CancelFunc
+	pollCtx context.Context
+	// eventSubscribe opens the Docker event subscription for dd:container_event
+	// forwarding; tests replace it.
+	eventSubscribe adapter.EventSubscribe
+	pollCancel     context.CancelFunc
 	// hupDone is closed by Shutdown to stop the SIGHUP goroutine.
 	hupDone chan struct{}
 	// hupCh is the signal channel registered for SIGHUP; kept so Shutdown
@@ -1058,6 +1061,7 @@ func (s *Server) waitForActiveHandlers(ctx context.Context) error {
 // polling and uses TLS if certificates are configured.
 func (s *Server) ListenAndServe() error {
 	go s.pollContainers(s.pollCtx)
+	go s.forwardContainerEvents(s.pollCtx)
 
 	if s.cfg.TLSCert != "" && s.cfg.TLSKey != "" {
 		return s.httpServer.ListenAndServeTLS(s.cfg.TLSCert, s.cfg.TLSKey)
@@ -1120,6 +1124,22 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.auditCloseOnce.Do(s.auditor.Close)
 	return nil
+}
+
+// forwardContainerEvents streams raw Docker container events to the adapter for
+// the lifetime of ctx. It is a no-op when the adapter doesn't forward events.
+func (s *Server) forwardContainerEvents(ctx context.Context) {
+	fw, ok := s.adapter.(adapter.ContainerEventAdapter)
+	if !ok {
+		return
+	}
+	subscribe := s.eventSubscribe
+	if subscribe == nil {
+		subscribe = adapter.DockerEventSubscriber(s.dockerClient)
+	}
+	adapter.RunContainerEvents(ctx, subscribe, func(ev docker.DockerEvent) {
+		fw.OnDockerEvent(ctx, nil, ev)
+	})
 }
 
 // pollContainers periodically refreshes the container inventory via the

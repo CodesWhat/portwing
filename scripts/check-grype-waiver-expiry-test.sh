@@ -88,9 +88,14 @@ leap="${test_root}/leap.yaml"
 mkentry "${leap}" '    reason: "expires: 2028-02-29"'
 expect pass 2026-11-18 "${leap}" "valid leap day in the future"
 
-# The real config is valid today's-date-independent in shape: pre-deadline passes.
-expect pass 2026-11-18 .grype.yaml "real .grype.yaml before its deadline"
-expect pass 2026-12-16 .grype.yaml "real .grype.yaml the day before its deadline"
+# The real config carries no expiring waiver today: it passes on any date, and
+# the withdrawn picomatch entry stays gone.
+expect pass 2026-11-18 .grype.yaml "real .grype.yaml today"
+expect pass 2099-01-01 .grype.yaml "real .grype.yaml far in the future"
+if grep -v '^[[:space:]]*#' .grype.yaml | grep -Fq 'GHSA-fc5q-39xc-vjpf'; then
+	echo "FAIL: real .grype.yaml must not carry the withdrawn GHSA-fc5q-39xc-vjpf waiver" >&2
+	failures=$((failures + 1))
+fi
 
 if [ "${failures}" -ne 0 ]; then
 	exit 1

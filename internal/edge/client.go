@@ -196,9 +196,15 @@ type hostCollector interface {
 type edgeMessageSender struct {
 	client *Client
 	target *outboundTarget
+	// lossy drops the message when the target queue is full or closed instead
+	// of evicting the connection. Only best-effort lifecycle events set it.
+	lossy bool
 }
 
 func (s *edgeMessageSender) SendTypedMessage(msgType string, data any) error {
+	if s.lossy && s.target != nil {
+		return s.client.sendLossyTypedMessageTo(*s.target, msgType, data)
+	}
 	if s.target != nil {
 		return s.client.sendTypedMessageTo(*s.target, msgType, data)
 	}
@@ -235,13 +241,19 @@ type Client struct {
 	signedHelloKeyID string
 	cfg              *config.Config
 	dockerClient     dockerAPI
-	readiness        docker.HealthProbe
-	adapter          adapter.EdgeAdapter
-	compose          *docker.ComposeManager
-	collector        hostCollector
-	metrics          *metrics.Registry
-	auditor          *audit.Logger
-	startTime        time.Time
+	// eventSubscribe opens the Docker event subscription for dd:container_event
+	// forwarding; tests replace it. Nil falls back to the real event stream.
+	eventSubscribe adapter.EventSubscribe
+	// rawDockerClient is the concrete client behind dockerClient, kept for the
+	// event stream, which dockerAPI does not cover.
+	rawDockerClient *docker.Client
+	readiness       docker.HealthProbe
+	adapter         adapter.EdgeAdapter
+	compose         *docker.ComposeManager
+	collector       hostCollector
+	metrics         *metrics.Registry
+	auditor         *audit.Logger
+	startTime       time.Time
 
 	conn   *websocket.Conn
 	connMu sync.Mutex
@@ -377,15 +389,16 @@ func NewClient(cfg *config.Config, dockerClient *docker.Client, a adapter.EdgeAd
 	registry := metrics.NewRegistry()
 	registry.SetEdgeMode(true)
 	return &Client{
-		cfg:          cfg,
-		dockerClient: dockerClient,
-		adapter:      a,
-		compose:      docker.NewComposeManagerWithLister(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket, dockerClient),
-		collector:    metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
-		metrics:      registry,
-		auditor:      auditor,
-		startTime:    time.Now(),
-		streamSem:    make(chan struct{}, maxStreams),
+		cfg:             cfg,
+		dockerClient:    dockerClient,
+		rawDockerClient: dockerClient,
+		adapter:         a,
+		compose:         docker.NewComposeManagerWithLister(cfg.StacksDir, dockerClient.GetAPIVersion(), cfg.DockerSocket, dockerClient),
+		collector:       metrics.NewDaemonCollector(dockerClient, cfg.SkipDFCollection),
+		metrics:         registry,
+		auditor:         auditor,
+		startTime:       time.Now(),
+		streamSem:       make(chan struct{}, maxStreams),
 	}
 }
 
@@ -405,6 +418,11 @@ func (c *Client) Run(ctx context.Context) error {
 			slog.Warn("health server shutdown error", "error", err)
 		}
 	}()
+
+	// One Docker event subscription per Run, outside the reconnect loop. It
+	// outlives controller reconnects; events that fire while the tunnel is down
+	// are dropped and the poll-diff inventory covers final state.
+	go c.forwardContainerEvents(ctx)
 
 	delay := time.Duration(c.cfg.ReconnectDelay) * time.Second
 	maxDelay := time.Duration(c.cfg.MaxReconnectDelay) * time.Second
@@ -468,6 +486,42 @@ func (c *Client) Run(ctx context.Context) error {
 			delay = maxDelay
 		}
 	}
+}
+
+// forwardContainerEvents streams raw Docker container events to the adapter
+// while the tunnel is up. It is a no-op when the adapter doesn't forward events.
+func (c *Client) forwardContainerEvents(ctx context.Context) {
+	fw, ok := c.adapter.(adapter.ContainerEventAdapter)
+	if !ok {
+		return
+	}
+	subscribe := c.eventSubscribe
+	if subscribe == nil {
+		if c.rawDockerClient == nil {
+			return
+		}
+		subscribe = adapter.DockerEventSubscriber(c.rawDockerClient)
+	}
+	adapter.RunContainerEvents(ctx, subscribe, func(ev docker.DockerEvent) {
+		sender, connected := c.connectedMessageSender()
+		if !connected {
+			slog.Debug("controller not connected, dropping container event", "action", ev.Action)
+			return
+		}
+		fw.OnDockerEvent(ctx, sender, ev)
+	})
+}
+
+// connectedMessageSender returns a lossy sender bound to one captured outbound
+// target, only once that target's send pump is up. Capturing the target once
+// means an event can't be written directly during a later connection's
+// handshake, and a queue that has since closed just drops the event.
+func (c *Client) connectedMessageSender() (adapter.MessageSender, bool) {
+	target := c.currentOutboundTarget()
+	if target.ch == nil {
+		return nil, false
+	}
+	return &edgeMessageSender{client: c, target: &target, lossy: true}, true
 }
 
 // proxyFunc returns the proxy selector for the controller dial: the injected
@@ -1959,6 +2013,39 @@ func (s *outboundQueueState) isClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed
+}
+
+// sendLossyTypedMessageTo enqueues a best-effort message on target without
+// blocking. A full, byte-limited or closed queue drops the message; it never
+// evicts the connection, unlike sendMessageTo. A target with no queue (the
+// handshake phase) is dropped too, never written directly.
+func (c *Client) sendLossyTypedMessageTo(target outboundTarget, msgType string, data any) error {
+	rawData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshaling %s: %w", msgType, err)
+	}
+	env := protocol.Envelope{Type: msgType, Data: json.RawMessage(rawData)}
+
+	if target.ch == nil || target.state == nil {
+		slog.Debug("dropping best-effort message, no send queue", "type", msgType)
+		return nil
+	}
+	var reason string
+	switch target.state.enqueue(target.ch, env) {
+	case outboundEnqueued:
+		return nil
+	case outboundQueueClosed:
+		reason = "send queue closed"
+	case outboundByteLimitExceeded:
+		reason = "send queue byte limit exceeded"
+	case outboundFrameLimitExceeded:
+		reason = "send queue full"
+	}
+	if c.metrics != nil {
+		c.metrics.IncDroppedEvent()
+	}
+	slog.Debug("dropping best-effort message", "type", msgType, "reason", reason)
+	return nil
 }
 
 func (s *outboundQueueState) enqueue(ch chan protocol.Envelope, env protocol.Envelope) outboundEnqueueResult {

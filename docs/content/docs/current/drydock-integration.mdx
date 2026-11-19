@@ -37,7 +37,7 @@ When a Drydock controller connects to a Portwing agent in Standard Mode, the fol
 1. The controller opens `GET /api/events` with the `X-Dd-Agent-Secret` header. Portwing responds with a `text/event-stream`.
 2. Portwing immediately emits `dd:ack` on the stream. The controller's `handleAckEvent()` triggers `handshake()`.
 3. The controller calls `GET /api/containers`, then `GET /api/watchers`, then `GET /api/triggers` in sequence.
-4. The SSE stream remains open. Portwing pushes `dd:container-added`, `dd:container-updated`, and `dd:container-removed` events as container state changes.
+4. The SSE stream remains open. Portwing pushes `dd:container-added`, `dd:container-updated`, and `dd:container-removed` events as container state changes, plus a raw `dd:container-event` for each Docker `die`, `oom`, `stop`, `start` and `restart`.
 5. After every poll cycle, Portwing also emits `dd:watcher-snapshot` so the controller can prune any stale entries. A reconnecting controller receives the current snapshot immediately after `dd:ack` — no waiting for the next poll interval.
 
 ---
@@ -120,6 +120,23 @@ Drydock reads only `.data.id` from this event. Portwing also sends `name` as a h
 ```json
 {"type": "dd:container-removed", "data": {"id": "abc123", "name": "web"}}
 ```
+
+### `dd:container-event`
+
+One raw Docker container lifecycle event per message, for controller-side state alerts (exit, OOM, restart loop). Portwing does no coalescing or classification. Over the Edge tunnel the same payload is sent as `dd:container_event`. Advertised as the `dd:container-event` capability, so a controller can feature-detect it; older controllers ignore the unknown type.
+
+```json
+{"type": "dd:container-event", "data": {"containerId": "abc123", "name": "web", "action": "die", "exitCode": 137, "time": 1749820800123}}
+```
+
+| Field | Notes |
+|---|---|
+| `action` | Docker's own name: `die`, `oom`, `stop`, `start` or `restart`. Everything else, including `kill`, is not forwarded. |
+| `exitCode` | Only on `die`, from the event's `exitCode` attribute. Omitted when absent. |
+| `oomKilled` | `true`, only on `oom`. |
+| `time` | Unix milliseconds. |
+
+A user stop emits `kill`, `die`, `stop`. Portwing forwards the `die` and the following `stop` as separate messages and never drops a `stop` after a `die`. Events that fire while the Docker event stream is reconnecting, or in Edge mode while no controller is connected, are not replayed; the poll-diff inventory still reports final state.
 
 ### `dd:watcher-snapshot`
 
@@ -214,9 +231,18 @@ define the integration contract:
 2. Docker inspection and update calls traverse Portwing's authenticated,
    transparent proxy: inbound HTTP in Standard Mode or correlated
    `request`/`response` messages over the outbound WebSocket in Edge Mode.
-3. Portwing reports inventory, reads `dd.*` labels, and emits Docker lifecycle
-   events. `events: "portwing"` prevents Drydock from opening a second Docker
-   event stream through the proxy.
+3. Portwing reports inventory, reads `dd.*` labels, and emits container
+   inventory events. In Drydock mode these are poll-diffed: Portwing refreshes
+   the container list every `DD_POLL_INTERVAL` and emits added, updated and
+   removed events when a container's name, status or health changes. In Edge
+   Mode a positive `pollInterval` in the controller's welcome frame overrides
+   `DD_POLL_INTERVAL`. In Standard Mode each cycle also broadcasts a full
+   snapshot over SSE. In Edge Mode the added, updated and removed events go over
+   the WebSocket as individual messages and the full snapshot goes only to the
+   SSE broadcaster. Raw Docker lifecycle events (`die`, `oom`, `stop`, `start`,
+   `restart`) are forwarded separately as `dd:container-event`, described below.
+   `events: "portwing"` prevents Drydock from opening a second Docker event
+   stream through the proxy.
 4. Drydock records the watcher result and owns update orchestration and update
    operation events.
 
@@ -281,7 +307,7 @@ Handshake sequence:
     "capabilities": [
       "compose", "exec", "metrics", "events",
       "edge-response-body-b64", "edge-request-body-stream",
-      "dd:container-sync", "dd:logs"
+      "dd:container-sync", "dd:container-event", "dd:logs"
     ],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
@@ -419,6 +445,7 @@ Sockguard only includes the detailed reason in its `reason` field when the prese
 | `dd:container_added` | Agent → Controller | New container discovered |
 | `dd:container_updated` | Agent → Controller | Container state/metadata changed |
 | `dd:container_removed` | Agent → Controller | Container removed |
+| `dd:container_event` | Agent → Controller | Raw Docker lifecycle event (`die`, `oom`, `stop`, `start`, `restart`) |
 | `dd:component_sync` | Agent → Controller | Watcher + trigger component descriptors |
 | `dd:watch_request` | Controller → Agent | Reserved legacy remote-watcher message; not used by the controller-owned Docker watcher contract |
 | `dd:watch_response` | Agent → Controller | Reserved legacy remote-watcher response |
