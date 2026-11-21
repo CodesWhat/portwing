@@ -292,8 +292,8 @@ func TestHandleContainerLogRequestReportsOnlyADecodeThatFailed(t *testing.T) {
 		if !ok {
 			t.Fatalf("response payload type = %T, want protocol.DDContainerLogResponseMessage", sender.Data())
 		}
-		if resp.Logs != "part" {
-			t.Fatalf("Logs = %q, want the bytes read before the cut, %q", resp.Logs, "part")
+		if want := "error: reading container logs: unexpected EOF"; resp.Logs != want {
+			t.Fatalf("Logs = %q, want %q", resp.Logs, want)
 		}
 		got := logs.String()
 		if !loggedFor(got, decodeFailed, "decode-truncated") {

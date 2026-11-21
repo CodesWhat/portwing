@@ -5,13 +5,16 @@ package docker
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -421,6 +424,10 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 		return "", fmt.Errorf("invalid stack path: %w", err)
 	}
 	for relPath := range req.Files {
+		// An empty or "." key names the stack directory itself, never a file.
+		if relPath == "" || filepath.Clean(relPath) == "." {
+			return "", fmt.Errorf("invalid stack file path %q: names the stack directory, not a file", relPath)
+		}
 		if _, err := cm.resolvePath(stackDir, relPath); err != nil {
 			return "", fmt.Errorf("invalid stack file path %q: %w", relPath, err)
 		}
@@ -546,12 +553,137 @@ func validateRegistryServer(server string) error {
 	return nil
 }
 
-// writeStackFiles writes the files from the request into the stack directory.
-// File contents prefixed with "base64:" are decoded before writing.
-func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
+// stackWrite is one fully validated file ready to land in the stack directory.
+type stackWrite struct {
+	rel  string
+	data []byte
+}
+
+// quoteEnvValue renders value as a .env.drydock right-hand side that Compose's
+// dotenv parser reads back byte for byte.
+//
+// Single quotes are the literal form: no interpolation, no escapes, no inline
+// comment, whitespace kept. They cannot carry a ' or a trailing backslash (the
+// parser reads \' as an escaped quote, so an odd run of backslashes before a
+// quote has no single-quoted spelling). Values with either use the
+// double-quoted form with \, \" and \$ escaped, which round-trips every byte
+// that matters and doesn't depend on \' support in the Compose build.
+// A newline, carriage return or NUL has no spelling that every Compose
+// version agrees on, so those are rejected by name.
+func quoteEnvValue(key, value string) (string, error) {
+	if strings.ContainsAny(value, "\n\r\x00") {
+		return "", fmt.Errorf("env var %q value contains invalid characters (newline, carriage return, or null)", key)
+	}
+	if !strings.ContainsAny(value, "'\\") {
+		return "'" + value + "'", nil
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(value)
+	return `"` + escaped + `"`, nil
+}
+
+// renderEnvFile returns the .env.drydock contents for envVars in key order.
+func renderEnvFile(envVars map[string]string) ([]byte, error) {
+	keys := make([]string, 0, len(envVars))
+	for key := range envVars {
+		if !envVarKeyPattern.MatchString(key) {
+			return nil, fmt.Errorf("invalid env var key: %q", key)
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var buf bytes.Buffer
+	for _, key := range keys {
+		quoted, err := quoteEnvValue(key, envVars[key])
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(&buf, "%s=%s\n", key, quoted)
+	}
+	return buf.Bytes(), nil
+}
+
+// prepareStackWrites resolves, decodes and renders everything a request will
+// write, without touching the disk. Any bad path, base64 body or env var fails
+// here, before the first file lands.
+func (cm *ComposeManager) prepareStackWrites(req ComposeRequest) ([]stackWrite, error) {
 	stackDir := req.StackDir
 	if stackDir == "" {
 		stackDir = req.StackName
+	}
+
+	relPaths := make([]string, 0, len(req.Files))
+	for relPath := range req.Files {
+		relPaths = append(relPaths, relPath)
+	}
+	sort.Strings(relPaths)
+
+	writes := make([]stackWrite, 0, len(relPaths)+1)
+	seen := make(map[string]string, len(relPaths)+1)
+	add := func(name, rel string, data []byte) error {
+		if other, dup := seen[rel]; dup {
+			return fmt.Errorf("%q and %q resolve to the same file", other, name)
+		}
+		seen[rel] = name
+		writes = append(writes, stackWrite{rel: rel, data: data})
+		return nil
+	}
+
+	for _, relPath := range relPaths {
+		content := req.Files[relPath]
+		rootedPath, err := cm.rootedPath(stackDir, relPath)
+		if err != nil {
+			return nil, fmt.Errorf("resolving path %q: %w", relPath, err)
+		}
+		data := []byte(content)
+		if strings.HasPrefix(content, "base64:") {
+			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(content, "base64:"))
+			if err != nil {
+				return nil, fmt.Errorf("decoding base64 for %q: %w", relPath, err)
+			}
+			data = decoded
+		}
+		if err := add(relPath, rootedPath, data); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(req.EnvVars) > 0 {
+		envPath, err := cm.rootedPath(stackDir, ".env.drydock")
+		if err != nil {
+			return nil, fmt.Errorf("resolving .env.drydock path: %w", err)
+		}
+		data, err := renderEnvFile(req.EnvVars)
+		if err != nil {
+			return nil, err
+		}
+		if err := add(".env.drydock", envPath, data); err != nil {
+			return nil, err
+		}
+	}
+
+	// A target that is also a parent directory of another target can't be both
+	// a file and a directory. Staging the child would create the directory and
+	// the rename of the file would fail only after earlier files had landed.
+	for _, w := range writes {
+		for dir := filepath.Dir(w.rel); dir != "." && dir != string(filepath.Separator); dir = filepath.Dir(dir) {
+			if other, conflict := seen[dir]; conflict {
+				return nil, fmt.Errorf("%q is a file but %q needs it to be a directory", other, seen[w.rel])
+			}
+		}
+	}
+	return writes, nil
+}
+
+// writeStackFiles writes the files from the request into the stack directory.
+// File contents prefixed with "base64:" are decoded before writing.
+//
+// It validates and decodes everything first, then stages every file as a temp
+// file beside its target and renames them into place, so a bad request changes
+// nothing and a failed write doesn't leave a half-updated stack behind.
+func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
+	writes, err := cm.prepareStackWrites(req)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(cm.stacksDir, 0o750); err != nil {
 		return fmt.Errorf("creating stacks directory: %w", err)
@@ -562,46 +694,105 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 	}
 	defer func() { _ = root.Close() }()
 
-	for relPath, content := range req.Files {
-		rootedPath, err := cm.rootedPath(stackDir, relPath)
-		if err != nil {
-			return fmt.Errorf("resolving path %q: %w", relPath, err)
-		}
-
-		var data []byte
-		if strings.HasPrefix(content, "base64:") {
-			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(content, "base64:"))
-			if err != nil {
-				return fmt.Errorf("decoding base64 for %q: %w", relPath, err)
-			}
-			data = decoded
-		} else {
-			data = []byte(content)
-		}
-
-		if err := writeRootedFile(root, rootedPath, data); err != nil {
-			return fmt.Errorf("writing %q: %w", relPath, err)
+	for _, w := range writes {
+		if err := checkRootedTarget(root, w.rel); err != nil {
+			return fmt.Errorf("writing %q: %w", w.rel, err)
 		}
 	}
 
-	// Write .env.drydock if env vars are provided.
-	if len(req.EnvVars) > 0 {
-		envPath, err := cm.rootedPath(stackDir, ".env.drydock")
-		if err != nil {
-			return fmt.Errorf("resolving .env.drydock path: %w", err)
-		}
-
-		var buf bytes.Buffer
-		for key, val := range req.EnvVars {
-			fmt.Fprintf(&buf, "%s=%s\n", key, val)
-		}
-
-		if err := writeRootedFile(root, envPath, buf.Bytes()); err != nil {
-			return fmt.Errorf("writing .env.drydock: %w", err)
+	staged := make([]string, 0, len(writes))
+	cleanup := func() {
+		for _, tmp := range staged {
+			_ = root.Remove(tmp)
 		}
 	}
-
+	for _, w := range writes {
+		tmp, err := stageRootedFile(root, w.rel, w.data)
+		if err != nil {
+			cleanup()
+			return fmt.Errorf("writing %q: %w", w.rel, err)
+		}
+		staged = append(staged, tmp)
+	}
+	for i, w := range writes {
+		if err := root.Rename(staged[i], w.rel); err != nil {
+			cleanup()
+			return fmt.Errorf("writing %q: %w", w.rel, err)
+		}
+		staged[i] = ""
+	}
 	return nil
+}
+
+// checkRootedTarget is the read-only pre-flight for a write: it
+// rejects a symlinked directory component, a non-directory component, or a
+// symlink or non-regular file at the target, without creating anything.
+func checkRootedTarget(root *os.Root, name string) error {
+	current := ""
+	parts := strings.Split(filepath.Clean(name), string(filepath.Separator))
+	for i, component := range parts {
+		current = filepath.Join(current, component)
+		info, err := root.Lstat(current)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("checking %q: %w", current, err)
+		}
+		last := i == len(parts)-1
+		switch {
+		case info.Mode()&os.ModeSymlink != 0 && last:
+			return fmt.Errorf("refusing symlink file %q", current)
+		case info.Mode()&os.ModeSymlink != 0:
+			return fmt.Errorf("refusing symlink directory %q", current)
+		case last && !info.Mode().IsRegular():
+			return fmt.Errorf("refusing non-regular file %q", current)
+		case !last && !info.IsDir():
+			return fmt.Errorf("path component %q is not a directory", current)
+		}
+	}
+	return nil
+}
+
+// stageRootedFile writes data to a fresh 0600 temp file next to name and
+// returns the temp file's rooted path. The caller renames it into place.
+func stageRootedFile(root *os.Root, name string, data []byte) (string, error) {
+	if err := mkdirRootedNoSymlinks(root, filepath.Dir(name)); err != nil {
+		return "", err
+	}
+	for range 8 {
+		var suffix [6]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return "", fmt.Errorf("naming temp file: %w", err)
+		}
+		tmp := filepath.Join(filepath.Dir(name), "."+filepath.Base(name)+".portwing-"+hex.EncodeToString(suffix[:]))
+		f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if os.IsExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		err = writeAndClose(f, data)
+		if err != nil {
+			_ = root.Remove(tmp)
+			return "", err
+		}
+		return tmp, nil
+	}
+	return "", fmt.Errorf("could not create a unique temp file for %q", name)
+}
+
+func writeAndClose(f *os.File, data []byte) error {
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("setting permissions: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (cm *ComposeManager) rootedPath(stackDir, path string) (string, error) {
@@ -621,38 +812,6 @@ func (cm *ComposeManager) rootedPath(stackDir, path string) (string, error) {
 		return "", fmt.Errorf("path %q is not a file below stacks directory", path)
 	}
 	return rel, nil
-}
-
-// writeRootedFile creates each directory component without following symlinks
-// and writes through os.Root, which keeps the operation beneath STACKS_DIR even
-// if a path is swapped concurrently.
-func writeRootedFile(root *os.Root, name string, data []byte) error {
-	if err := mkdirRootedNoSymlinks(root, filepath.Dir(name)); err != nil {
-		return err
-	}
-	if info, err := root.Lstat(name); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing symlink file %q", name)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("refusing non-regular file %q", name)
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("checking file %q: %w", name, err)
-	}
-
-	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := f.Chmod(0o600); err != nil {
-		return fmt.Errorf("setting permissions on %q: %w", name, err)
-	}
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	return nil
 }
 
 func mkdirRootedNoSymlinks(root *os.Root, dir string) error {

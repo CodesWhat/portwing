@@ -655,9 +655,9 @@ func TestHandleContainerLogs_ReadError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs", nil)
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
-	a.handleContainerLogs(rec, req)
+	requireLogAbort(t, func() { a.handleContainerLogs(rec, req) })
 
-	// Whatever error path was taken, the handler must return without panic.
+	// The failed read must abort the response rather than end it as a clean 200.
 	_ = rec.Code
 }
 
@@ -783,10 +783,8 @@ func TestHandleContainerLogs_CopyNError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/containers/container-1/logs", nil)
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
-	a.handleContainerLogs(rec, req)
-
-	// io.CopyN error causes a silent return; status is whatever was set before.
-	// We just verify no panic.
+	// A mid-frame failure aborts the response instead of ending it cleanly.
+	requireLogAbort(t, func() { a.handleContainerLogs(rec, req) })
 	_ = rec.Code
 }
 
@@ -1045,5 +1043,21 @@ func TestSSEServeHTTP_EventWriteError_UnitLevel(t *testing.T) {
 		cancel()
 		<-serveComplete
 		t.Fatal("ServeHTTP did not exit after write error")
+	}
+}
+
+// requireLogAbort runs a log handler and requires it to abort the response with
+// http.ErrAbortHandler, which is how a mid-body failure reaches the client as a
+// broken transfer instead of a clean 200.
+func requireLogAbort(t *testing.T, serve func()) {
+	t.Helper()
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		serve()
+	}()
+	if recovered != http.ErrAbortHandler { //nolint:errorlint // recover() yields the exact sentinel net/http recognizes.
+		t.Fatalf("recovered = %v, want http.ErrAbortHandler", recovered)
 	}
 }

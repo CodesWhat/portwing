@@ -530,14 +530,32 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 
 	path := "/containers/" + id + "/logs?" + q.Encode()
 
-	var resp *http.Response
-	var err error
-	if follow {
-		resp, err = c.DoStream(ctx, http.MethodGet, path, nil)
-	} else {
-		resp, err = c.Do(ctx, http.MethodGet, path, nil)
+	// Always the streaming client: the timeout-bound client's total deadline
+	// covers the body read, so a long non-follow read would be cut off at
+	// REQUEST_TIMEOUT and look like a complete, shorter log. A non-follow read
+	// is bounded by idleness instead: a daemon that stops sending for
+	// REQUEST_TIMEOUT has its request canceled, and the read fails as a
+	// mid-body error. Follow reads are legitimately idle and stay unbounded
+	// here; callers bound them through ctx.
+	var idle *idleTimeoutBody
+	reqCtx := ctx
+	if !follow {
+		timeout := c.dialTimeout
+		if timeout <= 0 {
+			timeout = defaultDialTimeout
+		}
+		var cancel context.CancelFunc
+		reqCtx, cancel = context.WithCancel(ctx)
+		idle = newIdleTimeoutBody(timeout, cancel)
 	}
+	resp, err := c.DoStream(reqCtx, http.MethodGet, path, nil)
 	if err != nil {
+		if idle != nil {
+			idle.stop()
+			if idle.timedOut() {
+				err = fmt.Errorf("no response from docker for %s: %w", idle.timeout, err)
+			}
+		}
 		return nil, fmt.Errorf("container logs: %w", err)
 	}
 
@@ -546,13 +564,21 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			slog.Debug("closing docker response body", "method", "GetContainerLogs", "error", closeErr)
 		}
+		if idle != nil {
+			idle.stop()
+		}
 		err = dockerError("container logs", resp.StatusCode, data)
 		slog.Warn("docker error", "method", "GetContainerLogs", "path", applog.Sanitize("/containers/"+id+"/logs"), "status", resp.StatusCode, "error", applog.Sanitize(err.Error()))
 		return nil, err
 	}
 
+	body := io.ReadCloser(resp.Body)
+	if idle != nil {
+		idle.body = resp.Body
+		body = idle
+	}
 	return formattedLogReadCloser{
-		ReadCloser: resp.Body,
+		ReadCloser: body,
 		format:     responseLogFormat(resp.Header.Get("Content-Type"), c.apiVersion),
 	}, nil
 }

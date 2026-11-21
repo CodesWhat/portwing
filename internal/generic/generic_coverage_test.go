@@ -562,6 +562,6 @@ func TestHandleContainerLogsFrameReadError(t *testing.T) {
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
 
-	// Should complete without panic regardless of error path taken.
-	a.handleContainerLogs(rec, req)
+	// The failed frame read aborts the response instead of ending it cleanly.
+	requireLogAbort(t, func() { a.handleContainerLogs(rec, req) })
 }

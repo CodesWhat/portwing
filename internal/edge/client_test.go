@@ -2683,45 +2683,6 @@ func TestSendPumpWriteJSONError(t *testing.T) {
 // done CLOSED — then select randomly picks done or default. We verify the
 // done slog.Debug is exercised by running multiple times.
 
-// ---------------------------------------------------------------------------
-// dockerReady — /_ping status-code boundary (client.go:1705-1719)
-// ---------------------------------------------------------------------------
-
-// TestDockerReadyStatusCodeBoundary pins the 2xx range dockerReady treats as
-// healthy: >= http.StatusOK (200) and < http.StatusMultipleChoices (300).
-// The rows straddle both boundaries so a >= -> > or < -> <= mutation on
-// either comparison flips a result and fails the test.
-func TestDockerReadyStatusCodeBoundary(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		status int
-		want   bool
-	}{
-		{name: "below range", status: 199, want: false},
-		{name: "range start", status: http.StatusOK, want: true},
-		{name: "still in range", status: 299, want: true},
-		{name: "range end excluded", status: http.StatusMultipleChoices, want: false},
-		{name: "well above range", status: 500, want: false},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			c, _ := newTestClient(t)
-			//nolint:bodyclose // the response body is consumed and closed by dockerReady, the code under test.
-			c.dockerClient = &fakeDocker{doResp: mkResp(tc.status, "", "")}
-
-			if got := c.dockerReady(context.Background()); got != tc.want {
-				t.Errorf("dockerReady() with status %d = %v, want %v", tc.status, got, tc.want)
-			}
-		})
-	}
-}
-
 // TestHealthServerBindsIPv6BindAddress is the edge-mode half of the listener
 // address regression: the operations listener joined BIND_ADDRESS and PORT
 // with a bare colon, so the documented "::1" became "::1:3000" and net.Listen

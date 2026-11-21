@@ -19,6 +19,7 @@ const OWN_GITHUB_OWNERS = new Set(["codeswhat"]);
 // A new host showing up in a link is a decision, so it fails until added here.
 const EXTERNAL_HOSTS = new Map([
   ["github.com", null],
+  ["codeswhat.com", null],
   ["discord.gg", null],
   ["opensource.org", null],
   ["docs.docker.com", null],
