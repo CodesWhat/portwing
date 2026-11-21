@@ -1484,7 +1484,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	// A path with no leading slash would be glued to the API version prefix
 	// and routed by the daemon differently than it was classified here.
 	if err := docker.ValidateAPIPath(req.Path); err != nil {
-		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, 0, 0)
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, 0, 0)
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
@@ -1524,7 +1524,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	}
 
 	if err != nil {
-		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, 0, msEdge(start))
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, 0, msEdge(start))
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
@@ -1572,9 +1572,9 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 					pool.PutStreamBuffer(buf)
 					slog.Warn("abandoning docker response stream: send failed",
 						"requestId", applog.Sanitize(req.RequestID),
-						"path", applog.Sanitize(req.Path),
+						"path", applog.Sanitize(auditPath(req.Path)),
 						"error", applog.Sanitize(sendErr.Error()))
-					c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
+					c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start))
 					return
 				}
 			}
@@ -1601,11 +1601,11 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			outcome = audit.OutcomeError
 			slog.Warn("docker response stream ended early",
 				"requestId", applog.Sanitize(req.RequestID),
-				"path", applog.Sanitize(req.Path),
+				"path", applog.Sanitize(auditPath(req.Path)),
 				"error", applog.Sanitize(streamErr.Error()))
 		}
 
-		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, outcome, resp.StatusCode, msEdge(start))
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), outcome, resp.StatusCode, msEdge(start))
 		_ = c.sendTypedMessageTo(target, protocol.TypeStreamEnd, protocol.StreamEndMessage{
 			RequestID: req.RequestID,
 			Reason:    reason,
@@ -1616,7 +1616,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		// as a successful response.
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 		if err != nil {
-			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
+			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start))
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("reading Docker response: %v", err),
 				RequestID: req.RequestID,
@@ -1624,7 +1624,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			return
 		}
 		if int64(len(body)) > maxResponseBody {
-			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeError, resp.StatusCode, msEdge(start))
+			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start))
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("response exceeds %d bytes; use a streaming request", int64(maxResponseBody)),
 				Code:      protocol.ErrorCodeResponseTooLarge,
@@ -1632,7 +1632,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			})
 			return
 		}
-		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, req.Path, audit.OutcomeAllowed, resp.StatusCode, msEdge(start))
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeAllowed, resp.StatusCode, msEdge(start))
 
 		respMsg := protocol.ResponseMessage{
 			RequestID:   req.RequestID,
@@ -1669,7 +1669,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		}
 
 		if err := c.sendTypedMessageTo(target, protocol.TypeResponse, respMsg); err != nil {
-			slog.Warn("failed to encode Docker response envelope", "requestId", applog.Sanitize(req.RequestID), "path", applog.Sanitize(req.Path), "error", err)
+			slog.Warn("failed to encode Docker response envelope", "requestId", applog.Sanitize(req.RequestID), "path", applog.Sanitize(auditPath(req.Path)), "error", err)
 			// Best-effort error reply; connection loss will surface on the read pump.
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("encoding response: %v", err),
@@ -2570,4 +2570,12 @@ func currentControllerState(connected bool) string {
 
 func (c *Client) redactedControllerURL() string {
 	return applog.RedactURL(c.cfg.DrydockURL)
+}
+
+// auditPath drops the query string from a request path before it reaches an
+// audit record or a log line. Queries can carry secrets (build args, remote=
+// URLs with credentials); Standard mode records r.URL.Path, which has none.
+func auditPath(path string) string {
+	pathOnly, _, _ := strings.Cut(path, "?")
+	return pathOnly
 }

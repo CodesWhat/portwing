@@ -107,7 +107,7 @@ func TestAuthenticatedAttachUpgradeRelaysBufferedInputBidirectionally(t *testing
 			daemonResult <- fmt.Errorf("end-to-end header = %q", got)
 			return
 		}
-		for _, name := range append(portwingAuthHeaders, "X-Connection-Only") {
+		for _, name := range append(portwingAuthHeaders, "X-Connection-Only", "X-Portwing-Audience") {
 			if value := attachReq.Header.Get(name); value != "" {
 				daemonResult <- fmt.Errorf("hop-by-hop or Portwing header %s leaked with value %q", name, value)
 				return
@@ -180,6 +180,7 @@ func TestAuthenticatedAttachUpgradeRelaysBufferedInputBidirectionally(t *testing
 		"X-Portwing-Token: must-not-leak\r\n" +
 		"X-Dd-Agent-Secret: must-not-leak\r\n" +
 		"X-Portwing-Signature: must-not-leak\r\n" +
+		"X-Portwing-Audience: must-not-leak\r\n" +
 		"Connection: Upgrade, X-Connection-Only\r\n" +
 		"X-Connection-Only: must-not-leak\r\n" +
 		"Upgrade: tcp\r\n" +

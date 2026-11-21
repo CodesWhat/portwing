@@ -21,12 +21,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/codeswhat/portwing/internal/adapter"
 	"github.com/codeswhat/portwing/internal/audit"
+	"github.com/codeswhat/portwing/internal/auth"
 	"github.com/codeswhat/portwing/internal/docker"
 )
 
@@ -573,6 +575,62 @@ func TestHandleDockerProxySuccess(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
+	}
+}
+
+// TestHandleDockerProxyStripsAudienceHeader verifies X-Portwing-Audience is not
+// forwarded to the Docker daemon on a normal proxied request.
+func TestHandleDockerProxyStripsAudienceHeader(t *testing.T) {
+	t.Parallel()
+
+	sockPath, cleanup := shortSocketPath(t)
+	defer cleanup()
+	ln := newUnixListener(t, sockPath)
+
+	var mu sync.Mutex
+	var seen []string
+	fakeDaemon := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			seen = append(seen, r.Header.Get(auth.HeaderAudience))
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+	go func() { _ = fakeDaemon.Serve(ln) }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = fakeDaemon.Shutdown(ctx)
+	}()
+
+	client, err := docker.NewClient(sockPath, 5)
+	if err != nil {
+		t.Fatalf("docker.NewClient: %v", err)
+	}
+	auditor, closeAudit, _ := audit.New("", 0)
+	defer closeAudit()
+
+	s := &Server{dockerClient: client, rateLimiter: NewRateLimiter(), auditor: auditor}
+	defer s.rateLimiter.Stop()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1.44/containers/json", nil)
+	req.Header.Set(auth.HeaderAudience, "agent-1")
+	rec := httptest.NewRecorder()
+	s.handleDockerProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) == 0 {
+		t.Fatal("daemon saw no request")
+	}
+	for _, v := range seen {
+		if v != "" {
+			t.Errorf("%s leaked to Docker: %q", auth.HeaderAudience, v)
+		}
 	}
 }
 
