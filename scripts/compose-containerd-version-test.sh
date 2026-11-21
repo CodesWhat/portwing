@@ -89,16 +89,16 @@ expect_fail() {
 
 module_line=$'\tdep\tgithub.com/containerd/containerd/v2\t'
 
-write_dockerfile "github.com/containerd/containerd/v2@v2.3.6"
-write_build_info "${module_line}v2.3.6"$'\th1:xyz='
+write_dockerfile "github.com/containerd/containerd/v2@v2.3.7"
+write_build_info "${module_line}v2.3.7"$'\th1:xyz='
 expect_pass "a binary on the pinned containerd must pass"
 
 write_build_info "${module_line}v2.3.5"$'\th1:xyz='
 expect_fail "embeds github.com/containerd/containerd/v2 v2.3.5, but" \
 	"an older containerd than the pin must fail"
 
-write_build_info "${module_line}v2.3.60"$'\th1:xyz='
-expect_fail "embeds github.com/containerd/containerd/v2 v2.3.60, but" \
+write_build_info "${module_line}v2.3.70"$'\th1:xyz='
+expect_fail "embeds github.com/containerd/containerd/v2 v2.3.70, but" \
 	"a version that only has the pin as a prefix must fail"
 
 write_build_info
@@ -110,16 +110,16 @@ write_build_info $'\tdep\tgithub.com/containerd/containerd\tv1.7.30\th1:xyz='
 expect_fail "no github.com/containerd/containerd/v2 module line" \
 	"the unversioned containerd path must not count as the v2 module"
 
-write_build_info "${module_line}v2.3.6"$'\th1:xyz=' \
-	$'\t=>\tgithub.com/example/containerd\tv2.3.6\th1:rep='
+write_build_info "${module_line}v2.3.7"$'\th1:xyz=' \
+	$'\t=>\tgithub.com/example/containerd\tv2.3.7\th1:rep='
 expect_fail "listed more than once or replaced" \
 	"a replaced containerd module must fail"
 
-write_build_info "${module_line}v2.3.6"$'\th1:xyz=' "${module_line}v2.3.5"$'\th1:xyz='
+write_build_info "${module_line}v2.3.7"$'\th1:xyz=' "${module_line}v2.3.5"$'\th1:xyz='
 expect_fail "listed more than once or replaced" \
 	"a duplicated module line must fail"
 
-write_build_info "${module_line}v2.3.6"$'\th1:xyz='
+write_build_info "${module_line}v2.3.7"$'\th1:xyz='
 write_dockerfile "github.com/other/module@v1.0.0"
 expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
 	"a Dockerfile without the pin must fail"
@@ -127,7 +127,7 @@ expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
 # A commented-out pin is not a pin.
 cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
 FROM golang:1.27.2-alpine AS compose-builder
-# RUN go get github.com/containerd/containerd/v2@v2.3.6
+# RUN go get github.com/containerd/containerd/v2@v2.3.7
 RUN go build ./cmd
 DOCKERFILE
 expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
@@ -136,7 +136,7 @@ expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
 # Nor is one that only appears in a trailing comment on a real instruction.
 cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
 FROM golang:1.27.2-alpine AS compose-builder
-RUN go build ./cmd # go get github.com/containerd/containerd/v2@v2.3.6
+RUN go build ./cmd # go get github.com/containerd/containerd/v2@v2.3.7
 DOCKERFILE
 expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
 	"a pin that only appears in a trailing comment must not count"
@@ -144,18 +144,18 @@ expect_fail "has no github.com/containerd/containerd/v2@vX.Y.Z pin" \
 # A real pin followed by a trailing comment still counts, and the comment's
 # own version is ignored.
 cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
-RUN go get github.com/containerd/containerd/v2@v2.3.6 # was v2.3.5
+RUN go get github.com/containerd/containerd/v2@v2.3.7 # was v2.3.5
 DOCKERFILE
 expect_pass "a real pin with a trailing comment must still pass"
 
 cat >"${fixture}/Dockerfile" <<'DOCKERFILE'
-RUN go get github.com/containerd/containerd/v2@v2.3.6
+RUN go get github.com/containerd/containerd/v2@v2.3.7
 RUN go get github.com/containerd/containerd/v2@v2.3.5
 DOCKERFILE
 expect_fail "pins github.com/containerd/containerd/v2 to more than one version" \
 	"conflicting Dockerfile pins must fail"
 
-write_dockerfile "github.com/containerd/containerd/v2@v2.3.6"
+write_dockerfile "github.com/containerd/containerd/v2@v2.3.7"
 set +e
 output="$(PATH="${bin}:${PATH}" MOCK_GO_FAIL=1 bash "${script}" "${binary}" "${fixture}/Dockerfile" 2>&1)"
 status=$?
