@@ -656,6 +656,17 @@ func (cm *ComposeManager) prepareStackWrites(req ComposeRequest) ([]stackWrite, 
 			return nil, err
 		}
 	}
+
+	// A target that is also a parent directory of another target can't be both
+	// a file and a directory. Staging the child would create the directory and
+	// the rename of the file would fail only after earlier files had landed.
+	for _, w := range writes {
+		for dir := filepath.Dir(w.rel); dir != "." && dir != string(filepath.Separator); dir = filepath.Dir(dir) {
+			if other, conflict := seen[dir]; conflict {
+				return nil, fmt.Errorf("%q is a file but %q needs it to be a directory", other, seen[w.rel])
+			}
+		}
+	}
 	return writes, nil
 }
 
