@@ -20,6 +20,7 @@ import (
 )
 
 const (
+	//nolint:gosec // G101: fake credentials exercise audit query redaction.
 	secretQuery   = "buildargs=%7B%22TOKEN%22%3A%22hunter2%22%7D&remote=https%3A%2F%2Fuser%3Apassw0rd%40git.example%2Frepo.git"
 	secretNeedle1 = "hunter2"
 	secretNeedle2 = "passw0rd"
