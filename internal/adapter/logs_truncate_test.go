@@ -122,3 +122,38 @@ func TestServeContainerLogsMidBodyFailureAbortsResponse(t *testing.T) {
 		})
 	}
 }
+
+func TestServeContainerLogsNonFollowStallAbortsResponse(t *testing.T) {
+	t.Parallel()
+
+	// A daemon that sends some bytes and then goes quiet, against a
+	// one-second REQUEST_TIMEOUT.
+	handlerDone := make(chan struct{})
+	client := newCustomLogDaemonClient(t, 1, func(w http.ResponseWriter, r *http.Request) {
+		defer close(handlerDone)
+		w.Header().Set("Content-Type", "application/vnd.docker.multiplexed-stream")
+		_, _ = w.Write(dockerLogFrame(1, []byte("before the stall\n")))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+
+	rec := httptest.NewRecorder()
+	var recovered any
+	start := time.Now()
+	func() {
+		defer func() { recovered = recover() }()
+		ServeContainerLogs(rec, logRequest("/logs"), ContainerLogOptions{Client: client})
+	}()
+
+	if recovered != http.ErrAbortHandler { //nolint:errorlint // recover() yields the exact sentinel net/http recognizes.
+		t.Fatalf("recovered = %v, want http.ErrAbortHandler (body %q)", recovered, rec.Body.String())
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("stalled read took %v, want about the 1s REQUEST_TIMEOUT", elapsed)
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon connection was not released after the stall")
+	}
+}
