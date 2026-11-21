@@ -795,6 +795,24 @@ func TestValidateRequest_FilePathTraversal(t *testing.T) {
 	}
 }
 
+func TestValidateRequest_FileKeyNamesStackDirectory(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir()}
+
+	for _, key := range []string{"", ".", "./", "a/.."} {
+		req := ComposeRequest{
+			StackName: "app",
+			EnvVars:   map[string]string{"A": ""},
+			Files:     map[string]string{key: ""},
+		}
+		_, err := cm.validateRequest(req)
+		if err == nil || !strings.Contains(err.Error(), "names the stack directory") {
+			t.Fatalf("file key %q: err = %v, want a stack-directory rejection", key, err)
+		}
+	}
+}
+
 // ---- validateRequest: stack path escapes stacks dir ----
 
 func TestValidateRequest_StackPathTraversal(t *testing.T) {

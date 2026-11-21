@@ -424,6 +424,10 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 		return "", fmt.Errorf("invalid stack path: %w", err)
 	}
 	for relPath := range req.Files {
+		// An empty or "." key names the stack directory itself, never a file.
+		if relPath == "" || filepath.Clean(relPath) == "." {
+			return "", fmt.Errorf("invalid stack file path %q: names the stack directory, not a file", relPath)
+		}
 		if _, err := cm.resolvePath(stackDir, relPath); err != nil {
 			return "", fmt.Errorf("invalid stack file path %q: %w", relPath, err)
 		}

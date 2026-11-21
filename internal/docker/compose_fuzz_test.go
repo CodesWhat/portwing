@@ -244,6 +244,8 @@ func FuzzComposeRequestValidate(f *testing.F) {
 	// Seed: stack root resolving to stacksDir itself, the one path where
 	// writeStackFiles legitimately rejects what validateRequest accepted.
 	f.Add([]byte(`{"stackName":".","files":{".":"x"}}`))
+	// Seed: an empty file key next to envVars (fuzz crash, 2026-11-21).
+	f.Add([]byte(`{"stackName":"0","envVars":{"A":""},"files":{"":""}}`))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var req ComposeRequest
