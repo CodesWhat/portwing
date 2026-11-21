@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Multi-byte UTF-8 characters split across Drydock `dd:container_log_chunk` frames no longer turn into U+FFFD; each stream carries the incomplete tail into its next chunk.
 - Non-follow container log reads no longer stop at `REQUEST_TIMEOUT` and return a truncated log as a complete one. They stream like follow reads, and a failure mid-body now aborts the HTTP response or returns an error instead of a clean 200.
-
 - Edge mode readiness now pings the unversioned `/_ping` through the same check as Standard mode and requires a 200, so a daemon that denies the versioned path or answers a non-200 2xx reports the same readiness in both modes.
+- Compose deploy `envVars` are now written single- or double-quoted in `.env.drydock`, so `$VAR`, `${X}`, `$$`, ` #`, quotes, backslashes and edge spaces reach the container exactly as sent. A variable name that isn't a plain identifier, or a value with a newline or NUL, is rejected by name.
+- A Compose deploy with a bad base64 file (or any other invalid file or variable) is now rejected before anything is written, and files land through temp-file renames instead of in place.
 
 ## [v1.4.2] - 2026-11-21
 

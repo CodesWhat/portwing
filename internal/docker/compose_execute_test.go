@@ -888,10 +888,10 @@ func TestExecuteEnvironmentWithoutComposeFiles(t *testing.T) {
 		name, fields, initial, want string
 		blocked                     bool
 	}{
-		{name: "omitted files", fields: `,"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT=9090\n"},
-		{name: "null files", fields: `,"files":null,"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT=9090\n"},
-		{name: "empty files", fields: `,"files":{},"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT=9090\n"},
-		{name: "creates environment", fields: `,"envVars":{"APP_PORT":"9090"}`, want: "APP_PORT=9090\n"},
+		{name: "omitted files", fields: `,"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT='9090'\n"},
+		{name: "null files", fields: `,"files":null,"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT='9090'\n"},
+		{name: "empty files", fields: `,"files":{},"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT='9090'\n"},
+		{name: "creates environment", fields: `,"envVars":{"APP_PORT":"9090"}`, want: "APP_PORT='9090'\n"},
 		{name: "nil environment preserves file", initial: original, want: original},
 		{name: "empty environment preserves file", fields: `,"envVars":{}`, initial: original, want: original},
 		{name: "empty environment creates no file", fields: `,"envVars":{}`},
