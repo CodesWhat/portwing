@@ -794,6 +794,62 @@ func TestEd25519NonceCapacityHeaderAndMetric(t *testing.T) {
 	}
 }
 
+// TestEd25519NonceCapacityDoesNotSpendFailureBudget verifies that repeated
+// nonce-capacity rejections from one IP stay 401 (never 429) and leave the
+// failure count untouched, while a genuine bad signature still counts.
+func TestEd25519NonceCapacityDoesNotSpendFailureBudget(t *testing.T) {
+	t.Parallel()
+	ed, priv := setupEd25519(t)
+	ed.Nonces.Close()
+	ed.Nonces = auth.NewNonceLRU(1, 60)
+	t.Cleanup(ed.Nonces.Close)
+	_ = ed.Nonces.Add("filler")
+	rl := NewRateLimiter()
+	t.Cleanup(rl.Stop)
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
+
+	const clientIP = "198.51.100.77"
+	failures := func() int {
+		rl.mu.Lock()
+		defer rl.mu.Unlock()
+		if a, ok := rl.attempts[clientIP]; ok {
+			return a.count
+		}
+		return 0
+	}
+
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
+		req.RemoteAddr = clientIP + ":1234"
+		signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized || rec.Header().Get(auth.HeaderReason) != "nonce-capacity" {
+			t.Fatalf("capacity rejection %d = %d %q", i, rec.Code, rec.Header().Get(auth.HeaderReason))
+		}
+	}
+	if got := failures(); got != 0 {
+		t.Fatalf("capacity rejections recorded %d failures, want 0", got)
+	}
+
+	// A genuine bad signature (nonce cache has room again) still counts.
+	ed.Nonces.Close()
+	ed.Nonces = auth.NewNonceLRU(100, 60)
+	t.Cleanup(ed.Nonces.Close)
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
+	req.RemoteAddr = clientIP + ":1234"
+	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
+	req.Header.Set(auth.HeaderSignature, "AAAA")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad signature = %d, want 401", rec.Code)
+	}
+	if got := failures(); got != 1 {
+		t.Fatalf("bad signature recorded %d failures, want 1", got)
+	}
+}
+
 func TestEd25519MiddlewareRejectsWhenVerificationCapacityFull(t *testing.T) {
 	t.Parallel()
 

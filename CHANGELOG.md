@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Nonce-cache capacity rejections no longer count against the per-IP auth failure budget, so a busy controller can't lock its own IP out with 429.
 - Standard mode no longer forwards the `X-Portwing-Audience` request header to the Docker daemon.
 
 ## [v1.4.0] - 2026-11-19
