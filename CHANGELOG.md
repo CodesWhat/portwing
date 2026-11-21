@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.4.1] - 2026-11-21
+
 ### Security
 
 - Edge mode audit records and warning logs no longer keep the request query string, which can carry build args and `remote=` URL credentials.
