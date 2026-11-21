@@ -659,6 +659,11 @@ if [ -n "${stale_previous_version_matches}" ]; then
 		index($0, "COMPATIBILITY.md:") == 1 && (index($0, ":The exact v" previous " artifacts passed the hosted matrix on ") ||
 			index($0, ":| v" previous " | v") || index($0, ":The exact v" previous "-rc.") ||
 			index($0, ":| v" previous "-rc.")) { next }
+		# DrydockCompat is the wire-compat constant, versioned independently of
+		# the release. It can equal the previous release number (1.4.0), and
+		# its matrix column cells carry it without naming the field.
+		index(tolower($0), "drydockcompat") { next }
+		index($0, "COMPATIBILITY.md:") == 1 && index($0, "| `" previous "` |") { next }
 		{ print }
 	' <<<"${stale_previous_version_matches}")"
 fi
