@@ -153,3 +153,45 @@ func TestIncompleteUTF8Suffix(t *testing.T) {
 		}
 	}
 }
+
+func TestContainerLogStreamCarryDoesNotAliasOutgoingChunk(t *testing.T) {
+	t.Parallel()
+
+	// C2 / A2 E2 / 82 AC: the second frame completes a character and starts
+	// another, so the new suffix is written while the outgoing chunk is built.
+	body := append(routeTestDockerLogFrame(1, []byte{0xC2}), routeTestDockerLogFrame(1, []byte{0xA2, 0xE2})...)
+	body = append(body, routeTestDockerLogFrame(1, []byte{0x82, 0xAC})...)
+	got, _ := forwardLogFrames(t, body)
+	if got["stdout"] != "¢€" {
+		t.Fatalf("stdout = %q, want %q", got["stdout"], "¢€")
+	}
+}
+
+func TestContainerLogStreamCarryConsecutiveSplitCharacters(t *testing.T) {
+	t.Parallel()
+
+	text := strings.Repeat("¢€\U0001F600", 40)
+	raw := []byte(text)
+	var body []byte
+	// One-byte frames split every multi-byte character at every boundary.
+	for _, b := range raw {
+		body = append(body, routeTestDockerLogFrame(1, []byte{b})...)
+	}
+	got, _ := forwardLogFrames(t, body)
+	if got["stdout"] != text {
+		t.Fatalf("stdout = %q, want %q", got["stdout"], text)
+	}
+
+	// Frames that finish one character and start a different one, so the new
+	// suffix differs from the bytes it would overwrite.
+	body = nil
+	for _, part := range [][]byte{
+		{0xE2}, {0x82, 0xAC, 0xF0, 0x9F}, {0x98, 0x80, 0xC2}, {0xA2, 0xE2, 0x82}, {0xAC},
+	} {
+		body = append(body, routeTestDockerLogFrame(1, part)...)
+	}
+	got, _ = forwardLogFrames(t, body)
+	if got["stdout"] != "€\U0001F600¢€" {
+		t.Fatalf("stdout = %q, want %q", got["stdout"], "€\U0001F600¢€")
+	}
+}

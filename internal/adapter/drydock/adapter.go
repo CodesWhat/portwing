@@ -588,11 +588,16 @@ func (a *Adapter) forwardContainerLogStream(
 		}
 		data := payload
 		if len(pending[idx]) > 0 {
-			data = append(pending[idx], payload...)
+			// A fresh slice: appending to pending could share its backing
+			// array, and the suffix copy below would overwrite data.
+			data = make([]byte, 0, len(pending[idx])+len(payload))
+			data = append(data, pending[idx]...)
+			data = append(data, payload...)
 		}
 		keep := incompleteUTF8Suffix(data)
-		// Copy the suffix: payload aliases the decoder's reusable buffer.
-		pending[idx] = append(pending[idx][:0], data[len(data)-keep:]...)
+		// Copy the suffix into its own array: payload aliases the decoder's
+		// reusable buffer, and data must never share storage with pending.
+		pending[idx] = append(pending[idx][:0:0], data[len(data)-keep:]...)
 		data = data[:len(data)-keep]
 		if len(data) == 0 {
 			return nil
