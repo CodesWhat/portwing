@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Multi-byte UTF-8 characters split across Drydock `dd:container_log_chunk` frames no longer turn into U+FFFD; each stream carries the incomplete tail into its next chunk.
+
 ## [v1.4.2] - 2026-11-21
 
 ### Security

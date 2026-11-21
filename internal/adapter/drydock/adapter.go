@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/codeswhat/portwing/internal/adapter"
 	"github.com/codeswhat/portwing/internal/docker"
@@ -554,17 +555,71 @@ func (a *Adapter) forwardContainerLogStream(
 	msg protocol.DDContainerLogRequestMessage,
 	body io.Reader,
 ) error {
-	err := docker.DecodeContainerLogStream(body, func(stream docker.ContainerLogStream, payload []byte) error {
-		name := "stdout"
-		if stream == docker.ContainerLogStderr {
-			name = "stderr"
+	// Each stream carries its own pending bytes: a multi-byte character can be
+	// split across Docker frames or read boundaries, and JSON-encoding the
+	// halves separately turns each into U+FFFD. Stdout and stderr interleave,
+	// so a split on one must never be completed with the other's bytes.
+	var pending [2][]byte
+	var sendFailed bool
+	send := func(name string, logs []byte) error {
+		if err := a.sendContainerLogStreamChunk(ctx, sender, msg, name, logs); err != nil {
+			sendFailed = true
+			return err
 		}
-		return a.sendContainerLogStreamChunk(ctx, sender, msg, name, payload)
+		return nil
+	}
+	err := docker.DecodeContainerLogStream(body, func(stream docker.ContainerLogStream, payload []byte) error {
+		name, idx := "stdout", 0
+		if stream == docker.ContainerLogStderr {
+			name, idx = "stderr", 1
+		}
+		data := payload
+		if len(pending[idx]) > 0 {
+			data = append(pending[idx], payload...)
+		}
+		keep := incompleteUTF8Suffix(data)
+		// Copy the suffix: payload aliases the decoder's reusable buffer.
+		pending[idx] = append(pending[idx][:0], data[len(data)-keep:]...)
+		data = data[:len(data)-keep]
+		if len(data) == 0 {
+			return nil
+		}
+		return send(name, data)
 	})
+	// Stream end, clean or not: an incomplete final character is emitted as-is
+	// (it decodes to U+FFFD) rather than dropped. Skipped once a send failed,
+	// since the transport is already refusing chunks.
+	if !sendFailed {
+		for idx, name := range [2]string{"stdout", "stderr"} {
+			if len(pending[idx]) == 0 {
+				continue
+			}
+			if flushErr := send(name, pending[idx]); flushErr != nil && err == nil {
+				err = flushErr
+			}
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("forwarding container log stream: %w", err)
 	}
 	return nil
+}
+
+// incompleteUTF8Suffix returns how many trailing bytes of b begin a multi-byte
+// UTF-8 character that b ends in the middle of. Zero when b ends on a complete
+// character, or in bytes that can never form one.
+func incompleteUTF8Suffix(b []byte) int {
+	for i := 1; i < utf8.UTFMax && i <= len(b); i++ {
+		tail := b[len(b)-i:]
+		if !utf8.RuneStart(tail[0]) {
+			continue
+		}
+		if utf8.FullRune(tail) {
+			return 0
+		}
+		return i
+	}
+	return 0
 }
 
 func (a *Adapter) sendContainerLogStreamChunk(
