@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Edge mode audit records and warning logs no longer keep the request query string, which can carry build args and `remote=` URL credentials.
 - Nonce-cache capacity rejections no longer count against the per-IP auth failure budget, so a busy controller can't lock its own IP out with 429.
 - Standard mode no longer forwards the `X-Portwing-Audience` request header to the Docker daemon.
+- `scripts/install.sh` now verifies the archive against `checksums.txt` and, when `cosign` is installed, the `checksums.txt` signature before extracting or installing anything. `PORTWING_REQUIRE_SIGNATURE=1` makes a missing `cosign` fatal.
 
 ## [v1.4.0] - 2026-11-19
 

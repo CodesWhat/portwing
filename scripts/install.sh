@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
+#
+# Installs the Portwing release binary, a config template and a service unit.
+#
+# Everything downloaded is verified before any extraction or sudo call:
+#   1. checksums.txt must list the archive and its SHA-256 must match
+#      (sha256sum, or shasum -a 256 on macOS). Always required.
+#   2. If cosign is on PATH, checksums.txt must verify against the release's
+#      keyless bundle (identity release.yml@refs/tags/<tag>, GitHub Actions
+#      OIDC issuer). A failed verification aborts the install.
+#      Without cosign the script warns and continues, unless
+#      PORTWING_REQUIRE_SIGNATURE=1 is set, which makes a missing cosign fatal.
+# To verify by hand, see https://portwing.codeswhat.com/docs/verification.
 set -euo pipefail
 
 REPO="codeswhat/portwing"
@@ -41,8 +53,60 @@ get_latest_version() {
 	curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/'
 }
 
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | awk '{print $1}'
+	else
+		return 1
+	fi
+}
+
+verify_checksum() {
+	local dir="$1" archive="$2" expected actual
+
+	if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+		error "Neither sha256sum nor shasum is available; cannot verify the download. Nothing was installed."
+	fi
+
+	expected=$(awk -v f="$archive" '$2 == f || $2 == "*" f { print $1; exit }' "${dir}/checksums.txt")
+	if [ -z "$expected" ]; then
+		error "checksums.txt has no entry for ${archive}. Nothing was installed."
+	fi
+
+	actual=$(sha256_of "${dir}/${archive}")
+	if [ "$actual" != "$expected" ]; then
+		error "Checksum mismatch for ${archive} (expected ${expected}, got ${actual}). Nothing was installed."
+	fi
+	info "Checksum verified for ${archive}"
+}
+
+verify_signature() {
+	local dir="$1" base_url="$2" version="$3"
+
+	if ! command -v cosign >/dev/null 2>&1; then
+		if [ "${PORTWING_REQUIRE_SIGNATURE:-}" = "1" ]; then
+			error "cosign is not installed and PORTWING_REQUIRE_SIGNATURE=1 is set. Nothing was installed."
+		fi
+		warn "cosign not found; skipping signature verification. Verify checksums.txt manually: https://portwing.codeswhat.com/docs/verification"
+		return 0
+	fi
+
+	curl -fsSL "${base_url}/checksums.txt.bundle" -o "${dir}/checksums.txt.bundle" ||
+		error "Could not download checksums.txt.bundle. Nothing was installed."
+	if ! cosign verify-blob \
+		--certificate-identity="https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/${version}" \
+		--certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+		--bundle="${dir}/checksums.txt.bundle" \
+		"${dir}/checksums.txt" >/dev/null 2>&1; then
+		error "cosign signature verification of checksums.txt failed. Nothing was installed."
+	fi
+	info "Signature verified for checksums.txt"
+}
+
 main() {
-	local os arch version url
+	local os arch version url base_url archive
 
 	os=$(detect_os)
 	arch=$(detect_arch)
@@ -50,14 +114,21 @@ main() {
 
 	info "Installing Portwing ${version} for ${os}/${arch}"
 
-	url="https://github.com/${REPO}/releases/download/${version}/portwing_${version#v}_${os}_${arch}.tar.gz"
+	archive="portwing_${version#v}_${os}_${arch}.tar.gz"
+	base_url="https://github.com/${REPO}/releases/download/${version}"
+	url="${base_url}/${archive}"
 
 	info "Downloading from ${url}..."
 	tmpdir=$(mktemp -d)
 	trap 'rm -rf "$tmpdir"' EXIT
 
-	curl -fsSL "$url" -o "${tmpdir}/portwing.tar.gz"
-	tar -xzf "${tmpdir}/portwing.tar.gz" -C "$tmpdir"
+	curl -fsSL "$url" -o "${tmpdir}/${archive}"
+	curl -fsSL "${base_url}/checksums.txt" -o "${tmpdir}/checksums.txt"
+
+	verify_checksum "$tmpdir" "$archive"
+	verify_signature "$tmpdir" "$base_url" "$version"
+
+	tar -xzf "${tmpdir}/${archive}" -C "$tmpdir"
 
 	info "Installing to ${INSTALL_DIR}/portwing..."
 	sudo install -m 755 "${tmpdir}/portwing" "${INSTALL_DIR}/portwing"
