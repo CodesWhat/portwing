@@ -191,6 +191,7 @@ test("external links must be https URLs to expected hosts", () => {
     "https://github.com/orgs/CodesWhat/packages/container/package/portwing",
     "https://github.com/portainer/portainer/releases/tag/2.45.3",
     "https://discord.gg/mWHCPJRzSx",
+    "https://codeswhat.com",
     "mailto:security@codeswhat.com",
   ]) {
     assert.equal(checkExternal(ok), null, ok);

@@ -136,6 +136,12 @@ export function Footer({ full = false }: { full?: boolean }) {
               <span>{SITE_CONFIG.name}</span>
             </Link>
             <p className="fblurb">{BLURB}</p>
+            <p className="fblurb">
+              <a href="https://codeswhat.com" target="_blank" rel="noopener noreferrer">
+                CodesWhat
+              </a>
+              : small, sharp tools from one developer and a lot of agents
+            </p>
             <div className="icons">
               <TrackedLink
                 href={GITHUB_URL}

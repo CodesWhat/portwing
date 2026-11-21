@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compose deploy `envVars` are now written single- or double-quoted in `.env.drydock`, so `$VAR`, `${X}`, `$$`, ` #`, quotes, backslashes and edge spaces reach the container exactly as sent. A variable name that isn't a plain identifier, or a value with a newline or NUL, is rejected by name.
 - A Compose deploy with a bad base64 file (or any other invalid file or variable) is now rejected before anything is written, and files land through temp-file renames instead of in place.
 
+### Changed
+
+- The marketing site and docs footers link back to codeswhat.com.
+
 ## [v1.4.2] - 2026-11-21
 
 ### Security
