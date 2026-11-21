@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Edge mode audit records and warning logs no longer keep the request query string, which can carry build args and `remote=` URL credentials.
 - Nonce-cache capacity rejections no longer count against the per-IP auth failure budget, so a busy controller can't lock its own IP out with 429.
 - Standard mode no longer forwards the `X-Portwing-Audience` request header to the Docker daemon.
 
