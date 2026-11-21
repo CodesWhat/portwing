@@ -5,8 +5,6 @@ package edge
 import (
 	"context"
 	"errors"
-	"io"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,7 +13,7 @@ import (
 
 func TestDockerReadinessRejectsPingError(t *testing.T) {
 	t.Parallel()
-	c := &Client{dockerClient: &fakeDocker{doErr: errors.New("daemon unavailable")}}
+	c := &Client{dockerClient: &fakeDocker{pingErr: errors.New("daemon unavailable")}}
 	for range 2 {
 		if c.dockerReady(context.Background()) {
 			t.Fatal("failed Docker ping reported ready")
@@ -30,15 +28,15 @@ type readinessDocker struct {
 	release chan struct{}
 }
 
-func (d *readinessDocker) Do(ctx context.Context, _, _ string, _ io.Reader) (*http.Response, error) {
+func (d *readinessDocker) Ping(ctx context.Context) error {
 	if d.pings.Add(1) == 1 {
 		close(d.entered)
 	}
 	select {
 	case <-d.release:
-		return mkResp(http.StatusOK, "", ""), nil
+		return nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return ctx.Err()
 	}
 }
 

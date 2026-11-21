@@ -739,26 +739,6 @@ func TestEnsureOperationalStateInitializesStreamSem(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// dockerReady — nil response body (client.go:1715)
-// ---------------------------------------------------------------------------
-
-// TestDockerReadyNilBodyDoesNotPanic covers the CONDITIONALS_NEGATION on
-// `response.Body != nil`: response.Body is a nil io.ReadCloser interface
-// here, so the mutant (`== nil`) would call Close on a nil interface value
-// and panic.
-func TestDockerReadyNilBodyDoesNotPanic(t *testing.T) {
-	t.Parallel()
-
-	c, _ := newTestClient(t)
-	fd := &fakeDocker{doResp: &http.Response{StatusCode: http.StatusOK, Body: nil}}
-	c.dockerClient = fd
-
-	if !c.dockerReady(context.Background()) {
-		t.Error("dockerReady = false, want true for a 200 response with a nil body")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // writePump — poll tick error paths are logged (client.go:1361, 1365)
 // ---------------------------------------------------------------------------
 
@@ -1018,8 +998,7 @@ func TestHealthServerReadyFieldRequiresBothDockerAndController(t *testing.T) {
 			Port:        "0",
 		},
 	}
-	//nolint:bodyclose // consumed and closed by dockerReady, the code under test.
-	c.dockerClient = &fakeDocker{doResp: mkResp(http.StatusOK, "", "")}
+	c.dockerClient = &fakeDocker{}
 	c.startHealthServer()
 	t.Cleanup(func() {
 		if c.healthServer != nil {
@@ -1039,26 +1018,6 @@ func TestHealthServerReadyFieldRequiresBothDockerAndController(t *testing.T) {
 	}
 	if body.Docker != "connected" || body.Controller != "disconnected" {
 		t.Fatalf("readiness response = %+v, want docker connected / controller disconnected", body)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// dockerReady — nil response with nil error (client.go:1712, extra-mutator
-// run)
-// ---------------------------------------------------------------------------
-
-// TestDockerReadyNilResponseNilErrorIsNotReady covers `err != nil || response
-// == nil`. A dockerClient that hands back (nil, nil) is the one case where
-// INVERT_LOGICAL (`||` -> `&&`) diverges: the mutant no longer short-circuits
-// on the nil response and falls through toward dereferencing it.
-func TestDockerReadyNilResponseNilErrorIsNotReady(t *testing.T) {
-	t.Parallel()
-
-	c, _ := newTestClient(t)
-	c.dockerClient = &fakeDocker{doResp: nil, doErr: nil}
-
-	if got := c.dockerReady(context.Background()); got != false {
-		t.Errorf("dockerReady() with nil response and nil error = %v, want false", got)
 	}
 }
 

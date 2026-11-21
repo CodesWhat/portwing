@@ -171,6 +171,7 @@ const (
 // *docker.Client satisfies it structurally.
 type dockerAPI interface {
 	GetVersion(ctx context.Context) (string, error)
+	Ping(ctx context.Context) error
 	Do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error)
 	DoWithHeaders(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error)
 	DoStream(ctx context.Context, method, path string, body io.Reader) (*http.Response, error)
@@ -2536,22 +2537,8 @@ func (c *Client) dockerReady(ctx context.Context) bool {
 	if c.dockerClient == nil {
 		return false
 	}
-	return c.readiness.Check(ctx, func(pingCtx context.Context) error {
-		response, err := c.dockerClient.Do(pingCtx, http.MethodGet, "/_ping", nil)
-		if err != nil {
-			return err
-		}
-		if response == nil {
-			return errors.New("docker ping returned no response")
-		}
-		if response.Body != nil {
-			_ = response.Body.Close()
-		}
-		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-			return fmt.Errorf("docker ping returned status %d", response.StatusCode)
-		}
-		return nil
-	}) == nil
+	// Same probe and same ping as Standard mode: the unversioned /_ping, 200 only.
+	return c.readiness.Check(ctx, c.dockerClient.Ping) == nil
 }
 
 func currentDockerState(connected bool) string {
