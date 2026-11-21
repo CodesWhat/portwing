@@ -46,7 +46,7 @@ Download the package for your architecture from the
 [GitHub release](https://github.com/CodesWhat/portwing/releases). For example:
 
 ```bash
-VERSION=1.4.0
+VERSION=1.4.1
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.deb" \
@@ -65,7 +65,7 @@ Use `linux_arm64.deb` on 64-bit Arm or `linux_armv7.deb` on 32-bit Arm.
 Download the matching package and its signature bundle:
 
 ```bash
-VERSION=1.4.0
+VERSION=1.4.1
 gh release download "v${VERSION}" \
   --repo CodesWhat/portwing \
   --pattern "portwing_${VERSION}_linux_amd64.rpm" \
@@ -99,6 +99,27 @@ cosign verify-blob \
 Replace `.deb` with `.rpm` for an rpm package. The release workflow also
 installs the published `amd64` deb and rpm in clean distribution containers and
 smoke-tests the Homebrew cask on macOS.
+
+## Install script
+
+`scripts/install.sh` installs the release binary, a config template and a
+service unit on Linux and macOS. It checks what it downloads before it
+extracts anything or calls `sudo`:
+
+- `checksums.txt` must list the archive and its SHA-256 must match. The script
+  uses `sha256sum`, or `shasum -a 256` on macOS, and stops if neither exists,
+  the archive has no line, or the hash differs.
+- If `cosign` is on `PATH`, it verifies `checksums.txt` against the release's
+  keyless bundle, using the `release.yml@refs/tags/<tag>` identity and the
+  GitHub Actions OIDC issuer. A failed verification stops the install.
+- Without `cosign` the script warns and continues. Set
+  `PORTWING_REQUIRE_SIGNATURE=1` to make a missing `cosign` fatal instead.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/codeswhat/portwing/main/scripts/install.sh | PORTWING_REQUIRE_SIGNATURE=1 bash
+```
+
+To verify by hand, follow [Release Verification](/verification).
 
 ## Configure the systemd service
 

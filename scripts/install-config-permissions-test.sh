@@ -25,18 +25,25 @@ cat >"${fixture_bin}/curl" <<'EOF'
 set -euo pipefail
 
 output=""
+url=""
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 	-o)
 		output="$2"
 		shift 2
 		;;
-	*) shift ;;
+	-*) shift ;;
+	*)
+		url="$1"
+		shift
+		;;
 	esac
 done
 
 [ -n "${output}" ]
-: >"${output}"
+source_file="${INSTALL_TEST_RELEASE_DIR}/${url##*/}"
+[ -f "${source_file}" ]
+cp "${source_file}" "${output}"
 EOF
 
 cat >"${fixture_bin}/tar" <<'EOF'
@@ -66,6 +73,28 @@ set -euo pipefail
 /bin/mkdir -p "${INSTALL_TEST_DOWNLOAD_DIR}"
 printf '%s\n' "${INSTALL_TEST_DOWNLOAD_DIR}"
 EOF
+
+# Fake cosign binaries live in their own dirs so a case opts in via PATH.
+cosign_ok_bin="${test_root}/cosign-ok"
+cosign_fail_bin="${test_root}/cosign-fail"
+mkdir -p "${cosign_ok_bin}" "${cosign_fail_bin}"
+cat >"${cosign_ok_bin}/cosign" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${INSTALL_TEST_COSIGN_LOG}"
+exit 0
+EOF
+cat >"${cosign_fail_bin}/cosign" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "${cosign_ok_bin}/cosign" "${cosign_fail_bin}/cosign"
+
+# A PATH with the basic tools but no sha256sum or shasum.
+nosha_bin="${test_root}/nosha"
+mkdir -p "${nosha_bin}"
+for tool in awk bash cat cp cut dirname env grep head rm sed tr; do
+	ln -s "$(command -v "${tool}")" "${nosha_bin}/${tool}"
+done
 
 cat >"${fixture_bin}/sudo" <<'EOF'
 #!/usr/bin/env bash
@@ -132,6 +161,29 @@ chmod +x \
 	"${fixture_bin}/mktemp" \
 	"${fixture_bin}/sudo"
 
+sha256_file() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	else
+		shasum -a 256 "$1" | awk '{print $1}'
+	fi
+}
+
+archive_name="portwing_0.0.0_darwin_amd64.tar.gz"
+
+# make_release <dir>: a fake release with a matching checksums.txt and bundle.
+make_release() {
+	local dir="$1"
+
+	mkdir -p "${dir}"
+	printf 'fixture archive\n' >"${dir}/${archive_name}"
+	printf '%s  %s\n' "$(sha256_file "${dir}/${archive_name}")" "${archive_name}" >"${dir}/checksums.txt"
+	printf 'fixture bundle\n' >"${dir}/checksums.txt.bundle"
+}
+
+default_release="${test_root}/release"
+make_release "${default_release}"
+
 prepare_case() {
 	local case_root="$1"
 
@@ -150,6 +202,7 @@ run_installer() {
 	(
 		umask 022
 		INSTALL_TEST_CONFIG_DIR="${case_root}/etc/portwing" \
+			INSTALL_TEST_RELEASE_DIR="${default_release}" \
 			INSTALL_TEST_DOWNLOAD_DIR="${case_root}/download" \
 			INSTALL_TEST_OWNERSHIP_LOG="${ownership_log}" \
 			PATH="${fixture_bin}:/usr/bin:/bin" \
@@ -159,6 +212,48 @@ run_installer() {
 	if [ -e "${case_root}/download" ]; then
 		echo "FAIL: installer did not remove its temporary download directory" >&2
 		exit 1
+	fi
+}
+
+# run_verify_case <name> <release-dir> <path> <want: ok|fail> [env assignments...]
+# Runs the installer against a fake release and checks the exit status, that a
+# rejected install left nothing behind, and that the temp dir was cleaned up.
+run_verify_case() {
+	local name="$1" release_dir="$2" case_path="$3" want="$4"
+	shift 4
+	local case_root="${test_root}/verify-${name}"
+	local status=0
+
+	prepare_case "${case_root}"
+	: >"${case_root}/cosign.log"
+	INSTALL_TEST_CONFIG_DIR="${case_root}/etc/portwing" \
+		INSTALL_TEST_RELEASE_DIR="${release_dir}" \
+		INSTALL_TEST_DOWNLOAD_DIR="${case_root}/download" \
+		INSTALL_TEST_OWNERSHIP_LOG="${case_root}/ownership.log" \
+		INSTALL_TEST_COSIGN_LOG="${case_root}/cosign.log" \
+		PATH="${case_path}" \
+		env ${1+"$@"} /bin/bash "${case_root}/install-under-test.sh" v0.0.0 \
+		>"${case_root}/out.log" 2>&1 || status=$?
+
+	if [ -e "${case_root}/download" ]; then
+		echo "FAIL: ${name}: installer left its temporary download directory behind" >&2
+		exit 1
+	fi
+	if [ "${want}" = ok ]; then
+		if [ "${status}" -ne 0 ] || [ ! -x "${case_root}/usr/local/bin/portwing" ]; then
+			echo "FAIL: ${name}: expected a successful install (exit ${status})" >&2
+			cat "${case_root}/out.log" >&2
+			exit 1
+		fi
+	else
+		if [ "${status}" -eq 0 ]; then
+			echo "FAIL: ${name}: installer accepted a release it should reject" >&2
+			exit 1
+		fi
+		if [ -e "${case_root}/usr/local/bin/portwing" ] || [ -e "${case_root}/etc/portwing" ]; then
+			echo "FAIL: ${name}: installer changed the system despite rejecting the release" >&2
+			exit 1
+		fi
 	fi
 }
 
@@ -257,6 +352,36 @@ fi
 if [ "${failure}" -ne 0 ]; then
 	exit 1
 fi
+
+base_path="${fixture_bin}:/usr/bin:/bin"
+
+run_verify_case happy-no-cosign "${default_release}" "${base_path}" ok
+run_verify_case happy-cosign "${default_release}" "${cosign_ok_bin}:${base_path}" ok
+if ! grep -Fq 'verify-blob' "${test_root}/verify-happy-cosign/cosign.log" ||
+	! grep -Fq -- '--certificate-identity=https://github.com/CodesWhat/portwing/.github/workflows/release.yml@refs/tags/v0.0.0' "${test_root}/verify-happy-cosign/cosign.log" ||
+	! grep -Fq -- '--certificate-oidc-issuer=https://token.actions.githubusercontent.com' "${test_root}/verify-happy-cosign/cosign.log"; then
+	echo "FAIL: cosign was not invoked with verify-blob and the release identity" >&2
+	failure=1
+fi
+
+mismatch_release="${test_root}/release-mismatch"
+make_release "${mismatch_release}"
+printf '%s  %s\n' "$(printf 'other' | sha256_file /dev/stdin)" "${archive_name}" >"${mismatch_release}/checksums.txt"
+run_verify_case checksum-mismatch "${mismatch_release}" "${base_path}" fail
+
+missing_release="${test_root}/release-missing-line"
+make_release "${missing_release}"
+printf '%s  %s\n' "$(sha256_file "${missing_release}/${archive_name}")" "portwing_0.0.0_linux_amd64.tar.gz" >"${missing_release}/checksums.txt"
+run_verify_case missing-checksum-line "${missing_release}" "${base_path}" fail
+
+run_verify_case no-sha-tool "${default_release}" "${fixture_bin}:${nosha_bin}" fail
+if ! grep -Fq 'Neither sha256sum nor shasum' "${test_root}/verify-no-sha-tool/out.log"; then
+	echo "FAIL: no-sha-tool case did not fail for the missing checksum tool" >&2
+	failure=1
+fi
+run_verify_case cosign-verify-fails "${default_release}" "${cosign_fail_bin}:${base_path}" fail
+run_verify_case require-signature-no-cosign "${default_release}" "${base_path}" fail PORTWING_REQUIRE_SIGNATURE=1
+run_verify_case require-signature-with-cosign "${default_release}" "${cosign_ok_bin}:${base_path}" ok PORTWING_REQUIRE_SIGNATURE=1
 
 # Extract the installed template without invoking OpenRC or writing system paths.
 openrc_case="${test_root}/openrc"
@@ -389,4 +514,4 @@ if ! grep -Fq 'DRYDOCK_URL + PRIVATE_KEY_FILE' "${new_case}/etc/portwing/config"
 fi
 
 [ "${failure}" -eq 0 ] || exit 1
-echo "Installer config permission and OpenRC environment checks passed."
+echo "Installer config permission, release verification and OpenRC environment checks passed."

@@ -86,7 +86,7 @@ The following variables govern how Portwing authenticates incoming requests. `TO
 | `AUTHORIZED_KEYS` | — | Path to an Ed25519 `authorized_keys` file for per-client asymmetric authentication (Model B). `AUTHORIZED_KEYS_FILE` is an alias for this variable. |
 | `AUTHORIZED_KEYS_FILE` | — | Alias for `AUTHORIZED_KEYS`. |
 | `MAX_CLOCK_SKEW_SECONDS` | `60` | Maximum tolerated clock difference (seconds) between client and agent when validating Ed25519 request timestamps. Range: `1..4611686018` seconds. |
-| `NONCE_LRU_SIZE` | `10000` | Capacity of the in-memory nonce cache used for replay protection. |
+| `NONCE_LRU_SIZE` | `10000` | Capacity of the in-memory nonce cache used for replay protection. Each nonce is kept for twice `MAX_CLOCK_SKEW_SECONDS`, so size it above your sustained signed request rate times that (the default 10,000 covers about 83 requests/s at the default skew). A full cache rejects new requests with 401 `nonce-capacity`; those rejections don't count toward the per-IP lockout. |
 | `ENROLLMENT_TOKEN` | — | One-shot bootstrap token for Model C key enrollment; consumed on successful enrollment. The burn is recorded as a `# portwing-enrollment-burned` comment in the authorized_keys file and persists across restarts. |
 | `ENROLLMENT_TOKEN_FILE` | — | Path to a file containing the enrollment token. |
 | `ALLOW_INSECURE_ENROLLMENT` | `false` | Since v1.2: allow plaintext Model C enrollment for trusted local testing. By default enrollment requires native TLS or exactly one `X-Forwarded-Proto: https` value from a direct peer in `TRUSTED_PROXIES`. The proxy must overwrite the header and the backend listener must stay private. |

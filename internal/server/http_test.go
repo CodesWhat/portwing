@@ -80,6 +80,7 @@ func TestStripPortwingAuthHeaders(t *testing.T) {
 		auth.HeaderNonce,
 		auth.HeaderSignature,
 		auth.HeaderSignatureVersion,
+		auth.HeaderAudience,
 	}
 	for _, name := range stripped {
 		h.Set(name, "secret")

@@ -563,7 +563,10 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			}
 			verified, err := auth.VerifyRequestDetailed(r, body, ed.Registry, ed.Nonces, skew)
 			keyID := verified.KeyID
-			releaseAuthSlot(err == nil)
+			// A full nonce cache is the agent's own capacity limit, not a
+			// credential failure, so it must not spend the IP's failure
+			// budget or a busy controller would lock itself out with 429.
+			releaseAuthSlot(err == nil || errors.Is(err, auth.ErrNonceCapacity))
 			if err != nil {
 				reason := auth.ReasonFor(err)
 				slog.Warn("ed25519 authentication failed",
