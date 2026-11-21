@@ -530,13 +530,11 @@ func (c *Client) GetContainerLogs(ctx context.Context, id, tail, since, until st
 
 	path := "/containers/" + id + "/logs?" + q.Encode()
 
-	var resp *http.Response
-	var err error
-	if follow {
-		resp, err = c.DoStream(ctx, http.MethodGet, path, nil)
-	} else {
-		resp, err = c.Do(ctx, http.MethodGet, path, nil)
-	}
+	// Always the streaming client: the timeout-bound client's total deadline
+	// covers the body read, so a long non-follow read would be cut off at
+	// REQUEST_TIMEOUT and look like a complete, shorter log. Callers bound the
+	// read through ctx instead.
+	resp, err := c.DoStream(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("container logs: %w", err)
 	}

@@ -414,8 +414,8 @@ func TestHandleContainerLogsCopyNError(t *testing.T) {
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
 
-	// Should return without panic when CopyN fails mid-frame.
-	a.handleContainerLogs(rec, req)
+	// A mid-frame failure aborts the response instead of ending it cleanly.
+	requireLogAbort(t, func() { a.handleContainerLogs(rec, req) })
 }
 
 // TestHandleContainerLogsPartialHeader exercises the io.ErrUnexpectedEOF path
@@ -479,10 +479,26 @@ func TestHandleContainerLogsPartialHeader(t *testing.T) {
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
 
-	a.handleContainerLogs(rec, req)
+	requireLogAbort(t, func() { a.handleContainerLogs(rec, req) })
 
 	// Should have the valid frame's content.
 	if !strings.Contains(rec.Body.String(), "ok") {
 		t.Fatalf("expected 'ok' in body, got: %q", rec.Body.String())
+	}
+}
+
+// requireLogAbort runs a log handler and requires it to abort the response with
+// http.ErrAbortHandler, which is how a mid-body failure reaches the client as a
+// broken transfer instead of a clean 200.
+func requireLogAbort(t *testing.T, serve func()) {
+	t.Helper()
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		serve()
+	}()
+	if recovered != http.ErrAbortHandler { //nolint:errorlint // recover() yields the exact sentinel net/http recognizes.
+		t.Fatalf("recovered = %v, want http.ErrAbortHandler", recovered)
 	}
 }

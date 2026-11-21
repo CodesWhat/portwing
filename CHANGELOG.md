@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Multi-byte UTF-8 characters split across Drydock `dd:container_log_chunk` frames no longer turn into U+FFFD; each stream carries the incomplete tail into its next chunk.
+- Non-follow container log reads no longer stop at `REQUEST_TIMEOUT` and return a truncated log as a complete one. They stream like follow reads, and a failure mid-body now aborts the HTTP response or returns an error instead of a clean 200.
 
 ## [v1.4.2] - 2026-11-21
 

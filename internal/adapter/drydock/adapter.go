@@ -434,6 +434,19 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 		return
 	}
 
+	// A follow request ends at its own deadline, so a read error there is the
+	// expected end of the window. Otherwise it is a failed read, and the
+	// partial text must not go out as if it were the whole log. (The over-cap
+	// case above also surfaces as a decode error, so it is checked first.)
+	if err != nil && !msg.Follow {
+		a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
+			RequestID:   msg.RequestID,
+			ContainerID: msg.ContainerID,
+			Logs:        fmt.Sprintf("error: reading container logs: %v", err),
+		})
+		return
+	}
+
 	a.sendTypedMessage(sender, protocol.TypeDDContainerLogResponse, protocol.DDContainerLogResponseMessage{
 		RequestID:   msg.RequestID,
 		ContainerID: msg.ContainerID,

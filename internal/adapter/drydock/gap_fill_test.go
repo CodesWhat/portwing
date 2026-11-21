@@ -214,10 +214,8 @@ func TestHandleContainerLogs_InvalidChunkError(t *testing.T) {
 	req.SetPathValue("id", "container-1")
 	rec := httptest.NewRecorder()
 
-	a.handleContainerLogs(rec, req)
-
-	// The handler returns silently after the non-EOF read error; the response
-	// code must not be 500 (no http.Error was called before the error).
-	// We just confirm no panic occurred and that the handler returned.
+	// The non-EOF read error aborts the response; no http.Error was called
+	// before it, so the status was never rewritten to 500.
+	requireLogAbort(t, func() { a.handleContainerLogs(rec, req) })
 	_ = rec.Code
 }
