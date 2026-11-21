@@ -4,6 +4,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -58,6 +59,9 @@ func (b *idleTimeoutBody) retire() {
 	b.mu.Unlock()
 }
 
+// ErrIdleLogRead reports that Docker sent no log data within the idle bound.
+var ErrIdleLogRead = errors.New("no data from docker")
+
 func (b *idleTimeoutBody) Read(p []byte) (int, error) {
 	n, err := b.body.Read(p)
 	b.mu.Lock()
@@ -69,7 +73,10 @@ func (b *idleTimeoutBody) Read(p []byte) (int, error) {
 	}
 	b.mu.Unlock()
 	if err != nil && b.fired.Load() {
-		err = fmt.Errorf("no data from docker for %s: %w", b.timeout, err)
+		// Wrap the sentinel, not the underlying error: the read usually ends
+		// in io.EOF once the context is cancelled, and callers treat
+		// errors.Is(err, io.EOF) as a clean end of the body.
+		err = fmt.Errorf("%w for %s: %v", ErrIdleLogRead, b.timeout, err) //nolint:errorlint // Deliberately not wrapping io.EOF; see above.
 	}
 	return n, err
 }

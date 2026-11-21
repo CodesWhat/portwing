@@ -134,7 +134,7 @@ func TestIdleBodyFiredTimerSurfacesAsFailure(t *testing.T) {
 	}
 	close(gate)
 	_, err := b.Read(make([]byte, 8))
-	if err == nil || err == io.EOF {
+	if !errors.Is(err, ErrIdleLogRead) || errors.Is(err, io.EOF) {
 		t.Fatalf("err = %v, want a wrapped timeout error, not clean EOF", err)
 	}
 }
