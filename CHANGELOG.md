@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Standard mode no longer forwards the `X-Portwing-Audience` request header to the Docker daemon.
+
 ## [v1.4.0] - 2026-11-19
 
 ### Added

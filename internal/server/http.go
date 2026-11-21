@@ -59,6 +59,7 @@ var portwingAuthHeaders = []string{
 	auth.HeaderNonce,
 	auth.HeaderSignature,
 	auth.HeaderSignatureVersion,
+	auth.HeaderAudience,
 }
 
 // stripPortwingAuthHeaders removes Portwing's own auth headers from a request
