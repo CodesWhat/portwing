@@ -63,6 +63,8 @@ package audit
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"os"
@@ -123,6 +125,7 @@ type Logger struct {
 	log    *slog.Logger // nil when slog output is disabled
 	ring   *ring        // nil when the in-memory buffer is disabled
 	closer func()       // flushes/closes the underlying file; no-op for non-file sinks
+	epoch  string       // random per-process generation embedded in export cursors
 }
 
 // Stats describes the current audit sink and in-memory export buffer.
@@ -132,6 +135,9 @@ type Stats struct {
 	SinkEnabled  bool
 	OldestCursor uint64
 	LatestCursor uint64
+	// Epoch identifies this Logger's buffer generation. Export cursors carry it
+	// so a cursor minted by a previous process is never read as one of ours.
+	Epoch string
 }
 
 // New creates a Logger that writes to the sink indicated by dest and keeps an
@@ -141,7 +147,11 @@ type Stats struct {
 // The returned closer is retained internally; callers should use Logger.Close()
 // on shutdown instead.
 func New(dest string, bufferSize int) (*Logger, func(), error) {
-	l := &Logger{closer: func() {}}
+	var gen [8]byte
+	if _, err := rand.Read(gen[:]); err != nil {
+		return nil, func() {}, err
+	}
+	l := &Logger{closer: func() {}, epoch: hex.EncodeToString(gen[:])}
 	if bufferSize > 0 {
 		l.ring = newRing(bufferSize)
 	}
@@ -216,7 +226,7 @@ func (l *Logger) RecordsAfter(after uint64, limit int) ([]Record, Stats) {
 
 // Stats returns current audit sink and buffer state.
 func (l *Logger) Stats() Stats {
-	stats := Stats{SinkEnabled: l.log != nil}
+	stats := Stats{SinkEnabled: l.log != nil, Epoch: l.epoch}
 	if l.ring == nil {
 		return stats
 	}

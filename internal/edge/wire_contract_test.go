@@ -975,7 +975,7 @@ func TestStartHealthServerExportsAuditRecords(t *testing.T) {
 		}
 	})
 
-	exportURL := "http://" + c.healthServer.Addr + "/_portwing/audit/export?cursor=0"
+	exportURL := "http://" + c.healthServer.Addr + "/_portwing/audit/export?cursor=" + audit.FormatCursor(auditor.Stats().Epoch, 0)
 	var resp *http.Response
 	waitFor(t, "edge audit export ready", func() bool {
 		//nolint:noctx,bodyclose
@@ -998,7 +998,7 @@ func TestStartHealthServerExportsAuditRecords(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); got != "application/x-ndjson" {
 		t.Fatalf("content type = %q, want application/x-ndjson", got)
 	}
-	if got := resp.Header.Get("X-Portwing-Next-Cursor"); got != "1" {
+	if got := resp.Header.Get("X-Portwing-Next-Cursor"); got != audit.FormatCursor(auditor.Stats().Epoch, 1) {
 		t.Fatalf("next cursor = %q, want 1", got)
 	}
 	if got := resp.Header.Get("X-Portwing-Record-Count"); got != "1" {

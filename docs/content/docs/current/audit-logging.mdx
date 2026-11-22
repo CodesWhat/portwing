@@ -230,13 +230,14 @@ curl -sS -D audit-headers.txt \
 ```
 
 After consuming the entire response, persist `X-Portwing-Next-Cursor` and send
-it as the next request's `cursor`. `limit` bounds the number of records returned;
+it as the next request's `cursor`. The value is opaque and tied to the agent
+process that issued it, so send it back exactly as received. `limit` bounds the number of records returned;
 zero or omission returns every retained match.
 
 ```bash
 curl -sS -D audit-headers.txt \
   -H "Authorization: Bearer $TOKEN" \
-  "https://portwing.example.com/_portwing/audit/export?cursor=42&limit=500"
+  "https://portwing.example.com/_portwing/audit/export?cursor=9f2c41d07ab3e815.42&limit=500"
 ```
 
 For Edge mode, make the same request from the private operations network and
@@ -244,7 +245,7 @@ omit the Authorization header:
 
 ```bash
 curl -sS -D audit-headers.txt \
-  "http://portwing-edge:3000/_portwing/audit/export?cursor=42&limit=500"
+  "http://portwing-edge:3000/_portwing/audit/export?cursor=9f2c41d07ab3e815.42&limit=500"
 ```
 
 | Response header | Meaning |
@@ -256,7 +257,10 @@ curl -sS -D audit-headers.txt \
 
 A `409 Conflict` means the supplied cursor is outside the current buffer
 generation: retained records were overwritten, or the agent restarted and
-cursor numbering began again. The response's `X-Portwing-Next-Cursor` gives the
+cursor numbering began again. A cursor issued by an earlier agent process always
+gets a 409, even when its sequence number would fall inside the new buffer, and
+a bare number such as `42` is treated the same way. A malformed cursor gets a
+`400`. The response's `X-Portwing-Next-Cursor` gives the
 safe reset point, but the exporter should surface the gap before resuming so
 data loss is never silent.
 

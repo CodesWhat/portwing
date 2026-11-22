@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audit export cursors now carry a per-process generation, so a cursor saved before an agent restart gets the documented 409 instead of a 200 that silently skips records. Cursors are opaque strings; echo `X-Portwing-Next-Cursor` back as received.
 - `api_request`, `compose_op` and `exec_start` audit records now carry `key_id` for Ed25519-authenticated callers (the verified key in Standard mode, the session signing key in Edge mode), in the export buffer, the sink and the export stream.
 - Multi-byte UTF-8 characters split across Drydock `dd:container_log_chunk` frames no longer turn into U+FFFD; each stream carries the incomplete tail into its next chunk.
 - Non-follow container log reads no longer stop at `REQUEST_TIMEOUT` and return a truncated log as a complete one. They stream like follow reads, and a failure mid-body now aborts the HTTP response or returns an error instead of a clean 200.
