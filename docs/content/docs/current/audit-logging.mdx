@@ -35,7 +35,9 @@ docker run -e AUDIT_LOG=stderr \
 ```
 
 <Callout type="info">
-  File sinks are opened with mode `0600` (owner read/write only). On Linux you can bind-mount a host directory and use a tool like `logrotate` or forward with `filebeat`/`fluentd` without any additional configuration on Portwing's side.
+  File sinks are opened with mode `0600` (owner read/write only). On Linux you can bind-mount a host directory and forward with `filebeat`/`fluentd` without any additional configuration on Portwing's side.
+
+  Portwing opens the file once at startup (append-only) and holds it open. It never reopens the file, and `SIGHUP` reloads only `authorized_keys`, not the audit log. With `logrotate`, use `copytruncate`: the append-only handle keeps writing at the new end of the truncated file. A plain rename-and-create rotation leaves Portwing writing to the renamed file until the process restarts, so don't use it (`postrotate` signals won't help). A short window of records between the copy and the truncate can be lost with `copytruncate`; for lossless capture, use `AUDIT_LOG=stdout` and let the container runtime rotate it.
 </Callout>
 
 See [Configuration](/configuration) for the full environment variable reference.
@@ -89,7 +91,7 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `container` | string | Exec path or container ID |
+| `container` | string | The exec start request path, for example `/exec/e7f8a9b1/start` (including any `/v1.xx` API version prefix the client sent). It is a path, not a container ID or name. Only a typed edge `exec_start` message carries the container ID here instead. |
 | `exec_id` | string | Exec resource ID assigned by the agent |
 
 The `outcome` of an `exec_start` record says whether the exec was admitted. `allowed` means it took an exec session slot and was forwarded or started. `denied` means it was refused: the exec session limit was full or, in edge mode, a raw exec request hit the request cap or the streamed-body cap, or a typed `exec_start` had a missing or duplicate exec ID.
@@ -147,7 +149,7 @@ Docker Compose operation:
 Exec tunnel opened:
 
 ```json
-{"time":"2026-01-15T10:24:01.500000000Z","level":"INFO","msg":"","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"}
+{"time":"2026-01-15T10:24:01.500000000Z","level":"INFO","msg":"","event":"exec_start","actor":"203.0.113.42","container":"/exec/e7f8a9b1/start","exec_id":"e7f8a9b1","outcome":"allowed"}
 ```
 
 Ed25519 key enrolled:
@@ -191,7 +193,7 @@ Response shape:
 ```json
 {
   "records": [
-    {"cursor":42,"ts":"2026-01-15T10:24:01.500000000Z","event":"exec_start","actor":"203.0.113.42","container":"abc123def456","exec_id":"e7f8a9b1","outcome":"allowed"},
+    {"cursor":42,"ts":"2026-01-15T10:24:01.500000000Z","event":"exec_start","actor":"203.0.113.42","container":"/exec/e7f8a9b1/start","exec_id":"e7f8a9b1","outcome":"allowed"},
     {"cursor":41,"ts":"2026-01-15T10:23:50.001000000Z","event":"auth_failure","actor":"203.0.113.9","method":"GET","path":"/_portwing/info","outcome":"denied"}
   ],
   "count": 2
@@ -230,13 +232,14 @@ curl -sS -D audit-headers.txt \
 ```
 
 After consuming the entire response, persist `X-Portwing-Next-Cursor` and send
-it as the next request's `cursor`. `limit` bounds the number of records returned;
+it as the next request's `cursor`. The value is opaque and tied to the agent
+process that issued it, so send it back exactly as received. `limit` bounds the number of records returned;
 zero or omission returns every retained match.
 
 ```bash
 curl -sS -D audit-headers.txt \
   -H "Authorization: Bearer $TOKEN" \
-  "https://portwing.example.com/_portwing/audit/export?cursor=42&limit=500"
+  "https://portwing.example.com/_portwing/audit/export?cursor=9f2c41d07ab3e815.42&limit=500"
 ```
 
 For Edge mode, make the same request from the private operations network and
@@ -244,7 +247,7 @@ omit the Authorization header:
 
 ```bash
 curl -sS -D audit-headers.txt \
-  "http://portwing-edge:3000/_portwing/audit/export?cursor=42&limit=500"
+  "http://portwing-edge:3000/_portwing/audit/export?cursor=9f2c41d07ab3e815.42&limit=500"
 ```
 
 | Response header | Meaning |
@@ -256,7 +259,10 @@ curl -sS -D audit-headers.txt \
 
 A `409 Conflict` means the supplied cursor is outside the current buffer
 generation: retained records were overwritten, or the agent restarted and
-cursor numbering began again. The response's `X-Portwing-Next-Cursor` gives the
+cursor numbering began again. A cursor issued by an earlier agent process always
+gets a 409, even when its sequence number would fall inside the new buffer, and
+a bare number such as `42` is treated the same way. A malformed cursor gets a
+`400`. The response's `X-Portwing-Next-Cursor` gives the
 safe reset point, but the exporter should surface the gap before resuming so
 data loss is never silent.
 

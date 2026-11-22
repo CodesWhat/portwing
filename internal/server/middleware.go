@@ -597,7 +597,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				defer reg.DecInFlight()
 			}
 			next.ServeHTTP(rw, r)
-			auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start), audit.WithKeyID(keyID))
 			if reg != nil {
 				reg.IncRequest(r.Method, rw.code)
 				reg.ObserveRequestDuration(time.Since(start).Seconds())

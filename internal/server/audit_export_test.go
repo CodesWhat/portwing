@@ -185,7 +185,7 @@ func TestHandleAuditExportNDJSONCursor(t *testing.T) {
 	s.auditor.AuthFailure("b", "GET", "/2")
 	s.auditor.APIRequest("c", "GET", "/3", audit.OutcomeAllowed, 200, 0.5)
 
-	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor=1&limit=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor="+audit.FormatCursor(s.auditor.Stats().Epoch, 1)+"&limit=1", nil)
 	rr := httptest.NewRecorder()
 	s.handleAuditExport(rr, req)
 
@@ -195,7 +195,7 @@ func TestHandleAuditExportNDJSONCursor(t *testing.T) {
 	if got := rr.Header().Get("Content-Type"); got != "application/x-ndjson" {
 		t.Fatalf("content type = %q, want application/x-ndjson", got)
 	}
-	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != "2" {
+	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != audit.FormatCursor(s.auditor.Stats().Epoch, 2) {
 		t.Fatalf("next cursor = %q, want 2", got)
 	}
 	if got := rr.Header().Get("X-Portwing-Record-Count"); got != "1" {
@@ -275,7 +275,7 @@ func TestHandleAuditExportReportsCursorGap(t *testing.T) {
 	s.auditor.AuthFailure("b", "GET", "/2")
 	s.auditor.AuthFailure("c", "GET", "/3")
 
-	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor=0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor="+audit.FormatCursor(s.auditor.Stats().Epoch, 0), nil)
 	rr := httptest.NewRecorder()
 	s.handleAuditExport(rr, req)
 
@@ -302,7 +302,7 @@ func TestHandleAuditExportWithoutCursorBootstrapsAtOldestRetainedRecord(t *testi
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 bootstrap response, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != "3" {
+	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != audit.FormatCursor(s.auditor.Stats().Epoch, 3) {
 		t.Fatalf("next cursor = %q, want 3", got)
 	}
 
@@ -326,14 +326,14 @@ func TestHandleAuditExportDetectsCursorAheadOfCurrentGeneration(t *testing.T) {
 	s := makeAuditTestServer(t, 2)
 	s.auditor.AuthFailure("a", "GET", "/1")
 
-	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor=99", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/audit/export?cursor="+audit.FormatCursor(s.auditor.Stats().Epoch, 99), nil)
 	rr := httptest.NewRecorder()
 	s.handleAuditExport(rr, req)
 
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for future cursor, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != "0" {
+	if got := rr.Header().Get("X-Portwing-Next-Cursor"); got != audit.FormatCursor(s.auditor.Stats().Epoch, 0) {
 		t.Fatalf("reset cursor = %q, want 0", got)
 	}
 }

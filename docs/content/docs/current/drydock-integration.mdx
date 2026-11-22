@@ -30,7 +30,7 @@ Edge Mode is implemented on both sides. Drydock's cross-repo `quality-portwing-f
 
 ## Standard Mode: Handshake Sequence
 
-Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`).
+This describes the Drydock controller flow (`app/agent/AgentClient.ts`). Which Drydock releases pair with which Portwing release is in [`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md); this page isn't a verification record for any specific build.
 
 When a Drydock controller connects to a Portwing agent in Standard Mode, the following sequence occurs:
 
@@ -550,12 +550,17 @@ services:
       TOKEN: "${DD_AGENT_SECRET}"
       PORT: "3000"
       AGENT_NAME: "my-server"
+      # Drydock refuses a shared secret over plain HTTP unless
+      # DD_AGENT_ALLOW_INSECURE_SECRET=true, so terminate TLS in Portwing.
+      TLS_CERT: /certs/server.crt
+      TLS_KEY: /certs/server.key
     # The image runs as non-root UID 65532; grant the Docker socket's group:
     #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
     group_add:
       - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/certs:ro   # server.crt / server.key, readable by UID 65532
     ports:
       - "3000:3000"
     restart: unless-stopped
@@ -566,22 +571,27 @@ services:
 ```yaml
 agent:
   my-server:
-    host: http://my-server-ip
+    host: my-server.example.com   # must match a name in the server certificate
     port: 3000
     secret: "${DD_AGENT_SECRET}"
+    cafile: /certs/ca.crt         # CA that signed server.crt; omit for a publicly trusted cert
 ```
 
-The `TOKEN` value on the Portwing side must match the `secret` value on the Drydock side.
+The `TOKEN` value on the Portwing side must match the `secret` value on the Drydock side. This pairing works against Drydock 1.9 without `DD_AGENT_ALLOW_INSECURE_SECRET`, because the secret only travels over TLS.
+
+<Callout type="warn">
+Never pair `TOKEN` with plain HTTP on a port published to all interfaces. If the controller runs on the same host, publish `127.0.0.1:3000:3000` instead of `3000:3000` and leave TLS off; Drydock still needs `DD_AGENT_ALLOW_INSECURE_SECRET=true` for that plaintext hop, so prefer TLS or [Ed25519 request signing](/authentication#4-ed25519-per-client-keys), which sends no shared secret at all.
+</Callout>
 
 ---
 
 ## Compatibility Matrix
 
 <Callout type="info">
-For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages are implemented and verified against a specific Drydock build.
+For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages Portwing implements.
 </Callout>
 
-Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`, `app/agent/api/`).
+The `AgentClient.ts` line references below point into Drydock's source and drift between releases. Drydock `v1.6.0-rc.11+` is the minimum for the full watcher/update feature path; the supported wire pairings (1.7.x, 1.6.x, and 1.5.x with `DD_EXPERIMENTAL_PORTWING=true`) are in the compatibility matrix.
 
 | Feature | Status | Notes |
 |---|---|---|

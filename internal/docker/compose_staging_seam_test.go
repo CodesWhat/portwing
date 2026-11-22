@@ -27,7 +27,7 @@ func TestStageRootedFileRetriesOnTempNameCollision(t *testing.T) {
 	stagingSuffix = func() string { s := suffixes[0]; suffixes = suffixes[1:]; return s }
 	t.Cleanup(func() { stagingSuffix = orig })
 
-	tmp, err := stageRootedFile(root, "app.conf", []byte("x"))
+	tmp, err := stageRootedFile(root, "app.conf", []byte("x"), 0o600)
 	if err != nil {
 		t.Fatalf("stageRootedFile: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestStageRootedFileGivesUpAfterRepeatedCollisions(t *testing.T) {
 	stagingSuffix = func() string { return "taken" }
 	t.Cleanup(func() { stagingSuffix = orig })
 
-	_, err = stageRootedFile(root, "app.conf", []byte("x"))
+	_, err = stageRootedFile(root, "app.conf", []byte("x"), 0o600)
 	if err == nil || !strings.Contains(err.Error(), "could not create a unique temp file") {
 		t.Fatalf("err = %v, want the collision give-up error", err)
 	}
@@ -67,10 +67,10 @@ func TestStageRootedFileRemovesTempWhenWriteFails(t *testing.T) {
 
 	boom := errors.New("write failed")
 	orig := writeStaged
-	writeStaged = func(f *os.File, _ []byte) error { _ = f.Close(); return boom }
+	writeStaged = func(f *os.File, _ []byte, _ os.FileMode) error { _ = f.Close(); return boom }
 	t.Cleanup(func() { writeStaged = orig })
 
-	if _, err := stageRootedFile(root, "app.conf", []byte("x")); !errors.Is(err, boom) {
+	if _, err := stageRootedFile(root, "app.conf", []byte("x"), 0o600); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the write failure", err)
 	}
 	entries, err := os.ReadDir(dir)

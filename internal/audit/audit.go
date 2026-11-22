@@ -41,6 +41,11 @@
 //
 //	"key_id": "<enrolled key ID on allowed results; empty on denied results>"
 //
+// api_request, compose_op and exec_start records add "key_id" when the caller
+// authenticated with an Ed25519 key (the verified key on the Standard path, the
+// session signing key on the Edge path); it is omitted for shared-token and
+// unauthenticated callers.
+//
 // # Configuration
 //
 // Set AUDIT_LOG to one of:
@@ -57,6 +62,9 @@
 package audit
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"os"
@@ -86,12 +94,38 @@ const (
 	OutcomeError   = "error"
 )
 
+// Option adjusts an audit record before it is written.
+type Option func(*options)
+
+type options struct{ keyID string }
+
+// WithKeyID attributes a record to the Ed25519 key that authenticated the
+// caller. An empty id leaves the record unattributed.
+func WithKeyID(id string) Option { return func(o *options) { o.keyID = id } }
+
+// keyAttr appends the key_id attribute to attrs when keyID is set.
+func keyAttr(keyID string, attrs []slog.Attr) []slog.Attr {
+	if keyID != "" {
+		attrs = append(attrs, slog.String("key_id", applog.Sanitize(keyID)))
+	}
+	return attrs
+}
+
+func keyIDOf(opts []Option) string {
+	var o options
+	for _, f := range opts {
+		f(&o)
+	}
+	return o.keyID
+}
+
 // Logger is a structured audit logger. The zero value is valid and emits
 // nothing (auditing disabled). All methods are safe for concurrent use.
 type Logger struct {
 	log    *slog.Logger // nil when slog output is disabled
 	ring   *ring        // nil when the in-memory buffer is disabled
 	closer func()       // flushes/closes the underlying file; no-op for non-file sinks
+	epoch  string       // random per-process generation embedded in export cursors
 }
 
 // Stats describes the current audit sink and in-memory export buffer.
@@ -101,6 +135,9 @@ type Stats struct {
 	SinkEnabled  bool
 	OldestCursor uint64
 	LatestCursor uint64
+	// Epoch identifies this Logger's buffer generation. Export cursors carry it
+	// so a cursor minted by a previous process is never read as one of ours.
+	Epoch string
 }
 
 // New creates a Logger that writes to the sink indicated by dest and keeps an
@@ -110,7 +147,9 @@ type Stats struct {
 // The returned closer is retained internally; callers should use Logger.Close()
 // on shutdown instead.
 func New(dest string, bufferSize int) (*Logger, func(), error) {
-	l := &Logger{closer: func() {}}
+	var gen [8]byte
+	_, _ = rand.Read(gen[:]) // never returns an error (crypto/rand docs)
+	l := &Logger{closer: func() {}, epoch: hex.EncodeToString(gen[:])}
 	if bufferSize > 0 {
 		l.ring = newRing(bufferSize)
 	}
@@ -185,7 +224,7 @@ func (l *Logger) RecordsAfter(after uint64, limit int) ([]Record, Stats) {
 
 // Stats returns current audit sink and buffer state.
 func (l *Logger) Stats() Stats {
-	stats := Stats{SinkEnabled: l.log != nil}
+	stats := Stats{SinkEnabled: l.log != nil, Epoch: l.epoch}
 	if l.ring == nil {
 		return stats
 	}
@@ -194,20 +233,22 @@ func (l *Logger) Stats() Stats {
 }
 
 // APIRequest records an authenticated (or rejected) HTTP API call.
-func (l *Logger) APIRequest(actor, method, path, outcome string, status int, durationMs float64) {
+func (l *Logger) APIRequest(actor, method, path, outcome string, status int, durationMs float64, opts ...Option) {
+	keyID := keyIDOf(opts)
 	if l.log == nil && l.ring == nil {
 		return
 	}
 	if l.log != nil {
-		l.log.Info("",
-			slog.String("event", EventAPIRequest),
-			slog.String("actor", applog.Sanitize(actor)),
-			slog.String("method", applog.Sanitize(method)),
-			slog.String("path", applog.Sanitize(path)),
-			slog.String("outcome", outcome),
-			slog.Int("status", status),
-			slog.Float64("duration_ms", durationMs),
-		)
+		l.log.LogAttrs(context.Background(), slog.LevelInfo, "", keyAttr(
+			keyID, []slog.Attr{
+				slog.String("event", EventAPIRequest),
+				slog.String("actor", applog.Sanitize(actor)),
+				slog.String("method", applog.Sanitize(method)),
+				slog.String("path", applog.Sanitize(path)),
+				slog.String("outcome", outcome),
+				slog.Int("status", status),
+				slog.Float64("duration_ms", durationMs),
+			})...)
 	}
 	if l.ring != nil {
 		l.ring.push(Record{
@@ -219,6 +260,7 @@ func (l *Logger) APIRequest(actor, method, path, outcome string, status int, dur
 			Outcome:    outcome,
 			Status:     status,
 			DurationMs: durationMs,
+			KeyID:      keyID,
 		})
 	}
 }
@@ -276,18 +318,20 @@ func (l *Logger) RateLimited(actor, method, path string) {
 }
 
 // ComposeOp records a Docker Compose lifecycle operation.
-func (l *Logger) ComposeOp(actor, operation, stack, outcome string) {
+func (l *Logger) ComposeOp(actor, operation, stack, outcome string, opts ...Option) {
+	keyID := keyIDOf(opts)
 	if l.log == nil && l.ring == nil {
 		return
 	}
 	if l.log != nil {
-		l.log.Info("",
-			slog.String("event", EventComposeOp),
-			slog.String("actor", applog.Sanitize(actor)),
-			slog.String("operation", applog.Sanitize(operation)),
-			slog.String("stack", applog.Sanitize(stack)),
-			slog.String("outcome", outcome),
-		)
+		l.log.LogAttrs(context.Background(), slog.LevelInfo, "", keyAttr(
+			keyID, []slog.Attr{
+				slog.String("event", EventComposeOp),
+				slog.String("actor", applog.Sanitize(actor)),
+				slog.String("operation", applog.Sanitize(operation)),
+				slog.String("stack", applog.Sanitize(stack)),
+				slog.String("outcome", outcome),
+			})...)
 	}
 	if l.ring != nil {
 		l.ring.push(Record{
@@ -297,6 +341,7 @@ func (l *Logger) ComposeOp(actor, operation, stack, outcome string) {
 			Operation: operation,
 			Stack:     stack,
 			Outcome:   outcome,
+			KeyID:     keyID,
 		})
 	}
 }
@@ -368,18 +413,20 @@ func ExecOutcome(admitted bool) string {
 // ExecStart records an exec start attempt at the admission decision, before
 // anything reaches the Docker daemon. outcome is OutcomeAllowed when the exec
 // was admitted and OutcomeDenied when a limit refused it.
-func (l *Logger) ExecStart(actor, container, execID, outcome string) {
+func (l *Logger) ExecStart(actor, container, execID, outcome string, opts ...Option) {
+	keyID := keyIDOf(opts)
 	if l.log == nil && l.ring == nil {
 		return
 	}
 	if l.log != nil {
-		l.log.Info("",
-			slog.String("event", EventExecStart),
-			slog.String("actor", applog.Sanitize(actor)),
-			slog.String("container", applog.Sanitize(container)),
-			slog.String("exec_id", applog.Sanitize(execID)),
-			slog.String("outcome", outcome),
-		)
+		l.log.LogAttrs(context.Background(), slog.LevelInfo, "", keyAttr(
+			keyID, []slog.Attr{
+				slog.String("event", EventExecStart),
+				slog.String("actor", applog.Sanitize(actor)),
+				slog.String("container", applog.Sanitize(container)),
+				slog.String("exec_id", applog.Sanitize(execID)),
+				slog.String("outcome", outcome),
+			})...)
 	}
 	if l.ring != nil {
 		l.ring.push(Record{
@@ -389,6 +436,7 @@ func (l *Logger) ExecStart(actor, container, execID, outcome string) {
 			Container: container,
 			ExecID:    execID,
 			Outcome:   outcome,
+			KeyID:     keyID,
 		})
 	}
 }

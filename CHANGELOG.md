@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Standard mode logs a startup WARN when token authentication is enabled, TLS is off and the listen address isn't loopback, since the shared secret then travels in plaintext and Drydock refuses that pairing.
+- Compose deploy `files` entries can be an object with `content` and an optional `mode` (masked to 0755), so a shipped script can run during a build and a config file can be read by a non-root container user. Plain string values still work and stay 0600.
+
+### Changed
+
+- Docs examples no longer pair a token with plaintext HTTP on a port published to all interfaces. The Drydock pairing, connection-modes, Watchtower migration and MCP examples use TLS, and the hardened quickstart explains Sockguard's `allowed_bind_mounts` allowlist. The Edge quickstart shows a `docker run` keygen and names Drydock's `DD_PORTWING_AUTHORIZED_KEYS`.
+- Docs and OpenAPI corrections: the generic `/api/v1/containers` response has its own flat `GenericContainer` schema, key-rotation endpoints accept signature v3 (and v2 only for a key not yet locked to v3), `REQUEST_TIMEOUT` is documented as a total timeout with non-follow log reads bounded by idleness, the 32 MiB compose request cap is documented, the auth rate-limit window is described as fixed rather than sliding, the exec audit `container` field is documented as the request path, and the audit log's `copytruncate` rotation requirement and the `portwing-with-exec.yaml` preset's lack of container attach are spelled out.
+- The observability docs now state what the host metrics measure in a container deployment and which mounts (`network_mode: host`, the Docker data root) host-accurate network and disk figures need.
+
+### Fixed
+
+- Docs analytics events now carry `surface=docs`. The docs export uses basePath `/docs`, `usePathname()` strips it, and every docs pageview and CTA was tagged as an unknown marketing route.
+- Analytics on the marketing site and docs now send only from `portwing.codeswhat.com`. Previews, localhost and lookalike hosts no longer initialize PostHog or queue events.
+- Audit export cursors now carry a per-process generation, so a cursor saved before an agent restart gets the documented 409 instead of a 200 that silently skips records. Cursors are opaque strings; echo `X-Portwing-Next-Cursor` back as received.
+- `api_request`, `compose_op` and `exec_start` audit records now carry `key_id` for Ed25519-authenticated callers (the verified key in Standard mode, the session signing key in Edge mode), in the export buffer, the sink and the export stream.
+- The Grype waiver expiry check now reads the config with a real YAML parser (yq), so indentless lists, `package:` before `vulnerability:`, and `#`-leading lines inside a block-scalar reason can no longer hide an `expires:` date. It fails closed when yq isn't installed.
+
 ## [v1.4.3] - 2026-11-21
 
 ### Fixed

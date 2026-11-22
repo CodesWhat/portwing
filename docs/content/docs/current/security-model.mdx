@@ -259,7 +259,7 @@ These controls structurally prevent the class of root RCE via compose inputs dem
 
 ## Control 9 — Rate limiting
 
-Failed authentication attempts are tracked per remote IP in a sliding one-minute window:
+Failed authentication attempts are tracked per remote IP in a fixed one-minute window. The window opens at the first failure and is not extended by later ones; once 60 seconds have passed since that first failure the counter resets:
 
 | Parameter | Value |
 |-----------|-------|

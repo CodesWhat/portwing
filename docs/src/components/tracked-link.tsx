@@ -2,7 +2,12 @@
 
 "use client";
 
-import { type CtaId, type CtaPlacement, captureCta } from "@codeswhat/public-analytics";
+import {
+  type CtaId,
+  type CtaPlacement,
+  captureCta,
+  docsAnalyticsPath,
+} from "@codeswhat/public-analytics";
 import { usePathname } from "next/navigation";
 import type { ComponentPropsWithoutRef } from "react";
 
@@ -13,7 +18,7 @@ type TrackedLinkProps = ComponentPropsWithoutRef<"a"> & {
 };
 
 export function TrackedLink({ href, ctaId, placement, onClick, ...props }: TrackedLinkProps) {
-  const pathname = usePathname();
+  const pathname = docsAnalyticsPath(usePathname());
   return (
     <a
       href={href}

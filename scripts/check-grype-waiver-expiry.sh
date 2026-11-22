@@ -8,8 +8,13 @@
 # day itself, or later (UTC), this script fails. Entries with no `expires:` are
 # permanent (for example the GO-2026-5932 linkage waivers) and always pass. A
 # malformed or impossible (for example 2026-11-31) `expires:` value fails too,
-# so a typo cannot disable the check. `expires:` is read anywhere in the entry,
+# so a typo cannot disable the check. `expires:` is read from the entry's reason,
 # so block-scalar reasons count; two in one entry fail as ambiguous.
+#
+# The config is read with a real YAML parser, mikefarah yq v4 (preinstalled on
+# GitHub's ubuntu runners, `brew install yq` locally), so list indentation, key
+# order and `#`-leading lines inside block scalars cannot hide an entry. With no
+# yq v4 on PATH the script fails closed (exit 2) rather than skipping the check.
 #
 # Usage: check-grype-waiver-expiry.sh [grype-config ...]   (default .grype.yaml)
 # GRYPE_WAIVER_TODAY=YYYY-MM-DD overrides today's date, for tests.
@@ -25,69 +30,63 @@ if [ "$#" -eq 0 ]; then
 	set -- .grype.yaml
 fi
 
+if ! command -v yq >/dev/null 2>&1 || ! yq --version 2>&1 | grep -Eq 'mikefarah/yq.* v?4\.'; then
+	echo "error: mikefarah yq v4 is required to read the Grype config and was not found on PATH" >&2
+	exit 2
+fi
+
+# One line per ignore entry: <count of expires: values>, TAB, <vulnerability>,
+# TAB, <first word after expires:>.
+# shellcheck disable=SC2016  # $v and $e are yq variables, not shell
+entry_query='(.ignore // [])[] | (.vulnerability // "(no vulnerability id)") as $v
+	| ([(.reason // "") | tostring | match("expires:[ \t]*(\\S*)"; "g") | .captures[0].string]) as $e
+	| ($e | length | tostring) + "\t" + ($v | tostring) + "\t" + ($e[0] // "")'
+
+is_leap() {
+	local y=$((10#$1))
+	[ $((y % 4)) -eq 0 ] && { [ $((y % 100)) -ne 0 ] || [ $((y % 400)) -eq 0 ]; }
+}
+
 status=0
 for config in "$@"; do
 	if [ ! -f "${config}" ]; then
 		echo "error: ${config} not found" >&2
 		exit 2
 	fi
-	# Dates are validated in awk (month lengths and leap years) rather than with
-	# `date -d` or python3, so it behaves the same on GNU/Linux and macOS.
-	if ! awk -v today="${today}" -v file="${config}" '
-		function flush(    line, expiry, y, m, d, mx, rest) {
-			if (!inentry) return
-			inentry = 0
-			if (n > 1) {
-				printf "%s: waiver for %s has %d expires: values; ambiguous, keep exactly one\n", file, vuln, n > "/dev/stderr"
-				bad = 1
-				return
-			}
-			if (n == 0) return
-			line = val
-			if (line !~ /^[0-9][0-9][0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])([^0-9]|$)/) {
-				printf "%s: waiver for %s has a malformed expiry; use expires: YYYY-MM-DD\n", file, vuln > "/dev/stderr"
-				bad = 1
-				return
-			}
-			expiry = substr(line, 1, 10)
-			y = substr(expiry, 1, 4) + 0
-			m = substr(expiry, 6, 2) + 0
-			d = substr(expiry, 9, 2) + 0
-			mx = substr("312831303130313130313031", (m - 1) * 2 + 1, 2) + 0
-			if (m == 2 && (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0))) mx = 29
-			if (d > mx) {
-				printf "%s: waiver for %s has an invalid calendar date %s in expires:; use a real YYYY-MM-DD date\n", file, vuln, expiry > "/dev/stderr"
-				bad = 1
-				return
-			}
-			if (expiry <= today) {
-				printf "%s: waiver for %s expired on %s (today is %s). Remove the ignore entry or get a renewed approval and a new expiry date.\n", file, vuln, expiry, today > "/dev/stderr"
-				bad = 1
-			}
-		}
-		/^[[:space:]]*#/ { next }
-		/^[^[:space:]]/ { flush(); next }
-		/^[[:space:]]*-[[:space:]]+vulnerability:/ {
-			flush()
-			inentry = 1
-			n = 0
-			val = ""
-			vuln = $0
-			sub(/^[[:space:]]*-[[:space:]]+vulnerability:[[:space:]]*/, "", vuln)
-			gsub(/["\047[:space:]]/, "", vuln)
-			next
-		}
-		inentry {
-			rest = $0
-			while ((i = index(rest, "expires:")) > 0) {
-				rest = substr(rest, i + 8)
-				sub(/^[[:space:]]*/, "", rest)
-				if (++n == 1) val = rest
-			}
-		}
-		END { flush(); exit bad }
-	' "${config}"; then
-		status=1
+	if ! entries="$(yq eval -r "${entry_query}" "${config}" 2>&1)"; then
+		echo "error: ${config} is not valid YAML: ${entries}" >&2
+		exit 2
 	fi
+	[ -n "${entries}" ] || continue
+	while IFS=$'\t' read -r n vuln val; do
+		[ "${n}" -gt 0 ] || continue
+		if [ "${n}" -gt 1 ]; then
+			echo "${config}: waiver for ${vuln} has ${n} expires: values; ambiguous, keep exactly one" >&2
+			status=1
+			continue
+		fi
+		if ! [[ ${val} =~ ^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])([^0-9]|$) ]]; then
+			echo "${config}: waiver for ${vuln} has a malformed expiry; use expires: YYYY-MM-DD" >&2
+			status=1
+			continue
+		fi
+		expiry="${val:0:10}"
+		m=$((10#${expiry:5:2}))
+		d=$((10#${expiry:8:2}))
+		mx="$(printf '%s' '312831303130313130313031' | cut -c$(((m - 1) * 2 + 1))-$(((m - 1) * 2 + 2)))"
+		mx=$((10#${mx}))
+		if [ "${m}" -eq 2 ] && is_leap "${expiry:0:4}"; then
+			mx=29
+		fi
+		if [ "${d}" -gt "${mx}" ]; then
+			echo "${config}: waiver for ${vuln} has an invalid calendar date ${expiry} in expires:; use a real YYYY-MM-DD date" >&2
+			status=1
+			continue
+		fi
+		if ! [[ ${expiry} > ${today} ]]; then
+			echo "${config}: waiver for ${vuln} expired on ${expiry} (today is ${today}). Remove the ignore entry or get a renewed approval and a new expiry date." >&2
+			status=1
+		fi
+	done <<<"${entries}"
 done
 exit "${status}"

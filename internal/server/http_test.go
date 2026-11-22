@@ -66,6 +66,55 @@ func TestNewServerPlaintextEnrollmentWarning(t *testing.T) {
 	}
 }
 
+func TestNewServerPlaintextTokenWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		bind     string
+		tls      bool
+		hash     bool
+		wantWarn bool
+	}{
+		{name: "all interfaces", bind: "0.0.0.0", wantWarn: true},
+		{name: "empty host", bind: ":3000", wantWarn: true},
+		{name: "token hash all interfaces", bind: "0.0.0.0", hash: true, wantWarn: true},
+		{name: "loopback v4", bind: "127.0.0.1"},
+		{name: "loopback v6", bind: "::1"},
+		{name: "TLS all interfaces", bind: "0.0.0.0", tls: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, stop := newStubDockerClient(t)
+			defer stop()
+			cfg := minimalConfig()
+			cfg.AllowUnauthenticated = false
+			cfg.BindAddress = tc.bind
+			if tc.hash {
+				phc, err := HashToken("s3cret-value")
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg.TokenHash = phc
+			} else {
+				cfg.Token = "s3cret-value"
+			}
+			if tc.tls {
+				cfg.TLSCert, cfg.TLSKey = "cert.pem", "key.pem"
+			}
+			logs := installLogCapture(t)
+			s, err := NewServer(cfg, client, &stubServerAdapter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
+			if got := logs.has("token authentication is enabled without TLS"); got != tc.wantWarn {
+				t.Errorf("plaintext token warning = %v, want %v", got, tc.wantWarn)
+			}
+			if logs.has("s3cret-value") {
+				t.Error("startup log exposed the token")
+			}
+		})
+	}
+}
+
 // TestStripPortwingAuthHeaders verifies that every Portwing credential header is
 // removed before a request is proxied to the Docker socket, while unrelated
 // headers are preserved.

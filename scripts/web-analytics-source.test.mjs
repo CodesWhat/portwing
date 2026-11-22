@@ -73,6 +73,24 @@ test("both web roots use the shared PostHog client and no Vercel analytics", () 
     assert.match(runtime, /useEffect\(\(\) => \{\s*capturePageview\(pathname\)/);
   }
 
+  // docs is exported with basePath "/docs" and usePathname() strips it, so the
+  // docs runtime and CTA links must restore it before an event is built.
+  assert.match(read("docs/next.config.ts"), /basePath: "\/docs"/);
+  for (const file of ["analytics-runtime", "tracked-link"]) {
+    assert.match(
+      read(`docs/src/components/${file}.tsx`),
+      /docsAnalyticsPath\(usePathname\(\)\)/,
+      file,
+    );
+  }
+
+  // The host gate lives in the shared client, after the DNT/GPC refusal and
+  // before anything is scheduled, so neither app can bypass it.
+  assert.match(
+    analyticsClient,
+    /if \(trackingRefused\(\)\) return;\s*if \(typeof location === "undefined" \|\| !isAnalyticsHost\(location\.hostname\)\) return;/,
+  );
+
   assert.doesNotMatch(read("analytics/src/contract.ts"), /metric_name|metric_value/);
 
   const lockWithNestedStalePostHog = { packages: { ...lock.packages } };

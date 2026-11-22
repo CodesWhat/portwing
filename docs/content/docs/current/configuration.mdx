@@ -165,7 +165,7 @@ bound also cannot exceed the platform's integer maximum (`2147483647` on
 | `LOG_LEVEL` | `info` | Log verbosity. Accepted values: `debug`, `info`, `warn`, `error`. |
 | `HEARTBEAT_INTERVAL` | `30` | Seconds between WebSocket ping frames in Edge mode. The read deadline is `max(2 * HEARTBEAT_INTERVAL, 60)` seconds. Range: `1..4611686018` seconds. |
 | `WELCOME_TIMEOUT` | `30` | Seconds to wait for the Drydock welcome message after the WebSocket handshake in Edge mode. Range: `1..4611686018` seconds. |
-| `REQUEST_TIMEOUT` | `30` | Timeout in seconds for individual Docker API calls; `0` disables the timeout. Range: `0..4611686018` seconds. |
+| `REQUEST_TIMEOUT` | `30` | Total timeout in seconds for a blocking Docker API call, covering the connection, the request and reading the whole response body; `0` disables the timeout. Streaming responses (follow logs, events, stats) aren't subject to the total timeout, and it also bounds the dial to the Docker socket. Non-follow container log reads aren't cut off at the total timeout either: they're bounded by idleness, so a daemon that sends nothing for `REQUEST_TIMEOUT` seconds fails the read with a mid-body error, however long the log is. Range: `0..4611686018` seconds. |
 | `RECONNECT_DELAY` | `1` | Initial reconnect backoff delay in seconds; `0` retries immediately (doubles on each failure, capped at `MAX_RECONNECT_DELAY`, with ±25% jitter). Range: `0..4611686018` seconds. |
 | `MAX_RECONNECT_DELAY` | `60` | Maximum reconnect backoff delay in seconds. Range: `0..4611686018` seconds. |
 | `SKIP_DF_COLLECTION` | `false` | Set to `true` (or `1`/`yes`) to disable disk-usage metric collection. Useful when the host filesystem is inaccessible or collection is slow. |

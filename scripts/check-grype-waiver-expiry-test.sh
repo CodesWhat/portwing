@@ -88,10 +88,71 @@ leap="${test_root}/leap.yaml"
 mkentry "${leap}" '    reason: "expires: 2028-02-29"'
 expect pass 2026-11-18 "${leap}" "valid leap day in the future"
 
+# Shapes a line-based reader missed: indentless lists, package before
+# vulnerability, and `#`-leading lines inside a block scalar.
+indentless="${test_root}/indentless.yaml"
+cat >"${indentless}" <<'YAML'
+ignore:
+- vulnerability: GHSA-fc5q-39xc-vjpf
+  reason: "Build-time only. expires: 2026-12-17"
+  package:
+    name: picomatch
+YAML
+expect pass 2026-12-16 "${indentless}" "indentless list, before the deadline"
+expect fail 2026-12-17 "${indentless}" "indentless list, on the deadline"
+pkgfirst="${test_root}/pkgfirst.yaml"
+cat >"${pkgfirst}" <<'YAML'
+ignore:
+  - package:
+      name: picomatch
+    reason: "Build-time only. expires: 2026-12-17"
+    vulnerability: GHSA-fc5q-39xc-vjpf
+YAML
+expect pass 2026-12-16 "${pkgfirst}" "package before vulnerability, before the deadline"
+expect fail 2026-12-17 "${pkgfirst}" "package before vulnerability, on the deadline"
+hashline="${test_root}/hashline.yaml"
+mkentry "${hashline}" '    reason: |' '      Build-time only.' '      # not a comment, part of the reason' '      expires: 2026-12-17'
+expect pass 2026-12-16 "${hashline}" "expiry after a #-leading block line, before the deadline"
+expect fail 2026-12-17 "${hashline}" "expiry after a #-leading block line, on the deadline"
+hashexp="${test_root}/hashexp.yaml"
+mkentry "${hashexp}" '    reason: |' '      # expires: 2026-12-17' '      Build-time only.'
+expect fail 2026-12-17 "${hashexp}" "expiry on a #-leading block line"
+yamlcomment="${test_root}/yamlcomment.yaml"
+cat >"${yamlcomment}" <<'YAML'
+ignore:
+  # expires: 2020-01-01 (a real YAML comment, not part of any reason)
+  - vulnerability: GHSA-fc5q-39xc-vjpf
+    reason: "No expiry."
+YAML
+expect pass 2026-12-17 "${yamlcomment}" "expires: in a real YAML comment is ignored"
+
+# Century years: 2100 is not a leap year, 2000 and 2400 are.
+c2100="${test_root}/c2100.yaml"
+mkentry "${c2100}" '    reason: "expires: 2100-02-29"'
+expect fail 2026-01-01 "${c2100}" "2100-02-29 is not a real date" "invalid calendar date"
+c2000="${test_root}/c2000.yaml"
+mkentry "${c2000}" '    reason: "expires: 2000-02-29"'
+expect pass 1999-01-01 "${c2000}" "2000-02-29 is a real leap day"
+
+# No yq v4 on PATH fails closed instead of skipping the check.
+nobin="${test_root}/nobin"
+mkdir -p "${nobin}"
+for tool in bash env date grep cut; do
+	ln -s "$(command -v "${tool}")" "${nobin}/${tool}"
+done
+got=0
+out="$(PATH="${nobin}" GRYPE_WAIVER_TODAY=2026-11-18 "${nobin}/bash" scripts/check-grype-waiver-expiry.sh "${config}" 2>&1)" || got=$?
+if [ "${got}" -ne 2 ] || ! grep -Fq 'yq v4 is required' <<<"${out}"; then
+	echo "FAIL: missing yq must fail closed with exit 2, got ${got}: ${out}" >&2
+	failures=$((failures + 1))
+fi
+
 # The real config carries no expiring waiver today: it passes on any date, and
 # the withdrawn picomatch entry stays gone.
 expect pass 2026-11-18 .grype.yaml "real .grype.yaml today"
 expect pass 2099-01-01 .grype.yaml "real .grype.yaml far in the future"
+expect pass 2026-11-18 .grype-shipped.yaml "real .grype-shipped.yaml today"
+expect pass 2099-01-01 .grype-shipped.yaml "real .grype-shipped.yaml far in the future"
 if grep -v '^[[:space:]]*#' .grype.yaml | grep -Fq 'GHSA-fc5q-39xc-vjpf'; then
 	echo "FAIL: real .grype.yaml must not carry the withdrawn GHSA-fc5q-39xc-vjpf waiver" >&2
 	failures=$((failures + 1))

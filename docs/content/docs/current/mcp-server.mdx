@@ -55,7 +55,7 @@ The MCP endpoint is always active when Portwing is running — it is not gated b
 
 ```bash
 # Minimal example: run Portwing with a token and connect an MCP client
-docker run -e TOKEN=mysecrettoken -p 3000:3000 ghcr.io/codeswhat/portwing:1.4.3
+docker run -e TOKEN=mysecrettoken -p 127.0.0.1:3000:3000 ghcr.io/codeswhat/portwing:1.4.3
 ```
 
 ---
@@ -200,7 +200,7 @@ Replace `YOUR_PORTWING_TOKEN` with the value you set in `TOKEN`, `TOKEN_FILE`, o
   "mcpServers": {
     "portwing": {
       "type": "http",
-      "url": "http://your-host:3000/_portwing/mcp",
+      "url": "https://your-host:3000/_portwing/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_PORTWING_TOKEN"
       }
@@ -214,7 +214,7 @@ Replace `YOUR_PORTWING_TOKEN` with the value you set in `TOKEN`, `TOKEN_FILE`, o
 ```bash
 claude mcp add --transport http \
   --header "Authorization: Bearer YOUR_PORTWING_TOKEN" \
-  portwing http://your-host:3000/_portwing/mcp
+  portwing https://your-host:3000/_portwing/mcp
 ```
 
 ### Project-level `.mcp.json` (Cursor, Windsurf, or any MCP client)
@@ -224,7 +224,7 @@ claude mcp add --transport http \
   "mcpServers": {
     "portwing": {
       "type": "http",
-      "url": "http://your-host:3000/_portwing/mcp",
+      "url": "https://your-host:3000/_portwing/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_PORTWING_TOKEN"
       }
