@@ -152,6 +152,14 @@ type outboundTarget struct {
 	conn  *websocket.Conn
 	ch    chan protocol.Envelope
 	state *outboundQueueState
+	// keyID is the signing key id of the session that owns this target,
+	// captured with it so audit records for a request that outlives a
+	// reconnect keep the dispatching session's key.
+	keyID string
+}
+
+func (t outboundTarget) auditKeyID() audit.Option {
+	return audit.WithKeyID(t.keyID)
 }
 
 type outboundEnqueueResult uint8
@@ -1046,7 +1054,7 @@ func (c *Client) readPump(ctx context.Context) error {
 				}()
 			default:
 				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
-				c.auditRefusedRawExecStart(req.Method, req.Path)
+				c.auditRefusedRawExecStart(req.Method, req.Path, c.auditKeyID())
 				_ = c.sendTypedMessage(protocol.TypeError, protocol.ErrorMessage{
 					Message:   "agent busy: too many concurrent requests",
 					RequestID: req.RequestID,
@@ -1191,7 +1199,7 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 	if len(c.pendingBodies) >= maxPendingRequestBodies {
 		c.pendingBodiesMu.Unlock()
 		slog.Warn("concurrent streamed request body limit reached, rejecting", "max", maxPendingRequestBodies, "request_id", applog.Sanitize(req.RequestID))
-		c.auditRefusedRawExecStart(req.Method, req.Path)
+		c.auditRefusedRawExecStart(req.Method, req.Path, target.auditKeyID())
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   "agent busy: too many concurrent streamed request bodies",
 			RequestID: req.RequestID,
@@ -1410,7 +1418,7 @@ func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestM
 		c.handleRequestTo(ctx, req, target)
 	default:
 		slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
-		c.auditRefusedRawExecStart(req.Method, req.Path)
+		c.auditRefusedRawExecStart(req.Method, req.Path, target.auditKeyID())
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   "agent busy: too many concurrent requests",
 			RequestID: req.RequestID,
@@ -1488,7 +1496,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	// A path with no leading slash would be glued to the API version prefix
 	// and routed by the daemon differently than it was classified here.
 	if err := docker.ValidateAPIPath(req.Path); err != nil {
-		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, 0, 0, c.auditKeyID())
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, 0, 0, target.auditKeyID())
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
@@ -1496,7 +1504,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		return
 	}
 
-	isExec, admitted := c.admitRawExecStart(req.Method, req.Path)
+	isExec, admitted := c.admitRawExecStartAs(req.Method, req.Path, target.auditKeyID())
 	if !admitted {
 		slog.Warn("exec session limit reached, rejecting", "max", maxExecSessions, "request_id", applog.Sanitize(req.RequestID))
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
@@ -1528,7 +1536,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	}
 
 	if err != nil {
-		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, 0, msEdge(start), c.auditKeyID())
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, 0, msEdge(start), target.auditKeyID())
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
@@ -1578,7 +1586,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 						"requestId", applog.Sanitize(req.RequestID),
 						"path", applog.Sanitize(auditPath(req.Path)),
 						"error", applog.Sanitize(sendErr.Error()))
-					c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start), c.auditKeyID())
+					c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start), target.auditKeyID())
 					return
 				}
 			}
@@ -1609,7 +1617,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 				"error", applog.Sanitize(streamErr.Error()))
 		}
 
-		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), outcome, resp.StatusCode, msEdge(start), c.auditKeyID())
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), outcome, resp.StatusCode, msEdge(start), target.auditKeyID())
 		_ = c.sendTypedMessageTo(target, protocol.TypeStreamEnd, protocol.StreamEndMessage{
 			RequestID: req.RequestID,
 			Reason:    reason,
@@ -1620,7 +1628,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		// as a successful response.
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 		if err != nil {
-			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start), c.auditKeyID())
+			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start), target.auditKeyID())
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("reading Docker response: %v", err),
 				RequestID: req.RequestID,
@@ -1628,7 +1636,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			return
 		}
 		if int64(len(body)) > maxResponseBody {
-			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start), c.auditKeyID())
+			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start), target.auditKeyID())
 			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 				Message:   fmt.Sprintf("response exceeds %d bytes; use a streaming request", int64(maxResponseBody)),
 				Code:      protocol.ErrorCodeResponseTooLarge,
@@ -1636,7 +1644,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			})
 			return
 		}
-		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeAllowed, resp.StatusCode, msEdge(start), c.auditKeyID())
+		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeAllowed, resp.StatusCode, msEdge(start), target.auditKeyID())
 
 		respMsg := protocol.ResponseMessage{
 			RequestID:   req.RequestID,
@@ -1705,7 +1713,7 @@ func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.Reques
 
 	resp, err := c.compose.Execute(ctx, composeReq)
 	if err != nil {
-		c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, audit.OutcomeError, c.auditKeyID())
+		c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, audit.OutcomeError, target.auditKeyID())
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
 			Message:   err.Error(),
 			RequestID: req.RequestID,
@@ -1717,7 +1725,7 @@ func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.Reques
 	if !resp.Success {
 		outcome = audit.OutcomeError
 	}
-	c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, outcome, c.auditKeyID())
+	c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, outcome, target.auditKeyID())
 
 	body, err := json.Marshal(resp)
 	if err != nil {
@@ -1922,8 +1930,11 @@ func (c *Client) currentOutboundTarget() outboundTarget {
 		state = &outboundQueueState{}
 		c.sendState = state
 	}
+	c.keyIDMu.RLock()
+	keyID := c.signedHelloKeyID
+	c.keyIDMu.RUnlock()
 	c.connMu.Unlock()
-	return outboundTarget{conn: conn, ch: ch, state: state}
+	return outboundTarget{conn: conn, ch: ch, state: state, keyID: keyID}
 }
 
 func (c *Client) sendMessageTo(target outboundTarget, env protocol.Envelope) {

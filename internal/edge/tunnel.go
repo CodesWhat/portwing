@@ -922,12 +922,19 @@ func rawExecStart(method, path string) (execID, routePath string, ok bool) {
 // admitted. The caller releases the slot with releaseRawExecSlot when isExec and
 // admitted are both true.
 func (c *Client) admitRawExecStart(method, path string) (isExec, admitted bool) {
+	return c.admitRawExecStartAs(method, path, c.auditKeyID())
+}
+
+// admitRawExecStartAs is admitRawExecStart with the audit key id captured when
+// the request was dispatched, so a reconnect under another key doesn't
+// re-attribute it.
+func (c *Client) admitRawExecStartAs(method, path string, keyID audit.Option) (isExec, admitted bool) {
 	id, routePath, ok := rawExecStart(method, path)
 	if !ok {
 		return false, true
 	}
 	admitted = c.acquireRawExecSlot()
-	c.auditor.ExecStart(c.redactedControllerURL(), routePath, id, audit.ExecOutcome(admitted), c.auditKeyID())
+	c.auditor.ExecStart(c.redactedControllerURL(), routePath, id, audit.ExecOutcome(admitted), keyID)
 	return true, admitted
 }
 
@@ -936,12 +943,12 @@ func (c *Client) admitRawExecStart(method, path string) (isExec, admitted bool) 
 // applies the path gate handleRequestTo applies, so a path the handler rejects
 // as invalid is not recorded as an exec start. A request admitted past the caps
 // is recorded by handleRequestTo instead, so none is recorded twice.
-func (c *Client) auditRefusedRawExecStart(method, path string) {
+func (c *Client) auditRefusedRawExecStart(method, path string, keyID audit.Option) {
 	if docker.ValidateAPIPath(path) != nil {
 		return
 	}
 	id, routePath, ok := rawExecStart(method, path)
 	if ok {
-		c.auditor.ExecStart(c.redactedControllerURL(), routePath, id, audit.OutcomeDenied, c.auditKeyID())
+		c.auditor.ExecStart(c.redactedControllerURL(), routePath, id, audit.OutcomeDenied, keyID)
 	}
 }
