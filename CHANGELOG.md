@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Docs analytics events now carry `surface=docs`. The docs export uses basePath `/docs`, `usePathname()` strips it, and every docs pageview and CTA was tagged as an unknown marketing route.
+- Analytics on the marketing site and docs now send only from `portwing.codeswhat.com`. Previews, localhost and lookalike hosts no longer initialize PostHog or queue events.
 
 ## [v1.4.3] - 2026-11-21
 

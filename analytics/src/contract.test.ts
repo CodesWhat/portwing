@@ -11,6 +11,7 @@ import {
   canonicalizeAnalyticsRoute,
   createPostHogOptions,
   docsAnalyticsPath,
+  isAnalyticsHost,
   isTrackingRefused,
   POSTHOG_PROXY_HOST,
   POSTHOG_UI_HOST,
@@ -983,5 +984,40 @@ test("docs events tag site=portwing and surface=docs, marketing events surface=m
   assert.equal(
     buildPageviewEvent(docsAnalyticsPath("/installation")).properties.path,
     "/docs/installation",
+  );
+});
+
+test("analytics host gate enables only the exact production hostname", () => {
+  assert.equal(isAnalyticsHost("portwing.codeswhat.com"), true);
+  for (const host of [
+    "www.portwing.codeswhat.com",
+    "getportwing.vercel.app",
+    "localhost",
+    "portwing.codeswhat.com.evil.com",
+    "evil.portwing.codeswhat.com",
+    "PORTWING.codeswhat.com",
+    "",
+    undefined,
+  ]) {
+    assert.equal(isAnalyticsHost(host), false, String(host));
+  }
+});
+
+test("DNT and GPC still refuse on the production host", () => {
+  assert.equal(isAnalyticsHost("portwing.codeswhat.com"), true);
+  assert.equal(isTrackingRefused({ doNotTrack: "1" }), true);
+  assert.equal(isTrackingRefused({ globalPrivacyControl: true }), true);
+  const options = createPostHogOptions(
+    "phc_project-token",
+    POSTHOG_PROXY_HOST,
+    POSTHOG_UI_HOST,
+    () => true,
+  );
+  assert.equal(
+    options?.before_send({
+      event: "$pageview",
+      properties: { path: "/", token: "phc_project-token" },
+    } as never),
+    null,
   );
 });

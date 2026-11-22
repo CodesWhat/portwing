@@ -10,6 +10,10 @@ export const POSTHOG_UI_HOST = "https://us.posthog.com";
 // built or every docs page canonicalizes as a marketing "/_other" route.
 export const DOCS_BASE_PATH = "/docs";
 
+// Analytics sends only from this exact hostname. Previews, localhost and any
+// lookalike host (www., *.vercel.app, portwing.codeswhat.com.evil.com) send nothing.
+export const ANALYTICS_PRODUCTION_HOST = "portwing.codeswhat.com";
+
 const SCHEMA_VERSION = 1;
 const SITE = "portwing";
 const PROJECT_TOKEN_PATTERN = /^phc_[A-Za-z0-9_-]+$/u;
@@ -138,6 +142,10 @@ export function docsAnalyticsPath(pathname: string): string {
     return normalized;
   }
   return normalized === "/" ? DOCS_BASE_PATH : `${DOCS_BASE_PATH}${normalized}`;
+}
+
+export function isAnalyticsHost(hostname: string | undefined): boolean {
+  return hostname === ANALYTICS_PRODUCTION_HOST;
 }
 
 export function canonicalizeAnalyticsRoute(rawPath: string): {
