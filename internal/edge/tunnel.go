@@ -204,7 +204,7 @@ func (c *Client) admitTypedExec(execID string, session *ExecSession) typedExecAd
 // auditTypedExecStart writes the exec_start record for a typed exec_start with
 // the admission result, before the bring-up reaches the Docker daemon.
 func (c *Client) auditTypedExecStart(msg protocol.ExecStartMessage, admitted bool) {
-	c.auditor.ExecStart(c.redactedControllerURL(), msg.ContainerID, msg.ExecID, audit.ExecOutcome(admitted))
+	c.auditor.ExecStart(c.redactedControllerURL(), msg.ContainerID, msg.ExecID, audit.ExecOutcome(admitted), c.auditKeyID())
 }
 
 // bringUpExec performs the Docker round-trips for an already-registered session
@@ -521,7 +521,7 @@ func (s *ExecSession) auditStartError() {
 	if s.startErrWritten {
 		return
 	}
-	s.client.auditor.APIRequest(s.client.redactedControllerURL(), protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0)
+	s.client.auditor.APIRequest(s.client.redactedControllerURL(), protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0, s.client.auditKeyID())
 	s.startErrWritten = true
 }
 
@@ -927,7 +927,7 @@ func (c *Client) admitRawExecStart(method, path string) (isExec, admitted bool) 
 		return false, true
 	}
 	admitted = c.acquireRawExecSlot()
-	c.auditor.ExecStart(c.redactedControllerURL(), routePath, id, audit.ExecOutcome(admitted))
+	c.auditor.ExecStart(c.redactedControllerURL(), routePath, id, audit.ExecOutcome(admitted), c.auditKeyID())
 	return true, admitted
 }
 
@@ -942,6 +942,6 @@ func (c *Client) auditRefusedRawExecStart(method, path string) {
 	}
 	id, routePath, ok := rawExecStart(method, path)
 	if ok {
-		c.auditor.ExecStart(c.redactedControllerURL(), routePath, id, audit.OutcomeDenied)
+		c.auditor.ExecStart(c.redactedControllerURL(), routePath, id, audit.OutcomeDenied, c.auditKeyID())
 	}
 }

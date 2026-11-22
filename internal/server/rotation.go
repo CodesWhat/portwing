@@ -19,6 +19,13 @@ import (
 
 type verifiedKeyIDContextKey struct{}
 
+// auditKeyID attributes an audit record to the Ed25519 key that signed r. It is
+// a no-op option for token-authenticated or unauthenticated requests.
+func auditKeyID(r *http.Request) audit.Option {
+	id, _ := r.Context().Value(verifiedKeyIDContextKey{}).(string)
+	return audit.WithKeyID(id)
+}
+
 const rotationRoute = protocol.KeyRotationPath
 
 func (s *Server) handleKeyRotation(w http.ResponseWriter, r *http.Request) {

@@ -614,7 +614,7 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.compose.Execute(r.Context(), req)
 	if err != nil {
-		s.auditor.ComposeOp(actor, req.Operation, req.StackName, audit.OutcomeError)
+		s.auditor.ComposeOp(actor, req.Operation, req.StackName, audit.OutcomeError, auditKeyID(r))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -623,7 +623,7 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 	if !resp.Success {
 		outcome = audit.OutcomeError
 	}
-	s.auditor.ComposeOp(actor, req.Operation, req.StackName, outcome)
+	s.auditor.ComposeOp(actor, req.Operation, req.StackName, outcome, auditKeyID(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -899,7 +899,7 @@ func noteHijackStatus(w http.ResponseWriter, code int) {
 // with the outcome of its admission decision.
 func (s *Server) auditExecStart(r *http.Request, admitted bool) {
 	execID := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(r.URL.Path), "/exec/"), "/start")
-	s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID, audit.ExecOutcome(admitted))
+	s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID, audit.ExecOutcome(admitted), auditKeyID(r))
 }
 
 // acquireExecSlot takes an exec session slot, or answers 503 and returns false
