@@ -89,6 +89,7 @@ func TestComposeRequestFilesObjectRequiresStringContent(t *testing.T) {
 	for name, body := range map[string]string{
 		"missing content": `{"files":{"app.conf":{"mode":"0644"}}}`,
 		"empty object":    `{"files":{"app.conf":{}}}`,
+		"null file":       `{"files":{"app.conf":null}}`,
 		"null content":    `{"files":{"app.conf":{"content":null}}}`,
 		"numeric content": `{"files":{"app.conf":{"content":5}}}`,
 		"unknown key":     `{"files":{"app.conf":{"content":"x","owner":"root"}}}`,

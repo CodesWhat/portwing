@@ -113,6 +113,9 @@ func (r *ComposeRequest) UnmarshalJSON(data []byte) error {
 	}
 	r.Files = make(map[string]string, len(aux.Files))
 	for name, raw := range aux.Files {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("files[%q]: must be a string or an object with content and mode, not null", name)
+		}
 		var content string
 		if err := json.Unmarshal(raw, &content); err == nil {
 			r.Files[name] = content
