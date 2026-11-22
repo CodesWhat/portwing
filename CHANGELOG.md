@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The marketing site and docs footers link back to codeswhat.com.
 - Docs examples no longer pair a token with plaintext HTTP on a port published to all interfaces. The Drydock pairing, connection-modes, Watchtower migration and MCP examples use TLS, and the hardened quickstart explains Sockguard's `allowed_bind_mounts` allowlist. The Edge quickstart shows a `docker run` keygen and names Drydock's `DD_PORTWING_AUTHORIZED_KEYS`.
 - Docs and OpenAPI corrections: the generic `/api/v1/containers` response has its own flat `GenericContainer` schema, key-rotation endpoints accept signature v3 (and v2 only for a key not yet locked to v3), `REQUEST_TIMEOUT` is documented as a total timeout with non-follow log reads bounded by idleness, the 32 MiB compose request cap is documented, the auth rate-limit window is described as fixed rather than sliding, the exec audit `container` field is documented as the request path, and the audit log's `copytruncate` rotation requirement and the `portwing-with-exec.yaml` preset's lack of container attach are spelled out.
+- The observability docs now state what the host metrics measure in a container deployment and which mounts (`network_mode: host`, the Docker data root) host-accurate network and disk figures need.
 
 ## [v1.4.2] - 2026-11-21
 
