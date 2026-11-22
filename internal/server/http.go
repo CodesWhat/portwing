@@ -139,7 +139,7 @@ type Server struct {
 	dockerClient *docker.Client
 	dockerDialer func(network, address string) (net.Conn, error)
 	adapter      adapter.ServerAdapter
-	compose      *docker.ComposeManager
+	compose      composeExecutor
 	collector    *metrics.Collector
 	metrics      *metrics.Registry
 	rateLimiter  *RateLimiter
@@ -605,6 +605,11 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(info)
+}
+
+// composeExecutor runs compose requests; *docker.ComposeManager in production.
+type composeExecutor interface {
+	Execute(ctx context.Context, req docker.ComposeRequest) (*docker.ComposeResponse, error)
 }
 
 // handleCompose dispatches Docker Compose operations.

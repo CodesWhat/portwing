@@ -148,6 +148,11 @@ type outboundQueueState struct {
 	wake chan struct{}
 }
 
+// composeExecutor runs compose requests; *docker.ComposeManager in production.
+type composeExecutor interface {
+	Execute(ctx context.Context, req docker.ComposeRequest) (*docker.ComposeResponse, error)
+}
+
 type outboundTarget struct {
 	conn  *websocket.Conn
 	ch    chan protocol.Envelope
@@ -259,7 +264,7 @@ type Client struct {
 	rawDockerClient *docker.Client
 	readiness       docker.HealthProbe
 	adapter         adapter.EdgeAdapter
-	compose         *docker.ComposeManager
+	compose         composeExecutor
 	collector       hostCollector
 	metrics         *metrics.Registry
 	auditor         *audit.Logger

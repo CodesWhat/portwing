@@ -5,6 +5,7 @@ package edge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -93,5 +94,40 @@ func TestEdgeBufferedRequestAuditsAPIRequest(t *testing.T) {
 	records = recordsOfEvent(logger2, audit.EventAPIRequest)
 	if len(records) != 1 || records[0].Outcome != audit.OutcomeError {
 		t.Fatalf("failed request records = %+v, want one error record", records)
+	}
+}
+
+// failingCompose returns an error from Execute, which the real manager never does.
+type failingCompose struct{}
+
+func (failingCompose) Execute(context.Context, docker.ComposeRequest) (*docker.ComposeResponse, error) {
+	return nil, errors.New("compose exploded")
+}
+
+// An Execute error sends an error frame and records an error-outcome
+// compose_op under the dispatching session's key.
+func TestEdgeComposeExecuteErrorAudits(t *testing.T) {
+	t.Parallel()
+
+	c, logger, next := newAuditedTestClient(t)
+	c.compose = failingCompose{}
+	c.signedHelloKeyID = "0123456789abcdef"
+
+	body, err := json.Marshal(docker.ComposeRequest{Operation: "up", StackName: "app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "compose-err", Method: http.MethodPost, Path: "/_portwing/compose", Body: body,
+	})
+	if env := next(); env.Type != protocol.TypeError {
+		t.Fatalf("frame = %q, want error", env.Type)
+	}
+	records := recordsOfEvent(logger, audit.EventComposeOp)
+	if len(records) != 1 {
+		t.Fatalf("compose_op records = %+v, want one", records)
+	}
+	if r := records[0]; r.Outcome != audit.OutcomeError || r.Operation != "up" || r.Stack != "app" || r.KeyID != "0123456789abcdef" {
+		t.Fatalf("compose_op record = %+v, want error outcome with key id", r)
 	}
 }

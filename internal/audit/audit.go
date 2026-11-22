@@ -148,9 +148,7 @@ type Stats struct {
 // on shutdown instead.
 func New(dest string, bufferSize int) (*Logger, func(), error) {
 	var gen [8]byte
-	if _, err := rand.Read(gen[:]); err != nil {
-		return nil, func() {}, err
-	}
+	_, _ = rand.Read(gen[:]) // never returns an error (crypto/rand docs)
 	l := &Logger{closer: func() {}, epoch: hex.EncodeToString(gen[:])}
 	if bufferSize > 0 {
 		l.ring = newRing(bufferSize)
