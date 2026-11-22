@@ -550,12 +550,17 @@ services:
       TOKEN: "${DD_AGENT_SECRET}"
       PORT: "3000"
       AGENT_NAME: "my-server"
+      # Drydock refuses a shared secret over plain HTTP unless
+      # DD_AGENT_ALLOW_INSECURE_SECRET=true, so terminate TLS in Portwing.
+      TLS_CERT: /certs/server.crt
+      TLS_KEY: /certs/server.key
     # The image runs as non-root UID 65532; grant the Docker socket's group:
     #   export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
     group_add:
       - "${DOCKER_SOCK_GID:?set to the GID of /var/run/docker.sock}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/certs:ro   # server.crt / server.key, readable by UID 65532
     ports:
       - "3000:3000"
     restart: unless-stopped
@@ -566,12 +571,17 @@ services:
 ```yaml
 agent:
   my-server:
-    host: http://my-server-ip
+    host: my-server.example.com   # must match a name in the server certificate
     port: 3000
     secret: "${DD_AGENT_SECRET}"
+    cafile: /certs/ca.crt         # CA that signed server.crt; omit for a publicly trusted cert
 ```
 
-The `TOKEN` value on the Portwing side must match the `secret` value on the Drydock side.
+The `TOKEN` value on the Portwing side must match the `secret` value on the Drydock side. This pairing works against Drydock 1.9 without `DD_AGENT_ALLOW_INSECURE_SECRET`, because the secret only travels over TLS.
+
+<Callout type="warn">
+Never pair `TOKEN` with plain HTTP on a port published to all interfaces. If the controller runs on the same host, publish `127.0.0.1:3000:3000` instead of `3000:3000` and leave TLS off; Drydock still needs `DD_AGENT_ALLOW_INSECURE_SECRET=true` for that plaintext hop, so prefer TLS or [Ed25519 request signing](/authentication#4-ed25519-per-client-keys), which sends no shared secret at all.
+</Callout>
 
 ---
 

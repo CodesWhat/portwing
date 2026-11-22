@@ -295,6 +295,12 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		slog.Warn("no authentication configured: all requests will be accepted without credentials — set TOKEN, TOKEN_HASH, or AUTHORIZED_KEYS")
 	}
 
+	// A shared secret on a plaintext listener that isn't loopback travels in the
+	// clear, and Drydock refuses that pairing without DD_AGENT_ALLOW_INSECURE_SECRET.
+	if verifier != nil && (cfg.TLSCert == "" || cfg.TLSKey == "") && !config.IsLoopbackBind(cfg.BindAddress) {
+		slog.Warn("token authentication is enabled without TLS on a non-loopback address: the shared secret is sent in plaintext — set TLS_CERT and TLS_KEY, bind to loopback, or use AUTHORIZED_KEYS signing", "bindAddress", cfg.BindAddress)
+	}
+
 	// Set up enrollment handler if ENROLLMENT_TOKEN is configured.
 	var enroller *auth.Enroller
 	if cfg.EnrollmentToken != "" {

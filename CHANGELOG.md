@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Standard mode logs a startup WARN when token authentication is enabled, TLS is off and the listen address isn't loopback, since the shared secret then travels in plaintext and Drydock refuses that pairing.
+
 ### Fixed
 
 - Audit export cursors now carry a per-process generation, so a cursor saved before an agent restart gets the documented 409 instead of a 200 that silently skips records. Cursors are opaque strings; echo `X-Portwing-Next-Cursor` back as received.
@@ -21,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The marketing site and docs footers link back to codeswhat.com.
+- Docs examples no longer pair a token with plaintext HTTP on a port published to all interfaces. The Drydock pairing, connection-modes, Watchtower migration and MCP examples use TLS, and the hardened quickstart explains Sockguard's `allowed_bind_mounts` allowlist. The Edge quickstart shows a `docker run` keygen and names Drydock's `DD_PORTWING_AUTHORIZED_KEYS`.
 
 ## [v1.4.2] - 2026-11-21
 
