@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,39 @@ func TestWriteStackFilesAppliesMaskedMode(t *testing.T) {
 		}
 		if got := info.Mode(); got != m {
 			t.Errorf("%s mode = %v (%o), want %o", name, got, got, m)
+		}
+	}
+}
+
+// An object entry must carry a string content: OpenAPI requires it, and a
+// missing one would otherwise overwrite an existing file with an empty one.
+func TestComposeRequestFilesObjectRequiresStringContent(t *testing.T) {
+	for name, body := range map[string]string{
+		"missing content": `{"files":{"app.conf":{"mode":"0644"}}}`,
+		"empty object":    `{"files":{"app.conf":{}}}`,
+		"null content":    `{"files":{"app.conf":{"content":null}}}`,
+		"numeric content": `{"files":{"app.conf":{"content":5}}}`,
+		"unknown key":     `{"files":{"app.conf":{"content":"x","owner":"root"}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var req ComposeRequest
+			err := json.Unmarshal([]byte(body), &req)
+			if err == nil {
+				t.Fatalf("%s: want error", body)
+			}
+			if !strings.Contains(err.Error(), "app.conf") {
+				t.Errorf("error %q does not name the file", err)
+			}
+		})
+	}
+
+	for _, body := range []string{
+		`{"files":{"app.conf":{"content":"x"}}}`,
+		`{"files":{"app.conf":{"content":"","mode":"0644"}}}`,
+	} {
+		var req ComposeRequest
+		if err := json.Unmarshal([]byte(body), &req); err != nil {
+			t.Errorf("%s: %v", body, err)
 		}
 	}
 }

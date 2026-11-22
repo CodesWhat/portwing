@@ -74,7 +74,7 @@ func maskStackFileMode(m uint32) os.FileMode {
 // stackFileEntry is one files value: a plain string, or an object with content
 // and an optional mode.
 type stackFileEntry struct {
-	Content string          `json:"content"`
+	Content *string         `json:"content"`
 	Mode    json.RawMessage `json:"mode"`
 }
 
@@ -119,10 +119,15 @@ func (r *ComposeRequest) UnmarshalJSON(data []byte) error {
 			continue
 		}
 		var entry stackFileEntry
-		if err := json.Unmarshal(raw, &entry); err != nil {
-			return fmt.Errorf("files[%q]: must be a string or an object with content and mode", name)
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&entry); err != nil {
+			return fmt.Errorf("files[%q]: must be a string or an object with content and mode: %w", name, err)
 		}
-		r.Files[name] = entry.Content
+		if entry.Content == nil {
+			return fmt.Errorf("files[%q]: content is required and must be a string", name)
+		}
+		r.Files[name] = *entry.Content
 		if len(entry.Mode) > 0 && string(entry.Mode) != "null" {
 			m, err := parseStackFileMode(entry.Mode)
 			if err != nil {
