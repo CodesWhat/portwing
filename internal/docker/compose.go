@@ -756,14 +756,23 @@ func checkRootedTarget(root *os.Root, name string) error {
 
 // stageRootedFile writes data to a fresh 0600 temp file next to name and
 // returns the temp file's rooted path. The caller renames it into place.
+// stagingSuffix and writeStaged are variables so tests can force a temp-name
+// collision and a write failure after the temp file exists.
+var (
+	stagingSuffix = func() string {
+		var suffix [6]byte
+		_, _ = rand.Read(suffix[:]) // never returns an error (crypto/rand docs)
+		return hex.EncodeToString(suffix[:])
+	}
+	writeStaged = writeAndClose
+)
+
 func stageRootedFile(root *os.Root, name string, data []byte) (string, error) {
 	if err := mkdirRootedNoSymlinks(root, filepath.Dir(name)); err != nil {
 		return "", err
 	}
 	for range 8 {
-		var suffix [6]byte
-		_, _ = rand.Read(suffix[:]) // never returns an error (crypto/rand docs)
-		tmp := filepath.Join(filepath.Dir(name), "."+filepath.Base(name)+".portwing-"+hex.EncodeToString(suffix[:]))
+		tmp := filepath.Join(filepath.Dir(name), "."+filepath.Base(name)+".portwing-"+stagingSuffix())
 		f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if os.IsExist(err) {
 			continue
@@ -771,7 +780,7 @@ func stageRootedFile(root *os.Root, name string, data []byte) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		err = writeAndClose(f, data)
+		err = writeStaged(f, data)
 		if err != nil {
 			_ = root.Remove(tmp)
 			return "", err
