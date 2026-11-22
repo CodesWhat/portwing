@@ -347,12 +347,31 @@ components:
         files:
           type: object
           additionalProperties:
-            type: string
+            oneOf:
+              - type: string
+              - type: object
+                required: [content]
+                properties:
+                  content:
+                    type: string
+                    description: File content, plain or prefixed with `base64:`.
+                  mode:
+                    oneOf:
+                      - type: string
+                        pattern: '^[0-7]{1,4}$'
+                      - type: integer
+                        minimum: 0
+                    description: >
+                      Permission bits, as an octal string (`"0755"`) or an
+                      integer. Masked to 0755 (setuid, setgid, sticky and
+                      group/other write are dropped); the owner always keeps
+                      read and write. Defaults to 0600.
           description: >
             Files to write into the stack directory before execution.
             Keys are paths relative to the stack directory; values are
             file content (plain text) or base64-encoded content prefixed
-            with `base64:`. Paths are resolved and verified within the
+            with `base64:`, or an object carrying `content` and an optional
+            `mode`. Paths are resolved and verified within the
             stacks directory (path-traversal protected).
           example:
             "docker-compose.yml": "version: '3'\nservices:\n  web:\n    image: nginx\n"

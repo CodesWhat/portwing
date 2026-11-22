@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -53,7 +54,87 @@ type ComposeRequest struct {
 	Tail          int               `json:"tail,omitempty"`
 	EnvVars       map[string]string `json:"envVars,omitempty"`
 	Files         map[string]string `json:"files,omitempty"`
-	RegistryAuth  *RegistryAuth     `json:"registryAuth,omitempty"`
+	// FileModes holds the optional per-file permission bits from the object
+	// form of a files entry, keyed like Files. It is filled by UnmarshalJSON,
+	// already masked by maskStackFileMode.
+	FileModes    map[string]os.FileMode `json:"-"`
+	RegistryAuth *RegistryAuth          `json:"registryAuth,omitempty"`
+}
+
+// stackFileDefaultMode is the mode of a stack file whose entry carries none.
+const stackFileDefaultMode os.FileMode = 0o600
+
+// maskStackFileMode limits a requested mode to 0o755 so setuid, setgid, sticky
+// and group/other write bits can't be set, and keeps the owner's read/write so
+// the agent can always replace the file.
+func maskStackFileMode(m uint32) os.FileMode {
+	return os.FileMode(m&0o755) | stackFileDefaultMode
+}
+
+// stackFileEntry is one files value: a plain string, or an object with content
+// and an optional mode.
+type stackFileEntry struct {
+	Content string          `json:"content"`
+	Mode    json.RawMessage `json:"mode"`
+}
+
+// parseStackFileMode reads a mode given as a JSON number (permission bits, as
+// an integer) or an octal string such as "0755".
+func parseStackFileMode(raw json.RawMessage) (uint32, error) {
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		v, err := strconv.ParseUint(str, 8, 32)
+		if err != nil {
+			return 0, fmt.Errorf("mode %q is not an octal string", str)
+		}
+		return uint32(v), nil
+	}
+	var num uint32
+	if err := json.Unmarshal(raw, &num); err != nil {
+		return 0, fmt.Errorf("mode must be an integer or an octal string")
+	}
+	return num, nil
+}
+
+// UnmarshalJSON accepts each files value as either a plain string (content,
+// default mode) or {"content": "...", "mode": ...}.
+func (r *ComposeRequest) UnmarshalJSON(data []byte) error {
+	type plain ComposeRequest
+	aux := struct {
+		*plain
+		Files map[string]json.RawMessage `json:"files,omitempty"`
+	}{plain: (*plain)(r)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	r.Files, r.FileModes = nil, nil
+	if aux.Files == nil {
+		return nil
+	}
+	r.Files = make(map[string]string, len(aux.Files))
+	for name, raw := range aux.Files {
+		var content string
+		if err := json.Unmarshal(raw, &content); err == nil {
+			r.Files[name] = content
+			continue
+		}
+		var entry stackFileEntry
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			return fmt.Errorf("files[%q]: must be a string or an object with content and mode", name)
+		}
+		r.Files[name] = entry.Content
+		if len(entry.Mode) > 0 && string(entry.Mode) != "null" {
+			m, err := parseStackFileMode(entry.Mode)
+			if err != nil {
+				return fmt.Errorf("files[%q]: %w", name, err)
+			}
+			if r.FileModes == nil {
+				r.FileModes = make(map[string]os.FileMode)
+			}
+			r.FileModes[name] = maskStackFileMode(m)
+		}
+	}
+	return nil
 }
 
 type RegistryAuth struct {
@@ -557,6 +638,7 @@ func validateRegistryServer(server string) error {
 type stackWrite struct {
 	rel  string
 	data []byte
+	mode os.FileMode
 }
 
 // quoteEnvValue renders value as a .env.drydock right-hand side that Compose's
@@ -619,12 +701,12 @@ func (cm *ComposeManager) prepareStackWrites(req ComposeRequest) ([]stackWrite, 
 
 	writes := make([]stackWrite, 0, len(relPaths)+1)
 	seen := make(map[string]string, len(relPaths)+1)
-	add := func(name, rel string, data []byte) error {
+	add := func(name, rel string, data []byte, mode os.FileMode) error {
 		if other, dup := seen[rel]; dup {
 			return fmt.Errorf("%q and %q resolve to the same file", other, name)
 		}
 		seen[rel] = name
-		writes = append(writes, stackWrite{rel: rel, data: data})
+		writes = append(writes, stackWrite{rel: rel, data: data, mode: mode})
 		return nil
 	}
 
@@ -642,7 +724,11 @@ func (cm *ComposeManager) prepareStackWrites(req ComposeRequest) ([]stackWrite, 
 			}
 			data = decoded
 		}
-		if err := add(relPath, rootedPath, data); err != nil {
+		mode := stackFileDefaultMode
+		if m, ok := req.FileModes[relPath]; ok {
+			mode = maskStackFileMode(uint32(m))
+		}
+		if err := add(relPath, rootedPath, data, mode); err != nil {
 			return nil, err
 		}
 	}
@@ -656,7 +742,7 @@ func (cm *ComposeManager) prepareStackWrites(req ComposeRequest) ([]stackWrite, 
 		if err != nil {
 			return nil, err
 		}
-		if err := add(".env.drydock", envPath, data); err != nil {
+		if err := add(".env.drydock", envPath, data, stackFileDefaultMode); err != nil {
 			return nil, err
 		}
 	}
@@ -707,7 +793,7 @@ func (cm *ComposeManager) writeStackFiles(req ComposeRequest) error {
 		}
 	}
 	for _, w := range writes {
-		tmp, err := stageRootedFile(root, w.rel, w.data)
+		tmp, err := stageRootedFile(root, w.rel, w.data, w.mode)
 		if err != nil {
 			cleanup()
 			return fmt.Errorf("writing %q: %w", w.rel, err)
@@ -754,9 +840,10 @@ func checkRootedTarget(root *os.Root, name string) error {
 	return nil
 }
 
-// stageRootedFile writes data to a fresh 0600 temp file next to name and
-// returns the temp file's rooted path. The caller renames it into place.
-func stageRootedFile(root *os.Root, name string, data []byte) (string, error) {
+// stageRootedFile writes data to a fresh temp file with the given mode next to
+// name and returns the temp file's rooted path. The caller renames it into
+// place.
+func stageRootedFile(root *os.Root, name string, data []byte, mode os.FileMode) (string, error) {
 	if err := mkdirRootedNoSymlinks(root, filepath.Dir(name)); err != nil {
 		return "", err
 	}
@@ -773,7 +860,7 @@ func stageRootedFile(root *os.Root, name string, data []byte) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		err = writeAndClose(f, data)
+		err = writeAndClose(f, data, mode)
 		if err != nil {
 			_ = root.Remove(tmp)
 			return "", err
@@ -783,8 +870,8 @@ func stageRootedFile(root *os.Root, name string, data []byte) (string, error) {
 	return "", fmt.Errorf("could not create a unique temp file for %q", name)
 }
 
-func writeAndClose(f *os.File, data []byte) error {
-	if err := f.Chmod(0o600); err != nil {
+func writeAndClose(f *os.File, data []byte, mode os.FileMode) error {
+	if err := f.Chmod(mode); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("setting permissions: %w", err)
 	}

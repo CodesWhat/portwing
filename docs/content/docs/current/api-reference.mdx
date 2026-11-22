@@ -471,6 +471,14 @@ Execute Docker Compose sub-commands within the managed stacks directory (`STACKS
 }
 ```
 
+Each `files` value is either a plain string (the file content) or an object
+`{"content": "...", "mode": "0755"}`. `mode` is optional and may be an octal
+string or an integer of permission bits. Files default to `0600`. A requested
+mode is masked to `0755`: setuid, setgid, sticky and group/other write bits are
+dropped, and the owner always keeps read and write. Set `mode` on a shipped
+script that a build `RUN` or a container executes, or on a config file that a
+non-root container user must read.
+
 `operation` is required and must be one of: `up`, `down`, `pull`, `ps`, `logs`, `restart`, `stop`, `start`. `stackName` is required.
 
 For the `logs` operation, `tail` defaults to 100 lines and is clamped to a

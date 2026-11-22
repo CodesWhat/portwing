@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Standard mode logs a startup WARN when token authentication is enabled, TLS is off and the listen address isn't loopback, since the shared secret then travels in plaintext and Drydock refuses that pairing.
 
+- Compose deploy `files` entries can be an object with `content` and an optional `mode` (masked to 0755), so a shipped script can run during a build and a config file can be read by a non-root container user. Plain string values still work and stay 0600.
+
 ### Fixed
 
 - Audit export cursors now carry a per-process generation, so a cursor saved before an agent restart gets the documented 409 instead of a 200 that silently skips records. Cursors are opaque strings; echo `X-Portwing-Next-Cursor` back as received.
