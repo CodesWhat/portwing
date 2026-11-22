@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Edge mode readiness now pings the unversioned `/_ping` through the same check as Standard mode and requires a 200, so a daemon that denies the versioned path or answers a non-200 2xx reports the same readiness in both modes.
 - Compose deploy `envVars` are now written single- or double-quoted in `.env.drydock`, so `$VAR`, `${X}`, `$$`, inline `#` comments, quotes, backslashes and edge spaces reach the container exactly as sent. A variable name that isn't a plain identifier, or a value with a newline or NUL, is rejected by name.
 - A Compose deploy with a bad base64 file (or any other invalid file or variable) is now rejected before anything is written, and files land through temp-file renames instead of in place.
+- The Grype waiver expiry check now reads the config with a real YAML parser (yq), so indentless lists, `package:` before `vulnerability:`, and `#`-leading lines inside a block-scalar reason can no longer hide an `expires:` date. It fails closed when yq isn't installed.
 
 ### Changed
 
