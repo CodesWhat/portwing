@@ -146,3 +146,26 @@ func TestIdleBodyFiredTimerSurfacesAsFailure(t *testing.T) {
 		t.Fatalf("err = %v, want a wrapped timeout error, not clean EOF", err)
 	}
 }
+
+// A timer that fires while the body is being retired must not cancel: the
+// callback blocks on the mutex, retire marks the body done, and the callback
+// then sees done and returns.
+func TestIdleBodyTimerFiringAfterRetireDoesNotCancel(t *testing.T) {
+	t.Parallel()
+
+	var cancels atomic.Int32
+	b := newIdleTimeoutBody(time.Millisecond, func() { cancels.Add(1) })
+
+	b.mu.Lock()
+	time.Sleep(30 * time.Millisecond) // the callback is now parked on b.mu
+	b.done = true
+	b.mu.Unlock()
+	time.Sleep(30 * time.Millisecond)
+
+	if b.timedOut() {
+		t.Fatal("timer marked a retired body as timed out")
+	}
+	if got := cancels.Load(); got != 0 {
+		t.Fatalf("cancel called %d times, want 0", got)
+	}
+}

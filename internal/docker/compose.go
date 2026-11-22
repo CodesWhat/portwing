@@ -848,6 +848,17 @@ func checkRootedTarget(root *os.Root, name string) error {
 	return nil
 }
 
+// stagingSuffix and writeStaged are variables so tests can force a temp-name
+// collision and a write failure after the temp file exists.
+var (
+	stagingSuffix = func() string {
+		var suffix [6]byte
+		_, _ = rand.Read(suffix[:]) // never returns an error (crypto/rand docs)
+		return hex.EncodeToString(suffix[:])
+	}
+	writeStaged = writeAndClose
+)
+
 // stageRootedFile writes data to a fresh temp file with the given mode next to
 // name and returns the temp file's rooted path. The caller renames it into
 // place.
@@ -856,11 +867,7 @@ func stageRootedFile(root *os.Root, name string, data []byte, mode os.FileMode) 
 		return "", err
 	}
 	for range 8 {
-		var suffix [6]byte
-		if _, err := rand.Read(suffix[:]); err != nil {
-			return "", fmt.Errorf("naming temp file: %w", err)
-		}
-		tmp := filepath.Join(filepath.Dir(name), "."+filepath.Base(name)+".portwing-"+hex.EncodeToString(suffix[:]))
+		tmp := filepath.Join(filepath.Dir(name), "."+filepath.Base(name)+".portwing-"+stagingSuffix())
 		f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if os.IsExist(err) {
 			continue
@@ -868,7 +875,7 @@ func stageRootedFile(root *os.Root, name string, data []byte, mode os.FileMode) 
 		if err != nil {
 			return "", err
 		}
-		err = writeAndClose(f, data, mode)
+		err = writeStaged(f, data, mode)
 		if err != nil {
 			_ = root.Remove(tmp)
 			return "", err
