@@ -30,7 +30,7 @@ Edge Mode is implemented on both sides. Drydock's cross-repo `quality-portwing-f
 
 ## Standard Mode: Handshake Sequence
 
-Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`).
+This describes the Drydock controller flow (`app/agent/AgentClient.ts`). Which Drydock releases pair with which Portwing release is in [`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md); this page isn't a verification record for any specific build.
 
 When a Drydock controller connects to a Portwing agent in Standard Mode, the following sequence occurs:
 
@@ -588,10 +588,10 @@ Never pair `TOKEN` with plain HTTP on a port published to all interfaces. If the
 ## Compatibility Matrix
 
 <Callout type="info">
-For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages are implemented and verified against a specific Drydock build.
+For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](https://github.com/CodesWhat/portwing/blob/main/COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages Portwing implements.
 </Callout>
 
-Verified against Drydock `v1.6.0-rc.11+` (`app/agent/AgentClient.ts`, `app/agent/api/`).
+The `AgentClient.ts` line references below point into Drydock's source and drift between releases. Drydock `v1.6.0-rc.11+` is the minimum for the full watcher/update feature path; the supported wire pairings (1.7.x, 1.6.x, and 1.5.x with `DD_EXPERIMENTAL_PORTWING=true`) are in the compatibility matrix.
 
 | Feature | Status | Notes |
 |---|---|---|

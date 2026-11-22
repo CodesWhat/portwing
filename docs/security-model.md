@@ -126,8 +126,8 @@ if strings.HasPrefix(svc, "-") {
 
 ### 7. Rate Limiting
 
-Failed authentication attempts are tracked per remote IP in a sliding
-one-minute window:
+Failed authentication attempts are tracked per remote IP in a fixed
+one-minute window that opens at the first failure and resets 60 seconds later:
 
 - **Threshold:** 10 failures within 60 seconds triggers a block.
 - **Response:** HTTP 429 (`Too Many Requests`) until the window expires.

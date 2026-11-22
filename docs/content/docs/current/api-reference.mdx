@@ -479,6 +479,10 @@ dump is never the default. Combined stdout and stderr from any compose
 operation is capped at 10 MB; output past the cap is dropped and the captured
 output ends with an `[output truncated: ...]` marker.
 
+The request body is capped at 32 MiB (this covers `files` and `envVars`). A larger
+body is rejected with `400` and `invalid request: http: request body too large`
+before anything is written.
+
 ### Project names
 
 Every Compose command runs under a project name that is unique to the stack
