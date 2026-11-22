@@ -762,9 +762,7 @@ func stageRootedFile(root *os.Root, name string, data []byte) (string, error) {
 	}
 	for range 8 {
 		var suffix [6]byte
-		if _, err := rand.Read(suffix[:]); err != nil {
-			return "", fmt.Errorf("naming temp file: %w", err)
-		}
+		_, _ = rand.Read(suffix[:]) // never returns an error (crypto/rand docs)
 		tmp := filepath.Join(filepath.Dir(name), "."+filepath.Base(name)+".portwing-"+hex.EncodeToString(suffix[:]))
 		f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if os.IsExist(err) {
