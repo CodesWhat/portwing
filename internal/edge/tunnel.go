@@ -521,7 +521,7 @@ func (s *ExecSession) auditStartError() {
 	if s.startErrWritten {
 		return
 	}
-	s.client.auditor.APIRequest(s.client.redactedControllerURL(), protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0, s.client.auditKeyID())
+	s.client.auditor.APIRequest(s.client.redactedControllerURL(), protocol.TypeExecStart, s.containerID, audit.OutcomeError, 0, 0, s.target.auditKeyID())
 	s.startErrWritten = true
 }
 

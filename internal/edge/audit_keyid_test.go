@@ -91,3 +91,29 @@ func TestEdgeAuditKeyIDFollowsDispatchingSession(t *testing.T) {
 		}
 	}
 }
+
+// A typed exec that fails to come up after the client reconnects under another
+// key still records its exec_start error under the key it was admitted with.
+func TestTypedExecBringUpFailureKeepsAdmissionKeyID(t *testing.T) {
+	t.Parallel()
+	const keyA, keyB = "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"
+
+	c, logger, next := newAuditedTestClient(t)
+	c.signedHelloKeyID = keyA
+	c.dockerClient = &fakeDocker{
+		createExecErr: errors.New("boom"),
+		createHook: func() {
+			c.keyIDMu.Lock()
+			c.signedHelloKeyID = keyB
+			c.keyIDMu.Unlock()
+		},
+	}
+
+	c.StartExec(context.Background(), protocol.ExecStartMessage{ExecID: "e1", ContainerID: "c1"})
+	next()
+
+	recs := recordsOfEvent(logger, audit.EventAPIRequest)
+	if len(recs) != 1 || recs[0].KeyID != keyA {
+		t.Fatalf("api_request records = %+v, want one with key_id %q", recs, keyA)
+	}
+}

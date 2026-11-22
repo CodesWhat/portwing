@@ -382,3 +382,35 @@ func TestManagedHelloCapabilitiesPreserveFirstOccurrence(t *testing.T) {
 		t.Fatalf("capabilities=%v, want%v", hello.Capabilities, want)
 	}
 }
+
+// A rotation request keeps the key of the session that dispatched it: the
+// api_request record carries it even when the client reconnects under another
+// key before the handler finishes.
+func TestEdgeRotationAPIRequestKeepsDispatchingKeyID(t *testing.T) {
+	t.Parallel()
+	const keyA, keyB = "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"
+
+	c, ctrl, _ := managedEdgeClient(t)
+	logger, closeAudit, err := audit.New("", 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeAudit)
+	c.auditor = logger
+
+	c.keyIDMu.Lock()
+	c.signedHelloKeyID = keyA
+	c.keyIDMu.Unlock()
+	target := c.currentOutboundTarget()
+	c.keyIDMu.Lock()
+	c.signedHelloKeyID = keyB
+	c.keyIDMu.Unlock()
+
+	c.handleRequestTo(context.Background(), protocol.RequestMessage{RequestID: "r1", Method: http.MethodGet, Path: "/_portwing/auth/rotation/edge"}, target)
+	expectType(t, ctrl, protocol.TypeResponse)
+
+	recs := recordsOfEvent(logger, audit.EventAPIRequest)
+	if len(recs) != 1 || recs[0].KeyID != keyA {
+		t.Fatalf("api_request records = %+v, want one with key_id %q", recs, keyA)
+	}
+}
