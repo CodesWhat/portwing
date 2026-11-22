@@ -121,3 +121,4 @@ export function captureCta(path: string, ctaId: CtaId, placement: CtaPlacement):
 }
 
 export type { CtaId, CtaPlacement } from "./contract";
+export { docsAnalyticsPath } from "./contract";

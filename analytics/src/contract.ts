@@ -5,6 +5,11 @@ import type { BeforeSendFn, CaptureResult } from "posthog-js";
 export const POSTHOG_PROXY_HOST = "https://e.codeswhat.com";
 export const POSTHOG_UI_HOST = "https://us.posthog.com";
 
+// The docs app is exported with basePath "/docs", and Next's usePathname()
+// strips the basePath, so the docs app has to put it back before an event is
+// built or every docs page canonicalizes as a marketing "/_other" route.
+export const DOCS_BASE_PATH = "/docs";
+
 const SCHEMA_VERSION = 1;
 const SITE = "portwing";
 const PROJECT_TOKEN_PATTERN = /^phc_[A-Za-z0-9_-]+$/u;
@@ -125,6 +130,14 @@ function normalizedPath(rawPath: string): string {
     return withoutQuery.slice(0, -1);
   }
   return withoutQuery;
+}
+
+export function docsAnalyticsPath(pathname: string): string {
+  const normalized = normalizedPath(pathname);
+  if (normalized === DOCS_BASE_PATH || normalized.startsWith(`${DOCS_BASE_PATH}/`)) {
+    return normalized;
+  }
+  return normalized === "/" ? DOCS_BASE_PATH : `${DOCS_BASE_PATH}${normalized}`;
 }
 
 export function canonicalizeAnalyticsRoute(rawPath: string): {

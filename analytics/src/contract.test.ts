@@ -10,6 +10,7 @@ import {
   buildWebVitalsEvent,
   canonicalizeAnalyticsRoute,
   createPostHogOptions,
+  docsAnalyticsPath,
   isTrackingRefused,
   POSTHOG_PROXY_HOST,
   POSTHOG_UI_HOST,
@@ -953,4 +954,34 @@ test("before_send drops events when tracking is refused and sanitizes otherwise"
   const defaults = createPostHogOptions("phc_project-token", POSTHOG_PROXY_HOST, POSTHOG_UI_HOST);
   assert.ok(defaults);
   assert.deepEqual(defaults.before_send(envelope as never), sanitizeEvent(envelope as never));
+});
+
+test("docsAnalyticsPath restores the /docs basePath that usePathname() strips", () => {
+  assert.equal(docsAnalyticsPath("/"), "/docs");
+  assert.equal(docsAnalyticsPath("/getting-started"), "/docs/getting-started");
+  assert.equal(docsAnalyticsPath("/getting-started/"), "/docs/getting-started");
+  assert.equal(docsAnalyticsPath("/docs/getting-started"), "/docs/getting-started");
+  assert.equal(docsAnalyticsPath("/docs"), "/docs");
+});
+
+test("docs events tag site=portwing and surface=docs, marketing events surface=marketing", () => {
+  for (const pathname of ["/", "/installation", "/not-a-page"]) {
+    const docsPath = docsAnalyticsPath(pathname);
+    for (const properties of [
+      buildPageviewEvent(docsPath).properties,
+      buildPageleaveEvent(docsPath).properties,
+      buildCtaEvent(docsPath, "docs_getting_started", "get_started")?.properties,
+      buildWebVitalsEvent(docsPath, { LCP: 1 })?.properties,
+    ]) {
+      assert.equal(properties?.site, "portwing");
+      assert.equal(properties?.surface, "docs");
+    }
+  }
+  assert.equal(buildPageviewEvent("/compare").properties.surface, "marketing");
+  // Without the basePath fix a docs page reads as an unknown marketing route.
+  assert.equal(buildPageviewEvent("/installation").properties.surface, "marketing");
+  assert.equal(
+    buildPageviewEvent(docsAnalyticsPath("/installation")).properties.path,
+    "/docs/installation",
+  );
 });
