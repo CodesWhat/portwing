@@ -795,6 +795,24 @@ func TestValidateRequest_FilePathTraversal(t *testing.T) {
 	}
 }
 
+func TestValidateRequest_FileKeyNamesStackDirectory(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir()}
+
+	for _, key := range []string{"", ".", "./", "a/.."} {
+		req := ComposeRequest{
+			StackName: "app",
+			EnvVars:   map[string]string{"A": ""},
+			Files:     map[string]string{key: ""},
+		}
+		_, err := cm.validateRequest(req)
+		if err == nil || !strings.Contains(err.Error(), "names the stack directory") {
+			t.Fatalf("file key %q: err = %v, want a stack-directory rejection", key, err)
+		}
+	}
+}
+
 // ---- validateRequest: stack path escapes stacks dir ----
 
 func TestValidateRequest_StackPathTraversal(t *testing.T) {
@@ -888,10 +906,10 @@ func TestExecuteEnvironmentWithoutComposeFiles(t *testing.T) {
 		name, fields, initial, want string
 		blocked                     bool
 	}{
-		{name: "omitted files", fields: `,"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT=9090\n"},
-		{name: "null files", fields: `,"files":null,"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT=9090\n"},
-		{name: "empty files", fields: `,"files":{},"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT=9090\n"},
-		{name: "creates environment", fields: `,"envVars":{"APP_PORT":"9090"}`, want: "APP_PORT=9090\n"},
+		{name: "omitted files", fields: `,"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT='9090'\n"},
+		{name: "null files", fields: `,"files":null,"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT='9090'\n"},
+		{name: "empty files", fields: `,"files":{},"envVars":{"APP_PORT":"9090"}`, initial: original, want: "APP_PORT='9090'\n"},
+		{name: "creates environment", fields: `,"envVars":{"APP_PORT":"9090"}`, want: "APP_PORT='9090'\n"},
 		{name: "nil environment preserves file", initial: original, want: original},
 		{name: "empty environment preserves file", fields: `,"envVars":{}`, initial: original, want: original},
 		{name: "empty environment creates no file", fields: `,"envVars":{}`},

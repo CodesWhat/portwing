@@ -389,6 +389,8 @@ type fakeDocker struct {
 	resizeAttempts  int
 	resizeCalls     []resizeCall
 
+	// pingErr is what Ping returns; dockerReady goes through Ping, not Do.
+	pingErr    error
 	doResp     *http.Response
 	doErr      error
 	streamResp *http.Response
@@ -488,6 +490,12 @@ func (f *fakeDocker) ResizeExec(_ context.Context, execID string, cols, rows int
 		return errors.New("resize busy")
 	}
 	return f.resizeErr
+}
+
+func (f *fakeDocker) Ping(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pingErr
 }
 
 func (f *fakeDocker) Do(_ context.Context, method, path string, body io.Reader) (*http.Response, error) {

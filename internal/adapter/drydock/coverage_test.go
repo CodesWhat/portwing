@@ -610,7 +610,7 @@ func TestHandleContainerLogRequest_RawTTYLogsPassThrough(t *testing.T) {
 	}
 }
 
-func TestHandleContainerLogRequest_TruncatedFrameReturnsPartialLogs(t *testing.T) {
+func TestHandleContainerLogRequest_TruncatedFrameReturnsErrorNotPartialLogs(t *testing.T) {
 	t.Parallel()
 
 	client, calls, shutdown := newRouteTestDockerClient(t)
@@ -639,8 +639,8 @@ func TestHandleContainerLogRequest_TruncatedFrameReturnsPartialLogs(t *testing.T
 	if resp.ContainerID != "truncated-container" {
 		t.Fatalf("ContainerID = %q, want truncated-container", resp.ContainerID)
 	}
-	if resp.Logs != "part" {
-		t.Fatalf("Logs = %q, want partial demuxed payload %q", resp.Logs, "part")
+	if want := "error: reading container logs: unexpected EOF"; resp.Logs != want {
+		t.Fatalf("Logs = %q, want %q (a cut-off read must not pass as the whole log)", resp.Logs, want)
 	}
 }
 

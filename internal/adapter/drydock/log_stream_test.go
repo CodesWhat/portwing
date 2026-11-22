@@ -789,7 +789,7 @@ func TestForwardContainerLogStreamEmitsPartialFinalFrame(t *testing.T) {
 		req.SetPathValue("id", "container-1")
 		rec := httptest.NewRecorder()
 
-		a.handleContainerLogs(rec, req)
+		requireLogAbort(t, func() { a.handleContainerLogs(rec, req) })
 
 		if got, want := rec.Body.String(), "complete\ntrunc"; got != want {
 			t.Fatalf("body = %q, want %q", got, want)

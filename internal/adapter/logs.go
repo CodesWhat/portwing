@@ -86,8 +86,10 @@ func ServeContainerLogs(w http.ResponseWriter, r *http.Request, opts ContainerLo
 	}
 
 	flusher, canFlush := w.(http.Flusher)
+	var writeFailed bool
 	err = docker.DecodeContainerLogStream(body, func(_ docker.ContainerLogStream, payload []byte) error {
 		if _, writeErr := w.Write(payload); writeErr != nil {
+			writeFailed = true
 			return writeErr
 		}
 		if canFlush {
@@ -97,5 +99,11 @@ func ServeContainerLogs(w http.ResponseWriter, r *http.Request, opts ContainerLo
 	})
 	if err != nil {
 		slog.Debug("log stream ended", "error", err)
+		// An upstream failure mid-body would otherwise end the response as a
+		// clean, shorter 200. Abort so the client sees a broken transfer. A
+		// client that went away or canceled needs nothing.
+		if !writeFailed && r.Context().Err() == nil {
+			panic(http.ErrAbortHandler)
+		}
 	}
 }
