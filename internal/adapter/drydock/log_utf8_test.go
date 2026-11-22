@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -193,5 +194,25 @@ func TestContainerLogStreamCarryConsecutiveSplitCharacters(t *testing.T) {
 	got, _ = forwardLogFrames(t, body)
 	if got["stdout"] != "€\U0001F600¢€" {
 		t.Fatalf("stdout = %q, want %q", got["stdout"], "€\U0001F600¢€")
+	}
+}
+
+// An incomplete final character is held until the stream ends. If sending it
+// then fails, the send error is what the caller gets.
+func TestForwardContainerLogStreamFlushFailureIsReported(t *testing.T) {
+	t.Parallel()
+
+	// One stdout frame holding the first two bytes of a three-byte character.
+	frame := []byte{1, 0, 0, 0, 0, 0, 0, 2, 0xE2, 0x82}
+	sendErr := errors.New("transport closed")
+	a := &Adapter{}
+	err := a.forwardContainerLogStream(
+		context.Background(),
+		&failingSender{err: sendErr},
+		protocol.DDContainerLogRequestMessage{RequestID: "flush", ContainerID: "c"},
+		bytes.NewReader(frame),
+	)
+	if !errors.Is(err, sendErr) {
+		t.Fatalf("err = %v, want it to wrap %v", err, sendErr)
 	}
 }
