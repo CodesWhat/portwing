@@ -69,6 +69,29 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install Sockguard
+        # The preset evaluator tests in internal/server shell out to
+        # `sockguard match` and skip when it is missing. Pinned by version and
+        # SHA-256 (from the release's checksums.txt) like the other tools here.
+        # The version tracks examples/sockguard-provenance.json's imageTag, and
+        # scripts/sockguard-contract.test.mjs fails when the two drift.
+        env:
+          SOCKGUARD_VERSION: '2.4.6'
+          SOCKGUARD_LINUX_AMD64_SHA256: '8365f5c2f253001a7cd33404b385afb5935526645916f6c2ea4cea11a8ae3cb5'
+        run: |
+          set -euo pipefail
+
+          archive="${RUNNER_TEMP}/sockguard.tar.gz"
+          install_dir="${RUNNER_TEMP}/sockguard-bin"
+          mkdir -p "${install_dir}"
+          curl --proto '=https' --tlsv1.2 --retry 3 --fail --silent --show-error --location \
+            "https://github.com/CodesWhat/sockguard/releases/download/v${SOCKGUARD_VERSION}/sockguard_${SOCKGUARD_VERSION}_linux_amd64.tar.gz" \
+            --output "${archive}"
+          printf '%s  %s\n' "${SOCKGUARD_LINUX_AMD64_SHA256}" "${archive}" | sha256sum --check --strict
+          tar -xzf "${archive}" -C "${install_dir}" sockguard
+          "${install_dir}/sockguard" version
+          printf '%s\n' "${install_dir}" >> "${GITHUB_PATH}"
+
       - name: Verify Docker daemon is reachable
         run: |
           docker version
@@ -81,3 +104,19 @@ jobs:
         env:
           PORTWING_TEST_DOCKER_SOCKET: /var/run/docker.sock
         run: go test -tags=integration -count=1 -timeout=10m -race ./internal/edge/ ./internal/integration/
+
+      - name: Run compose parse-only tier
+        # Real `docker compose config` against stacks Portwing writes; needs
+        # the compose plugin but not the daemon.
+        run: go test -tags=integration -count=1 -timeout=5m -race -run '^(TestComposeConfig(StackEnvQuoting|PerFileModes|ProjectNaming)|TestEnvFileRoundTripsThroughDockerComposeConfig)$' ./internal/docker/
+
+      - name: Run Sockguard preset tests
+        # Fails if the evaluator tests skip, which is what happens when the
+        # pinned binary is not on PATH.
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run 'TestSockguardPresets' ./internal/server/ | tee "${RUNNER_TEMP}/sockguard-tests.log"
+          if grep -q -- '--- SKIP' "${RUNNER_TEMP}/sockguard-tests.log"; then
+            echo "Sockguard preset tests skipped; the pinned binary is not on PATH" >&2
+            exit 1
+          fi
