@@ -949,7 +949,7 @@ func TestOutboundQueueStateEnqueueRollsBackReservationOnFrameLimit(t *testing.T)
 // ---------------------------------------------------------------------------
 
 // TestStreamedBodyBytesLockedSumsAllEntries proves the pendingBodies loop
-// (client.go:986, `total += int64(pb.buf.Len())`) accumulates across
+// (client.go:986, `total += int64(cap(pb.buf))`) accumulates across
 // multiple entries. REMOVE_SELF_ASSIGNMENTS (`+=` -> `=`) would leave total
 // holding only the last-iterated entry's length, undercounting whenever more
 // than one streamed body is in flight.
@@ -959,9 +959,9 @@ func TestStreamedBodyBytesLockedSumsAllEntries(t *testing.T) {
 	c, _ := newTestClient(t)
 
 	pbA := &pendingRequestBody{req: protocol.RequestMessage{RequestID: "a"}, timer: time.NewTimer(time.Hour)}
-	pbA.buf.WriteString("12345") // 5 bytes
+	pbA.buf = make([]byte, 5) // 5 bytes of capacity
 	pbB := &pendingRequestBody{req: protocol.RequestMessage{RequestID: "b"}, timer: time.NewTimer(time.Hour)}
-	pbB.buf.WriteString("1234567") // 7 bytes
+	pbB.buf = make([]byte, 3, 7) // 7 bytes of capacity, only 3 used: charged by cap
 	t.Cleanup(func() {
 		pbA.timer.Stop()
 		pbB.timer.Stop()

@@ -151,7 +151,8 @@ pre-push:
           "FuzzVerifyRequest ./internal/auth/" \
           "FuzzDecodeContainerLogStream ./internal/docker/" \
           "FuzzComposeRequestValidate ./internal/docker/" \
-          "FuzzParseKeyLine ./internal/auth/"; do
+          "FuzzParseKeyLine ./internal/auth/" \
+          "FuzzEdgeRequestPath ./internal/edge/"; do
           set -- $entry
           FUZZ_RETRIES=2 FUZZ_TIMEOUT=1m FUZZ_PARALLEL="$workers" bash scripts/ci/fuzz-run.sh "$2" "$1" 5s
         done

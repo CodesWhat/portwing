@@ -13,7 +13,7 @@ run-name: >-
 #   tier 2  quality-fuzz-nightly.yml   5m per fuzzer, daily 09:30 UTC
 #   tier 3  quality-fuzz-monthly.yml   1h per fuzzer, day 1 at 02:30 UTC
 #
-# This one builds the SAME ten `func Fuzz*(f *testing.F)` targets against
+# This one builds the SAME eleven `func Fuzz*(f *testing.F)` targets against
 # libFuzzer and AddressSanitizer through OSS-Fuzz's base-builder-go, and runs
 # them against a corpus committed to a branch. Tiers 2 and 3 also persist their
 # corpus, but through the Actions cache, where an entry is evicted after seven
@@ -106,7 +106,7 @@ jobs:
   code-change-fuzz:
     name: "ClusterFuzzLite (code change)"
     runs-on: ubuntu-24.04
-    # Pulling base-builder-go, downloading the go1.27.2 toolchain, building ten
+    # Pulling base-builder-go, downloading the go1.27.2 toolchain, building eleven
     # libFuzzer targets, and 300 seconds of fuzzing. 30 minutes is roughly
     # double the expected wall time.
     timeout-minutes: 30
@@ -149,7 +149,7 @@ jobs:
           # Without this, build_fuzzers drops every target it cannot prove the
           # diff reaches, and it proves that from coverage reports. We run no
           # coverage lane, so there are none, and the honest configuration is to
-          # run all ten rather than to depend on how the upstream code happens to
+          # run all eleven rather than to depend on how the upstream code happens to
           # fail when the report is missing.
           KEEP_UNAFFECTED_FUZZ_TARGETS: "true"
           LOW_DISK_SPACE: "True"
@@ -169,7 +169,7 @@ jobs:
         env:
           LANGUAGE: go
           GITHUB_TOKEN: ${{ github.token }}
-          # Total across all ten targets, not per target: run_fuzzers.py splits
+          # Total across all eleven targets, not per target: run_fuzzers.py splits
           # the budget with fuzz_seconds // len(targets), so this is 30s each.
           FUZZ_SECONDS: "300"
           MODE: code-change

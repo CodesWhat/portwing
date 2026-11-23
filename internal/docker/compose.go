@@ -19,7 +19,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+// composeStopGrace is how long a cancelled compose subprocess gets to wind down
+// after SIGTERM before it is SIGKILLed. A variable so tests can shorten it.
+var composeStopGrace = 30 * time.Second
 
 var (
 	envVarKeyPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -155,6 +160,10 @@ type ComposeResponse struct {
 	Success bool   `json:"success"`
 	Output  string `json:"output"`
 	Error   string `json:"error,omitempty"`
+	// Cancelled is set when the request context ended while the compose
+	// subprocess was running and the subprocess has since exited. It is not
+	// part of the wire response; callers use it to audit the outcome.
+	Cancelled bool `json:"-"`
 }
 
 const (
@@ -436,7 +445,11 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	err = cmd.Run()
+	// The run returns only once the subprocess and its whole process group are
+	// gone, so the per-stack lock stays held until then even when the request
+	// is cancelled.
+	err = runInProcessGroup(cmd)
+	cancelled := err != nil && ctx.Err() != nil
 
 	output := stdout.buf.String()
 	if stderr.buf.Len() > 0 {
@@ -454,6 +467,8 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 			Success: false,
 			Output:  output,
 			Error:   err.Error(),
+
+			Cancelled: cancelled,
 		}, nil
 	}
 
@@ -1076,6 +1091,9 @@ func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) 
 	// #nosec G204 -- compose binary is detected locally and args are built from validated request fields without shell expansion.
 	cmd := exec.CommandContext(ctx, cm.composeBin, args...)
 	cmd.Dir = projectDir
+	// Execute runs it through runInProcessGroup: a dropped tunnel or client
+	// must not SIGKILL a half-finished deploy, so the whole process group gets
+	// SIGTERM and is only killed after composeStopGrace.
 	return cmd, nil
 }
 

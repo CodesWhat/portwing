@@ -340,8 +340,19 @@ grep -Eq '^[[:space:]]*exit 1$' <<<"${socket_guard}" ||
 # lane's coverage, and the drift would be invisible in review because the
 # lines live in different files.
 
-engines_test_cmd="$(grep -E '^[[:space:]]*run: go test ' "${workflow}" | sed -e 's/^[[:space:]]*//' || true)"
-base_test_cmd="$(grep -E '^[[:space:]]*run: go test ' "${base_workflow}" | sed -e 's/^[[:space:]]*//' || true)"
+# Compare the run line of the step named "Run integration suite" in each file.
+# The daily lane also runs daemon-independent tiers (compose config parsing,
+# Sockguard presets) that an Engine matrix has no reason to repeat, so a
+# file-wide grep would demand they be copied here.
+suite_run_line() {
+	awk '
+		/^[[:space:]]*- name: Run integration suite[[:space:]]*$/ { in_step = 1; next }
+		in_step && /^[[:space:]]*- name:/ { exit }
+		in_step && /^[[:space:]]*run: go test / { sub(/^[[:space:]]*/, ""); print; exit }
+	' "$1"
+}
+engines_test_cmd="$(suite_run_line "${workflow}" || true)"
+base_test_cmd="$(suite_run_line "${base_workflow}" || true)"
 
 [ -n "${engines_test_cmd}" ] || fail "lane must invoke the integration suite with go test"
 [ -n "${base_test_cmd}" ] || fail "could not read the suite invocation from ${base_workflow}"

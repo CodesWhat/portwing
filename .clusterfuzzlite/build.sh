@@ -108,6 +108,7 @@ build_fuzzer internal/auth FuzzVerifyRequest
 build_fuzzer internal/docker FuzzDecodeContainerLogStream
 build_fuzzer internal/docker FuzzComposeRequestValidate
 build_fuzzer internal/auth FuzzParseKeyLine
+build_fuzzer internal/edge FuzzEdgeRequestPath
 
 # No seeds are copied out of internal/*/testdata/fuzz/, even though every target
 # is now required to ship one there. Go writes those files with a

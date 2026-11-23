@@ -43,3 +43,10 @@ test("the exec bundle protects custom proxy image overrides", () => {
   assert.ok(proxy, "expected the sockguard service");
   assert.match(proxy, /\n {4}labels:\n {6}com\.sockguard\.exec: "deny"\n/);
 });
+
+test("quality-integration installs the Sockguard release the presets are reviewed against", () => {
+  const workflow = read(".github/workflows/quality-integration.yml");
+  const version = workflow.match(/SOCKGUARD_VERSION: '([^']+)'/)?.[1];
+  assert.equal(`v${version}`, provenance.imageTag);
+  assert.match(workflow, /SOCKGUARD_LINUX_AMD64_SHA256: '[0-9a-f]{64}'/);
+});

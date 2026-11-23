@@ -48,9 +48,9 @@ expect_pass "valid fuzz tier fixture must pass"
 
 seed_fixture
 awk '
-	/FuzzParseKeyLine \.\/internal\/auth\/"; do/ {
-		print "        # \"FuzzParseKeyLine ./internal/auth/\""
-		print "          \"FuzzUnrelated ./internal/auth/\"; do"
+	/FuzzEdgeRequestPath \.\/internal\/edge\/"; do/ {
+		print "        # \"FuzzEdgeRequestPath ./internal/edge/\""
+		print "          \"FuzzUnrelated ./internal/edge/\"; do"
 		next
 	}
 	{ print }
@@ -586,7 +586,7 @@ grep -v '^build_fuzzer internal/auth FuzzParseKeyLine$' \
 expect_fail "a fuzzer missing from .clusterfuzzlite/build.sh must not satisfy the contract"
 
 seed_fixture
-# An eleventh target built for libFuzzer that no other tier runs. Every
+# An extra target built for libFuzzer that no other tier runs. Every
 # per-fuzzer check still passes; only the count notices.
 {
 	cat .clusterfuzzlite/build.sh

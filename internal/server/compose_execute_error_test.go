@@ -65,3 +65,38 @@ func TestHandleComposeExecuteErrorAudits(t *testing.T) {
 		t.Fatal("no compose_op record")
 	}
 }
+
+// cancelledCompose reports a deploy whose request ended while compose ran.
+type cancelledCompose struct{}
+
+func (cancelledCompose) Execute(context.Context, docker.ComposeRequest) (*docker.ComposeResponse, error) {
+	return &docker.ComposeResponse{Cancelled: true, Error: "signal: terminated"}, nil
+}
+
+// A deploy stopped by a client disconnect is audited as cancelled, not error.
+func TestHandleComposeCancelledAudits(t *testing.T) {
+	t.Parallel()
+
+	auditor, closeAudit, err := audit.New("", 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeAudit)
+	rl := NewRateLimiter()
+	t.Cleanup(rl.Stop)
+	s := &Server{compose: cancelledCompose{}, rateLimiter: rl, auditor: auditor, cfg: minimalConfig()}
+
+	req := httptest.NewRequest(http.MethodPost, "/_portwing/compose", bytes.NewReader([]byte(`{"operation":"up","stackName":"app"}`)))
+	req.RemoteAddr = "192.0.2.7:4000"
+	s.handleCompose(httptest.NewRecorder(), req)
+
+	for _, r := range auditor.Records(0) {
+		if r.Event == audit.EventComposeOp {
+			if r.Outcome != audit.OutcomeCancelled {
+				t.Fatalf("compose_op outcome = %q, want %q", r.Outcome, audit.OutcomeCancelled)
+			}
+			return
+		}
+	}
+	t.Fatal("no compose_op record")
+}

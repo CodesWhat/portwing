@@ -1434,3 +1434,19 @@ func TestHandleContainerLogRequest_DockerErrorSendsResponse(t *testing.T) {
 		t.Fatalf("response type = %q, want %q", got, protocol.TypeDDContainerLogResponse)
 	}
 }
+
+func TestRefreshContainersThen_NotifiesWithTheDiff(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newRouteTestDockerClient(t)
+	defer shutdown()
+
+	a := NewAdapter(client, "test-agent", AgentInfo{})
+	notified := false
+	if err := a.RefreshContainersThen(context.Background(), func(_, _, _ []adapterpkg.Container) { notified = true }); err != nil {
+		t.Fatalf("RefreshContainersThen: %v", err)
+	}
+	if !notified {
+		t.Fatal("notify was not called")
+	}
+}

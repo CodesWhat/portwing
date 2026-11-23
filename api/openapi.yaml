@@ -799,7 +799,7 @@ components:
             carries the container ID instead.
         outcome:
           type: string
-          enum: [allowed, denied, error]
+          enum: [allowed, denied, error, cancelled]
           description: >-
             Result of the event. On `exec_start` it is the admission decision:
             `allowed` when the exec took an exec session slot, `denied` when

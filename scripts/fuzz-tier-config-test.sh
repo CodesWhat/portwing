@@ -24,6 +24,7 @@ fuzzers=(
 	"FuzzDecodeContainerLogStream|./internal/docker/"
 	"FuzzComposeRequestValidate|./internal/docker/"
 	"FuzzParseKeyLine|./internal/auth/"
+	"FuzzEdgeRequestPath|./internal/edge/"
 )
 
 # --- seed-replay tier (PW-7.37) ----------------------------------------------

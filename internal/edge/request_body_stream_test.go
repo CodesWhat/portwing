@@ -806,7 +806,7 @@ func TestStreamedBodyBudgetCoversDispatchAndIsReleased(t *testing.T) {
 	pb, registered := c.pendingBodies["after-release"]
 	var buffered int
 	if registered {
-		buffered = pb.buf.Len()
+		buffered = len(pb.buf)
 	}
 	c.pendingBodiesMu.Unlock()
 	if !registered {
@@ -918,7 +918,7 @@ func TestStreamedBodyRejectedWhenStreamSemFullReleasesItsReservation(t *testing.
 	pb, registered := c.pendingBodies["after-rejection"]
 	var buffered int
 	if registered {
-		buffered = pb.buf.Len()
+		buffered = len(pb.buf)
 	}
 	c.pendingBodiesMu.Unlock()
 	if !registered {
@@ -983,7 +983,7 @@ func TestStreamedBodyDuplicateRequestIDRejectedAndOriginalSurvives(t *testing.T)
 	pb, stillPending := c.pendingBodies["dup"]
 	var buffered string
 	if stillPending {
-		buffered = pb.buf.String()
+		buffered = string(pb.buf)
 	}
 	pending := len(c.pendingBodies)
 	c.pendingBodiesMu.Unlock()

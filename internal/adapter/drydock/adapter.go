@@ -123,11 +123,14 @@ func (a *Adapter) PollInterval() int { return 0 }
 func (a *Adapter) OnConnect(ctx context.Context, sender adapter.MessageSender) error {
 	a.sendComponentSync(sender)
 
-	containers, err := a.containers.BuildInventory(ctx)
+	// The sync is sent while the inventory operation is still held, so a
+	// periodic refresh can neither commit before this build nor emit its diff
+	// ahead of the sync.
+	_, err := a.containers.BuildInventoryThen(ctx, func(containers []adapter.Container) {
+		a.sendContainerSync(sender, containers)
+	})
 	if err != nil {
 		slog.Warn("initial container sync failed", "error", err)
-	} else {
-		a.sendContainerSync(sender, containers)
 	}
 	return nil
 }
@@ -135,6 +138,13 @@ func (a *Adapter) OnConnect(ctx context.Context, sender adapter.MessageSender) e
 // RefreshContainers delegates to the container manager.
 func (a *Adapter) RefreshContainers(ctx context.Context) (added, updated, removed []adapter.Container, err error) {
 	return a.containers.Refresh(ctx)
+}
+
+// RefreshContainersThen refreshes the inventory and calls notify with the diff
+// while the inventory operation slot is still held.
+func (a *Adapter) RefreshContainersThen(ctx context.Context, notify func(added, updated, removed []adapter.Container)) error {
+	_, _, _, err := a.containers.RefreshThen(ctx, notify)
+	return err
 }
 
 // OnContainerRefresh sends container events over the edge WebSocket when

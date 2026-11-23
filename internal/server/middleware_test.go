@@ -19,8 +19,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,13 +42,6 @@ func okHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-type blockingTokenVerifier struct {
-	entered chan struct{}
-	release <-chan struct{}
-	active  atomic.Int64
-	maximum atomic.Int64
-}
-
 type saturatedTokenVerifier struct{}
 
 func (saturatedTokenVerifier) Verify(string) bool {
@@ -59,62 +50,6 @@ func (saturatedTokenVerifier) Verify(string) bool {
 
 func (saturatedTokenVerifier) VerifyWithCapacity(string) (bool, bool) {
 	return false, false
-}
-
-func (v *blockingTokenVerifier) Verify(string) bool {
-	active := v.active.Add(1)
-	for {
-		maximum := v.maximum.Load()
-		if active <= maximum || v.maximum.CompareAndSwap(maximum, active) {
-			break
-		}
-	}
-	v.entered <- struct{}{}
-	<-v.release
-	v.active.Add(-1)
-	return false
-}
-
-func TestAuthMiddlewareBoundsConcurrentVerificationsPerIP(t *testing.T) {
-	rl := NewRateLimiter()
-	defer rl.Stop()
-
-	const requests = 12
-	release := make(chan struct{})
-	verifier := &blockingTokenVerifier{
-		entered: make(chan struct{}, requests),
-		release: release,
-	}
-	h := rl.AuthMiddlewareWithEd25519(verifier, Ed25519Config{}, noAudit(t), nil, http.HandlerFunc(okHandler))
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for i := 0; i < requests; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			req.RemoteAddr = "192.0.2.10:12345"
-			req.Header.Set(headerPortwingToken, "wrong")
-			h.ServeHTTP(httptest.NewRecorder(), req)
-		}()
-	}
-	close(start)
-
-	for i := 0; i < 2; i++ {
-		select {
-		case <-verifier.entered:
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for bounded verification slots")
-		}
-	}
-	time.Sleep(50 * time.Millisecond)
-	close(release)
-	wg.Wait()
-
-	if got := verifier.maximum.Load(); got > 2 {
-		t.Fatalf("maximum concurrent verifications = %d, want at most 2", got)
-	}
 }
 
 func TestAuthMiddlewareReturns429WhenVerifierCapacityIsExhausted(t *testing.T) {
@@ -294,24 +229,6 @@ func TestRawTokenVerifierUsesFixedLengthDigest(t *testing.T) {
 		if verifier.Verify(token) {
 			t.Fatalf("incorrect token of length %d verified", len(token))
 		}
-	}
-}
-
-func TestTryBeginAuthPreservesFailOpenTrackingAtIPCapacity(t *testing.T) {
-	rl := &RateLimiter{
-		attempts:    map[string]*ipAttempts{"existing": {count: 1, firstFail: time.Now()}},
-		maxFails:    10,
-		window:      time.Minute,
-		maxIPs:      1,
-		maxInFlight: 2,
-	}
-
-	if !rl.tryBeginAuth("untracked") {
-		t.Fatal("IP table capacity must not turn tracking exhaustion into an auth denial")
-	}
-	rl.finishAuth("untracked", false)
-	if _, ok := rl.attempts["untracked"]; ok {
-		t.Fatal("capacity-overflow IP should remain untracked")
 	}
 }
 
@@ -850,35 +767,6 @@ func TestEd25519NonceCapacityDoesNotSpendFailureBudget(t *testing.T) {
 	}
 }
 
-func TestEd25519MiddlewareRejectsWhenVerificationCapacityFull(t *testing.T) {
-	t.Parallel()
-
-	ed, priv := setupEd25519(t)
-	rl := NewRateLimiter()
-	defer rl.Stop()
-
-	const clientIP = "198.51.100.10"
-	rl.maxInFlight = 1
-	rl.attempts[clientIP] = &ipAttempts{inFlight: 1}
-
-	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
-	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
-	req.RemoteAddr = clientIP + ":1234"
-	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 when Ed25519 verification capacity is full, got %d", rec.Code)
-	}
-	rl.mu.Lock()
-	attempt := *rl.attempts[clientIP]
-	rl.mu.Unlock()
-	if attempt.inFlight != 1 || attempt.count != 0 {
-		t.Fatalf("rejected verification changed rate-limit state: %+v", attempt)
-	}
-}
-
 // TestEd25519MiddlewareAuthBodyReadDeadline is a regression test for the
 // pre-auth slowloris finding: a client that sends signature headers plus a
 // Content-Length body but never actually sends the body bytes must not pin
@@ -1135,157 +1023,36 @@ func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
 }
 
-// dialSignatureHeadedSlowBody opens a raw connection to addr and writes a
-// request that declares a body via Content-Length and carries Ed25519
-// signature headers, but never sends the body bytes. Signature headers cost
-// nothing to attach — no credential is needed to reach the Ed25519 branch —
-// so this is exactly the shape of the pre-admission slowloris.
-func dialSignatureHeadedSlowBody(t *testing.T, addr string) net.Conn {
-	t.Helper()
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-	if err != nil {
-		t.Fatalf("dial %s: %v", addr, err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-
-	var raw strings.Builder
-	raw.WriteString("POST / HTTP/1.1\r\n")
-	raw.WriteString("Host: " + addr + "\r\n")
-	raw.WriteString("Content-Length: 64\r\n")
-	raw.WriteString(auth.HeaderKeyID + ": deadbeefdeadbeef\r\n")
-	raw.WriteString(auth.HeaderTimestamp + ": " + strconv.FormatInt(time.Now().Unix(), 10) + "\r\n")
-	raw.WriteString(auth.HeaderNonce + ": " + freshNonce(t) + "\r\n")
-	raw.WriteString(auth.HeaderSignature + ": bogus\r\n")
-	raw.WriteString(auth.HeaderSignatureVersion + ": " + auth.SignatureVersion2 + "\r\n")
-	raw.WriteString("\r\n")
-	// Deliberately do not write the 64 declared body bytes.
-	if _, err := conn.Write([]byte(raw.String())); err != nil {
-		t.Fatalf("write request headers: %v", err)
-	}
-	return conn
-}
-
-// waitForInFlightSlots polls the per-IP in-flight verification count until it
-// reaches want, or fails the test. Reading it directly is what makes the
-// admission ordering observable: the count is the bound the finding says was
-// bypassed.
-func waitForInFlightSlots(t *testing.T, rl *RateLimiter, ip string, want int, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	got := -1
-	for time.Now().Before(deadline) {
-		rl.mu.Lock()
-		got = 0
-		if a, ok := rl.attempts[ip]; ok {
-			got = a.inFlight
-		}
-		rl.mu.Unlock()
-		if got == want {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("in-flight verification slots for %s = %d, want %d", ip, got, want)
-}
-
-// TestEd25519MiddlewareBoundsConcurrentSlowBodies is a regression test for the
-// pre-admission body read: the Ed25519 path buffered up to 1 MiB before it
-// reserved the per-IP verification slot, so N concurrent signature-headered
-// slow bodies from one IP each held a goroutine and a connection while
-// maxInFlight still reported zero slots in use. The read must happen inside
-// the slot, and the slot must come back on the read-failure path.
-//
-// Not t.Parallel(): it mutates the package-level authBodyReadDeadline var,
-// which every request through this middleware reads.
-func TestEd25519MiddlewareBoundsConcurrentSlowBodies(t *testing.T) {
-	ed, _ := setupEd25519(t)
-	rl := NewRateLimiter()
-	defer rl.Stop()
-	const maxInFlight = 2
-	rl.maxInFlight = maxInFlight
-
-	orig := authBodyReadDeadline
-	authBodyReadDeadline = 2 * time.Second
-	t.Cleanup(func() { authBodyReadDeadline = orig })
-
-	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
-	ts := httptest.NewServer(h)
-	defer ts.Close()
-
-	u, err := url.Parse(ts.URL)
-	if err != nil {
-		t.Fatalf("parse test server URL: %v", err)
-	}
-	const clientIP = "127.0.0.1"
-
-	// Saturate the bound with slow bodies. Before the fix these never
-	// occupied a slot at all, so this wait times out on the old code.
-	slow := make([]net.Conn, maxInFlight)
-	for i := range slow {
-		slow[i] = dialSignatureHeadedSlowBody(t, u.Host)
-	}
-	waitForInFlightSlots(t, rl, clientIP, maxInFlight, 1500*time.Millisecond)
-
-	// One more from the same IP must be turned away immediately rather than
-	// admitted into another 1 MiB read.
-	extra := dialSignatureHeadedSlowBody(t, u.Host)
-	if err := extra.SetReadDeadline(time.Now().Add(1500 * time.Millisecond)); err != nil {
-		t.Fatalf("SetReadDeadline: %v", err)
-	}
-	resp, err := http.ReadResponse(bufio.NewReader(extra), nil)
-	if err != nil {
-		t.Fatalf("read response for the over-bound request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("over-bound slow body got %d, want 429 (admission bound bypassed)", resp.StatusCode)
-	}
-
-	// Every saturating request must hand its slot back when its read times
-	// out, or the bound leaks shut after one burst.
-	for i, conn := range slow {
-		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			t.Fatalf("SetReadDeadline on slow conn %d: %v", i, err)
-		}
-		slowResp, err := http.ReadResponse(bufio.NewReader(conn), nil)
-		if err != nil {
-			t.Fatalf("read response for slow conn %d: %v", i, err)
-		}
-		slowResp.Body.Close()
-		if slowResp.StatusCode != http.StatusRequestTimeout {
-			t.Fatalf("slow conn %d got %d, want 408", i, slowResp.StatusCode)
-		}
-	}
-	waitForInFlightSlots(t, rl, clientIP, 0, 2*time.Second)
-}
-
-// TestEd25519AdmissionRejectionRecordsMetrics covers the metrics branch of the
-// Ed25519 admission rejection. Every other test of that 429 passes a nil
+// TestEd25519LockoutRejectionRecordsMetrics covers the metrics branch of the
+// Ed25519 lockout rejection. Every other test of that 429 passes a nil
 // registry, so the two counter calls never ran, yet production always has a
-// registry: NewServer sets one unconditionally. Without this the operator
-// dashboard would silently under-report exactly the rejections the admission
-// bound exists to produce.
-func TestEd25519AdmissionRejectionRecordsMetrics(t *testing.T) {
+// registry: NewServer sets one unconditionally.
+func TestEd25519LockoutRejectionRecordsMetrics(t *testing.T) {
 	t.Parallel()
-	ed, priv := setupEd25519(t)
+	ed, _ := setupEd25519(t)
+	_, otherPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
 	rl := NewRateLimiter()
 	defer rl.Stop()
 
 	const clientIP = "198.51.100.20"
-	rl.maxInFlight = 1
-	rl.attempts[clientIP] = &ipAttempts{inFlight: 1}
+	for i := 0; i < rl.maxFails; i++ {
+		rl.RecordFailure(clientIP)
+	}
 
 	reg := newMetricsRegistry()
 	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), reg, http.HandlerFunc(okHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
 	req.RemoteAddr = clientIP + ":1234"
-	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
+	signEd25519Request(t, req, nil, otherPriv, time.Now().Unix(), freshNonce(t))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 when the verification slot is taken, got %d", rec.Code)
+		t.Fatalf("expected 429 for a bad signature from a locked-out source, got %d", rec.Code)
 	}
 
 	var b strings.Builder
