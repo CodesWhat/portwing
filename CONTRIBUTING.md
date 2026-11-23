@@ -67,6 +67,7 @@ go test -run=^$ -fuzz=^FuzzVerifyRequest$       -fuzztime=5s ./internal/auth/
 go test -run=^$ -fuzz=^FuzzDecodeContainerLogStream$ -fuzztime=5s ./internal/docker/
 go test -run=^$ -fuzz=^FuzzComposeRequestValidate$   -fuzztime=5s ./internal/docker/
 go test -run=^$ -fuzz=^FuzzParseKeyLine$             -fuzztime=5s ./internal/auth/
+go test -run=^$ -fuzz=^FuzzEdgeRequestPath$          -fuzztime=5s ./internal/edge/
 ```
 
 Every target ships a committed seed corpus under

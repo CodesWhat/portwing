@@ -10,7 +10,7 @@ run-name: >-
 # 5 minutes (lighter than sockguard's 15m — Portwing's corpus is young).
 # Matrix-parallelized so wall time stays near 5 minutes regardless of count.
 #
-# Two of the ten targets — FuzzParseImageRef and FuzzParseLabels — are a
+# Two of the eleven targets — FuzzParseImageRef and FuzzParseLabels — are a
 # third, seed-replay-only tier (PW-7.37): both logged 5.5M/6.8M executions
 # with zero new interesting inputs, and their path derivation was verified
 # correct, so this is real saturation rather than a bug. Fuzzing them further
@@ -25,8 +25,8 @@ run-name: >-
 # membership list is scripts/fuzz-tier-config-test.sh's `replay_tier_fuzzers`;
 # they also get no leg in quality-fuzz-monthly.yml's matrix, for the same
 # reason. `targets_expected`/`strategy.job-total` below is unaffected — the
-# matrix itself still carries all ten, so the quality-history union's
-# targets_total stays 10 exactly as it did before this tier existed.
+# matrix itself still carries all eleven, so the quality-history union's
+# targets_total stays 11 exactly as it did before this tier existed.
 
 on:
   workflow_dispatch:
@@ -82,6 +82,7 @@ jobs:
           - { name: FuzzDecodeContainerLogStream, pkg: ./internal/docker/ }
           - { name: FuzzComposeRequestValidate,   pkg: ./internal/docker/ }
           - { name: FuzzParseKeyLine,       pkg: ./internal/auth/ }
+          - { name: FuzzEdgeRequestPath,    pkg: ./internal/edge/ }
 
     steps:
       - name: Harden Runner
