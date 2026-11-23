@@ -123,11 +123,14 @@ func (a *Adapter) PollInterval() int { return 0 }
 func (a *Adapter) OnConnect(ctx context.Context, sender adapter.MessageSender) error {
 	a.sendComponentSync(sender)
 
-	containers, err := a.containers.BuildInventory(ctx)
+	// The sync is sent while the inventory operation is still held, so a
+	// periodic refresh can neither commit before this build nor emit its diff
+	// ahead of the sync.
+	_, err := a.containers.BuildInventoryThen(ctx, func(containers []adapter.Container) {
+		a.sendContainerSync(sender, containers)
+	})
 	if err != nil {
 		slog.Warn("initial container sync failed", "error", err)
-	} else {
-		a.sendContainerSync(sender, containers)
 	}
 	return nil
 }

@@ -26,6 +26,12 @@ type ContainerManager struct {
 	dockerClient *docker.Client
 	agentName    string
 	labelParser  LabelParser
+	// opSem serializes whole inventory operations (BuildInventory and
+	// Refresh), each from its snapshot through its commit. Without it a slow
+	// initial build could commit older state over a newer refresh. Readers
+	// (GetContainers, GetContainer) never take it, so requests are still served
+	// from the last committed inventory while an operation runs.
+	opSem        chan struct{}
 	containersMu sync.RWMutex
 	containers   map[string]Container // keyed by container ID
 	cacheMu      sync.Mutex
@@ -44,14 +50,50 @@ func NewContainerManager(dockerClient *docker.Client, agentName string, labelPar
 		dockerClient: dockerClient,
 		agentName:    agentName,
 		labelParser:  labelParser,
+		opSem:        make(chan struct{}, 1),
 		containers:   make(map[string]Container),
 		inspectCache: make(map[string]cachedContainer),
 	}
 }
 
+// acquireOp takes the inventory operation slot, or returns ctx's error if the
+// context ends first. The caller must call releaseOp exactly once on success.
+func (m *ContainerManager) acquireOp(ctx context.Context) error {
+	select {
+	case m.opSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *ContainerManager) releaseOp() { <-m.opSem }
+
 // BuildInventory lists all containers, inspects each one, builds Container
 // structs, and stores them for later diffing.
 func (m *ContainerManager) BuildInventory(ctx context.Context) ([]Container, error) {
+	return m.BuildInventoryThen(ctx, nil)
+}
+
+// BuildInventoryThen is BuildInventory that also calls then with the built
+// containers before the inventory operation slot is released. A refresh can't
+// start until then returns, so whatever then sends (the initial container
+// sync) goes out ahead of every diff computed against the inventory it
+// committed. then may be nil and is not called on error.
+func (m *ContainerManager) BuildInventoryThen(ctx context.Context, then func([]Container)) ([]Container, error) {
+	if err := m.acquireOp(ctx); err != nil {
+		return nil, fmt.Errorf("waiting for inventory: %w", err)
+	}
+	defer m.releaseOp()
+
+	containers, err := m.buildInventoryLocked(ctx)
+	if err == nil && then != nil {
+		then(containers)
+	}
+	return containers, err
+}
+
+func (m *ContainerManager) buildInventoryLocked(ctx context.Context) ([]Container, error) {
 	listed, err := m.dockerClient.ListContainers(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("listing containers: %w", err)
@@ -105,6 +147,11 @@ func (m *ContainerManager) GetContainer(id string) (*Container, bool) {
 // Refresh rebuilds the inventory and computes the diff against the previous
 // snapshot. Returns added, updated, and removed containers.
 func (m *ContainerManager) Refresh(ctx context.Context) (added, updated, removed []Container, err error) {
+	if err := m.acquireOp(ctx); err != nil {
+		return nil, nil, nil, fmt.Errorf("waiting for inventory: %w", err)
+	}
+	defer m.releaseOp()
+
 	oldMap := m.snapshotContainers()
 
 	listed, err := m.dockerClient.ListContainers(ctx, true)
