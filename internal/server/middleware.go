@@ -344,6 +344,38 @@ func (rl *RateLimiter) finishEnrollment(ip string, success bool) {
 	rl.finishAuthLocked(ip, success)
 }
 
+// recordAuthFailure records a failed credential check and reports whether the
+// source is locked out: already at the failure limit within its window, or
+// unable to be tracked because the table is full. A locked-out source's
+// failure is not counted again, so a lockout can't be extended by hammering it.
+// It is only ever called for requests whose credentials did not verify; a
+// request with valid credentials never reaches it.
+func (rl *RateLimiter) recordAuthFailure(ip string) bool {
+	key := limiterKey(ip)
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	a, ok := rl.attempts[key]
+	if !ok {
+		if len(rl.attempts) >= rl.maxIPs {
+			return true
+		}
+		rl.attempts[key] = &ipAttempts{count: 1, firstFail: now}
+		return false
+	}
+	if a.firstFail.IsZero() || now.Sub(a.firstFail) > rl.window {
+		a.count = 1
+		a.firstFail = now
+		return false
+	}
+	if a.count >= rl.maxFails {
+		return true
+	}
+	a.count++
+	return false
+}
+
 // RecordFailure records a failed authentication attempt for the given IP.
 // If the total number of tracked IPs exceeds the limit, the failure is silently
 // dropped to prevent memory exhaustion. The admission check refuses untracked
@@ -416,6 +448,32 @@ type Ed25519Config struct {
 	Registry       *auth.KeyRegistry
 	Nonces         *auth.NonceLRU
 	MaxSkewSeconds int
+}
+
+const (
+	// maxSignedBodyBytes caps the body buffered for signature verification on
+	// every route except compose.
+	maxSignedBodyBytes = 1 << 20
+	// maxSignedComposeBodyBytes matches handleCompose's own 32 MiB cap, so a
+	// large compose deploy can be signed and still reach the handler.
+	maxSignedComposeBodyBytes = 32 << 20
+	// maxLargeSignedBodies bounds how many compose-sized bodies are buffered
+	// at once, agent-wide. Buffering happens before the signature is checked,
+	// so without it unauthenticated callers could pin 32 MiB each.
+	maxLargeSignedBodies = 4
+	composePath          = "/_portwing/compose"
+)
+
+// largeSignedBodySlots holds one token per compose-sized signed body being
+// buffered.
+var largeSignedBodySlots = make(chan struct{}, maxLargeSignedBodies)
+
+// wantsLargeSignedBody reports whether r is a compose request whose body may
+// exceed the default signed-body cap: it declares more than the default, or
+// its length is unknown (chunked).
+func wantsLargeSignedBody(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.URL.Path == composePath &&
+		(r.ContentLength > maxSignedBodyBytes || r.ContentLength < 0)
 }
 
 // authBodyReadDeadline bounds how long the Ed25519 auth path may block
@@ -502,59 +560,36 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 
 		clientIP := rl.clientIP(r)
 
-		if rl.IsRateLimited(clientIP) {
-			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
-			if reg != nil {
-				reg.IncRequest(r.Method, http.StatusTooManyRequests)
-				reg.IncRateLimited()
-			}
-			rejectUnadmitted(w, r, "too many failed attempts", http.StatusTooManyRequests)
-			return
-		}
+		// Credentials are checked before any lockout applies. A request that
+		// verifies is never refused by the failed-auth limiter, so one noisy
+		// client behind a shared address can't lock out the controller. The
+		// limiter only decides how a failed check is answered (401, or 429
+		// once the source is locked out).
 
 		// If Ed25519 is configured and the request carries a signature, use
 		// that path exclusively. Reading the body first is required because
 		// VerifyRequest needs it for the canonical message.
 		if ed.Registry != nil && auth.HasSignature(r.Header) {
-			// Reserve the per-IP verification slot BEFORE touching the body.
-			// The read below is the attacker-controlled part of this path:
-			// anyone can attach signature headers and then drip up to 1 MiB
-			// for authBodyReadDeadline without holding a credential, so
-			// reading first let N concurrent slow bodies from one IP occupy
-			// N goroutines and N connections while maxInFlight was still
-			// showing zero in use.
-			if !rl.tryBeginAuth(clientIP) {
-				auditor.RateLimited(clientIP, r.Method, r.URL.Path)
-				if reg != nil {
-					reg.IncRequest(r.Method, http.StatusTooManyRequests)
-					reg.IncRateLimited()
-				}
-				rejectUnadmitted(w, r, "too many failed attempts", http.StatusTooManyRequests)
-				return
-			}
-			// The slot covers the body read and the signature check only, not
-			// the downstream handler: holding it through next.ServeHTTP would
-			// cap one client's concurrent authenticated requests at
-			// maxInFlight. releaseAuthSlot is idempotent, so the deferred call
-			// covers every early return (and a panic) while the success path
-			// still releases explicitly before next.ServeHTTP runs.
-			authSlotReleased := false
-			releaseAuthSlot := func(success bool) {
-				if authSlotReleased {
-					return
-				}
-				authSlotReleased = true
-				rl.finishAuth(clientIP, success)
-			}
-			// A body that never arrives is not a credential failure, so the
-			// fallback release does not spend the rolling failure budget.
-			defer releaseAuthSlot(true)
-
-			// Buffer the body (capped at 1 MB; MaxBytesReader also closes the
-			// connection on overflow, preventing slow-drip memory exhaustion).
+			// Buffer the body. The signature covers its SHA-256, so it has to be
+			// held whole to verify. It is capped at 1 MiB, or 32 MiB for a
+			// compose request that declares more (bounded agent-wide by
+			// largeSignedBodySlots); MaxBytesReader also closes the connection
+			// on overflow, preventing slow-drip memory exhaustion.
 			var body []byte
 			if r.Body != nil {
-				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+				limit := int64(maxSignedBodyBytes)
+				if wantsLargeSignedBody(r) {
+					select {
+					case largeSignedBodySlots <- struct{}{}:
+						defer func() { <-largeSignedBodySlots }()
+						limit = maxSignedComposeBodyBytes
+					default:
+						w.Header().Set("Retry-After", "1")
+						rejectUnadmitted(w, r, "too many large requests in progress", http.StatusServiceUnavailable)
+						return
+					}
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
 
 				// Deadline the read itself, not just its size: a slow drip
 				// under the 1 MiB cap would otherwise pin this goroutine for
@@ -592,12 +627,15 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			}
 			verified, err := auth.VerifyRequestDetailed(r, body, ed.Registry, ed.Nonces, skew)
 			keyID := verified.KeyID
-			// A full nonce cache is the agent's own capacity limit, not a
-			// credential failure, so it must not spend the IP's failure
-			// budget or a busy controller would lock itself out with 429.
-			releaseAuthSlot(err == nil || errors.Is(err, auth.ErrNonceCapacity))
 			if err != nil {
 				reason := auth.ReasonFor(err)
+				// A full nonce cache is the agent's own capacity limit, not a
+				// credential failure, so it must not spend the IP's failure
+				// budget or a busy controller would lock itself out with 429.
+				if !errors.Is(err, auth.ErrNonceCapacity) && rl.recordAuthFailure(clientIP) {
+					rejectLockedOut(w, r, clientIP, auditor, reg)
+					return
+				}
 				slog.Warn("ed25519 authentication failed",
 					"ip", applog.Sanitize(clientIP), "reason", applog.Sanitize(reason))
 				auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
@@ -638,7 +676,10 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		if verifier == nil {
 			// Ed25519 was configured but request had no signature, and there
 			// is no token verifier — authentication required but none presented.
-			rl.RecordFailure(clientIP)
+			if rl.recordAuthFailure(clientIP) {
+				rejectLockedOut(w, r, clientIP, auditor, reg)
+				return
+			}
 			slog.Warn("authentication failed: no credentials presented", "ip", applog.Sanitize(clientIP))
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			if reg != nil {
@@ -650,18 +691,11 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		}
 
 		provided := agentToken(r)
-		if !rl.tryBeginAuth(clientIP) {
-			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
-			if reg != nil {
-				reg.IncRequest(r.Method, http.StatusTooManyRequests)
-				reg.IncRateLimited()
-			}
-			rejectUnadmitted(w, r, "too many failed attempts", http.StatusTooManyRequests)
-			return
-		}
 		valid, attempted := verifyTokenWithCapacity(verifier, provided)
 		if !attempted {
-			rl.finishAuth(clientIP, true)
+			// The agent-wide cold Argon2 slots are full. That is the agent's
+			// own capacity limit, not a credential verdict, so it doesn't
+			// touch the source's failure budget.
 			auditor.RateLimited(clientIP, r.Method, r.URL.Path)
 			if reg != nil {
 				reg.IncRequest(r.Method, http.StatusTooManyRequests)
@@ -670,9 +704,12 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			rejectUnadmitted(w, r, "authentication verification capacity exceeded", http.StatusTooManyRequests)
 			return
 		}
-		rl.finishAuth(clientIP, valid)
 
 		if !valid {
+			if rl.recordAuthFailure(clientIP) {
+				rejectLockedOut(w, r, clientIP, auditor, reg)
+				return
+			}
 			slog.Warn("authentication failed", "ip", applog.Sanitize(clientIP))
 			auditor.AuthFailure(clientIP, r.Method, r.URL.Path)
 			if reg != nil {
@@ -695,6 +732,17 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			reg.ObserveRequestDuration(time.Since(start).Seconds())
 		}
 	})
+}
+
+// rejectLockedOut answers a request whose credentials failed from a source
+// that is already locked out (or can't be tracked) with the 429 path.
+func rejectLockedOut(w http.ResponseWriter, r *http.Request, clientIP string, auditor *audit.Logger, reg *metrics.Registry) {
+	auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+	if reg != nil {
+		reg.IncRequest(r.Method, http.StatusTooManyRequests)
+		reg.IncRateLimited()
+	}
+	rejectUnadmitted(w, r, "too many failed attempts", http.StatusTooManyRequests)
 }
 
 // statusRecorder wraps ResponseWriter to capture the status code. It must

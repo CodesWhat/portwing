@@ -112,7 +112,7 @@ func TestRateLimiterFailsClosedAtCapacity(t *testing.T) {
 	}
 }
 
-func TestAuthMiddlewareRejectsUntrackedSourceAtCapacity(t *testing.T) {
+func TestAuthMiddlewareUntrackedSourceAtCapacity(t *testing.T) {
 	t.Parallel()
 	rl := NewRateLimiter()
 	defer rl.Stop()
@@ -120,18 +120,24 @@ func TestAuthMiddlewareRejectsUntrackedSourceAtCapacity(t *testing.T) {
 	rl.RecordFailure("192.0.2.1")
 
 	h := rl.AuthMiddlewareWithEd25519(newRawTokenVerifier("correct"), Ed25519Config{}, noAudit(t), nil, http.HandlerFunc(okHandler))
-	do := func(remote string) int {
+	do := func(remote, token string) int {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = remote + ":1234"
-		req.Header.Set(headerPortwingToken, "correct")
+		req.Header.Set(headerPortwingToken, token)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	if got := do("192.0.2.9"); got != http.StatusTooManyRequests {
-		t.Fatalf("untracked source at capacity: status %d, want 429", got)
+	if got := do("192.0.2.9", "wrong"); got != http.StatusTooManyRequests {
+		t.Fatalf("untracked source with bad credentials at capacity: status %d, want 429", got)
 	}
-	if got := do("192.0.2.1"); got != http.StatusOK {
-		t.Fatalf("tracked source at capacity: status %d, want 200", got)
+	if got := do("192.0.2.9", "correct"); got != http.StatusOK {
+		t.Fatalf("untracked source with valid credentials at capacity: status %d, want 200", got)
+	}
+	if got := do("192.0.2.1", "wrong"); got != http.StatusUnauthorized {
+		t.Fatalf("tracked source with bad credentials at capacity: status %d, want 401", got)
+	}
+	if got := do("192.0.2.1", "correct"); got != http.StatusOK {
+		t.Fatalf("tracked source with valid credentials at capacity: status %d, want 200", got)
 	}
 }

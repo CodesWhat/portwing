@@ -27,7 +27,7 @@ Alternatively, per-request Ed25519 signatures are accepted when the
 query string. See [Authentication](/authentication) for the full signing
 protocol.
 
-**Rate limiting:** 10 failed auth attempts per IP per rolling minute. Exceeding the limit returns HTTP `429` until the window resets.
+**Rate limiting:** 10 failed auth attempts per source per fixed minute, where a source is an IPv4 address or an IPv6 /64. Credentials are checked first, so a request with valid credentials is never refused by this limit. A failed attempt from a source over the limit returns HTTP `429` until the window resets. Behind a reverse proxy, set `TRUSTED_PROXIES` so sources are real clients; see [Connection modes](/connection-modes#behind-a-reverse-proxy).
 
 ---
 
@@ -487,9 +487,13 @@ dump is never the default. Combined stdout and stderr from any compose
 operation is capped at 10 MB; output past the cap is dropped and the captured
 output ends with an `[output truncated: ...]` marker.
 
-The request body is capped at 32 MiB (this covers `files` and `envVars`). A larger
-body is rejected with `400` and `invalid request: http: request body too large`
-before anything is written.
+The request body is capped at 32 MiB (this covers `files` and `envVars`). With
+Ed25519 signing the agent buffers the body to verify its hash, and this route
+gets the same 32 MiB cap there (other signed routes keep 1 MiB); a larger signed
+body is rejected with `413`, and an unsigned or token-authenticated one with
+`400` and `invalid request: http: request body too large`, before anything is
+written. At most four compose bodies over 1 MiB are buffered at once; further
+ones get `503` with `Retry-After: 1`.
 
 ### Project names
 
@@ -660,8 +664,8 @@ curl -s -X POST \
 | `401` | Missing, invalid, or burned token |
 | `405` | Method not allowed |
 | `409` | Conflict — audit export cursor is outside the retained buffer, or a Docker conflict response passed through on container log/delete routes |
-| `413` | Payload too large — request body exceeds its limit (64 KiB enrollment, 1 MiB signed request, 10 MB exec/attach upgrade) |
-| `429` | Rate limit exceeded (10 failures/min/IP) |
+| `413` | Payload too large — request body exceeds its limit (64 KiB enrollment, 1 MiB signed request or 32 MiB signed compose request, 10 MB exec/attach upgrade) |
+| `429` | Rate limit exceeded (10 failures/min per IPv4 address or IPv6 /64) |
 | `500` | Internal error |
 | `501` | Not implemented (stub Drydock endpoints) |
 | `502` | Docker daemon unreachable or returned an error (proxy) |

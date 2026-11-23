@@ -20,8 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<<<<<<< HEAD
 - Graceful shutdown no longer waits out its deadline on an open SSE, follow-log or event stream. Streams now end when shutdown starts, so the audit log closes promptly.
 - A Standard-mode attach or exec hijack no longer holds its Docker connection open after the controller hangs up. Portwing still treats the hang-up as a stdin half-close and keeps relaying Docker output, but closes both ends once Docker has sent nothing for 30 s. A client that half-closes stdin and then waits longer than that for output is disconnected.
+||||||| parent of c5b09b57 (fix(server): check credentials before the failed-auth lockout)
+=======
+- Valid requests no longer get sporadic 429s. The per-IP in-flight slot (2) and the failed-auth lockout were applied before credentials were checked, so a third request from one address overlapping two others, or any request from an address that had earlier failures, was refused despite valid credentials. Credentials are now verified first and the lockout only decides whether a failed check answers 401 or 429. Once the limiter table is full, an untracked source with failing credentials gets 429 while valid credentials still pass.
+- Signed compose requests can now carry the documented 32 MiB body. The signed-body cap is 32 MiB for `POST /_portwing/compose` (at most four such bodies buffered at once, then `503`), and stays 1 MiB elsewhere.
+- Docs: `TRUSTED_PROXIES` now has a reverse-proxy section in Connection modes covering what it changes for client-IP keying, with an example.
+>>>>>>> c5b09b57 (fix(server): check credentials before the failed-auth lockout)
 - Docs analytics events now carry `surface=docs`. The docs export uses basePath `/docs`, `usePathname()` strips it, and every docs pageview and CTA was tagged as an unknown marketing route.
 - Analytics on the marketing site and docs now send only from `portwing.codeswhat.com`. Previews, localhost and lookalike hosts no longer initialize PostHog or queue events.
 - Audit export cursors now carry a per-process generation, so a cursor saved before an agent restart gets the documented 409 instead of a 200 that silently skips records. Cursors are opaque strings; echo `X-Portwing-Next-Cursor` back as received.

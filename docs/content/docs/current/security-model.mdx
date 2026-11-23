@@ -259,15 +259,15 @@ These controls structurally prevent the class of root RCE via compose inputs dem
 
 ## Control 9 — Rate limiting
 
-Failed authentication attempts are tracked per remote IP in a fixed one-minute window. The window opens at the first failure and is not extended by later ones; once 60 seconds have passed since that first failure the counter resets:
+Failed authentication attempts are tracked per remote source in a fixed one-minute window. A source is one IPv4 address (an IPv4-mapped IPv6 address counts as its IPv4 address) or one IPv6 /64 prefix, so rotating through the addresses of a /64 shares one budget. Credentials are checked first: a request that verifies is never refused by the lockout, and the lockout only decides whether a failed check is answered with 401 or 429. The window opens at the first failure and is not extended by later ones; once 60 seconds have passed since that first failure the counter resets:
 
 | Parameter | Value |
 |-----------|-------|
 | Failure threshold | 10 within 60 seconds |
-| Response | HTTP 429 until the window expires |
-| IP table cap | 10,000 entries (new entries beyond the cap are dropped to prevent map exhaustion — fail-open for tracking, not for auth) |
+| Response | HTTP 401 for a failed check inside the budget; HTTP 429 for a failed check from a source that has used it, until the window expires. Valid credentials are never refused. |
+| Source table cap | 10,000 entries. Beyond the cap, a request from an untracked source with failing credentials gets HTTP 429 (fail closed); tracked sources and valid credentials are unaffected |
 | Cleanup interval | Every 5 minutes (background goroutine) |
-| Per-IP in-flight auth cap | 2 credential verifications |
+| Per-source enrollment cap | 2 in-flight enrollment requests (32 agent-wide) |
 | Agent-wide cold Argon2 cap | 2 derivations; excess requests return HTTP 429 before allocation |
 
 Malformed and oversized enrollment bodies use a separate per-IP abuse window,
@@ -289,13 +289,13 @@ while bad enrollment credentials use the authentication-failure window.
 | Exec request body | 10 MB | Limit exec payload size |
 | Compose logs tail | 500 lines | Clamp the `logs` operation's `--tail`, which is otherwise unbounded |
 | Compose combined output | 10 MB | Bound buffered stdout+stderr from a compose subprocess |
-| Ed25519 signed-request body | 1 MB | Bound body buffering before signature verification |
-| Ed25519 auth body read | 10 s deadline | Stop a slow-trickled body from holding a handler slot before authentication |
+| Ed25519 signed-request body | 1 MiB (32 MiB for `POST /_portwing/compose`, at most 4 such bodies buffered at once, agent-wide) | Bound body buffering before signature verification |
+| Ed25519 auth body read | 10 s deadline | Stop a slow-trickled body from holding a handler before authentication |
 | Enrollment request body | 64 KiB | Bound unauthenticated JSON parsing |
 | Cold Argon2id derivations | 2 | Bound memory-hard verification across the agent |
 | Concurrent exec sessions | 100 (edge: fixed; standard: `MAX_EXEC_SESSIONS`, non-positive disables) | Prevent unbounded goroutine growth |
 | Concurrent stream sessions | 100 (edge: fixed; standard: `MAX_STREAM_SESSIONS`, non-positive disables). Shared by every proxied streaming Docker request (including `/containers/{id}/logs` with or without `follow`), the adapter `/api/events` SSE route, and follow-mode adapter log reads; non-follow adapter log reads are a single bounded read and take no slot. | Prevent unbounded goroutine growth |
-| Rate-limiter IP table | 10,000 entries | Prevent rate-limiter map exhaustion |
+| Rate-limiter source table | 10,000 entries | Prevent rate-limiter map exhaustion |
 
 ---
 
