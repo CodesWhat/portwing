@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Edge backpressure no longer evicts a slow but still-draining controller when the producer is descheduled past the stall window. Progress the pump made is now counted even if its wake signal was missed.
 - The Docker client's connections now close after sitting idle for 90 s. They had no idle timeout, so after a burst of requests the idle connections and their goroutines stayed until the process exited.
 - Graceful shutdown no longer waits out its deadline on an open SSE, follow-log or event stream. Streams now end when shutdown starts, so the audit log closes promptly.
 - A Standard-mode attach or exec hijack no longer holds its Docker connection open after the controller hangs up. Portwing still treats the hang-up as a stdin half-close and keeps relaying Docker output, but closes both ends once Docker has sent nothing for 30 s. A client that half-closes stdin and then waits longer than that for output is disconnected.
