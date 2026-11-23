@@ -357,3 +357,116 @@ func TestEd25519ComposeLargeBodiesAreBoundedAgentWide(t *testing.T) {
 		t.Fatalf("small compose body must not need a large-body slot: status %d, want 200", rec.Code)
 	}
 }
+
+// countingArgon2Verifier returns a cold verifier whose derivation is a counter
+// plus a constant-time-irrelevant string compare, so tests don't pay for Argon2.
+func countingArgon2Verifier(valid string) (*argon2Verifier, *atomic.Int64) {
+	var derivations atomic.Int64
+	v := newArgon2Verifier(&Argon2idParams{})
+	v.slowVerify = func(token string) bool {
+		derivations.Add(1)
+		return token == valid
+	}
+	return v, &derivations
+}
+
+func tokenRequest(ip, token string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = ip + ":1"
+	req.Header.Set(headerPortwingToken, token)
+	return req
+}
+
+func TestAuthMiddlewareLockedOutSourceSkipsColdDerivation(t *testing.T) {
+	t.Parallel()
+	rl := NewRateLimiter()
+	defer rl.Stop()
+	v, derivations := countingArgon2Verifier("correct")
+	h := rl.AuthMiddlewareWithEd25519(v, Ed25519Config{}, noAudit(t), nil, http.HandlerFunc(okHandler))
+	const locked = "203.0.113.30"
+	lockOut(rl, locked)
+
+	for _, token := range []string{"correct", "wrong"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, tokenRequest(locked, token))
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("locked-out source, cold hash, token %q: status %d, want 429", token, rec.Code)
+		}
+	}
+	if got := derivations.Load(); got != 0 {
+		t.Fatalf("locked-out source ran %d cold derivations, want 0", got)
+	}
+
+	// A source that isn't locked out still gets verify-first behaviour and
+	// primes the cache.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, tokenRequest("203.0.113.31", "correct"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clean source with valid token: status %d, want 200", rec.Code)
+	}
+	if got := derivations.Load(); got != 1 {
+		t.Fatalf("clean source ran %d derivations, want 1", got)
+	}
+
+	// With the derivation cached the check is cheap, so the locked-out source
+	// is verified: valid succeeds, invalid stays 429.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, tokenRequest(locked, "correct"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("locked-out source with cached hash and valid token: status %d, want 200", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, tokenRequest(locked, "wrong"))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("locked-out source with cached hash and bad token: status %d, want 429", rec.Code)
+	}
+	if got := derivations.Load(); got != 1 {
+		t.Fatalf("derivations after cache primed = %d, want 1", got)
+	}
+}
+
+func TestAuthMiddlewareLockedOutSourceEd25519SucceedsWithColdTokenHash(t *testing.T) {
+	t.Parallel()
+	ed, priv := setupEd25519(t)
+	rl := NewRateLimiter()
+	defer rl.Stop()
+	v, derivations := countingArgon2Verifier("correct")
+	h := rl.AuthMiddlewareWithEd25519(v, ed, noAudit(t), nil, http.HandlerFunc(okHandler))
+	const ip = "203.0.113.32"
+	lockOut(rl, ip)
+
+	req := httptest.NewRequest(http.MethodGet, "/_portwing/info", nil)
+	req.RemoteAddr = ip + ":1"
+	signEd25519Request(t, req, nil, priv, time.Now().Unix(), freshNonce(t))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid signature from a locked-out source: status %d, want 200", rec.Code)
+	}
+	if got := derivations.Load(); got != 0 {
+		t.Fatalf("signature path ran %d derivations, want 0", got)
+	}
+}
+
+func TestRateLimiterLockedOut(t *testing.T) {
+	t.Parallel()
+	rl := NewRateLimiter()
+	defer rl.Stop()
+	if rl.lockedOut("198.51.100.1") {
+		t.Fatal("unknown source must not be locked out")
+	}
+	lockOut(rl, "198.51.100.1")
+	if !rl.lockedOut("198.51.100.1") {
+		t.Fatal("source at the failure limit must be locked out")
+	}
+	rl.mu.Lock()
+	rl.attempts[limiterKey("198.51.100.1")].firstFail = time.Now().Add(-2 * rl.window)
+	rl.mu.Unlock()
+	if rl.lockedOut("198.51.100.1") {
+		t.Fatal("expired window must not be locked out")
+	}
+	rl.maxIPs = 1
+	if !rl.lockedOut("198.51.100.2") {
+		t.Fatal("untrackable source (table full) must count as locked out")
+	}
+}

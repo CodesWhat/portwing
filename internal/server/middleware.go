@@ -37,6 +37,13 @@ type capacityTokenVerifier interface {
 	VerifyWithCapacity(token string) (valid bool, attempted bool)
 }
 
+// coldTokenVerifier is implemented by verifiers whose check can need an
+// expensive derivation. wouldDerive reports whether verifying the next token
+// would run one, so a locked-out source can be refused before any work starts.
+type coldTokenVerifier interface {
+	wouldDerive() bool
+}
+
 func verifyTokenWithCapacity(verifier tokenVerifier, token string) (bool, bool) {
 	if bounded, ok := verifier.(capacityTokenVerifier); ok {
 		return bounded.VerifyWithCapacity(token)
@@ -461,6 +468,23 @@ func (rl *RateLimiter) recordAuthFailure(ip string) bool {
 	return false
 }
 
+// lockedOut reports, without changing any state, whether recordAuthFailure
+// would currently treat ip as locked out: at the failure limit within its
+// window, or unable to be tracked because the table is full.
+func (rl *RateLimiter) lockedOut(ip string) bool {
+	key := limiterKey(ip)
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	a, ok := rl.attempts[key]
+	if !ok {
+		return len(rl.attempts) >= rl.maxIPs
+	}
+	if a.firstFail.IsZero() || time.Since(a.firstFail) > rl.window {
+		return false
+	}
+	return a.count >= rl.maxFails
+}
+
 // RecordFailure records a failed authentication attempt for the given IP.
 // If the total number of tracked IPs exceeds the limit, the failure is silently
 // dropped to prevent memory exhaustion. The admission check refuses untracked
@@ -786,6 +810,16 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		}
 
 		provided := agentToken(r)
+		// Credentials are verified before the lockout so a valid caller behind
+		// a shared address is never refused. That order must not let a
+		// locked-out source keep triggering cold Argon2 derivations, which
+		// hold the agent-wide slots and starve other sources. So a locked-out
+		// source is only verified when the check is cheap (a raw compare, or
+		// a TOKEN_HASH whose derivation is already cached).
+		if cold, ok := verifier.(coldTokenVerifier); ok && cold.wouldDerive() && rl.lockedOut(clientIP) {
+			rejectLockedOut(w, r, clientIP, auditor, reg)
+			return
+		}
 		releasePreAuth, admitted := rl.admitPreAuth(w, r, clientIP, auditor, reg)
 		if !admitted {
 			return

@@ -197,6 +197,12 @@ func (v *argon2Verifier) Verify(token string) bool {
 	return attempted && valid
 }
 
+// wouldDerive reports whether verifying a token now would run the full Argon2
+// derivation, which is the case until a first success has primed the cache.
+func (v *argon2Verifier) wouldDerive() bool {
+	return v.cacheOnce.Load() == nil
+}
+
 // VerifyWithCapacity rejects excess cold Argon2 work before the derivation
 // allocates memory. The bools report (valid, attempted); attempted is false
 // only when all agent-wide verifier slots are occupied.
