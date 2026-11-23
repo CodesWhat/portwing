@@ -4,6 +4,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"io"
@@ -560,4 +561,54 @@ func TestEd25519ComposeLargeSlotHeldUntilHandlerReturns(t *testing.T) {
 	if code := <-fifth; code != http.StatusOK {
 		t.Fatalf("fifth request after release: status %d, want 200", code)
 	}
+}
+
+// Requests queued behind the pre-auth slots were checked before the wait. If
+// the source is locked out while they wait, they must be refused on admission
+// instead of each running a cold derivation.
+func TestAuthMiddlewareRechecksLockoutAfterPreAuthAdmission(t *testing.T) {
+	rl := NewRateLimiter()
+	defer rl.Stop()
+	v, derivations := countingArgon2Verifier("correct")
+	h := rl.AuthMiddlewareWithEd25519(v, Ed25519Config{}, noAudit(t), nil, http.HandlerFunc(okHandler))
+	const ip = "203.0.113.40"
+
+	var releases []func()
+	for i := 0; i < defaultMaxPreAuth; i++ {
+		release, err := rl.acquirePreAuth(context.Background(), ip)
+		if err != nil {
+			t.Fatalf("acquire slot %d: %v", i, err)
+		}
+		releases = append(releases, release)
+	}
+
+	const queued = 4
+	codes := make(chan int, queued)
+	for i := 0; i < queued; i++ {
+		go func() {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, tokenRequest(ip, "wrong"))
+			codes <- rec.Code
+		}()
+	}
+	waitFor(t, func() bool { return preAuthRefs(rl, ip) == defaultMaxPreAuth+queued })
+
+	lockOut(rl, ip)
+	for _, release := range releases {
+		release()
+	}
+	for i := 0; i < queued; i++ {
+		select {
+		case code := <-codes:
+			if code != http.StatusTooManyRequests {
+				t.Errorf("queued request after lockout: status %d, want 429", code)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("queued request never finished")
+		}
+	}
+	if got := derivations.Load(); got != 0 {
+		t.Fatalf("queued requests ran %d cold derivations after lockout, want 0", got)
+	}
+	waitFor(t, func() bool { return preAuthRefs(rl, ip) == 0 })
 }

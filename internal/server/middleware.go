@@ -818,12 +818,24 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		// hold the agent-wide slots and starve other sources. So a locked-out
 		// source is only verified when the check is cheap (a raw compare, or
 		// a TOKEN_HASH whose derivation is already cached).
-		if cold, ok := verifier.(coldTokenVerifier); ok && cold.wouldDerive() && rl.lockedOut(clientIP) {
+		lockedOutCold := func() bool {
+			cold, ok := verifier.(coldTokenVerifier)
+			return ok && cold.wouldDerive() && rl.lockedOut(clientIP)
+		}
+		if lockedOutCold() {
 			rejectLockedOut(w, r, clientIP, auditor, reg)
 			return
 		}
 		releasePreAuth, admitted := rl.admitPreAuth(w, r, clientIP, auditor, reg)
 		if !admitted {
+			return
+		}
+		// Admission can wait for seconds behind the source's other requests,
+		// and those can push it into lockout meanwhile. Without this recheck
+		// every queued request would still run a cold derivation.
+		if lockedOutCold() {
+			releasePreAuth()
+			rejectLockedOut(w, r, clientIP, auditor, reg)
 			return
 		}
 		valid, attempted := verifyTokenWithCapacity(verifier, provided)
