@@ -117,7 +117,7 @@ func TestConnectServesRequestsWhileInventorySyncs(t *testing.T) {
 			}
 			var resp protocol.ResponseMessage
 			if err := json.Unmarshal(env.Data, &resp); err != nil || resp.RequestID != "r1" || resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("response = %+v (err %v)", resp, err)
+				return fmt.Errorf("response = %+v (err %w)", resp, err)
 			}
 			if ad.finished.Load() {
 				return fmt.Errorf("sync finished before it was released; the test proved nothing")

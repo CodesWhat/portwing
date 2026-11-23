@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -381,8 +382,16 @@ type Client struct {
 type pendingRequestBody struct {
 	req    protocol.RequestMessage
 	target outboundTarget
-	buf    bytes.Buffer
-	timer  *time.Timer
+	// buf is the reassembly buffer. Its len is the bytes received and its cap
+	// is what the aggregate budget charges, because cap is the memory actually
+	// held. It is grown only by growPendingBodyLocked, which prices the growth
+	// against the budget before it allocates.
+	buf []byte
+	// declared is the Content-Length the request announced, or 0 when it gave
+	// none. It sizes the first allocation so a declared upload is assembled in
+	// one backing array instead of being doubled up to size.
+	declared int64
+	timer    *time.Timer
 	// gen counts how many times the idle timer has been armed for this
 	// entry. time.Timer.Reset does not cancel an AfterFunc whose deadline
 	// already elapsed, so a timeout callback can still be in flight when a
@@ -1228,7 +1237,7 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 		})
 		return
 	}
-	pb := &pendingRequestBody{req: req, target: target}
+	pb := &pendingRequestBody{req: req, target: target, declared: declaredBodySize(req.Headers)}
 	// The callback names the entry it was armed for, not just the RequestID
 	// it is filed under: the ID is freed and re-registered while a callback
 	// for it may already be running (the teardown drain then the controller's
@@ -1290,14 +1299,9 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 	// is holding added together. The aggregate one is what bounds agent
 	// memory, since the per-request cap multiplies by however many requests
 	// are open, and it counts dispatched bodies too — those bytes are still
-	// resident for the whole Docker round trip.
-	var overflow string
-	switch {
-	case int64(pb.buf.Len()+len(decoded)) > maxRequestBodyStream:
-		overflow = fmt.Sprintf("streamed request body exceeds %d byte limit", maxRequestBodyStream)
-	case c.streamedBodyBytesLocked()+int64(len(decoded)) > maxStreamedRequestBodyBytes:
-		overflow = fmt.Sprintf("streamed request bodies exceed the %d byte aggregate in-memory limit", maxStreamedRequestBodyBytes)
-	}
+	// resident for the whole Docker round trip. The aggregate is charged by
+	// backing capacity, so growth is priced and admitted before it allocates.
+	overflow := c.growPendingBodyLocked(pb, len(decoded))
 	if overflow != "" {
 		delete(c.pendingBodies, requestID)
 		timer, target := pb.timer, pb.target
@@ -1310,7 +1314,7 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 		return true
 	}
 
-	pb.buf.Write(decoded)
+	pb.buf = append(pb.buf, decoded...)
 	// Re-arm on forward progress, so a slow-but-steady multi-chunk upload
 	// isn't held to the same deadline as a stalled one. Reset alone is not
 	// enough: it cannot recall an AfterFunc whose deadline already elapsed,
@@ -1352,12 +1356,82 @@ func (c *Client) appendPendingBody(requestID, encodedChunk string) bool {
 func (c *Client) streamedBodyBytesLocked() int64 {
 	var total int64
 	for _, pb := range c.pendingBodies {
-		total += int64(pb.buf.Len())
+		total += int64(cap(pb.buf))
 	}
 	for _, n := range c.dispatchingBodies {
 		total += n
 	}
 	return total
+}
+
+// declaredBodySize returns the Content-Length a streamed request announced in
+// its headers, or 0 when it gave none or an unusable one. It is only a sizing
+// hint: the real limits are enforced on the bytes that arrive.
+func declaredBodySize(headers map[string]string) int64 {
+	for k, v := range headers {
+		if !strings.EqualFold(k, "Content-Length") {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || n < 0 {
+			return 0
+		}
+		return n
+	}
+	return 0
+}
+
+// nextBodyCap picks the backing capacity for a buffer that has to hold need
+// bytes and currently has oldCap. A declared size sets the first allocation
+// outright, so an upload that tells the truth is assembled in one array with
+// no regrowth. Otherwise small buffers double and large ones grow by a
+// quarter: append's doubling would leave up to half of a large buffer unused
+// while the budget charged for all of it.
+func nextBodyCap(oldCap, need int, declared int64) int {
+	switch {
+	case oldCap == 0 && declared > 0 && declared <= maxRequestBodyStream:
+		return max(need, int(declared))
+	case oldCap < 1<<20:
+		return max(need, 2*oldCap, 4096)
+	default:
+		return max(need, oldCap+oldCap/4)
+	}
+}
+
+// growPendingBodyLocked makes room in pb.buf for extra more bytes and returns
+// the rejection message when the upload may not grow, leaving pb.buf as it
+// was. The caller must hold pendingBodiesMu.
+//
+// The budget is charged for what is allocated. Growing copies, so the old and
+// the new array are both resident until the copy finishes: the check prices
+// that peak (everything already charged, which includes the old array, plus
+// the new one) and drops to an exact fit when the preferred headroom does not
+// fit, rather than allocating past the limit. A buffer that already has room takes the bytes
+// with no allocation.
+func (c *Client) growPendingBodyLocked(pb *pendingRequestBody, extra int) string {
+	need := int64(len(pb.buf)) + int64(extra)
+	if need > maxRequestBodyStream {
+		return fmt.Sprintf("streamed request body exceeds %d byte limit", maxRequestBodyStream)
+	}
+	if need <= int64(cap(pb.buf)) {
+		return ""
+	}
+	newCap := int64(nextBodyCap(cap(pb.buf), int(need), pb.declared))
+	newCap = min(newCap, maxRequestBodyStream)
+	allowed := maxStreamedRequestBodyBytes - c.streamedBodyBytesLocked()
+	if allowed < need {
+		return fmt.Sprintf("streamed request bodies exceed the %d byte aggregate in-memory limit", maxStreamedRequestBodyBytes)
+	}
+	if newCap > allowed {
+		// The preferred headroom does not fit beside what is already held.
+		// Take exactly what the bytes need instead of the whole remainder, so
+		// one upload under pressure cannot starve the rest of the budget.
+		newCap = need
+	}
+	grown := make([]byte, len(pb.buf), newCap)
+	copy(grown, pb.buf)
+	pb.buf = grown
+	return ""
 }
 
 // finishPendingBody removes and returns the reassembled request for
@@ -1381,25 +1455,23 @@ func (c *Client) finishPendingBody(requestID string) (protocol.RequestMessage, o
 	// Move the reservation from the reassembly stage to the dispatch stage
 	// under the same lock as the delete above, so the aggregate sum never
 	// dips between the two and no concurrent chunk can be admitted into a
-	// gap. buf.Len() is the size the copy below will be, so the charge is
-	// taken without holding this lock across a copy of up to
-	// maxRequestBodyStream bytes. (pb.buf and its copy are both resident for
-	// the length of that copy and the budget charges one, exactly as it did
-	// before the dispatch stage was covered at all.)
+	// gap. The charge is the buffer's capacity, the memory it really holds,
+	// and the body below is that same array rather than a copy, so the
+	// reservation stays accurate for as long as the request is in flight.
 	if c.dispatchingBodies == nil {
 		c.dispatchingBodies = make(map[uint64]int64)
 	}
 	c.nextDispatchSeq++
 	reservation := c.nextDispatchSeq
-	c.dispatchingBodies[reservation] = int64(pb.buf.Len())
+	c.dispatchingBodies[reservation] = int64(cap(pb.buf))
 	timer := pb.timer
 	c.pendingBodiesMu.Unlock()
 	timer.Stop()
 
 	req := pb.req
-	// pb.buf.Bytes() aliases the buffer's internal array; copy it so the
-	// request body survives independently of pb, which is discarded here.
-	req.Body = append(json.RawMessage(nil), pb.buf.Bytes()...)
+	// Hand the assembled array over instead of copying it: pb is discarded
+	// here and nothing else writes to pb.buf once it has left pendingBodies.
+	req.Body = json.RawMessage(pb.buf)
 	req.BodyStream = false
 	return req, pb.target, reservation, true
 }

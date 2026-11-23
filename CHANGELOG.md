@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 - Graceful shutdown no longer waits out its deadline on an open SSE, follow-log or event stream. Streams now end when shutdown starts, so the audit log closes promptly.
 - A Standard-mode attach or exec hijack no longer holds its Docker connection open after the controller hangs up. Portwing still treats the hang-up as a stdin half-close and keeps relaying Docker output, but closes both ends once Docker has sent nothing for 30 s. A client that half-closes stdin and then waits longer than that for output is disconnected.
 ||||||| parent of c5b09b57 (fix(server): check credentials before the failed-auth lockout)
@@ -32,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 >>>>>>> c5b09b57 (fix(server): check credentials before the failed-auth lockout)
 ||||||| parent of f3ac2614 (fix(edge): serve requests while the reconnect inventory syncs)
 =======
+||||||| parent of b081b2cc (fix(edge): charge upload reassembly for its real allocation)
+=======
+- Edge upload reassembly no longer holds 2-3x its 512 MB / 1 GB budget. The budget is charged for the buffer's real capacity, an upload that declares its `Content-Length` is allocated once, growth that would pass the budget is refused before it allocates, and the finished body is handed to the request without a copy.
+>>>>>>> b081b2cc (fix(edge): charge upload reassembly for its real allocation)
 - Edge mode no longer holds off pings and API requests while the reconnect inventory syncs. The initial container sync runs as a task owned by its connection, which is cancelled and joined when the connection ends.
 >>>>>>> f3ac2614 (fix(edge): serve requests while the reconnect inventory syncs)
 - Docs analytics events now carry `surface=docs`. The docs export uses basePath `/docs`, `usePathname()` strips it, and every docs pageview and CTA was tagged as an unknown marketing route.
