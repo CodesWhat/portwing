@@ -2,53 +2,82 @@
 # SPDX-License-Identifier: MIT
 """Pick the fuzzers a pull request needs to run.
 
-    select-fuzzers.py <fuzzer-list.json> <repo-root> < changed-files
+    select-fuzzers.py <fuzzer-list.json> <repo-root> < NUL-separated-changed-files
 
 A fuzzer is selected when its package, or any package it imports (directly or
-transitively, test files included) inside this module, holds a changed file.
-A changed file belongs to the nearest ancestor directory that holds Go files,
-so testdata/ and embedded assets count toward their package. Files outside
-every Go package (docs, website, workflows) select nothing; the caller decides
-which of those must run everything.
+transitively, test imports included) inside this module, holds a changed file.
+The import graph comes from `go list`, not from parsing source, so aliased,
+dot, blank and grouped imports all resolve the way the compiler sees them.
 
-Prints one compact JSON array. Any problem exits non-zero so the caller can
-fall back to the full list.
+Build constraints: one `go list` run sees one configuration, so the graph is
+the union of runs for linux, darwin and windows, each with the `integration`
+tag. If any Go file is ignored in EVERY run (an unknown tag, a constraint no
+run satisfies) the graph can't be trusted and this exits non-zero, so the
+caller runs the full list.
+
+A changed file belongs to the nearest ancestor directory that is a package, so
+testdata/ (fuzz seed corpora) and embedded assets count toward their package.
+Files outside every package (docs, website, workflows) select nothing; the
+caller decides which of those must run everything.
+
+Prints one compact JSON array. Any problem exits non-zero.
 """
 
 import json
 import os
-import re
+import subprocess
 import sys
 
-SKIP_DIRS = {".git", ".claude", ".planning", "node_modules", "website", "docs", "vendor"}
-IMPORT_RE = re.compile(r'^\s*(?:[\w.]+\s+)?"([^"\n]+)"', re.MULTILINE)
+CONFIGS = (
+    {"GOOS": "linux", "GOARCH": "amd64"},
+    {"GOOS": "darwin", "GOARCH": "arm64"},
+    {"GOOS": "windows", "GOARCH": "amd64"},
+)
+TAGS = "integration"
 
 
-def module_path(root):
-    with open(os.path.join(root, "go.mod"), encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith("module "):
-                return line.split()[1]
-    raise SystemExit("go.mod has no module line")
+def go_list(root, config):
+    env = dict(os.environ, CGO_ENABLED="0", **config)
+    result = subprocess.run(
+        ["go", "list", "-e", "-tags", TAGS, "-json=ImportPath,Dir,Imports,TestImports,XTestImports,IgnoredGoFiles,Error", "./..."],
+        cwd=root, env=env, capture_output=True, text=True, timeout=180, check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"go list failed for {config}: {result.stderr.strip()}")
+    decoder = json.JSONDecoder()
+    text, pos, packages = result.stdout, 0, []
+    while pos < len(text):
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if pos >= len(text):
+            break
+        package, pos = decoder.raw_decode(text, pos)
+        packages.append(package)
+    return packages
 
 
-def build_graph(root, module):
-    prefix = module + "/"
+def build_graph(root):
     graph = {}
-    for current, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        go_files = [f for f in files if f.endswith(".go")]
-        if not go_files:
-            continue
-        rel = os.path.relpath(current, root)
-        deps = graph.setdefault(rel, set())
-        for name in go_files:
-            with open(os.path.join(current, name), encoding="utf-8") as handle:
-                source = handle.read()
-            for imported in IMPORT_RE.findall(source):
-                if imported.startswith(prefix):
-                    deps.add(imported[len(prefix):])
-    return graph
+    by_path = {}
+    ignored_everywhere = None
+    for config in CONFIGS:
+        ignored = set()
+        for package in go_list(root, config):
+            directory = os.path.relpath(package["Dir"], root)
+            by_path[package["ImportPath"]] = directory
+            deps = graph.setdefault(directory, set())
+            for key in ("Imports", "TestImports", "XTestImports"):
+                deps.update(package.get(key) or ())
+            for name in package.get("IgnoredGoFiles") or ():
+                ignored.add(os.path.join(directory, name))
+        ignored_everywhere = ignored if ignored_everywhere is None else ignored_everywhere & ignored
+    if ignored_everywhere:
+        raise SystemExit(f"Go files excluded in every configuration: {sorted(ignored_everywhere)}")
+    # Import paths -> directories, restricted to this module's own packages.
+    resolved = {}
+    for directory, imports in graph.items():
+        resolved[directory] = {by_path[i] for i in imports if i in by_path}
+    return resolved
 
 
 def closure(graph, start):
@@ -77,11 +106,13 @@ def main():
     list_path, root = sys.argv[1], sys.argv[2]
     with open(list_path, encoding="utf-8") as handle:
         fuzzers = json.load(handle)
-    graph = build_graph(root, module_path(root))
+    graph = build_graph(root)
 
     changed = set()
-    for line in sys.stdin.read().splitlines():
-        package = owning_package(graph, line.strip())
+    for entry in sys.stdin.buffer.read().split(b"\0"):
+        if not entry:
+            continue
+        package = owning_package(graph, os.fsdecode(entry))
         if package:
             changed.add(package)
 

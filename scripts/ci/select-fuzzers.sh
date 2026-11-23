@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 set -euo pipefail
 # Print the fuzzers-json value for a pull request: only the fuzzers whose
-# package, or a package it imports, holds a file the PR changed.
+# package, or a package it imports (per `go list`), holds a file the PR changed.
 #
 #   select-fuzzers.sh <base-ref> <fuzzer-list.json>
 #
@@ -32,13 +32,16 @@ jq -e 'type == "array"' "${list_path}" >/dev/null || {
   exit 1
 }
 
-changed=""
-if ! changed="$(git diff --no-renames --name-only "${base_ref}...HEAD" 2>/dev/null)"; then
+# -z: NUL-separated, unquoted paths. Without it git C-quotes non-ASCII names
+# ("a\303\251.txt"), which would never match a package directory.
+changed_file="$(mktemp)"
+trap 'rm -f "${changed_file}"' EXIT
+if ! git diff -z --no-renames --name-only "${base_ref}...HEAD" >"${changed_file}" 2>/dev/null; then
   fail_open "git diff against ${base_ref} failed"
 fi
-[ -n "${changed}" ] || fail_open "empty diff against ${base_ref}"
+[ -s "${changed_file}" ] || fail_open "empty diff against ${base_ref}"
 
-while IFS= read -r file; do
+while IFS= read -r -d '' file; do
   case "${file}" in
     go.mod | go.sum | .github/workflows/ci-verify.yml | .github/ci-fuzzers.json | scripts/ci/*)
       echo "select-fuzzers: ${file} affects every fuzzer" >&2
@@ -46,9 +49,9 @@ while IFS= read -r file; do
       exit 0
       ;;
   esac
-done <<<"${changed}"
+done <"${changed_file}"
 
-if ! selected="$(printf '%s\n' "${changed}" | python3 -I "${here}/select-fuzzers.py" "${list_path}" "$(pwd)")"; then
-  fail_open "could not build the import graph"
+if ! selected="$(python3 -I "${here}/select-fuzzers.py" "${list_path}" "$(pwd)" <"${changed_file}")"; then
+  fail_open "could not build the import graph with go list"
 fi
 echo "${selected}"

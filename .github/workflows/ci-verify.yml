@@ -109,6 +109,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 0  # need base-branch history to diff a PR against it
 
+      # select-fuzzers.py builds the import graph with `go list`, which needs
+      # the module's own toolchain rather than whatever the runner image has.
+      - name: Setup Go
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
       # A PR fuzzes only the fuzzers whose package, or a package that one
       # imports, it touches. The weekly schedule and pushes to main run the
       # whole list, and so do the nightly and monthly fuzz workflows. The list
