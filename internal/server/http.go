@@ -175,6 +175,13 @@ type Server struct {
 	eventSubscribe adapter.EventSubscribe
 	pollCancel     context.CancelFunc
 
+	// baseCtx is the base context of every request the HTTP server accepts, so
+	// long-lived handlers (SSE, follow-mode logs, proxied streams) that derive
+	// from r.Context() end when Shutdown cancels baseCancel. Without it an open
+	// stream holds graceful shutdown to its deadline.
+	baseCtx    context.Context
+	baseCancel context.CancelFunc
+
 	// hijackIdle is hijackHalfCloseIdle captured at construction, so a handler
 	// never reads the package variable while a test is restoring it.
 	hijackIdle time.Duration
@@ -342,6 +349,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		execSem:      newConcurrencyLimiter(cfg.MaxExecSessions),
 	}
 	s.pollCtx, s.pollCancel = context.WithCancel(context.Background())
+	s.baseCtx, s.baseCancel = context.WithCancel(context.Background())
 	s.hijackIdle = hijackHalfCloseIdle
 
 	// Reload authorized_keys on SIGHUP so keys can be rotated or revoked
@@ -423,7 +431,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		// owning the listener ourselves (see ListenAndServe below).
 		BaseContext: func(ln net.Listener) context.Context {
 			s.listenAddr.Store(ln.Addr())
-			return context.Background()
+			return s.baseCtx
 		},
 	}
 
@@ -1148,6 +1156,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		// Stop the pollContainers goroutine.
 		if s.pollCancel != nil {
 			s.pollCancel()
+		}
+
+		// End long-lived streams so http.Server.Shutdown isn't held to its
+		// deadline by an open SSE, follow-log or event stream.
+		if s.baseCancel != nil {
+			s.baseCancel()
 		}
 
 		// Stop the SIGHUP reload goroutine.
