@@ -57,6 +57,13 @@ func (a *Adapter) RefreshContainers(ctx context.Context) (added, updated, remove
 	return a.containers.Refresh(ctx)
 }
 
+// RefreshContainersThen refreshes the inventory and calls notify with the diff
+// while the inventory operation slot is still held.
+func (a *Adapter) RefreshContainersThen(ctx context.Context, notify func(added, updated, removed []adapter.Container)) error {
+	_, _, _, err := a.containers.RefreshThen(ctx, notify)
+	return err
+}
+
 func (a *Adapter) OnContainerRefresh(_ context.Context, _ adapter.MessageSender, _, _, _ []adapter.Container) error {
 	return nil
 }

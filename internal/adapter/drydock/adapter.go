@@ -140,6 +140,13 @@ func (a *Adapter) RefreshContainers(ctx context.Context) (added, updated, remove
 	return a.containers.Refresh(ctx)
 }
 
+// RefreshContainersThen refreshes the inventory and calls notify with the diff
+// while the inventory operation slot is still held.
+func (a *Adapter) RefreshContainersThen(ctx context.Context, notify func(added, updated, removed []adapter.Container)) error {
+	_, _, _, err := a.containers.RefreshThen(ctx, notify)
+	return err
+}
+
 // OnContainerRefresh sends container events over the edge WebSocket when
 // sender is non-nil (edge mode) and always broadcasts over SSE (standard mode).
 func (a *Adapter) OnContainerRefresh(ctx context.Context, sender adapter.MessageSender, added, updated, removed []adapter.Container) error {

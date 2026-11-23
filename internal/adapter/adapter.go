@@ -48,6 +48,14 @@ type HelloExtension struct {
 	TriggerTypes  []string `json:"triggerTypes,omitempty"`
 }
 
+// SlotRefresher is implemented by adapters that can run a container refresh
+// and hand its diff to notify while still holding the inventory operation
+// slot, so the diff can't be delivered after a newer initial sync. notify must
+// not block.
+type SlotRefresher interface {
+	RefreshContainersThen(ctx context.Context, notify func(added, updated, removed []Container)) error
+}
+
 // MetadataAdapter exposes adapter identity and capability metadata.
 type MetadataAdapter interface {
 	// Name returns a short identifier for the adapter (e.g. "drydock", "generic").

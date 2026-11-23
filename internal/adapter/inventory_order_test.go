@@ -131,3 +131,94 @@ func TestInventoryOperationHonoursContextWhileWaiting(t *testing.T) {
 		t.Fatalf("BuildInventory after release: %v", err)
 	}
 }
+
+// TestRefreshDiffIsSentBeforeAWaitingBuildSync is the refresh-first ordering:
+// the refresh wins the slot and the initial build waits for it. The refresh's
+// diff must go out while the slot is held, so the last state a controller sees
+// is the build's newer snapshot.
+func TestRefreshDiffIsSentBeforeAWaitingBuildSync(t *testing.T) {
+	t.Parallel()
+
+	client, fixture, shutdown := newDynamicDockerClient(t)
+	defer shutdown()
+	fixture.Set(buildInventorySnapshot([]fixtureContainer{{id: "c1", image: "nginx:1.0", state: "running"}}))
+	manager := NewContainerManager(client, "test-agent", nil)
+
+	inspecting := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	fixture.SetOnInspect(func() {
+		once.Do(func() {
+			close(inspecting)
+			<-release
+		})
+	})
+
+	var (
+		orderMu sync.Mutex
+		order   []string
+	)
+	record := func(ev string) {
+		orderMu.Lock()
+		defer orderMu.Unlock()
+		order = append(order, ev)
+	}
+
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, _, _, err := manager.RefreshThen(context.Background(), func(added, _, _ []Container) {
+			// A slow enqueue: a build that could slip in after the slot is
+			// released would sync first.
+			time.Sleep(100 * time.Millisecond)
+			record("refresh-diff:" + added[0].Status)
+		})
+		refreshDone <- err
+	}()
+	<-inspecting
+
+	// Docker moves on while the refresh is blocked mid-inspect; the build
+	// that starts waiting now sees the newer state.
+	fixture.Set(buildInventorySnapshot([]fixtureContainer{{id: "c1", image: "nginx:1.0", state: "exited"}}))
+	buildDone := make(chan error, 1)
+	go func() {
+		_, err := manager.BuildInventoryThen(context.Background(), func(cs []Container) {
+			record("sync:" + cs[0].Status)
+		})
+		buildDone <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // let the build queue behind the refresh
+	close(release)
+
+	for _, ch := range []chan error{refreshDone, buildDone} {
+		select {
+		case err := <-ch:
+			if err != nil {
+				t.Fatalf("inventory operation: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("inventory operation never finished")
+		}
+	}
+
+	orderMu.Lock()
+	defer orderMu.Unlock()
+	if len(order) != 2 || order[0] != "refresh-diff:running" || order[1] != "sync:stopped" {
+		t.Fatalf("order = %v, want the refresh diff, then the build's newer sync", order)
+	}
+}
+
+func TestRefreshThenSkipsCallbackOnError(t *testing.T) {
+	t.Parallel()
+
+	client, fixture, shutdown := newDynamicDockerClient(t)
+	shutdown() // Docker is unreachable, so the listing fails
+	_ = fixture
+	manager := NewContainerManager(client, "test-agent", nil)
+	called := false
+	if _, _, _, err := manager.RefreshThen(context.Background(), func(_, _, _ []Container) { called = true }); err == nil {
+		t.Fatal("RefreshThen against a dead daemon should fail")
+	}
+	if called {
+		t.Fatal("then ran for a failed refresh")
+	}
+}

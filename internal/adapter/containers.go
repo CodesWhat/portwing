@@ -147,10 +147,29 @@ func (m *ContainerManager) GetContainer(id string) (*Container, bool) {
 // Refresh rebuilds the inventory and computes the diff against the previous
 // snapshot. Returns added, updated, and removed containers.
 func (m *ContainerManager) Refresh(ctx context.Context) (added, updated, removed []Container, err error) {
+	return m.RefreshThen(ctx, nil)
+}
+
+// RefreshThen is Refresh that also calls then with the diff before the
+// inventory operation slot is released, the same way BuildInventoryThen does
+// for the initial sync. A build waiting for the slot can't commit and send its
+// newer snapshot until then returns, so a diff computed against the older
+// inventory never lands after that snapshot. then must not block. It may be
+// nil and is not called on error.
+func (m *ContainerManager) RefreshThen(ctx context.Context, then func(added, updated, removed []Container)) (added, updated, removed []Container, err error) {
 	if err := m.acquireOp(ctx); err != nil {
 		return nil, nil, nil, fmt.Errorf("waiting for inventory: %w", err)
 	}
 	defer m.releaseOp()
+
+	added, updated, removed, err = m.refreshLocked(ctx)
+	if err == nil && then != nil {
+		then(added, updated, removed)
+	}
+	return added, updated, removed, err
+}
+
+func (m *ContainerManager) refreshLocked(ctx context.Context) (added, updated, removed []Container, err error) {
 
 	oldMap := m.snapshotContainers()
 

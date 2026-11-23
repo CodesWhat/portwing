@@ -1900,6 +1900,27 @@ func (c *Client) writePump(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
+				notify := func(added, updated, removed []adapter.Container) {
+					if ctx.Err() != nil {
+						return
+					}
+					if err := c.adapter.OnContainerRefresh(ctx, sender, added, updated, removed); err != nil {
+						slog.Warn("container refresh notify failed", "error", err)
+					}
+				}
+				// An adapter that can notify under its inventory slot does,
+				// so the diff is enqueued before a waiting initial build
+				// can send its newer sync.
+				if r, ok := c.adapter.(adapter.SlotRefresher); ok {
+					err := r.RefreshContainersThen(ctx, notify)
+					if ctx.Err() != nil {
+						return
+					}
+					if err != nil {
+						slog.Warn("container refresh failed", "error", err)
+					}
+					continue
+				}
 				added, updated, removed, err := c.adapter.RefreshContainers(ctx)
 				if ctx.Err() != nil {
 					return
@@ -1908,9 +1929,7 @@ func (c *Client) writePump(ctx context.Context) {
 					slog.Warn("container refresh failed", "error", err)
 					continue
 				}
-				if err := c.adapter.OnContainerRefresh(ctx, sender, added, updated, removed); err != nil {
-					slog.Warn("container refresh notify failed", "error", err)
-				}
+				notify(added, updated, removed)
 			}
 		}
 	}()
