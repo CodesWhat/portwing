@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A Standard-mode attach or exec hijack no longer holds its Docker connection open after the controller hangs up. Portwing still treats the hang-up as a stdin half-close and keeps relaying Docker output, but closes both ends once Docker has sent nothing for 30 s. A client that half-closes stdin and then waits longer than that for output is disconnected.
 - Docs analytics events now carry `surface=docs`. The docs export uses basePath `/docs`, `usePathname()` strips it, and every docs pageview and CTA was tagged as an unknown marketing route.
 - Analytics on the marketing site and docs now send only from `portwing.codeswhat.com`. Previews, localhost and lookalike hosts no longer initialize PostHog or queue events.
 - Audit export cursors now carry a per-process generation, so a cursor saved before an agent restart gets the documented 409 instead of a 200 that silently skips records. Cursors are opaque strings; echo `X-Portwing-Next-Cursor` back as received.
