@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `api_request`, `compose_op` and `exec_start` audit records now carry `key_id` for Ed25519-authenticated callers (the verified key in Standard mode, the session signing key in Edge mode), in the export buffer, the sink and the export stream.
 - The Grype waiver expiry check now reads the config with a real YAML parser (yq), so indentless lists, `package:` before `vulnerability:`, and `#`-leading lines inside a block-scalar reason can no longer hide an `expires:` date. It fails closed when yq isn't installed.
 
+### Security
+
+- The auth rate limiter keys IPv6 sources by /64 prefix, so rotating through addresses in one /64 no longer earns a fresh failure budget per address. IPv4 and IPv4-mapped IPv6 stay per address. Once 10,000 sources are tracked, untracked sources are now refused with 429 instead of bypassing the limiter; tracked sources keep working. Shared-secret tokens should be high-entropy; see SECURITY.md.
+
 ## [v1.4.3] - 2026-11-21
 
 ### Fixed

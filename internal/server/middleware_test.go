@@ -297,24 +297,6 @@ func TestRawTokenVerifierUsesFixedLengthDigest(t *testing.T) {
 	}
 }
 
-func TestTryBeginAuthPreservesFailOpenTrackingAtIPCapacity(t *testing.T) {
-	rl := &RateLimiter{
-		attempts:    map[string]*ipAttempts{"existing": {count: 1, firstFail: time.Now()}},
-		maxFails:    10,
-		window:      time.Minute,
-		maxIPs:      1,
-		maxInFlight: 2,
-	}
-
-	if !rl.tryBeginAuth("untracked") {
-		t.Fatal("IP table capacity must not turn tracking exhaustion into an auth denial")
-	}
-	rl.finishAuth("untracked", false)
-	if _, ok := rl.attempts["untracked"]; ok {
-		t.Fatal("capacity-overflow IP should remain untracked")
-	}
-}
-
 // TestAuthMiddlewareRawTokenReject verifies the raw-token path rejects a wrong token.
 func TestAuthMiddlewareRawTokenReject(t *testing.T) {
 	t.Parallel()

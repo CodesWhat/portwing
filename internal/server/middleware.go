@@ -89,6 +89,26 @@ type RateLimiter struct {
 	done chan struct{}
 }
 
+// limiterKey maps a client address to the key the rate limiter tracks it by.
+// IPv6 sources are keyed by their /64 prefix, because one host or customer
+// typically owns a whole /64 and could otherwise rotate through addresses to
+// get a fresh failure budget per request. IPv4 and IPv4-mapped IPv6 addresses
+// stay per address. Anything that doesn't parse as an IP is returned as is, so
+// an already-built key passes through unchanged.
+func limiterKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.WithZone("").Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	// Prefix only errors for a bit count outside 0-128, never for 64.
+	prefix, _ := addr.Prefix(64)
+	return prefix.String()
+}
+
 type ipAttempts struct {
 	count     int
 	firstFail time.Time
@@ -158,11 +178,13 @@ func (rl *RateLimiter) sweepExpired(now time.Time) {
 }
 
 func (rl *RateLimiter) isAbuseRateLimited(ip string) bool {
+	ip = limiterKey(ip)
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	a, ok := rl.abuse[ip]
 	if !ok {
-		return false
+		// A source that can't be tracked is refused rather than waved through.
+		return len(rl.abuse) >= rl.maxIPs
 	}
 	if time.Since(a.firstFail) > rl.window {
 		delete(rl.abuse, ip)
@@ -172,6 +194,7 @@ func (rl *RateLimiter) isAbuseRateLimited(ip string) bool {
 }
 
 func (rl *RateLimiter) recordAbuse(ip string) {
+	ip = limiterKey(ip)
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	if rl.abuse == nil {
@@ -196,6 +219,7 @@ func (rl *RateLimiter) recordAbuse(ip string) {
 // IsRateLimited returns true if the given IP has exceeded the failure threshold
 // within the current window.
 func (rl *RateLimiter) IsRateLimited(ip string) bool {
+	ip = limiterKey(ip)
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -233,6 +257,7 @@ func (rl *RateLimiter) tryBeginAuth(ip string) bool {
 }
 
 func (rl *RateLimiter) tryBeginAuthLocked(ip string) bool {
+	ip = limiterKey(ip)
 	a, ok := rl.attempts[ip]
 	if ok && !a.firstFail.IsZero() && time.Since(a.firstFail) > rl.window {
 		a.count = 0
@@ -240,10 +265,11 @@ func (rl *RateLimiter) tryBeginAuthLocked(ip string) bool {
 	}
 	if !ok {
 		if len(rl.attempts) >= rl.maxIPs {
-			// Preserve the existing fail-open-for-tracking policy at the table
-			// capacity. Expensive Argon2 verification remains protected by its
-			// agent-wide semaphore even when this IP cannot be reserved.
-			return true
+			// Fail closed at capacity: a source that can't be tracked can't be
+			// budgeted, so refusing it is the only way a flood of fresh
+			// sources can't walk past the limiter. Tracked sources keep
+			// working.
+			return false
 		}
 		a = &ipAttempts{}
 		rl.attempts[ip] = a
@@ -269,6 +295,7 @@ func (rl *RateLimiter) finishAuth(ip string, success bool) {
 }
 
 func (rl *RateLimiter) finishAuthLocked(ip string, success bool) {
+	ip = limiterKey(ip)
 	a, ok := rl.attempts[ip]
 	if !ok {
 		return
@@ -319,8 +346,10 @@ func (rl *RateLimiter) finishEnrollment(ip string, success bool) {
 
 // RecordFailure records a failed authentication attempt for the given IP.
 // If the total number of tracked IPs exceeds the limit, the failure is silently
-// dropped to prevent memory exhaustion.
+// dropped to prevent memory exhaustion. The admission check refuses untracked
+// sources at that point, so a dropped failure never lets one through.
 func (rl *RateLimiter) RecordFailure(ip string) {
+	ip = limiterKey(ip)
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
