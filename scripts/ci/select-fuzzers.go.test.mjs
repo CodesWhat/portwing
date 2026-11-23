@@ -7,7 +7,15 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -46,7 +54,15 @@ function cleanEnv() {
 function git(cwd, ...args) {
   const result = spawnSync(
     "git",
-    ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args],
+    [
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      ...args,
+    ],
     { cwd, env: cleanEnv(), encoding: "utf8" },
   );
   assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
@@ -75,10 +91,18 @@ describe("select-fuzzers.sh", () => {
       `package top\n\nimport (\n\t"fmt"\n\tm "${MODULE}/internal/mid"\n)\n`,
     );
     put(dir, "internal/other/d.go", "package other\n");
-    put(dir, "internal/alias/f.go", `package alias\n\nimport dep "${MODULE}/internal/leaf"\n\nvar _ = dep.X\n`);
+    put(
+      dir,
+      "internal/alias/f.go",
+      `package alias\n\nimport dep "${MODULE}/internal/leaf"\n\nvar _ = dep.X\n`,
+    );
     put(dir, "internal/leaf/a.go", "package leaf\n\nvar X = 1\n");
     put(dir, "internal/testonly/t.go", "package testonly\n");
-    put(dir, "internal/testonly/t_test.go", `package testonly\n\nimport _ "${MODULE}/internal/other"\n`);
+    put(
+      dir,
+      "internal/testonly/t_test.go",
+      `package testonly\n\nimport _ "${MODULE}/internal/other"\n`,
+    );
     put(dir, "internal/tagged/x.go", "package tagged\n");
     put(
       dir,
@@ -108,7 +132,11 @@ describe("select-fuzzers.sh", () => {
       git(dir, "add", ".");
       git(dir, "commit", "-q", "-m", "change");
     }
-    return spawnSync("bash", [selector, base, list], { cwd: dir, env: cleanEnv(), encoding: "utf8" });
+    return spawnSync("bash", [selector, base, list], {
+      cwd: dir,
+      env: cleanEnv(),
+      encoding: "utf8",
+    });
   }
 
   it("selects a package's own fuzzers and those of everything that imports it", () => {
@@ -160,14 +188,19 @@ describe("select-fuzzers.sh", () => {
   });
 
   it("runs everything when a package has a parse error, which go list -e reports with exit 0", () => {
-    const result = select([["internal/other/broken.go", "package other\n\nimport (\n\t\"fmt\"\n"]]);
+    const result = select([["internal/other/broken.go", 'package other\n\nimport (\n\t"fmt"\n']]);
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(names(result), ALL);
     assert.match(result.stderr, /could not build the import graph/u);
   });
 
   it("runs everything when a package is broken only on linux, the GOOS CI and production build", () => {
-    const result = select([["internal/other/broken_linux.go", "//go:build linux\n\npackage other\n\nimport (\n\t\"fmt\"\n"]]);
+    const result = select([
+      [
+        "internal/other/broken_linux.go",
+        '//go:build linux\n\npackage other\n\nimport (\n\t"fmt"\n',
+      ],
+    ]);
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(names(result), ALL);
     assert.match(result.stderr, /could not build the import graph/u);

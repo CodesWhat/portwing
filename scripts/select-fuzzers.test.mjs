@@ -37,7 +37,15 @@ function cleanEnv() {
 function git(cwd, ...args) {
   const result = spawnSync(
     "git",
-    ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args],
+    [
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      ...args,
+    ],
     { cwd, env: cleanEnv(), encoding: "utf8" },
   );
   assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
@@ -72,7 +80,11 @@ describe("select-fuzzers.sh without a toolchain", () => {
       git(dir, "add", ".");
       git(dir, "commit", "-q", "-m", "change");
     }
-    return spawnSync("bash", [selector, base, list], { cwd: dir, env: cleanEnv(), encoding: "utf8" });
+    return spawnSync("bash", [selector, base, list], {
+      cwd: dir,
+      env: cleanEnv(),
+      encoding: "utf8",
+    });
   }
 
   it("runs everything when go.mod, go.sum or the CI wiring changes", () => {
@@ -114,7 +126,9 @@ describe("the changes job wiring", () => {
     const workflow = readFileSync(resolve(repoRoot, ".github/workflows/ci-verify.yml"), "utf8");
     assert.match(workflow, /fuzzers_json: \$\{\{ steps\.fuzzers\.outputs\.fuzzers_json \}\}/u);
     assert.match(workflow, /bash scripts\/ci\/select-fuzzers\.sh "origin\/\$\{BASE_REF\}"/u);
-    const setupGo = workflow.indexOf("      - name: Setup Go\n        if: github.event_name == 'pull_request'");
+    const setupGo = workflow.indexOf(
+      "      - name: Setup Go\n        if: github.event_name == 'pull_request'",
+    );
     const goTests = workflow.indexOf("node --test scripts/ci/select-fuzzers.go.test.mjs");
     const select = workflow.indexOf("      - name: Select fuzzers");
     assert.ok(setupGo > 0 && setupGo < goTests && goTests < select, "go tests run after setup-go");

@@ -55,7 +55,10 @@ test("required direct jobs run in full: no job-level or step-level standing down
     assert.doesNotMatch(job, /^ {4}needs:/mu, `${id} must not wait on the changes job`);
     assert.doesNotMatch(jobLevelIf(job), /cancelled/u, id);
   }
-  assert.equal(jobLevelIf(jobSection(workflow, "website-browser-checks")), "github.event_name != 'schedule'");
+  assert.equal(
+    jobLevelIf(jobSection(workflow, "website-browser-checks")),
+    "github.event_name != 'schedule'",
+  );
   assert.equal(
     jobLevelIf(jobSection(workflow, "release-contract")),
     "",
@@ -118,7 +121,11 @@ test("fuzzers-json fails toward the full list, never toward empty", () => {
     for (const result of ["failure", "cancelled", "skipped"]) {
       assert.equal(fuzzersJson({ result, output: "", event, ref }), full, `${event} ${result}`);
     }
-    assert.equal(fuzzersJson({ result: "success", output: "", event, ref }), full, `${event} empty`);
+    assert.equal(
+      fuzzersJson({ result: "success", output: "", event, ref }),
+      full,
+      `${event} empty`,
+    );
     assert.equal(fuzzersJson({ result: "success", output: selected, event, ref }), selected);
     assert.equal(fuzzersJson({ result: "success", output: "[]", event, ref }), "[]");
   }
@@ -130,7 +137,13 @@ test("fuzzers-json fails toward the full list, never toward empty", () => {
 });
 
 // Runs the real "covered" step script against a fake `gh`.
-function runCoveredStep({ event = "push", ref = "refs/heads/dev/v1.0", states, base = "main", openSha }) {
+function runCoveredStep({
+  event = "push",
+  ref = "refs/heads/dev/v1.0",
+  states,
+  base = "main",
+  openSha,
+}) {
   const sha = "a".repeat(40);
   const section = jobSection(workflow, "changes");
   const script = section
@@ -162,7 +175,9 @@ esac
 `,
       { mode: 0o755 },
     );
-    fs.writeFileSync(path.join(dir, "bin", "sleep"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, "bin", "sleep"), "#!/usr/bin/env bash\nexit 0\n", {
+      mode: 0o755,
+    });
     fs.writeFileSync(path.join(dir, "out"), "");
     const result = spawnSync("bash", ["-c", script], {
       env: {
@@ -200,7 +215,10 @@ test("an unsettled mergeable_state is re-read before giving up", () => {
 
 test("only open PRs for this exact head into main or dev/** can cover, and only dev pushes", () => {
   assert.equal(runCoveredStep({ states: ["clean"], base: "feature/x" }), "push_covered=false");
-  assert.equal(runCoveredStep({ states: ["clean"], openSha: "b".repeat(40) }), "push_covered=false");
+  assert.equal(
+    runCoveredStep({ states: ["clean"], openSha: "b".repeat(40) }),
+    "push_covered=false",
+  );
   assert.equal(runCoveredStep({ states: ["clean"], base: "dev/v2.0" }), "push_covered=true");
   assert.equal(runCoveredStep({ states: ["clean"], ref: "refs/heads/main" }), "push_covered=false");
   assert.equal(runCoveredStep({ states: ["clean"], event: "pull_request" }), "push_covered=false");
