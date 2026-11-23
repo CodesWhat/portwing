@@ -72,8 +72,9 @@ jobs:
       fuzzers_json: ${{ steps.fuzzers.outputs.fuzzers_json }}
     steps:
       # Block, because this job runs setup-go (scripts/setup-go-egress-config-test.sh
-      # requires it). `go list` without -deps never touches the module proxy, so
-      # the list is the Go jobs' toolchain-download hosts and nothing more.
+      # requires it). `go list` resolves the module's external imports even
+      # without -deps, so on a cold runner it needs the module proxy and the
+      # checksum database as well as the toolchain-download hosts.
       - name: Harden Runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
         with:
@@ -84,7 +85,10 @@ jobs:
             dl.google.com:443
             github.com:443
             go.dev:443
+            proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            storage.googleapis.com:443
+            sum.golang.org:443
             tmaproduction.blob.core.windows.net:443
 
       - name: Is this push covered by a pull request run

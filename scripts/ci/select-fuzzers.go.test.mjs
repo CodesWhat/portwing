@@ -166,6 +166,13 @@ describe("select-fuzzers.sh", () => {
     assert.match(result.stderr, /could not build the import graph/u);
   });
 
+  it("runs everything when a package is broken only on linux, the GOOS CI and production build", () => {
+    const result = select([["internal/other/broken_linux.go", "//go:build linux\n\npackage other\n\nimport (\n\t\"fmt\"\n"]]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(names(result), ALL);
+    assert.match(result.stderr, /could not build the import graph/u);
+  });
+
   it("selects nothing for docs and files outside every package", () => {
     const result = select(["docs/readme.md", "README.md", "website/x.tsx"]);
     assert.equal(result.status, 0, result.stderr);

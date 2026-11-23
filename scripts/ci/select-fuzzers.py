@@ -63,6 +63,7 @@ def build_graph(root):
     graph = {}
     by_path = {}
     ignored_everywhere = None
+    broken_on_linux = set()
     broken_everywhere = None
     for config in CONFIGS:
         ignored = set()
@@ -79,8 +80,12 @@ def build_graph(root):
                 ignored.add(os.path.join(directory, name))
         ignored_everywhere = ignored if ignored_everywhere is None else ignored_everywhere & ignored
         broken_everywhere = broken if broken_everywhere is None else broken_everywhere & broken
-    if broken_everywhere:
-        raise SystemExit(f"go list reported errors (imports may be missing): {sorted(broken_everywhere)}")
+        if config["GOOS"] == "linux":
+            # Linux is what CI and production build, so any error there means
+            # the graph may be missing edges, even if other GOOS runs are clean.
+            broken_on_linux = broken
+    if broken_everywhere or broken_on_linux:
+        raise SystemExit(f"go list reported errors (imports may be missing): {sorted(broken_everywhere | broken_on_linux)}")
     if ignored_everywhere:
         raise SystemExit(f"Go files excluded in every configuration: {sorted(ignored_everywhere)}")
     # Import paths -> directories, restricted to this module's own packages.
