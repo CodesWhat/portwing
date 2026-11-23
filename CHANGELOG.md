@@ -20,30 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 - Graceful shutdown no longer waits out its deadline on an open SSE, follow-log or event stream. Streams now end when shutdown starts, so the audit log closes promptly.
 - A Standard-mode attach or exec hijack no longer holds its Docker connection open after the controller hangs up. Portwing still treats the hang-up as a stdin half-close and keeps relaying Docker output, but closes both ends once Docker has sent nothing for 30 s. A client that half-closes stdin and then waits longer than that for output is disconnected.
-||||||| parent of c5b09b57 (fix(server): check credentials before the failed-auth lockout)
-=======
-- Valid requests no longer get sporadic 429s. The per-IP in-flight slot (2) and the failed-auth lockout were applied before credentials were checked, so a third request from one address overlapping two others, or any request from an address that had earlier failures, was refused despite valid credentials. Credentials are now verified first and the lockout only decides whether a failed check answers 401 or 429. Once the limiter table is full, an untracked source with failing credentials gets 429 while valid credentials still pass.
+- Valid requests no longer get sporadic 429s. The per-IP in-flight slot (2) and the failed-auth lockout were applied before credentials were checked, so a third request from one address overlapping two others, or any request from an address that had earlier failures, was refused despite valid credentials. Credentials are now verified first and the lockout only decides whether a failed check answers 401 or 429. Once the limiter table is full, an untracked source with failing credentials gets 429 while valid credentials still pass. Reading and verifying a request now takes one of 16 slots per source (IPv4 address or IPv6 /64). A request that finds them all busy waits instead of being refused, and gets 503 with `Retry-After: 1` only if it is still waiting at the 10 s read deadline.
 - Signed compose requests can now carry the documented 32 MiB body. The signed-body cap is 32 MiB for `POST /_portwing/compose` (at most four such bodies buffered at once, then `503`), and stays 1 MiB elsewhere.
 - Docs: `TRUSTED_PROXIES` now has a reverse-proxy section in Connection modes covering what it changes for client-IP keying, with an example.
->>>>>>> c5b09b57 (fix(server): check credentials before the failed-auth lockout)
-||||||| parent of f3ac2614 (fix(edge): serve requests while the reconnect inventory syncs)
-=======
-||||||| parent of b081b2cc (fix(edge): charge upload reassembly for its real allocation)
-=======
 - Edge upload reassembly no longer holds 2-3x its 512 MB / 1 GB budget. The budget is charged for the buffer's real capacity, an upload that declares its `Content-Length` is allocated once, growth that would pass the budget is refused before it allocates, and the finished body is handed to the request without a copy.
->>>>>>> b081b2cc (fix(edge): charge upload reassembly for its real allocation)
 - Edge mode no longer holds off pings and API requests while the reconnect inventory syncs. The initial container sync runs as a task owned by its connection, which is cancelled and joined when the connection ends.
->>>>>>> f3ac2614 (fix(edge): serve requests while the reconnect inventory syncs)
-||||||| parent of aad2a510 (fix(compose): stop cancelled deploys with SIGTERM and a bounded wait)
-=======
 - A tunnel drop or client disconnect no longer SIGKILLs a running `docker compose` deploy. The subprocess now gets SIGTERM and up to 30 seconds to stop before it is killed, the per-stack lock stays held until it exits, and the `compose_op` audit record reports outcome `cancelled`.
->>>>>>> aad2a510 (fix(compose): stop cancelled deploys with SIGTERM and a bounded wait)
 - Docs analytics events now carry `surface=docs`. The docs export uses basePath `/docs`, `usePathname()` strips it, and every docs pageview and CTA was tagged as an unknown marketing route.
 - Analytics on the marketing site and docs now send only from `portwing.codeswhat.com`. Previews, localhost and lookalike hosts no longer initialize PostHog or queue events.
 - Audit export cursors now carry a per-process generation, so a cursor saved before an agent restart gets the documented 409 instead of a 200 that silently skips records. Cursors are opaque strings; echo `X-Portwing-Next-Cursor` back as received.
