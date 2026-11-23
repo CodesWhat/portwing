@@ -151,6 +151,36 @@ func TestExecuteReapsGroupMembersLeftAfterNormalExit(t *testing.T) {
 	}
 }
 
+// A leftover child that inherited stdout and stderr keeps the pipes open after
+// the leader exits 0. Execute must still return within the grace period, kill
+// the child, and keep the output written before exit.
+func TestExecuteReturnsWithinGraceWhenSurvivorHoldsPipes(t *testing.T) {
+	requireLinuxProcGroup(t)
+	grace := 300 * time.Millisecond
+	setComposeStopGrace(t, grace)
+	out := t.TempDir()
+	childPID := filepath.Join(out, "child-pid")
+	cm := composeScriptManager(t,
+		"echo before-exit\necho err-before-exit >&2\n"+
+			"sh -c 'echo $$ > "+childPID+"; exec sleep 60' &\n"+
+			"while [ ! -s "+childPID+" ]; do sleep 0.02; done\nexit 0\n")
+	start := time.Now()
+	resp, err := cm.Execute(t.Context(), ComposeRequest{StackName: "app", Operation: "up"})
+	elapsed := time.Since(start)
+	if err != nil || !resp.Success {
+		t.Fatalf("Execute = %+v, %v", resp, err)
+	}
+	if elapsed > grace+time.Second {
+		t.Errorf("Execute took %v, want under %v", elapsed, grace+time.Second)
+	}
+	if !strings.Contains(resp.Output, "before-exit") || !strings.Contains(resp.Output, "err-before-exit") {
+		t.Errorf("Output = %q, lost output written before exit", resp.Output)
+	}
+	if !processGone(readPID(t, childPID)) {
+		t.Fatal("the pipe-holding child outlived Execute")
+	}
+}
+
 // A group that is already gone when the cancel signal is sent is not an error:
 // the command just finishes.
 func TestRunInProcessGroupCancelOnVanishedGroup(t *testing.T) {
