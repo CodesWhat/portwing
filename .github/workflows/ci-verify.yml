@@ -71,12 +71,21 @@ jobs:
       push_covered: ${{ steps.covered.outputs.push_covered }}
       fuzzers_json: ${{ steps.fuzzers.outputs.fuzzers_json }}
     steps:
-      # Audit mode: block mode intermittently refused allow-listed hosts on hosted runners (DEP-19). Release workflows keep block.
+      # Block, because this job runs setup-go (scripts/setup-go-egress-config-test.sh
+      # requires it). `go list` without -deps never touches the module proxy, so
+      # the list is the Go jobs' toolchain-download hosts and nothing more.
       - name: Harden Runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
         with:
-          egress-policy: audit
+          egress-policy: block
           disable-sudo: true
+          allowed-endpoints: >
+            api.github.com:443
+            dl.google.com:443
+            github.com:443
+            go.dev:443
+            release-assets.githubusercontent.com:443
+            tmaproduction.blob.core.windows.net:443
 
       - name: Is this push covered by a pull request run
         id: covered
