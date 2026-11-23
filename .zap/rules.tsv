@@ -1,6 +1,9 @@
 # ZAP baseline rules file for the static marketing/docs site (portwing.codeswhat.com).
-# Passive-only scan; every entry below was verified against a live dry run plus
-# `curl -sI` against the real site before being ignored. Format: rule-id<TAB>action<TAB>comment.
+# Passive-only scan of the built export served at http://localhost:4417 by e2e/serve.mjs (the live
+# site answers non-browser clients with Vercel's 429 bot challenge). Entries were first verified
+# against a dry run plus `curl -sI` against the real site; those whose rule only fires on
+# Vercel-added headers (10015, 10035, 10098) no longer appear locally and are kept for a rescan
+# of the live site. Format: rule-id<TAB>action<TAB>comment.
 10015	IGNORE	(Re-examine Cache-control Directives: fully static, no-auth, no-cookie site — no sensitive data for a caching intermediary to leak)
 10035	IGNORE	(Strict-Transport-Security Header Not Set: only fires on the /etc/passwd path-traversal probe's 403 edge-block page, not real content; `curl -sI https://portwing.codeswhat.com/` confirms `strict-transport-security: max-age=63072000` on every real 200 response)
 10049	IGNORE	(Storable but Non-Cacheable Content: `cache-control: public, max-age=0, must-revalidate` is intentional for a statically-exported site that redeploys on every change; no sensitive data behind it)
@@ -11,3 +14,11 @@
 2	IGNORE	(Private IP Disclosure: both hits are fabricated — the CIDR example `10.0.0.0/8,172.16.0.0/12` in /docs/configuration's reverse-proxy docs, and `10.0.0.42` inside the bundled mock data for the site's interactive audit-log demo widget, the same fabricated-placeholder pattern already documented for the demo API key in CHANGELOG.md)
 90003	IGNORE	(Sub Resource Integrity Attribute Missing: every script/link on the site is same-origin, self-hosted Next.js static output already covered by a hash-pinned script-src CSP; SRI adds no protection same-origin and there are no third-party CDN scripts)
 90004	IGNORE	(Cross-Origin-Embedder-Policy Header Missing or Invalid: the site uses no SharedArrayBuffer or other cross-origin-isolation-dependent feature that COEP/COOP would gate)
+# 90022 Application Error Disclosure, scoped to /docs/drydock-integration only (OUTOFSCOPE is
+# ZAP's per-URL exclusion; the regex is matched against the URL from the start). ZAP's evidence
+# was the literal string "internal error" (run 43914276326, the only instance, 200 OK). It comes
+# from docs/content/docs/current/drydock-integration.mdx lines 428 and 433, which document the
+# fixed, sanitised reason `exec start failed: internal error`. That is prose describing a
+# deliberate protocol string, not a stack trace or framework error. Not ignored globally, so a
+# real error page anywhere else still fails.
+90022	OUTOFSCOPE	http://localhost:4417/docs/drydock-integration$

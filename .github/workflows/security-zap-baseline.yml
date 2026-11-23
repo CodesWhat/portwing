@@ -4,6 +4,14 @@
 # tier — an active scan would find nothing an active application wouldn't
 # already need, and testssl is N/A (Vercel terminates TLS; Portwing owns no
 # certificate or listener to test). Scheduled-advisory tier, not a PR gate.
+#
+# The scan target is the built static export served on localhost, not the live
+# site. Since 2026-11-18 portwing.codeswhat.com answers non-browser clients with
+# Vercel's 429 bot challenge, so a scan of the live URL only ever saw the
+# challenge page (run 45247059188: 429 on every HTML page). e2e/serve.mjs serves
+# website/out with the per-page CSP and the common security headers from
+# website/scripts/security-headers.mjs, the same source the Vercel output uses.
+# It is the server the Playwright suite runs against.
 name: "Security: ZAP Baseline"
 
 on:
@@ -29,22 +37,62 @@ jobs:
             api.github.com:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
-            portwing.codeswhat.com:443
             raw.githubusercontent.com:443
+            mcr.microsoft.com:443
+            *.data.mcr.microsoft.com:443
+            registry.npmjs.org:443
+            results-receiver.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
+      # Same image and build as the website-browser-checks job in ci-verify.yml, so the
+      # export matches what CI builds. It runs through `docker run` so Harden Runner
+      # still sees the egress, and as the runner's uid so the output stays readable.
+      - name: Build the site export
+        env:
+          PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:766137e2d9caad4744187e53cdc89320ba6f2eb57cff097374020944b44dd0a9
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            --env CI=true --env HOME=/tmp/home \
+            --volume "$GITHUB_WORKSPACE:/work" --workdir /work \
+            "$PLAYWRIGHT_IMAGE" \
+            bash -euo pipefail -c '
+              mkdir -p "$HOME"
+              npm ci
+              npm run build
+            '
+
+      - name: Serve the export on localhost
+        env:
+          E2E_PORT: "4417"
+        run: |
+          node e2e/serve.mjs > serve.log 2>&1 &
+          echo "$!" > serve.pid
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null "http://127.0.0.1:${E2E_PORT}/"; then exit 0; fi
+            sleep 1
+          done
+          cat serve.log
+          echo "static server did not start" >&2
+          exit 1
+
       - name: Run ZAP baseline scan
         uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25  # v0.15.0
         with:
-          target: https://portwing.codeswhat.com
+          target: http://localhost:4417
           docker_name: ghcr.io/zaproxy/zaproxy@sha256:2ec1d5d5b44d55cfd02ba9b89cd26852f06d92b7fc0ce9f064b9463babc73074  # stable digest, 2026-05-28
           rules_file_name: .zap/rules.tsv
           allow_issue_writing: false
           fail_action: true
+
+      - name: Stop the static server
+        if: always()
+        run: |
+          if [ -f serve.pid ]; then kill "$(cat serve.pid)" 2>/dev/null || true; fi
 
       - name: Upload ZAP HTML report
         if: always()

@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Edge backpressure no longer evicts a slow but still-draining controller when the producer is descheduled past the stall window. Progress the pump made is now counted even if its wake signal was missed.
+- The Docker client's connections now close after sitting idle for 90 s. They had no idle timeout, so after a burst of requests the idle connections and their goroutines stayed until the process exited.
 - Graceful shutdown no longer waits out its deadline on an open SSE, follow-log or event stream. Streams now end when shutdown starts, so the audit log closes promptly.
 - A Standard-mode attach or exec hijack no longer holds its Docker connection open after the controller hangs up. Portwing still treats the hang-up as a stdin half-close and keeps relaying Docker output, but closes both ends once Docker has sent nothing for 30 s. A client that half-closes stdin and then waits longer than that for output is disconnected.
 - Valid requests no longer get sporadic 429s. The per-IP in-flight slot (2) and the failed-auth lockout were applied before credentials were checked, so a third request from one address overlapping two others, or any request from an address that had earlier failures, was refused despite valid credentials. Credentials are now verified first and the lockout only decides whether a failed check answers 401 or 429. A locked-out source is still verified only when that is cheap (an Ed25519 signature, a raw `TOKEN`, or a `TOKEN_HASH` whose derivation is already cached). A locked-out source whose `TOKEN_HASH` check would need a cold Argon2 derivation gets 429 without one, so it can't hold the agent-wide derivation slots. Once the limiter table is full, an untracked source with failing credentials gets 429 while valid credentials still pass. At most 4 compose-sized (over 1 MiB) signed bodies are held in memory agent-wide, and each keeps its slot until the compose handler returns, so a fifth gets 503 with `Retry-After: 1` meanwhile. Reading and verifying a request now takes one of 16 slots per source (IPv4 address or IPv6 /64). A request that finds them all busy waits instead of being refused, and gets 503 with `Retry-After: 1` only if it is still waiting at the 10 s read deadline.
@@ -36,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Edge mode's WebSocket client moves to gorilla/websocket commit d67f41855da4 (pseudo-version v1.5.4-0.20240701034025) for GO-2026-6278 / GHSA-w67g-5rqw-f597: v1.5.3 generated frame mask keys from a weak PRNG. No tagged release carries the fix yet.
+- `golang.org/x/net` moves to v0.63.0 in the agent and in the bundled Docker Compose plugin (now `v5.5.1-portwing.7`) for GO-2026-6860 and GO-2026-6866.
 - The auth rate limiter keys IPv6 sources by /64 prefix, so rotating through addresses in one /64 no longer earns a fresh failure budget per address. IPv4 and IPv4-mapped IPv6 stay per address. Once 10,000 sources are tracked, untracked sources are now refused with 429 instead of bypassing the limiter; tracked sources keep working. Shared-secret tokens should be high-entropy; see SECURITY.md.
 
 ## [v1.4.3] - 2026-11-21
