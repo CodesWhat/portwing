@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -125,4 +127,81 @@ test("fuzzers-json fails toward the full list, never toward empty", () => {
     "[]",
     "a dev push fuzzes nothing even when changes failed",
   );
+});
+
+// Runs the real "covered" step script against a fake `gh`.
+function runCoveredStep({ event = "push", ref = "refs/heads/dev/v1.0", states, base = "main", openSha }) {
+  const sha = "a".repeat(40);
+  const section = jobSection(workflow, "changes");
+  const script = section
+    .split("      - name: Is this push covered by a pull request run\n")[1]
+    ?.split("        run: |\n")[1]
+    ?.split("\n      - name:")[0]
+    .split("\n")
+    .map((line) => line.slice(10))
+    .join("\n");
+  assert.ok(script, "covered step script not found");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "covered-step-"));
+  try {
+    const list = JSON.stringify([
+      { number: 7, state: "open", head: { sha: openSha ?? sha }, base: { ref: base } },
+    ]);
+    fs.writeFileSync(path.join(dir, "list.json"), list);
+    fs.writeFileSync(path.join(dir, "states"), states.join("\n"));
+    fs.mkdirSync(path.join(dir, "bin"));
+    fs.writeFileSync(
+      path.join(dir, "bin", "gh"),
+      `#!/usr/bin/env bash
+case "$2" in
+  */commits/*/pulls) cat "${dir}/list.json" ;;
+  */pulls/*)
+    n=$(($(cat "${dir}/n" 2>/dev/null || echo 0) + 1)); echo "$n" > "${dir}/n"
+    sed -n "$((n > $(wc -l < "${dir}/states") + 1 ? $(wc -l < "${dir}/states") + 1 : n))p" "${dir}/states" ;;
+  *) exit 1 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(path.join(dir, "bin", "sleep"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, "out"), "");
+    const result = spawnSync("bash", ["-c", script], {
+      env: {
+        PATH: `${path.join(dir, "bin")}:${process.env.PATH}`,
+        GITHUB_OUTPUT: path.join(dir, "out"),
+        GH_TOKEN: "x",
+        EVENT_NAME: event,
+        REF: ref,
+        REPO: "o/r",
+        SHA: sha,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return fs.readFileSync(path.join(dir, "out"), "utf8").trim();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("a push stands down only when the PR has a merge commit, so its PR run exists", () => {
+  for (const state of ["clean", "unstable", "blocked", "behind"]) {
+    assert.equal(runCoveredStep({ states: [state] }), "push_covered=true", state);
+  }
+  // A conflicting PR gets no pull_request run (see promotion-conflict-suppresses-pr-run).
+  for (const state of ["dirty", "unknown", "null", "draft", "has_hooks", "", "something-new"]) {
+    assert.equal(runCoveredStep({ states: [state, state, state] }), "push_covered=false", state);
+  }
+});
+
+test("an unsettled mergeable_state is re-read before giving up", () => {
+  assert.equal(runCoveredStep({ states: ["unknown", "null", "clean"] }), "push_covered=true");
+  assert.equal(runCoveredStep({ states: ["unknown", "unknown", "unknown"] }), "push_covered=false");
+});
+
+test("only open PRs for this exact head into main or dev/** can cover, and only dev pushes", () => {
+  assert.equal(runCoveredStep({ states: ["clean"], base: "feature/x" }), "push_covered=false");
+  assert.equal(runCoveredStep({ states: ["clean"], openSha: "b".repeat(40) }), "push_covered=false");
+  assert.equal(runCoveredStep({ states: ["clean"], base: "dev/v2.0" }), "push_covered=true");
+  assert.equal(runCoveredStep({ states: ["clean"], ref: "refs/heads/main" }), "push_covered=false");
+  assert.equal(runCoveredStep({ states: ["clean"], event: "pull_request" }), "push_covered=false");
 });

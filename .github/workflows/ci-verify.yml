@@ -103,11 +103,31 @@ jobs:
             push:refs/heads/dev/*)
               # Only a PR into main or dev/** gets a pull_request run from this
               # workflow, so only those can stand in for the push run.
-              count="$(gh api "repos/${REPO}/commits/${SHA}/pulls" --paginate 2>/dev/null |
-                jq -s --arg sha "${SHA}" '[.[][] | select(.state == "open" and .head.sha == $sha and (.base.ref == "main" or (.base.ref | startswith("dev/"))))] | length' 2>/dev/null)" || count=0
-              if [ "${count:-0}" -gt 0 ] 2>/dev/null; then
-                covered=true
-              fi
+              numbers="$(gh api "repos/${REPO}/commits/${SHA}/pulls" --paginate 2>/dev/null |
+                jq -s -r --arg sha "${SHA}" '.[][] | select(.state == "open" and .head.sha == $sha and (.base.ref == "main" or (.base.ref | startswith("dev/")))) | .number' 2>/dev/null)" || numbers=""
+              for number in ${numbers}; do
+                # An open PR is not enough: GitHub creates no pull_request run
+                # for a PR with a merge conflict, because there is no merge
+                # commit to check out. mergeable_state says whether there is
+                # one: clean, unstable (non-required checks failing), blocked
+                # (required checks or reviews missing) and behind (base moved
+                # but merges cleanly) all have a mergeable merge commit, so the
+                # PR run will exist. dirty is a conflict; unknown/null means
+                # GitHub is still computing it; draft, has_hooks and anything
+                # new say nothing about conflicts. None of those is covered.
+                # The first read is what kicks off the computation, so give an
+                # unsettled answer a few seconds, up to three reads.
+                for attempt in 1 2 3; do
+                  state="$(gh api "repos/${REPO}/pulls/${number}" --jq '.mergeable_state' 2>/dev/null)" || state=""
+                  case "${state}" in
+                    "" | null | unknown) [ "${attempt}" -lt 3 ] && sleep 5 ;;
+                    *) break ;;
+                  esac
+                done
+                case "${state}" in
+                  clean | unstable | blocked | behind) covered=true ;;
+                esac
+              done
               ;;
           esac
           echo "push_covered=${covered}" >> "$GITHUB_OUTPUT"
@@ -126,6 +146,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
+      # The selector's cases that run a real `go list` live in
+      # scripts/ci/select-fuzzers.go.test.mjs, outside the `scripts/*.test.mjs`
+      # glob that `npm run test:web` (Node CI, no Go, block egress) runs.
+      - name: Test the fuzzer selector
+        if: github.event_name == 'pull_request'
+        run: node --test scripts/ci/select-fuzzers.go.test.mjs
 
       # A PR fuzzes only the fuzzers whose package, or a package that one
       # imports, it touches. The weekly schedule and pushes to main run the
