@@ -1,6 +1,9 @@
 # ZAP baseline rules file for the static marketing/docs site (portwing.codeswhat.com).
-# Passive-only scan; every entry below was verified against a live dry run plus
-# `curl -sI` against the real site before being ignored. Format: rule-id<TAB>action<TAB>comment.
+# Passive-only scan of the built export served at http://localhost:4417 by e2e/serve.mjs (the live
+# site answers non-browser clients with Vercel's 429 bot challenge). Entries were first verified
+# against a dry run plus `curl -sI` against the real site; those whose rule only fires on
+# Vercel-added headers (10015, 10035, 10098) no longer appear locally and are kept for a rescan
+# of the live site. Format: rule-id<TAB>action<TAB>comment.
 10015	IGNORE	(Re-examine Cache-control Directives: fully static, no-auth, no-cookie site — no sensitive data for a caching intermediary to leak)
 10035	IGNORE	(Strict-Transport-Security Header Not Set: only fires on the /etc/passwd path-traversal probe's 403 edge-block page, not real content; `curl -sI https://portwing.codeswhat.com/` confirms `strict-transport-security: max-age=63072000` on every real 200 response)
 10049	IGNORE	(Storable but Non-Cacheable Content: `cache-control: public, max-age=0, must-revalidate` is intentional for a statically-exported site that redeploys on every change; no sensitive data behind it)
@@ -18,4 +21,4 @@
 # fixed, sanitised reason `exec start failed: internal error`. That is prose describing a
 # deliberate protocol string, not a stack trace or framework error. Not ignored globally, so a
 # real error page anywhere else still fails.
-90022	OUTOFSCOPE	https://portwing\.codeswhat\.com/docs/drydock-integration$
+90022	OUTOFSCOPE	http://localhost:4417/docs/drydock-integration$
