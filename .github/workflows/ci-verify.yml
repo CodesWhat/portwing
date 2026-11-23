@@ -22,8 +22,89 @@ permissions:
   contents: read
 
 jobs:
+  # One push to a branch with an open pull request fires two runs on the same
+  # SHA: `push` and `pull_request`. Only a dev/** head can hit this (feature
+  # branches aren't push-triggered), and in practice that is the standing
+  # dev/v1.0 -> main promotion PR, the one PR whose required contexts matter.
+  # The run that matters is the pull_request one: it carries the PR-only jobs
+  # (commit-message, dependency-review diff, base-ref scanner policy), and the
+  # required contexts on main are reported by it.
+  #
+  # So the push run stands down when an open PR already covers its SHA. How it
+  # stands down is the part that has to be right, because the push run's
+  # skipped PR-only jobs landing after the PR run's successes is what turned a
+  # required context SKIPPED on promotion PRs before (see "Release Contract"
+  # below). Three rules keep that from happening:
+  #
+  #   * Go CI, Node CI and the Codecov upload are skipped at the job level. A
+  #     skipped caller posts a single "Go CI" entry and never instantiates the
+  #     nested "Go CI / ..." contexts, so none of those required names gets a
+  #     skipped result from this run (the old push run posted "Go CI / Commit
+  #     Message" as skipped, which is the race).
+  #   * CodeQL and Website Browser Checks are required contexts on direct jobs,
+  #     where a job-level skip would post SKIPPED under the exact name. They
+  #     stay running and skip only their heavy steps, so they report success.
+  #   * Secrets, Dependency Review and Release Contract are cheap and keep
+  #     running unchanged.
+  #
+  # Pushes to main never stand down: release-cut.yml waits for a successful
+  # run of this workflow on main HEAD, and the merged promotion PR is closed by
+  # then anyway. A push to dev/** with no open PR (a feature PR merged into
+  # dev/v1.0) runs in full, since that SHA has never been verified. When the
+  # lookup fails the answer is "not covered" and the run does everything.
+  #
+  # TODO(ci-tree-receipt): a promotion PR re-verifies a tree the dev push run
+  # already verified. Skip that second run with the tree-receipt action once it
+  # exists in CodesWhat/.github (ops standard: standards/ci.md, "Preserve every
+  # required context when reducing duplicate or superseded work").
+  changes:
+    name: "Changed Paths"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      push_covered: ${{ steps.covered.outputs.push_covered }}
+    steps:
+      # Audit mode: block mode intermittently refused allow-listed hosts on hosted runners (DEP-19). Release workflows keep block.
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Is this push covered by a pull request run
+        id: covered
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          # No `-e`: a failed lookup must mean "not covered", never a red job.
+          covered=false
+          case "${EVENT_NAME}:${REF}" in
+            push:refs/heads/dev/*)
+              # Only a PR into main or dev/** gets a pull_request run from this
+              # workflow, so only those can stand in for the push run.
+              count="$(gh api "repos/${REPO}/commits/${SHA}/pulls" --paginate 2>/dev/null |
+                jq -s --arg sha "${SHA}" '[.[][] | select(.state == "open" and .head.sha == $sha and (.base.ref == "main" or (.base.ref | startswith("dev/"))))] | length' 2>/dev/null)" || count=0
+              if [ "${count:-0}" -gt 0 ] 2>/dev/null; then
+                covered=true
+              fi
+              ;;
+          esac
+          echo "push_covered=${covered}" >> "$GITHUB_OUTPUT"
+
   go-ci:
     name: "Go CI"
+    needs: changes
+    # `!cancelled()` so a failed changes job runs everything rather than
+    # skipping it (an empty push_covered is not 'true').
+    if: ${{ !cancelled() && needs.changes.outputs.push_covered != 'true' }}
     permissions:
       actions: read
       contents: read
@@ -128,7 +209,8 @@ jobs:
 
   node-ci:
     name: "Node CI"
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.push_covered != 'true' }}
     permissions:
       contents: read
     uses: CodesWhat/.github/.github/workflows/node-ci.yml@29a963e6df100295bdd88c3d87dc1f73ceb30f65  # main, 2026-10-31
@@ -164,7 +246,11 @@ jobs:
 
   website-browser-checks:
     name: "Website Browser Checks"
-    if: github.event_name != 'schedule'
+    needs: changes
+    # Required context on a direct job: a job-level skip would report SKIPPED
+    # under this exact name. A push run covered by a PR run skips the heavy
+    # step instead and reports success (see the changes job).
+    if: ${{ !cancelled() && github.event_name != 'schedule' }}
     runs-on: ubuntu-24.04
     # The suite itself is about a minute. The rest is the image pull, npm ci and the site build.
     # Kept short on purpose: hosted runners kill sustained-CPU jobs past ~14 minutes.
@@ -205,6 +291,7 @@ jobs:
       # npm ci, the site build (the tests serve website/out) and the suite, all inside the image.
       # The Node check keeps the image honest against the repo's pin in .node-version.
       - name: Run browser checks
+        if: needs.changes.outputs.push_covered != 'true'
         run: |
           docker run --rm --ipc=host --user "$(id -u):$(id -g)" \
             --env CI=true --env HOME=/tmp/home \
@@ -232,8 +319,8 @@ jobs:
 
   codecov:
     name: "Coverage: Codecov Upload"
-    needs: go-ci
-    if: ${{ !cancelled() }}
+    needs: [changes, go-ci]
+    if: ${{ !cancelled() && needs.changes.outputs.push_covered != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -364,7 +451,11 @@ jobs:
     name: "CodeQL Analysis"
     # Keep this job local: the explicit category preserves the default-branch
     # code-scanning identity while the organization workflow is canaried.
-    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
+    needs: changes
+    # `!cancelled()` keeps this required context reporting if the changes job
+    # fails. A push run covered by a PR run skips the heavy steps below rather
+    # than the job, so the context reports success instead of SKIPPED.
+    if: ${{ !cancelled() && github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/')))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -387,11 +478,13 @@ jobs:
             uploads.github.com:443
 
       - name: Checkout
+        if: needs.changes.outputs.push_covered != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       - name: Initialize CodeQL
+        if: needs.changes.outputs.push_covered != 'true'
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
         with:
           # One non-matrix job on purpose. A matrix appends the leg value to
@@ -408,14 +501,17 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
 
       - name: Setup Go
+        if: needs.changes.outputs.push_covered != 'true'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
 
       - name: Build Go
+        if: needs.changes.outputs.push_covered != 'true'
         run: go build ./...
 
       - name: Perform CodeQL Analysis
+        if: needs.changes.outputs.push_covered != 'true'
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
         with:
           category: .github/workflows/ci.yml:codeql

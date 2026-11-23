@@ -3,7 +3,7 @@
 set -euo pipefail
 
 workflow="${1:-.github/workflows/ci-verify.yml}"
-expected_condition="    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))"
+expected_condition="    if: \${{ !cancelled() && github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/')))) }}"
 expected_push_branches='    branches: [main, "dev/**"]'
 expected_category='          category: .github/workflows/ci.yml:codeql'
 

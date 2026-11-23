@@ -71,7 +71,7 @@ remove_trigger_block() {
 	mv "${test_root}/workflow.tmp" "${test_root}/workflow.yml"
 }
 
-valid_condition="    if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))"
+valid_condition="    if: \${{ !cancelled() && github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/')))) }}"
 valid_push_branches='    branches: [main, "dev/**"]'
 
 write_fixture "${valid_condition}" "${valid_push_branches}"
