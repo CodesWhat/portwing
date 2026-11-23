@@ -84,6 +84,13 @@ type RateLimiter struct {
 	maxEnrollmentInFlight int
 	enrollmentInFlight    int
 
+	// preAuth bounds, per limiter key, how many requests are in the
+	// pre-verification phase (header/body read plus the credential check).
+	// Entries exist only while a request holds or waits for a slot.
+	preAuthMu  sync.Mutex
+	preAuth    map[string]*preAuthSem
+	maxPreAuth int
+
 	trustedProxies []*net.IPNet
 
 	done chan struct{}
@@ -344,6 +351,84 @@ func (rl *RateLimiter) finishEnrollment(ip string, success bool) {
 	rl.finishAuthLocked(ip, success)
 }
 
+const defaultMaxPreAuth = 16
+
+type preAuthSem struct {
+	slots chan struct{}
+	refs  int
+}
+
+// acquirePreAuth waits for one of the source's pre-verification slots. It
+// returns a release func, or an error when ctx ends first. A request never
+// gets refused for lack of a slot, it queues; the slots only bound how many
+// of one source's unauthenticated reads and checks run at once. The entry is
+// dropped when its last holder or waiter leaves, so the table can't grow past
+// the requests in flight.
+func (rl *RateLimiter) acquirePreAuth(ctx context.Context, ip string) (func(), error) {
+	key := limiterKey(ip)
+	rl.preAuthMu.Lock()
+	if rl.preAuth == nil {
+		rl.preAuth = make(map[string]*preAuthSem)
+	}
+	e, ok := rl.preAuth[key]
+	if !ok {
+		n := rl.maxPreAuth
+		if n <= 0 {
+			n = defaultMaxPreAuth
+		}
+		e = &preAuthSem{slots: make(chan struct{}, n)}
+		rl.preAuth[key] = e
+	}
+	e.refs++
+	rl.preAuthMu.Unlock()
+
+	leave := func() {
+		rl.preAuthMu.Lock()
+		e.refs--
+		if e.refs == 0 {
+			delete(rl.preAuth, key)
+		}
+		rl.preAuthMu.Unlock()
+	}
+	select {
+	case e.slots <- struct{}{}:
+	case <-ctx.Done():
+		leave()
+		return nil, ctx.Err()
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			<-e.slots
+			leave()
+		})
+	}, nil
+}
+
+// admitPreAuth acquires the source's pre-verification slot, waiting up to
+// authBodyReadDeadline. If the wait times out it answers 503 with
+// Retry-After and counts it where the old in-flight cap's rejections were
+// counted. A client that goes away while waiting gets no response.
+func (rl *RateLimiter) admitPreAuth(w http.ResponseWriter, r *http.Request, clientIP string, auditor *audit.Logger, reg *metrics.Registry) (func(), bool) {
+	ctx, cancel := context.WithTimeout(r.Context(), authBodyReadDeadline)
+	defer cancel()
+	release, err := rl.acquirePreAuth(ctx, clientIP)
+	if err == nil {
+		return release, true
+	}
+	if r.Context().Err() != nil {
+		return nil, false
+	}
+	auditor.RateLimited(clientIP, r.Method, r.URL.Path)
+	if reg != nil {
+		reg.IncRequest(r.Method, http.StatusServiceUnavailable)
+		reg.IncRateLimited()
+	}
+	w.Header().Set("Retry-After", "1")
+	rejectUnadmitted(w, r, "too many concurrent requests from this source", http.StatusServiceUnavailable)
+	return nil, false
+}
+
 // recordAuthFailure records a failed credential check and reports whether the
 // source is locked out: already at the failure limit within its window, or
 // unable to be tracked because the table is full. A locked-out source's
@@ -575,13 +660,19 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			// compose request that declares more (bounded agent-wide by
 			// largeSignedBodySlots); MaxBytesReader also closes the connection
 			// on overflow, preventing slow-drip memory exhaustion.
+			var releaseLarge func()
+			releasePreAuth, admitted := rl.admitPreAuth(w, r, clientIP, auditor, reg)
+			if !admitted {
+				return
+			}
+			defer releasePreAuth()
 			var body []byte
 			if r.Body != nil {
 				limit := int64(maxSignedBodyBytes)
 				if wantsLargeSignedBody(r) {
 					select {
 					case largeSignedBodySlots <- struct{}{}:
-						defer func() { <-largeSignedBodySlots }()
+						releaseLarge = func() { <-largeSignedBodySlots }
 						limit = maxSignedComposeBodyBytes
 					default:
 						w.Header().Set("Retry-After", "1")
@@ -600,6 +691,9 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				}
 				var err error
 				body, err = io.ReadAll(r.Body)
+				if releaseLarge != nil {
+					releaseLarge()
+				}
 				if closeErr := r.Body.Close(); closeErr != nil {
 					slog.Warn("closing request body", "error", closeErr)
 				}
@@ -626,6 +720,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				skew = 60
 			}
 			verified, err := auth.VerifyRequestDetailed(r, body, ed.Registry, ed.Nonces, skew)
+			releasePreAuth()
 			keyID := verified.KeyID
 			if err != nil {
 				reason := auth.ReasonFor(err)
@@ -691,7 +786,12 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 		}
 
 		provided := agentToken(r)
+		releasePreAuth, admitted := rl.admitPreAuth(w, r, clientIP, auditor, reg)
+		if !admitted {
+			return
+		}
 		valid, attempted := verifyTokenWithCapacity(verifier, provided)
+		releasePreAuth()
 		if !attempted {
 			// The agent-wide cold Argon2 slots are full. That is the agent's
 			// own capacity limit, not a credential verdict, so it doesn't
