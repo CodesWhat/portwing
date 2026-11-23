@@ -13,7 +13,10 @@ Build constraints: one `go list` run sees one configuration, so the graph is
 the union of runs for linux, darwin and windows, each with the `integration`
 tag. If any Go file is ignored in EVERY run (an unknown tag, a constraint no
 run satisfies) the graph can't be trusted and this exits non-zero, so the
-caller runs the full list.
+caller runs the full list. `go list -e` exits 0 even when a package has a
+parse error and its imports are missing, so a package Error (or DepsErrors) in
+every run does the same. An error in only some runs is a constraint ("build
+constraints exclude all Go files" on another GOOS), not a broken package.
 
 A changed file belongs to the nearest ancestor directory that is a package, so
 testdata/ (fuzz seed corpora) and embedded assets count toward their package.
@@ -39,7 +42,7 @@ TAGS = "integration"
 def go_list(root, config):
     env = dict(os.environ, CGO_ENABLED="0", **config)
     result = subprocess.run(
-        ["go", "list", "-e", "-tags", TAGS, "-json=ImportPath,Dir,Imports,TestImports,XTestImports,IgnoredGoFiles,Error", "./..."],
+        ["go", "list", "-e", "-tags", TAGS, "-json=ImportPath,Dir,Imports,TestImports,XTestImports,IgnoredGoFiles,Error,DepsErrors", "./..."],
         cwd=root, env=env, capture_output=True, text=True, timeout=180, check=False,
     )
     if result.returncode != 0:
@@ -60,17 +63,24 @@ def build_graph(root):
     graph = {}
     by_path = {}
     ignored_everywhere = None
+    broken_everywhere = None
     for config in CONFIGS:
         ignored = set()
+        broken = set()
         for package in go_list(root, config):
             directory = os.path.relpath(package["Dir"], root)
             by_path[package["ImportPath"]] = directory
             deps = graph.setdefault(directory, set())
             for key in ("Imports", "TestImports", "XTestImports"):
                 deps.update(package.get(key) or ())
+            if package.get("Error") or package.get("DepsErrors"):
+                broken.add(package["ImportPath"])
             for name in package.get("IgnoredGoFiles") or ():
                 ignored.add(os.path.join(directory, name))
         ignored_everywhere = ignored if ignored_everywhere is None else ignored_everywhere & ignored
+        broken_everywhere = broken if broken_everywhere is None else broken_everywhere & broken
+    if broken_everywhere:
+        raise SystemExit(f"go list reported errors (imports may be missing): {sorted(broken_everywhere)}")
     if ignored_everywhere:
         raise SystemExit(f"Go files excluded in every configuration: {sorted(ignored_everywhere)}")
     # Import paths -> directories, restricted to this module's own packages.
