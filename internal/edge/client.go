@@ -147,6 +147,10 @@ type outboundQueueState struct {
 	// the queue closes, so blocked bulk producers re-check capacity without
 	// polling. Created lazily by the first waiter.
 	wake chan struct{}
+	// progress counts pump releases and closes. enqueueWait compares it on a
+	// timer expiry so progress made while the producer goroutine was descheduled
+	// still counts, instead of racing the wake channel against the timer.
+	progress uint64
 }
 
 // composeExecutor runs compose requests; *docker.ComposeManager in production.
@@ -2253,6 +2257,9 @@ func (s *outboundQueueState) enqueueWait(ctx context.Context, ch chan protocol.E
 
 	timer := time.NewTimer(stall)
 	defer timer.Stop()
+	s.mu.Lock()
+	seen := s.progress
+	s.mu.Unlock()
 	for {
 		s.mu.Lock()
 		if s.closed {
@@ -2285,10 +2292,23 @@ func (s *outboundQueueState) enqueueWait(ctx context.Context, ch chan protocol.E
 				}
 			}
 			timer.Reset(stall)
+			s.mu.Lock()
+			seen = s.progress
+			s.mu.Unlock()
 		case <-ctx.Done():
 			return outboundCanceled
 		case <-timer.C:
-			return outboundStalled
+			// wake and the timer can both be ready when this goroutine was
+			// descheduled, and select picks one at random. Only evict when the
+			// pump really made no progress since the window started.
+			s.mu.Lock()
+			moved := s.progress != seen
+			seen = s.progress
+			s.mu.Unlock()
+			if !moved {
+				return outboundStalled
+			}
+			timer.Reset(stall)
 		}
 	}
 }
@@ -2296,6 +2316,7 @@ func (s *outboundQueueState) enqueueWait(ctx context.Context, ch chan protocol.E
 // signalLocked wakes every bulk producer waiting in enqueueWait. s.mu must be
 // held.
 func (s *outboundQueueState) signalLocked() {
+	s.progress++
 	if s.wake != nil {
 		close(s.wake)
 		s.wake = nil

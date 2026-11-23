@@ -502,6 +502,43 @@ func TestSlowButMovingConsumerIsNotEvicted(t *testing.T) {
 	}
 }
 
+// Progress the producer goroutine never got to observe through the wake channel
+// (it was descheduled and the timer expired first) must still restart the stall
+// window. The test records progress without closing wake to model that: a
+// producer that only trusts wake evicts at one window, one that checks the
+// progress count survives it and only stalls at the second.
+func TestEnqueueWaitCountsProgressMissedByWake(t *testing.T) {
+	t.Parallel()
+
+	const stall = 300 * time.Millisecond
+	ch := make(chan protocol.Envelope, 4)
+	state := &outboundQueueState{}
+	for i := 0; i < bulkFrameLimit(ch); i++ {
+		state.enqueue(ch, bulkEnvelope())
+	}
+	start := time.Now()
+	done := make(chan outboundEnqueueResult, 1)
+	go func() { done <- state.enqueueWait(context.Background(), ch, bulkEnvelope(), stall) }()
+	waitForBulkWaiter(t, state)
+
+	state.mu.Lock()
+	state.progress++
+	state.mu.Unlock()
+
+	select {
+	case got := <-done:
+		if got != outboundStalled {
+			t.Fatalf("result = %d, want outboundStalled after the second idle window", got)
+		}
+		// Timers never fire early, so this lower bound holds under any load.
+		if elapsed := time.Since(start); elapsed < 2*stall {
+			t.Fatalf("stalled after %v, want at least %v: progress did not restart the window", elapsed, 2*stall)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("producer never stalled")
+	}
+}
+
 // While a bulk stream saturates the queue, a ping/pong round trip and a small
 // concurrent request both still complete, and nothing is evicted.
 func TestControlFramesCompleteWhileBulkSaturatesQueue(t *testing.T) {
