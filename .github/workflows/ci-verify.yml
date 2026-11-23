@@ -6,6 +6,12 @@ run-name: >-
     format('CI — {0}', github.ref_name)
   }}
 
+# TODO(ci-tree-receipt): a promotion PR (dev/v1.0 -> main) re-verifies a tree
+# the dev push run already verified. Not implemented here: the tree-receipt
+# action isn't in CodesWhat/.github yet. When it lands, use it to skip that
+# second run while keeping every required context reported (ops standard:
+# standards/ci.md, "Preserve every required context when reducing duplicate or
+# superseded work").
 on:
   push:
     branches: [main, "dev/**"]
@@ -53,10 +59,6 @@ jobs:
   # dev/v1.0) runs in full, since that SHA has never been verified. When the
   # lookup fails the answer is "not covered" and the run does everything.
   #
-  # TODO(ci-tree-receipt): a promotion PR re-verifies a tree the dev push run
-  # already verified. Skip that second run with the tree-receipt action once it
-  # exists in CodesWhat/.github (ops standard: standards/ci.md, "Preserve every
-  # required context when reducing duplicate or superseded work").
   changes:
     name: "Changed Paths"
     runs-on: ubuntu-24.04
