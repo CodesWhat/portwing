@@ -810,11 +810,22 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		c.sendPump(pumpCtx, ctx, conn, sendCh)
 	}()
 
-	// Let adapter handle initial sync (container sync, component sync, etc.).
+	// Let the adapter run its initial sync (container sync, component sync,
+	// etc.) as a task owned by this connection. The full container inspect
+	// behind it can take a long while on a large host, and running it inline
+	// kept the read pump from answering pings and requests until it finished.
+	// The sender is bound to this connection's outbound target, so a task that
+	// outlives the connection can only write to a queue that is already closed,
+	// never to the next connection's. The task runs on pumpCtx and is joined
+	// after the pumps stop, so teardown cancels it and waits for it.
 	sender := c.currentMessageSender()
-	if err := c.adapter.OnConnect(ctx, sender); err != nil {
-		slog.Warn("adapter OnConnect failed", "error", err)
-	}
+	syncDone := make(chan struct{})
+	go func() {
+		defer close(syncDone)
+		if err := c.adapter.OnConnect(pumpCtx, sender); err != nil {
+			slog.Warn("adapter OnConnect failed", "error", err)
+		}
+	}()
 
 	// Send initial metrics.
 	c.sendMetrics()
@@ -835,6 +846,12 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	}()
 
 	wg.Wait()
+
+	// Cancel and join the initial sync. wg.Wait returning means every pump has
+	// stopped, but a sync still blocked on Docker would otherwise run on into
+	// the next connection's lifetime.
+	pumpCancel()
+	<-syncDone
 
 	// Tear down any exec sessions that outlived this connection so they (and
 	// their Docker exec conns) don't leak across reconnects; the next
