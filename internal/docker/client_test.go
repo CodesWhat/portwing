@@ -13,9 +13,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // newTestClient builds a Client whose httpClient and streamClient both route
@@ -126,6 +128,27 @@ func TestNewClientEmptySocketPath(t *testing.T) {
 	_, err := NewClient("", 10)
 	if err == nil {
 		t.Fatal("NewClient with empty socket path: expected error, got nil")
+	}
+}
+
+// ---- NewClient: idle connection reaping ----
+
+func TestNewClientTransportsCloseIdleConnections(t *testing.T) {
+	t.Parallel()
+
+	c, err := NewClient(filepath.Join(t.TempDir(), "missing.sock"), 1)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	for name, hc := range map[string]*http.Client{"request": c.httpClient, "stream": c.streamClient} {
+		tr, ok := hc.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("%s transport is %T, want *http.Transport", name, hc.Transport)
+		}
+		if tr.IdleConnTimeout != 90*time.Second {
+			t.Errorf("%s transport IdleConnTimeout = %v, want 90s", name, tr.IdleConnTimeout)
+		}
 	}
 }
 
