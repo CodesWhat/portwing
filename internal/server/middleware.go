@@ -684,11 +684,16 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			// compose request that declares more (bounded agent-wide by
 			// largeSignedBodySlots); MaxBytesReader also closes the connection
 			// on overflow, preventing slow-drip memory exhaustion.
-			var releaseLarge func()
 			releasePreAuth, admitted := rl.admitPreAuth(w, r, clientIP, auditor, reg)
 			if !admitted {
 				return
 			}
+			// The per-source pre-auth slot covers only the read and verify
+			// phase, so it is released as soon as verification ends. The
+			// large-body slot is different: it bounds resident memory, and the
+			// buffered body stays referenced by the request until the
+			// downstream handler returns, so that slot is held for the whole
+			// request.
 			defer releasePreAuth()
 			var body []byte
 			if r.Body != nil {
@@ -696,7 +701,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				if wantsLargeSignedBody(r) {
 					select {
 					case largeSignedBodySlots <- struct{}{}:
-						releaseLarge = func() { <-largeSignedBodySlots }
+						defer func() { <-largeSignedBodySlots }()
 						limit = maxSignedComposeBodyBytes
 					default:
 						w.Header().Set("Retry-After", "1")
@@ -715,9 +720,6 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				}
 				var err error
 				body, err = io.ReadAll(r.Body)
-				if releaseLarge != nil {
-					releaseLarge()
-				}
 				if closeErr := r.Body.Close(); closeErr != nil {
 					slog.Warn("closing request body", "error", closeErr)
 				}

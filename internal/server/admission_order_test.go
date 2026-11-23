@@ -470,3 +470,94 @@ func TestRateLimiterLockedOut(t *testing.T) {
 		t.Fatal("untrackable source (table full) must count as locked out")
 	}
 }
+
+// Not parallel: it uses the package-level largeSignedBodySlots.
+func TestEd25519ComposeLargeSlotHeldUntilHandlerReturns(t *testing.T) {
+	ed, priv := setupEd25519(t)
+	rl := NewRateLimiter()
+	defer rl.Stop()
+	t.Cleanup(func() {
+		for len(largeSignedBodySlots) > 0 {
+			<-largeSignedBodySlots
+		}
+	})
+
+	entered := make(chan struct{}, maxLargeSignedBodies+1)
+	release := make(chan struct{}, maxLargeSignedBodies+1)
+	h := rl.AuthMiddlewareWithEd25519(nil, ed, noAudit(t), nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		entered <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	var wg sync.WaitGroup
+	codes := make(chan int, maxLargeSignedBodies)
+	for i := 0; i < maxLargeSignedBodies; i++ {
+		req := signedComposeRequest(t, priv, 20<<20)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			codes <- rec.Code
+		}()
+	}
+	for i := 0; i < maxLargeSignedBodies; i++ {
+		select {
+		case <-entered:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d handlers entered", i)
+		}
+	}
+
+	// Every handler is past verification and still running, so the buffers
+	// are still resident and a fifth large body must be turned away.
+	blocked := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, signedComposeRequest(t, priv, 20<<20))
+		blocked <- rec.Code
+	}()
+	select {
+	case code := <-blocked:
+		if code != http.StatusServiceUnavailable {
+			t.Fatalf("fifth large body while four handlers run: status %d, want 503", code)
+		}
+	case <-time.After(10 * time.Second):
+		for i := 0; i <= maxLargeSignedBodies; i++ {
+			release <- struct{}{}
+		}
+		t.Fatal("fifth large body was admitted while four handlers still held their buffers")
+	}
+
+	release <- struct{}{}
+	deadline := time.After(10 * time.Second)
+	for len(largeSignedBodySlots) == maxLargeSignedBodies {
+		select {
+		case <-deadline:
+			t.Fatal("slot not freed after a handler returned")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	fifth := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, signedComposeRequest(t, priv, 20<<20))
+		fifth <- rec.Code
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("fifth request did not proceed after a slot was released")
+	}
+	for i := 0; i < maxLargeSignedBodies; i++ {
+		release <- struct{}{}
+	}
+	wg.Wait()
+	if code := <-fifth; code != http.StatusOK {
+		t.Fatalf("fifth request after release: status %d, want 200", code)
+	}
+}
