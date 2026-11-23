@@ -153,10 +153,13 @@ function assertReusableCaller(source) {
   assert.ok(jobSection(source, "codeql"), "CodeQL must remain local to preserve its category");
   assert.ok(jobSection(source, "dependency-review"), "dependency review must remain local");
 
-  const inventory = go.match(/&& '([^'\n]+)' \|\| '\[\]'/u)?.[1];
-  assert.ok(inventory, "go-ci must keep its conditional fuzz inventory in the caller");
+  assert.match(
+    go,
+    /^ {6}fuzzers-json: \$\{\{ needs\.changes\.outputs\.fuzzers_json \|\| '\[\]' \}\}$/mu,
+    "go-ci must take its fuzz list from the changes job",
+  );
   assert.deepEqual(
-    JSON.parse(inventory),
+    JSON.parse(fs.readFileSync(path.join(ROOT, ".github", "ci-fuzzers.json"), "utf8")),
     FUZZERS.map(([name, pkg]) => ({ name, pkg })),
   );
 

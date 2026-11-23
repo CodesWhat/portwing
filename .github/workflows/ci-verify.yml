@@ -66,6 +66,7 @@ jobs:
       pull-requests: read
     outputs:
       push_covered: ${{ steps.covered.outputs.push_covered }}
+      fuzzers_json: ${{ steps.fuzzers.outputs.fuzzers_json }}
     steps:
       # Audit mode: block mode intermittently refused allow-listed hosts on hosted runners (DEP-19). Release workflows keep block.
       - name: Harden Runner
@@ -99,6 +100,46 @@ jobs:
           esac
           echo "push_covered=${covered}" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0  # need base-branch history to diff a PR against it
+
+      # A PR fuzzes only the fuzzers whose package, or a package that one
+      # imports, it touches. The weekly schedule and pushes to main run the
+      # whole list, and so do the nightly and monthly fuzz workflows. The list
+      # lives in .github/ci-fuzzers.json; the selection is
+      # scripts/ci/select-fuzzers.sh. Fuzz job names are not required
+      # contexts, so an empty list needs no skipped-green reporting: the Go
+      # Fuzz matrix just has no legs.
+      - name: Select fuzzers
+        id: fuzzers
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -uo pipefail
+          # No `-e`: a failed selection must fall back to the full list.
+          list=.github/ci-fuzzers.json
+
+          if [ "${EVENT_NAME}" = "schedule" ] || { [ "${EVENT_NAME}" = "push" ] && [ "${REF}" = "refs/heads/main" ]; }; then
+            echo "fuzzers_json=$(jq -c . "${list}")" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
+            echo "fuzzers_json=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git fetch --quiet origin "${BASE_REF}" || ! selected="$(bash scripts/ci/select-fuzzers.sh "origin/${BASE_REF}" "${list}")" || [ -z "${selected}" ]; then
+            echo "::warning::changes: could not select fuzzers, running every fuzzer"
+            selected="$(jq -c . "${list}")"
+          fi
+          echo "fuzzers_json=${selected}" >> "$GITHUB_OUTPUT"
+
   go-ci:
     name: "Go CI"
     needs: changes
@@ -115,8 +156,12 @@ jobs:
       go-cache-dependency-path: go.sum
       test-check-name: Build & Test
       lint-check-name: Lint
-      fuzzers-json: >-
-        ${{ (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && '[{"name":"FuzzParsePHC","pkg":"./internal/server/"},{"name":"FuzzParseTrustedProxies","pkg":"./internal/server/"},{"name":"FuzzParseImageRef","pkg":"./internal/adapter/"},{"name":"FuzzParseLabels","pkg":"./internal/adapter/drydock/"},{"name":"FuzzMCPHandler","pkg":"./internal/mcp/"},{"name":"FuzzEnvelope","pkg":"./internal/protocol/"},{"name":"FuzzVerifyRequest","pkg":"./internal/auth/"},{"name":"FuzzDecodeContainerLogStream","pkg":"./internal/docker/"},{"name":"FuzzComposeRequestValidate","pkg":"./internal/docker/"},{"name":"FuzzParseKeyLine","pkg":"./internal/auth/"},{"name":"FuzzEdgeRequestPath","pkg":"./internal/edge/"}]' || '[]' }}
+      # An empty list produces no matrix jobs at all: go-ci.yml's fuzz job is
+      # gated on `fromJSON(inputs.fuzzers-json)[0] != null`. The changes job
+      # picks the list (see "Select fuzzers"). If it fails the default is an
+      # empty list, and the nightly and monthly fuzz workflows still run it
+      # all. None of these is a required context.
+      fuzzers-json: ${{ needs.changes.outputs.fuzzers_json || '[]' }}
       run-govulncheck: true
       run-qlty: ${{ github.event_name != 'schedule' }}
       run-goreleaser: ${{ github.event_name != 'schedule' }}
