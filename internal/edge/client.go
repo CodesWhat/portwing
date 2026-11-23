@@ -1816,7 +1816,9 @@ func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.Reques
 	}
 
 	outcome := audit.OutcomeAllowed
-	if !resp.Success {
+	if resp.Cancelled {
+		outcome = audit.OutcomeCancelled
+	} else if !resp.Success {
 		outcome = audit.OutcomeError
 	}
 	c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, outcome, target.auditKeyID())

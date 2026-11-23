@@ -92,6 +92,9 @@ const (
 	OutcomeAllowed = "allowed"
 	OutcomeDenied  = "denied"
 	OutcomeError   = "error"
+	// OutcomeCancelled marks an operation whose request ended before it
+	// finished, such as a compose deploy stopped by a client disconnect.
+	OutcomeCancelled = "cancelled"
 )
 
 // Option adjusts an audit record before it is written.

@@ -61,7 +61,7 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 | `actor` | string | Client IP address or edge peer URL |
 | `method` | string | HTTP method or message type; only present on `api_request`, `auth_failure`, and `rate_limited` events |
 | `path` | string | HTTP path or message path; only present on `api_request`, `auth_failure`, and `rate_limited` events |
-| `outcome` | string | One of `allowed`, `denied`, or `error` |
+| `outcome` | string | One of `allowed`, `denied`, `error`, or `cancelled` (a compose operation whose request ended before it finished) |
 | `status` | integer | HTTP status code; omitted when not applicable |
 | `duration_ms` | float | Request duration in milliseconds; omitted when not measured |
 

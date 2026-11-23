@@ -117,3 +117,29 @@ func TestTypedExecBringUpFailureKeepsAdmissionKeyID(t *testing.T) {
 		t.Fatalf("api_request records = %+v, want one with key_id %q", recs, keyA)
 	}
 }
+
+type cancelledCompose struct{}
+
+func (cancelledCompose) Execute(context.Context, docker.ComposeRequest) (*docker.ComposeResponse, error) {
+	return &docker.ComposeResponse{Cancelled: true, Error: "signal: terminated"}, nil
+}
+
+// A deploy stopped by a dropped tunnel is audited as cancelled, not error.
+func TestEdgeComposeCancelledAudits(t *testing.T) {
+	t.Parallel()
+	c, logger, _ := newAuditedTestClient(t)
+	c.compose = cancelledCompose{}
+
+	body, err := json.Marshal(docker.ComposeRequest{Operation: "up", StackName: "app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.handleRequest(context.Background(), protocol.RequestMessage{
+		RequestID: "compose-cancel", Method: http.MethodPost, Path: "/_portwing/compose", Body: body,
+	})
+
+	recs := recordsOfEvent(logger, audit.EventComposeOp)
+	if len(recs) != 1 || recs[0].Outcome != audit.OutcomeCancelled {
+		t.Fatalf("compose_op records = %+v, want one with outcome %q", recs, audit.OutcomeCancelled)
+	}
+}

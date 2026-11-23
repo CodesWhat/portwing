@@ -644,7 +644,9 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 	}
 
 	outcome := audit.OutcomeAllowed
-	if !resp.Success {
+	if resp.Cancelled {
+		outcome = audit.OutcomeCancelled
+	} else if !resp.Success {
 		outcome = audit.OutcomeError
 	}
 	s.auditor.ComposeOp(actor, req.Operation, req.StackName, outcome, auditKeyID(r))
