@@ -11,3 +11,11 @@
 2	IGNORE	(Private IP Disclosure: both hits are fabricated — the CIDR example `10.0.0.0/8,172.16.0.0/12` in /docs/configuration's reverse-proxy docs, and `10.0.0.42` inside the bundled mock data for the site's interactive audit-log demo widget, the same fabricated-placeholder pattern already documented for the demo API key in CHANGELOG.md)
 90003	IGNORE	(Sub Resource Integrity Attribute Missing: every script/link on the site is same-origin, self-hosted Next.js static output already covered by a hash-pinned script-src CSP; SRI adds no protection same-origin and there are no third-party CDN scripts)
 90004	IGNORE	(Cross-Origin-Embedder-Policy Header Missing or Invalid: the site uses no SharedArrayBuffer or other cross-origin-isolation-dependent feature that COEP/COOP would gate)
+# 90022 Application Error Disclosure, scoped to /docs/drydock-integration only (OUTOFSCOPE is
+# ZAP's per-URL exclusion; the regex is matched against the URL from the start). ZAP's evidence
+# was the literal string "internal error" (run 43914276326, the only instance, 200 OK). It comes
+# from docs/content/docs/current/drydock-integration.mdx lines 428 and 433, which document the
+# fixed, sanitised reason `exec start failed: internal error`. That is prose describing a
+# deliberate protocol string, not a stack trace or framework error. Not ignored globally, so a
+# real error page anywhere else still fails.
+90022	OUTOFSCOPE	https://portwing\.codeswhat\.com/docs/drydock-integration$
