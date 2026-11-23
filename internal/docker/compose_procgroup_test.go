@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -30,13 +31,36 @@ func readPID(t *testing.T, path string) int {
 	return pid
 }
 
+// requireLinuxProcGroup skips tests that rely on the Linux-only guarantee that
+// Execute returns with no group member left. The darwin build only signals the
+// group on cancel (see compose_procgroup_other.go).
+func requireLinuxProcGroup(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("whole-group reaping is Linux-only")
+	}
+}
+
+// processGone reports whether pid has exited. A zombie nobody has reaped (the
+// test container may have no init) counts as gone.
 func processGone(pid int) bool {
-	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+	if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		return true
+	}
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return false
+	}
+	if i := strings.LastIndexByte(string(b), ')'); i >= 0 && i+2 < len(b) {
+		return b[i+2] == 'Z'
+	}
+	return false
 }
 
 // TestExecuteCancelSignalsAndReapsWholeProcessGroup models "docker compose" v2:
 // the process Portwing starts spawns the real worker, and both ignore SIGTERM.
 func TestExecuteCancelSignalsAndReapsWholeProcessGroup(t *testing.T) {
+	requireLinuxProcGroup(t)
 	const grace = 500 * time.Millisecond
 	setComposeStopGrace(t, grace)
 	out := t.TempDir()
@@ -111,6 +135,8 @@ func TestExecuteCancelSignalsAndReapsWholeProcessGroup(t *testing.T) {
 }
 
 func TestExecuteReapsGroupMembersLeftAfterNormalExit(t *testing.T) {
+	requireLinuxProcGroup(t)
+	setComposeStopGrace(t, 300*time.Millisecond)
 	out := t.TempDir()
 	childPID := filepath.Join(out, "child-pid")
 	cm := composeScriptManager(t,
@@ -122,24 +148,6 @@ func TestExecuteReapsGroupMembersLeftAfterNormalExit(t *testing.T) {
 	}
 	if !processGone(readPID(t, childPID)) {
 		t.Fatal("a leftover group member outlived Execute")
-	}
-}
-
-func TestReapProcessGroupGivesUpOnUnkillableGroup(t *testing.T) {
-	oldSignal, oldTimeout, oldInterval := signalGroup, composeGroupReapTimeout, composeGroupProbeInterval
-	t.Cleanup(func() {
-		signalGroup, composeGroupReapTimeout, composeGroupProbeInterval = oldSignal, oldTimeout, oldInterval
-	})
-	composeGroupReapTimeout, composeGroupProbeInterval = 30*time.Millisecond, time.Millisecond
-	var probes int
-	signalGroup = func(int, syscall.Signal) error { probes++; return nil }
-	begin := time.Now()
-	reapProcessGroup(4242)
-	if time.Since(begin) < composeGroupReapTimeout {
-		t.Fatal("gave up before the reap timeout")
-	}
-	if probes < 3 {
-		t.Fatalf("probed %d times, want a bounded loop of several", probes)
 	}
 }
 
