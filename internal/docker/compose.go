@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -446,9 +445,10 @@ func (cm *ComposeManager) Execute(ctx context.Context, req ComposeRequest) (*Com
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	// Run returns only once the subprocess has exited, so the per-stack lock
-	// stays held until then even when the request is cancelled.
-	err = cmd.Run()
+	// The run returns only once the subprocess and its whole process group are
+	// gone, so the per-stack lock stays held until then even when the request
+	// is cancelled.
+	err = runInProcessGroup(cmd)
 	cancelled := err != nil && ctx.Err() != nil
 
 	output := stdout.buf.String()
@@ -1091,10 +1091,9 @@ func (cm *ComposeManager) buildCommand(ctx context.Context, req ComposeRequest) 
 	// #nosec G204 -- compose binary is detected locally and args are built from validated request fields without shell expansion.
 	cmd := exec.CommandContext(ctx, cm.composeBin, args...)
 	cmd.Dir = projectDir
-	// A dropped tunnel or client must not SIGKILL a half-finished deploy: ask
-	// compose to stop with SIGTERM and only kill it after the grace period.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = composeStopGrace
+	// Execute runs it through runInProcessGroup: a dropped tunnel or client
+	// must not SIGKILL a half-finished deploy, so the whole process group gets
+	// SIGTERM and is only killed after composeStopGrace.
 	return cmd, nil
 }
 
