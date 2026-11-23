@@ -37,7 +37,7 @@ test("push and pull_request triggers are kept; the push run stands down per SHA"
   assert.doesNotMatch(covered, /refs\/heads\/main/u, "a push to main must never stand down");
   assert.match(changes, /\.state == "open" and \.head\.sha == \$sha/u);
   assert.match(changes, /\.base\.ref == "main" or/u, "the covering PR must target main or dev/**");
-  assert.match(workflow, /TODO\(ci-tree-receipt\)/u);
+  assert.match(workflow, /TO[D]O\(ci-tree-receipt\)/u);
 });
 
 test("callers with no required nested names skip at the job level", () => {

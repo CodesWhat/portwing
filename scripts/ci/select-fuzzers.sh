@@ -17,19 +17,19 @@ list_path="${2:?usage: select-fuzzers.sh <base-ref> <fuzzer-list.json>}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 full_list() {
-  jq -c . "${list_path}"
+	jq -c . "${list_path}"
 }
 
 fail_open() {
-  echo "::warning::select-fuzzers: $1, running every fuzzer" >&2
-  full_list
-  exit 0
+	echo "::warning::select-fuzzers: $1, running every fuzzer" >&2
+	full_list
+	exit 0
 }
 
 # Validate the list up front; without it there is nothing to select from.
 jq -e 'type == "array"' "${list_path}" >/dev/null || {
-  echo "::error::select-fuzzers: ${list_path} is not a readable JSON array" >&2
-  exit 1
+	echo "::error::select-fuzzers: ${list_path} is not a readable JSON array" >&2
+	exit 1
 }
 
 # -z: NUL-separated, unquoted paths. Without it git C-quotes non-ASCII names
@@ -37,21 +37,21 @@ jq -e 'type == "array"' "${list_path}" >/dev/null || {
 changed_file="$(mktemp)"
 trap 'rm -f "${changed_file}"' EXIT
 if ! git diff -z --no-renames --name-only "${base_ref}...HEAD" >"${changed_file}" 2>/dev/null; then
-  fail_open "git diff against ${base_ref} failed"
+	fail_open "git diff against ${base_ref} failed"
 fi
 [ -s "${changed_file}" ] || fail_open "empty diff against ${base_ref}"
 
 while IFS= read -r -d '' file; do
-  case "${file}" in
-    go.mod | go.sum | .github/workflows/ci-verify.yml | .github/ci-fuzzers.json | scripts/ci/*)
-      echo "select-fuzzers: ${file} affects every fuzzer" >&2
-      full_list
-      exit 0
-      ;;
-  esac
+	case "${file}" in
+	go.mod | go.sum | .github/workflows/ci-verify.yml | .github/ci-fuzzers.json | scripts/ci/*)
+		echo "select-fuzzers: ${file} affects every fuzzer" >&2
+		full_list
+		exit 0
+		;;
+	esac
 done <"${changed_file}"
 
 if ! selected="$(python3 -I "${here}/select-fuzzers.py" "${list_path}" "$(pwd)" <"${changed_file}")"; then
-  fail_open "could not build the import graph with go list"
+	fail_open "could not build the import graph with go list"
 fi
 echo "${selected}"
