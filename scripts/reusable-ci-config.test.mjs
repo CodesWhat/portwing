@@ -155,8 +155,8 @@ function assertReusableCaller(source) {
 
   assert.match(
     go,
-    /^ {6}fuzzers-json: \$\{\{ needs\.changes\.outputs\.fuzzers_json \|\| '\[\]' \}\}$/mu,
-    "go-ci must take its fuzz list from the changes job",
+    /^ {6}fuzzers-json: >-\n {8}\$\{\{ \(needs\.changes\.result == 'success' && needs\.changes\.outputs\.fuzzers_json\) \|\|/mu,
+    "go-ci must take its fuzz list from the changes job and fail toward the full list",
   );
   assert.deepEqual(
     JSON.parse(fs.readFileSync(path.join(ROOT, ".github", "ci-fuzzers.json"), "utf8")),

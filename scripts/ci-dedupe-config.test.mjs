@@ -46,19 +46,83 @@ test("callers with no required nested names skip at the job level", () => {
   }
 });
 
-test("required direct jobs never skip at the job level, so they report success", () => {
-  for (const id of ["codeql", "website-browser-checks"]) {
+test("required direct jobs run in full: no job-level or step-level standing down", () => {
+  for (const id of ["codeql", "website-browser-checks", "secrets", "dependency-review"]) {
     const job = jobSection(workflow, id);
-    assert.doesNotMatch(jobLevelIf(job), /push_covered/u, `${id} job-level skip would report SKIPPED`);
-    assert.match(jobLevelIf(job), /!cancelled\(\)/u, `${id} must still run if changes fails`);
-    assert.match(job, /^ {8}if: needs\.changes\.outputs\.push_covered != 'true'$/mu, id);
+    assert.doesNotMatch(job, /push_covered/u, `${id} must not stand down on a covered push`);
+    assert.doesNotMatch(job, /^ {4}needs:/mu, `${id} must not wait on the changes job`);
+    assert.doesNotMatch(jobLevelIf(job), /cancelled/u, id);
   }
-  for (const id of ["secrets", "dependency-review"]) {
-    assert.doesNotMatch(jobSection(workflow, id), /push_covered/u, `${id} stays cheap and unconditional`);
-  }
+  assert.equal(jobLevelIf(jobSection(workflow, "website-browser-checks")), "github.event_name != 'schedule'");
   assert.equal(
     jobLevelIf(jobSection(workflow, "release-contract")),
     "",
     "Release Contract carries no if: condition",
+  );
+});
+
+test("only caller jobs that post no required nested name stand down", () => {
+  const required = [
+    "Go CI / Build & Test",
+    "Go CI / Lint",
+    "Go CI / Govulncheck",
+    "Go CI / Workflow Security",
+    "Go CI / Commit Message",
+    "Go CI / GoReleaser Config",
+    "Go CI / Qlty Check",
+    "Security: Secrets",
+    "Dependency Review",
+    "CodeQL Analysis",
+    "Security: Gosec SAST",
+    "Security: Grype Dependency Scan (Go + npm)",
+    "Release Contract",
+    "Website Browser Checks",
+    "codecov/patch",
+  ];
+  const standDown = [];
+  for (const match of workflow.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gmu)) {
+    if (/push_covered != 'true'/u.test(jobLevelIf(jobSection(workflow, match[1])))) {
+      standDown.push(match[1]);
+    }
+  }
+  assert.deepEqual(standDown.sort(), ["codecov", "go-ci", "node-ci"]);
+  // Their own names are not required contexts; a skipped caller posts only these.
+  for (const name of ["Go CI", "Node CI", "Coverage: Codecov Upload"]) {
+    assert.ok(!required.includes(name), `${name} must not be a required context`);
+  }
+});
+
+function fuzzersJson({ result, output, event, ref }) {
+  const body = workflow.match(/^ {6}fuzzers-json: >-\n {8}\$\{\{ (.*) \}\}$/mu)?.[1];
+  assert.ok(body, "fuzzers-json expression not found");
+  const evaluate = new Function("needs", "github", `return (${body});`);
+  return evaluate(
+    { changes: { result, outputs: { fuzzers_json: output } } },
+    { event_name: event, ref },
+  );
+}
+
+test("fuzzers-json fails toward the full list, never toward empty", () => {
+  const full = JSON.stringify(
+    JSON.parse(fs.readFileSync(path.join(ROOT, ".github/ci-fuzzers.json"), "utf8")),
+  );
+  const selected = '[{"name":"FuzzEnvelope","pkg":"./internal/protocol/"}]';
+  const fuzzing = [
+    ["pull_request", "refs/pull/1/merge"],
+    ["schedule", "refs/heads/main"],
+    ["push", "refs/heads/main"],
+  ];
+  for (const [event, ref] of fuzzing) {
+    for (const result of ["failure", "cancelled", "skipped"]) {
+      assert.equal(fuzzersJson({ result, output: "", event, ref }), full, `${event} ${result}`);
+    }
+    assert.equal(fuzzersJson({ result: "success", output: "", event, ref }), full, `${event} empty`);
+    assert.equal(fuzzersJson({ result: "success", output: selected, event, ref }), selected);
+    assert.equal(fuzzersJson({ result: "success", output: "[]", event, ref }), "[]");
+  }
+  assert.equal(
+    fuzzersJson({ result: "failure", output: "", event: "push", ref: "refs/heads/dev/v1.0" }),
+    "[]",
+    "a dev push fuzzes nothing even when changes failed",
   );
 });

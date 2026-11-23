@@ -1180,11 +1180,8 @@ website_browser_if_lines="$(awk '
 	in_job && /^  [A-Za-z0-9_-]+:/ { in_job = 0 }
 	in_job && /^    if:/ { print }
 ' "${ci_verify_workflow}")"
-# `!cancelled()` keeps the required context reporting when the changes job
-# fails. Nothing else may gate the job: a job-level skip on a push run covered
-# by a PR run would report SKIPPED under this required name.
-if [ "${website_browser_if_lines}" != "    if: \${{ !cancelled() && github.event_name != 'schedule' }}" ]; then
-	echo "FAIL: the website-browser-checks job in ci-verify.yml must have exactly one job-level 'if: \${{ !cancelled() && github.event_name != 'schedule' }}' and no other condition (found: ${website_browser_if_lines:-none})" >&2
+if [ "${website_browser_if_lines}" != "    if: github.event_name != 'schedule'" ]; then
+	echo "FAIL: the website-browser-checks job in ci-verify.yml must have exactly one job-level 'if: github.event_name != 'schedule'' and no other condition (found: ${website_browser_if_lines:-none})" >&2
 	failures=$((failures + 1))
 fi
 
