@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Edge mode's WebSocket client moves to gorilla/websocket commit d67f41855da4 (pseudo-version v1.5.4-0.20240701034025) for GO-2026-6278 / GHSA-w67g-5rqw-f597: v1.5.3 generated frame mask keys from a weak PRNG. No tagged release carries the fix yet.
+- `golang.org/x/net` moves to v0.63.0 in the agent and in the bundled Docker Compose plugin (now `v5.5.1-portwing.7`) for GO-2026-6860 and GO-2026-6866.
 - The auth rate limiter keys IPv6 sources by /64 prefix, so rotating through addresses in one /64 no longer earns a fresh failure budget per address. IPv4 and IPv4-mapped IPv6 stay per address. Once 10,000 sources are tracked, untracked sources are now refused with 429 instead of bypassing the limiter; tracked sources keep working. Shared-secret tokens should be high-entropy; see SECURITY.md.
 
 ## [v1.4.3] - 2026-11-21
