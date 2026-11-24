@@ -13,7 +13,7 @@ seed_fixture() {
 	cp scripts/fuzz-tier-config-test.sh "${fixture}/scripts/"
 	cp scripts/ci/go-fuzz.sh scripts/ci/fuzz-run.sh scripts/ci/fuzz-replay.sh "${fixture}/scripts/ci/"
 	cp lefthook.yml "${fixture}/"
-	cp .github/workflows/ci-verify.yml "${fixture}/.github/workflows/"
+	cp .github/ci-fuzzers.json "${fixture}/.github/"
 	cp .github/workflows/quality-fuzz-nightly.yml "${fixture}/.github/workflows/"
 	cp .github/workflows/quality-fuzz-monthly.yml "${fixture}/.github/workflows/"
 	cp .clusterfuzzlite/build.sh "${fixture}/.clusterfuzzlite/"
@@ -48,9 +48,9 @@ expect_pass "valid fuzz tier fixture must pass"
 
 seed_fixture
 awk '
-	/FuzzParseKeyLine \.\/internal\/auth\/"; do/ {
-		print "        # \"FuzzParseKeyLine ./internal/auth/\""
-		print "          \"FuzzUnrelated ./internal/auth/\"; do"
+	/FuzzEdgeRequestPath \.\/internal\/edge\/"; do/ {
+		print "        # \"FuzzEdgeRequestPath ./internal/edge/\""
+		print "          \"FuzzUnrelated ./internal/edge/\"; do"
 		next
 	}
 	{ print }
@@ -59,8 +59,8 @@ mv "${fixture}/lefthook.yml.tmp" "${fixture}/lefthook.yml"
 expect_fail "a comment outside the Lefthook entry list must not satisfy the contract"
 
 seed_fixture
-sed 's|"pkg":"./internal/auth/"|"pkg":"X/internal/auth/"|' \
-	.github/workflows/ci-verify.yml >"${fixture}/.github/workflows/ci-verify.yml"
+sed 's|"pkg": "./internal/auth/"|"pkg": "X/internal/auth/"|' \
+	.github/ci-fuzzers.json >"${fixture}/.github/ci-fuzzers.json"
 expect_fail "a malformed workflow mapping must not satisfy the contract"
 
 # --- Seed corpus (PW-2.1) ---------------------------------------------------
@@ -586,7 +586,7 @@ grep -v '^build_fuzzer internal/auth FuzzParseKeyLine$' \
 expect_fail "a fuzzer missing from .clusterfuzzlite/build.sh must not satisfy the contract"
 
 seed_fixture
-# An eleventh target built for libFuzzer that no other tier runs. Every
+# An extra target built for libFuzzer that no other tier runs. Every
 # per-fuzzer check still passes; only the count notices.
 {
 	cat .clusterfuzzlite/build.sh

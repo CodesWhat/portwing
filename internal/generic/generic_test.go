@@ -891,3 +891,22 @@ func TestEventSSEWritesWellFormedEvent(t *testing.T) {
 		t.Fatal("expected ts to be set")
 	}
 }
+
+func TestRefreshContainersThenNotifiesWithTheDiff(t *testing.T) {
+	t.Parallel()
+
+	client, _, shutdown := newTestDockerClient(t)
+	defer shutdown()
+
+	a := New(client, "test-agent")
+	var gotAdded int
+	err := a.RefreshContainersThen(context.Background(), func(added, _, _ []adapterpkg.Container) {
+		gotAdded = len(added)
+	})
+	if err != nil {
+		t.Fatalf("RefreshContainersThen: %v", err)
+	}
+	if gotAdded == 0 {
+		t.Fatal("notify saw no added container on the first refresh")
+	}
+}

@@ -80,8 +80,8 @@ jobs:
     # low-CPU jobs survive for hours. Measured repeatedly against this job on
     # 2026-09-03/04: a 25-minute sustained-CPU probe survived 10/10, but two
     # runs at the old hour-long budget both died mid-run. 600s total (60s
-    # per fuzzer across the ten targets) keeps the image pull, the toolchain
-    # download, ten libFuzzer builds, the fuzzing itself and the corpus push
+    # per fuzzer across the eleven targets) keeps the image pull, the toolchain
+    # download, eleven libFuzzer builds, the fuzzing itself and the corpus push
     # comfortably under that ceiling.
     timeout-minutes: 20
 
@@ -136,7 +136,7 @@ jobs:
         env:
           LANGUAGE: go
           GITHUB_TOKEN: ${{ github.token }}
-          # 600s total, split across the ten targets by run_fuzzers.py (60s
+          # 600s total, split across the eleven targets by run_fuzzers.py (60s
           # each). See the job's timeout-minutes comment above for why.
           FUZZ_SECONDS: "600"
           MODE: batch

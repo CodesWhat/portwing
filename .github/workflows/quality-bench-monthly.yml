@@ -22,7 +22,7 @@ run-name: >-
 # The design choices are not obvious, so:
 #
 # * Where the baseline lives. It is the `benchmark-results.txt` artifact of an
-#   earlier successful run of this same workflow, fetched with `gh run
+#   earlier completed run of this same workflow, fetched with `gh run
 #   download`. The alternative — a rolling baseline file the lane commits — puts
 #   a cron job in the business of writing to the repository, which the house
 #   rules forbid: committed generated artifacts regenerate at a release cut,
@@ -38,7 +38,7 @@ run-name: >-
 #   (goos/goarch/pkg/cpu) and will not compare across groups, so a run on a
 #   different CPU model produces no comparison at all rather than a bogus one.
 #   GitHub-hosted runners rotate between AMD and Intel SKUs, so the lane walks
-#   back through recent successful runs and uses the newest one whose hardware
+#   back through recent completed runs and uses the newest one whose hardware
 #   matches. If none matches it warns and does not gate, because a
 #   cross-hardware delta measures Azure's fleet, not this repository.
 #
@@ -56,10 +56,24 @@ run-name: >-
 #   change is often more than 10%, so a percentage threshold says nothing useful
 #   about it. Gating allocs/op wants an absolute rule this lane does not have.
 #
-# An intended slowdown would otherwise keep the lane red forever, since the next
-# run compares against the last run that passed. Dispatching with
-# `accept_new_baseline` skips the comparison once and lets that run become the
-# baseline.
+# Why the scheduled run failed while the dispatched one passed (2026-10-01 and
+# 2026-11-01 red, 2026-10-02 and 2026-11-02 green). The two were never the same
+# check. Each green dispatch was an `accept_new_baseline` run, which skips the
+# comparison, so it could not fail. Each red schedule ran the real gate against
+# that frozen dispatch baseline and found real changes merged since (the MCP
+# protocol work in October; the #415 X-Forwarded-For merge in November, which
+# took ClientIP/trusted_proxy_xff_chain from 1 to 2 allocs/op) plus
+# shared-runner noise just over 10% (Argon2id verify +10.56%, with no code
+# change). A regressed run was never eligible as a baseline, so the baseline
+# stayed frozen and every later scheduled run failed against it until someone
+# dispatched `accept_new_baseline` by hand. The fix is two parts: a run whose
+# gate verdict was recorded is a valid baseline even when it failed, so a step
+# change turns the lane red once and the next run compares against the new
+# numbers; and the threshold moves from 10% to 15%, above the noise seen between
+# runs of unchanged code and below every real regression seen so far (25-52%).
+#
+# `accept_new_baseline` stays for an intended slowdown you want recorded without
+# a red run first.
 #
 # Results and the comparison upload as an artifact (90-day retention) and the
 # comparison is written into the run summary, so a regression is visible without
@@ -84,7 +98,7 @@ env:
   # module pseudo-version. Roll it deliberately; never track a branch.
   BENCHSTAT_VERSION: v0.0.0-20260825160852-19be9d8e6c70
   # Gate tunables. Reasoning for the values is in the design notes above.
-  BENCH_REGRESSION_THRESHOLD_PERCENT: '10'
+  BENCH_REGRESSION_THRESHOLD_PERCENT: '15'
   BENCH_GATED_UNITS: "sec/op,B/op"
   BENCH_BASELINE_MAX_CANDIDATES: '6'
 
@@ -162,20 +176,30 @@ jobs:
           if [ -z "${baseline_ref}" ]; then
             baseline_ref="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')"
           fi
-          # Successful runs of this workflow, newest first. The current run is
-          # still in progress, so it can never select itself, and a run that
-          # failed on a regression is never adopted as a baseline.
+          # Completed runs of this workflow, newest first. The current run is
+          # still in progress, so it can never select itself. A run that failed
+          # the regression gate is a valid baseline: if it were not, one real
+          # step change would pin the baseline in the past and fail every
+          # scheduled run after it. Only a failure that recorded a gate verdict
+          # (bench-comparison.md exists) counts; a run that died mid-benchmark
+          # or on a runner shutdown has partial numbers and is skipped.
           runs="$(gh run list \
             --workflow quality-bench-monthly.yml \
             --branch "${baseline_ref}" \
-            --status success \
+            --status completed \
             --limit "${BENCH_BASELINE_MAX_CANDIDATES}" \
-            --json databaseId,createdAt,headSha \
-            --jq '.[] | "\(.databaseId)\t\(.createdAt) \(.headSha[0:7])"')"
-          while IFS=$'\t' read -r run_id stamp; do
+            --json databaseId,createdAt,headSha,conclusion \
+            --jq '.[] | select(.conclusion == "success" or .conclusion == "failure") | "\(.databaseId)\t\(.createdAt) \(.headSha[0:7])\t\(.conclusion)"')"
+          while IFS=$'\t' read -r run_id stamp conclusion; do
             [ -n "${run_id}" ] || continue
             if ! gh run download "${run_id}" --dir "baselines/${run_id}" >/dev/null 2>&1; then
               echo "run ${run_id}: no artifact (expired, or the run uploaded none)" >&2
+              continue
+            fi
+            if [ "${conclusion}" = "failure" ] \
+              && [ -z "$(find "baselines/${run_id}" -name bench-comparison.md -print -quit)" ]; then
+              echo "run ${run_id}: failed before the gate recorded a verdict; not a baseline" >&2
+              rm -rf "baselines/${run_id}"
               continue
             fi
             results="$(find "baselines/${run_id}" -name benchmark-results.txt -print -quit)"

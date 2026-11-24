@@ -85,6 +85,20 @@ These metrics are always present and use the `portwing_` prefix.
 Disk metrics (`portwing_host_disk_total_bytes`, `portwing_host_disk_used_bytes`) reflect the filesystem that contains the Docker data root, resolved from the daemon's `/info` rather than assumed to be `/var/lib/docker`. They are omitted when the agent is started with disk collection disabled, when the `statfs` read fails or reports an unusable block size, and when the `/proc` collection pass short-circuits first (`portwing_host_disk_metrics_available 0`).
 </Callout>
 
+### Host metrics inside a container
+
+Portwing reads the host figures from its own process view, so what they mean depends on how the container is started:
+
+| Figures | Source | In a default container |
+|---|---|---|
+| CPU usage, memory, uptime | `/proc/stat`, `/proc/meminfo`, `/proc/uptime` | Host-wide. These files aren't namespaced by Docker, so they're host figures without extra mounts. A runtime that virtualizes `/proc` (LXCFS, gVisor, Kata) reports its own view instead. |
+| Network receive/transmit bytes | `/proc/net/dev` | The container's own network namespace, so on a bridge network these are the container's `eth0` traffic, not the host's NICs. |
+| Disk total/used | `statfs` on the Docker data root reported by the daemon (usually `/var/lib/docker`) | The data root isn't mounted in the container, so the read fails or lands on the container's own filesystem. Failure sets `portwing_host_disk_metrics_available 0` and omits the disk series. |
+
+For host-accurate network figures, run the container with `network_mode: host`. That drops `ports:` publishing, and the listener then binds on the host's own interfaces, so keep TLS on or `BIND_ADDRESS` on loopback. For host-accurate disk figures, bind-mount the data root at the same path, for example `/var/lib/docker:/var/lib/docker:ro`, because Portwing measures the path the daemon reports. That mount gives the agent read access to every container's layers and volumes, so don't add it to a Sockguard-fronted deployment that keeps the agent away from the host filesystem. Set `SKIP_DF_COLLECTION=true` instead if you'd rather not report a disk figure at all.
+
+The bundled compose examples keep the default bridge network and mount neither, so their network figures are the container's and their disk series are unavailable or container-local. Treat them as per-container figures and label dashboards that way, or use `node_exporter` on the host for host NIC and disk numbers.
+
 ### Per-container metrics
 
 These metrics are emitted once per running container and carry `id`, `name`, and `image` labels. They are absent from the output if no containers are running or if Docker is unreachable at scrape time.
@@ -143,7 +157,7 @@ that remains at capacity while the exporter error counter rises.
 ```text
 # HELP portwing_build_info Portwing agent build metadata.
 # TYPE portwing_build_info gauge
-portwing_build_info{version="1.4.3"} 1
+portwing_build_info{version="1.5.0"} 1
 # HELP portwing_uptime_seconds Seconds since the agent started.
 # TYPE portwing_uptime_seconds gauge
 portwing_uptime_seconds 3842.7
@@ -197,7 +211,7 @@ curl http://your-host:3000/health
 Returns HTTP 200 with the full operational shape:
 
 ```json
-{"status":"ok","live":true,"ready":false,"mode":"standard","version":"1.4.3","uptimeSeconds":3842.7,"docker":"unknown","controller":"not_applicable"}
+{"status":"ok","live":true,"ready":false,"mode":"standard","version":"1.5.0","uptimeSeconds":3842.7,"docker":"unknown","controller":"not_applicable"}
 ```
 
 ### GET /ready
@@ -213,13 +227,13 @@ curl http://your-host:3000/ready
 Standard-mode ready response:
 
 ```json
-{"status":"healthy","live":true,"ready":true,"mode":"standard","version":"1.4.3","uptimeSeconds":3842.7,"docker":"connected","controller":"not_applicable"}
+{"status":"healthy","live":true,"ready":true,"mode":"standard","version":"1.5.0","uptimeSeconds":3842.7,"docker":"connected","controller":"not_applicable"}
 ```
 
 Edge-mode not-ready response:
 
 ```json
-{"status":"unhealthy","live":true,"ready":false,"mode":"edge","version":"1.4.3","uptimeSeconds":42.1,"docker":"connected","controller":"disconnected"}
+{"status":"unhealthy","live":true,"ready":false,"mode":"edge","version":"1.5.0","uptimeSeconds":42.1,"docker":"connected","controller":"disconnected"}
 ```
 
 `GET /_portwing/health` remains as a compatibility alias for `/ready`.

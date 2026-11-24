@@ -40,8 +40,12 @@ func (f *fakeIdleReader) Close() error {
 }
 
 func newTestIdleBody(r io.ReadCloser) (*idleTimeoutBody, *atomic.Int32) {
+	return newTestIdleBodyWithTimeout(r, idleTestTimeout)
+}
+
+func newTestIdleBodyWithTimeout(r io.ReadCloser, timeout time.Duration) (*idleTimeoutBody, *atomic.Int32) {
 	var cancels atomic.Int32
-	b := newIdleTimeoutBody(idleTestTimeout, func() { cancels.Add(1) })
+	b := newIdleTimeoutBody(timeout, func() { cancels.Add(1) })
 	b.body = r
 	return b, &cancels
 }
@@ -110,10 +114,14 @@ func TestIdleBodyProgressingReadIsNeverCancelled(t *testing.T) {
 		reads = append(reads, scriptedRead{2, nil})
 	}
 	reads = append(reads, scriptedRead{0, io.EOF})
-	b, cancels := newTestIdleBody(&fakeIdleReader{reads: reads})
+	// A wide timeout with gaps a fifth of it keeps scheduler delay on a
+	// loaded runner from looking like an idle stall; the total still runs
+	// well past one timeout.
+	const timeout = time.Second
+	b, cancels := newTestIdleBodyWithTimeout(&fakeIdleReader{reads: reads}, timeout)
 	buf := make([]byte, 8)
 	for range 8 {
-		time.Sleep(idleTestTimeout / 2) // total well past one timeout
+		time.Sleep(timeout / 5)
 		if _, err := b.Read(buf); err != nil {
 			t.Fatalf("Read: %v", err)
 		}

@@ -84,7 +84,7 @@ func TestRecordsAfterAndStats(t *testing.T) {
 	if records == nil || len(records) != 0 {
 		t.Fatalf("disabled records = %+v, want non-nil empty slice", records)
 	}
-	if stats != (Stats{}) {
+	if stats != (Stats{Epoch: disabled.Stats().Epoch}) {
 		t.Fatalf("disabled stats = %+v, want zero value", stats)
 	}
 

@@ -70,7 +70,7 @@ func TestExecuteReportsSelfKilledSubprocess(t *testing.T) {
 	}
 }
 
-func TestExecuteReportsSubprocessKilledByContextCancel(t *testing.T) {
+func TestExecuteReportsSubprocessStoppedByContextCancel(t *testing.T) {
 	cm := composeScriptManager(t, "touch started\nexec sleep 30\n")
 	startedFile := filepath.Join(cm.stacksDir, "app", "started")
 	ctx, cancel, started := contextWithCancelOnFile(t, startedFile)
@@ -86,8 +86,11 @@ func TestExecuteReportsSubprocessKilledByContextCancel(t *testing.T) {
 	if resp.Success {
 		t.Fatal("Success = true for a subprocess killed by context cancellation")
 	}
-	if !strings.Contains(resp.Error, "killed") && !strings.Contains(resp.Error, "canceled") {
-		t.Errorf("Error = %q, want it to carry the kill reason", resp.Error)
+	if !strings.Contains(resp.Error, "terminated") {
+		t.Errorf("Error = %q, want it to carry the SIGTERM reason", resp.Error)
+	}
+	if !resp.Cancelled {
+		t.Error("Cancelled = false for a subprocess stopped by context cancellation")
 	}
 }
 

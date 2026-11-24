@@ -9,6 +9,7 @@ import {
   type CtaPlacement,
   canonicalizeAnalyticsRoute,
   createPostHogOptions,
+  isAnalyticsHost,
   isTrackingRefused,
   type PrivacySignals,
 } from "./contract";
@@ -69,6 +70,7 @@ export function initializeAnalytics(
 ): void {
   if (started) return;
   if (trackingRefused()) return;
+  if (typeof location === "undefined" || !isAnalyticsHost(location.hostname)) return;
   const options = createPostHogOptions(projectToken, proxyHost, uiHost, trackingRefused);
   if (!options || !projectToken) return;
   started = true;
@@ -121,3 +123,4 @@ export function captureCta(path: string, ctaId: CtaId, placement: CtaPlacement):
 }
 
 export type { CtaId, CtaPlacement } from "./contract";
+export { docsAnalyticsPath } from "./contract";

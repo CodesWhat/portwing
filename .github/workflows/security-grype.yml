@@ -219,6 +219,27 @@ jobs:
         # duplicate govulncheck job was retired.
         run: ./scripts/verify-scanner-exclusions.sh
 
+      - name: Install yq
+        # The waiver expiry check reads .grype.yaml with a real YAML parser.
+        # Pinned by version and SHA-256 rather than trusting the runner image's
+        # copy. github.com and release-assets.githubusercontent.com are already
+        # in the egress allow-list above.
+        env:
+          YQ_VERSION: '4.54.3'
+          YQ_LINUX_AMD64_SHA256: '129534601871538efe0ba4c5e62a34fb1d5f469bcb975c4fddeb467d82974973'
+        run: |
+          set -euo pipefail
+
+          install_dir="${RUNNER_TEMP}/yq-bin"
+          mkdir -p "${install_dir}"
+          curl --proto '=https' --tlsv1.2 --retry 3 --fail --silent --show-error --location \
+            "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
+            --output "${install_dir}/yq"
+          printf '%s  %s\n' "${YQ_LINUX_AMD64_SHA256}" "${install_dir}/yq" | sha256sum --check --strict
+          chmod +x "${install_dir}/yq"
+          "${install_dir}/yq" --version
+          printf '%s\n' "${install_dir}" >> "${GITHUB_PATH}"
+
       - name: Enforce waiver expiry
         # Grype has no expiry field, so a waiver would suppress its finding
         # forever. This fails the job once any `expires: YYYY-MM-DD` in

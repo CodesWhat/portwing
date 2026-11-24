@@ -2788,3 +2788,88 @@ func TestControllerCapsAcrossConnectionGenerations(t *testing.T) {
 		t.Fatal("old request remained live")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// writePump — poll tick: an adapter that can notify under its inventory slot
+// ---------------------------------------------------------------------------
+
+// slotRefreshAdapter models adapter.SlotRefresher: the diff is handed to
+// notify while "slot" is still held, and OnContainerRefresh records whether it
+// ran inside that window.
+type slotRefreshAdapter struct {
+	fakeAdapter
+	slotHeld         atomic.Bool
+	notifiedInSlot   atomic.Bool
+	notifiedOutsideC atomic.Bool
+	plainRefreshes   atomic.Int64
+	err              error
+}
+
+func (a *slotRefreshAdapter) RefreshContainers(context.Context) (_, _, _ []adapter.Container, err error) {
+	a.plainRefreshes.Add(1)
+	return nil, nil, nil, nil
+}
+
+func (a *slotRefreshAdapter) RefreshContainersThen(_ context.Context, notify func(added, updated, removed []adapter.Container)) error {
+	if a.err != nil {
+		return a.err
+	}
+	a.slotHeld.Store(true)
+	notify([]adapter.Container{{ID: "c1"}}, nil, nil)
+	a.slotHeld.Store(false)
+	return nil
+}
+
+func (a *slotRefreshAdapter) OnContainerRefresh(context.Context, adapter.MessageSender, []adapter.Container, []adapter.Container, []adapter.Container) error {
+	if a.slotHeld.Load() {
+		a.notifiedInSlot.Store(true)
+	} else {
+		a.notifiedOutsideC.Store(true)
+	}
+	return nil
+}
+
+func TestWritePumpPollNotifiesInsideTheInventorySlot(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{{"refresh ok", nil}, {"refresh error", errors.New("refresh failed")}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c, _ := newTestClient(t)
+			wc := newWireClient(t, &config.Config{SkipDFCollection: true})
+			c.collector = wc.collector
+			c.cfg.HeartbeatInterval = 999
+			c.cfg.DDPollInterval = 999
+			c.welcomePollInterval = 1
+			a := &slotRefreshAdapter{fakeAdapter: fakeAdapter{pollInterval: 999}, err: tc.err}
+			c.adapter = a
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() { defer close(done); c.writePump(ctx) }()
+
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) && !a.notifiedInSlot.Load() && tc.err == nil {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if tc.err != nil {
+				time.Sleep(1300 * time.Millisecond) // one poll tick
+			}
+			cancel()
+			<-done
+
+			if tc.err == nil && !a.notifiedInSlot.Load() {
+				t.Error("the diff was not delivered while the inventory slot was held")
+			}
+			if tc.err != nil && a.notifiedInSlot.Load() {
+				t.Error("notify ran for a failed refresh")
+			}
+			if a.notifiedOutsideC.Load() || a.plainRefreshes.Load() != 0 {
+				t.Errorf("slot-aware adapter used the plain path: outside=%v plain=%d", a.notifiedOutsideC.Load(), a.plainRefreshes.Load())
+			}
+		})
+	}
+}

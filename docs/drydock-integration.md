@@ -1,6 +1,6 @@
 # Drydock Integration Reference
 
-> Verified against Drydock `dev/v1.6` (`app/agent/AgentClient.ts`, `app/agent/api/`, and `app/agent/EdgeAgentAdapter.ts`).
+> Describes the Drydock controller flow (`app/agent/AgentClient.ts`, `app/agent/api/`, and `app/agent/EdgeAgentAdapter.ts`). Supported pairings are in [`COMPATIBILITY.md`](../COMPATIBILITY.md); this page isn't a verification record for any specific build.
 
 ## Architecture
 
@@ -304,7 +304,7 @@ Source: `app/agent/components/Agent.ts:4–11`, `AgentClient.ts:247–258`
 
 ## Compatibility Matrix
 
-> For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](../COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages are implemented and verified against a specific Drydock build.
+> For the N-way version matrix (portwing version × Drydock version × sockguard preset × wire compat constant), see [`COMPATIBILITY.md`](../COMPATIBILITY.md) at the repo root — that file is the canonical source for "does version X of one tool work with version Y of another." The table below is feature-level detail: which individual endpoints/messages Portwing implements.
 
 | Feature | Status | Evidence |
 |---|---|---|

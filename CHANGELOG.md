@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.5.0] - 2026-11-24
+
+### Added
+
+- Standard mode logs a startup WARN when token authentication is enabled, TLS is off and the listen address isn't loopback, since the shared secret then travels in plaintext and Drydock refuses that pairing.
+- Compose deploy `files` entries can be an object with `content` and an optional `mode` (masked to 0755), so a shipped script can run during a build and a config file can be read by a non-root container user. Plain string values still work and stay 0600.
+
+### Changed
+
+- Docs examples no longer pair a token with plaintext HTTP on a port published to all interfaces. The Drydock pairing, connection-modes, Watchtower migration and MCP examples use TLS, and the hardened quickstart explains Sockguard's `allowed_bind_mounts` allowlist. The Edge quickstart shows a `docker run` keygen and names Drydock's `DD_PORTWING_AUTHORIZED_KEYS`.
+- Docs and OpenAPI corrections: the generic `/api/v1/containers` response has its own flat `GenericContainer` schema, key-rotation endpoints accept signature v3 (and v2 only for a key not yet locked to v3), `REQUEST_TIMEOUT` is documented as a total timeout with non-follow log reads bounded by idleness, the 32 MiB compose request cap is documented, the auth rate-limit window is described as fixed rather than sliding, the exec audit `container` field is documented as the request path, and the audit log's `copytruncate` rotation requirement and the `portwing-with-exec.yaml` preset's lack of container attach are spelled out.
+- The observability docs now state what the host metrics measure in a container deployment and which mounts (`network_mode: host`, the Docker data root) host-accurate network and disk figures need.
+
+### Fixed
+
+- Edge backpressure no longer evicts a slow but still-draining controller when the producer is descheduled past the stall window. Progress the pump made is now counted even if its wake signal was missed.
+- The Docker client's connections now close after sitting idle for 90 s. They had no idle timeout, so after a burst of requests the idle connections and their goroutines stayed until the process exited.
+- Graceful shutdown no longer waits out its deadline on an open SSE, follow-log or event stream. Streams now end when shutdown starts, so the audit log closes promptly.
+- A Standard-mode attach or exec hijack no longer holds its Docker connection open after the controller hangs up. Portwing still treats the hang-up as a stdin half-close and keeps relaying Docker output, but closes both ends once Docker has sent nothing for 30 s. A client that half-closes stdin and then waits longer than that for output is disconnected.
+- Valid requests no longer get sporadic 429s. The per-IP in-flight slot (2) and the failed-auth lockout were applied before credentials were checked, so a third request from one address overlapping two others, or any request from an address that had earlier failures, was refused despite valid credentials. Credentials are now verified first and the lockout only decides whether a failed check answers 401 or 429. A locked-out source is still verified only when that is cheap (an Ed25519 signature, a raw `TOKEN`, or a `TOKEN_HASH` whose derivation is already cached). A locked-out source whose `TOKEN_HASH` check would need a cold Argon2 derivation gets 429 without one, so it can't hold the agent-wide derivation slots. Once the limiter table is full, an untracked source with failing credentials gets 429 while valid credentials still pass. At most 4 compose-sized (over 1 MiB) signed bodies are held in memory agent-wide, and each keeps its slot until the compose handler returns, so a fifth gets 503 with `Retry-After: 1` meanwhile. Reading and verifying a request now takes one of 16 slots per source (IPv4 address or IPv6 /64). A request that finds them all busy waits instead of being refused, and gets 503 with `Retry-After: 1` only if it is still waiting at the 10 s read deadline.
+- Signed compose requests can now carry the documented 32 MiB body. The signed-body cap is 32 MiB for `POST /_portwing/compose` (at most four such bodies buffered at once, then `503`), and stays 1 MiB elsewhere.
+- Docs: `TRUSTED_PROXIES` now has a reverse-proxy section in Connection modes covering what it changes for client-IP keying, with an example.
+- Edge upload reassembly no longer holds 2-3x its 512 MB / 1 GB budget. The budget is charged for the buffer's real capacity, an upload that declares its `Content-Length` is allocated once, growth that would pass the budget is refused before it allocates, and the finished body is handed to the request without a copy.
+- Edge mode no longer holds off pings and API requests while the reconnect inventory syncs. The initial container sync runs as a task owned by its connection, which is cancelled and joined when the connection ends. The initial sync and the periodic refresh are serialized as whole inventory operations, so a slow initial sync can't overwrite newer refreshed state or send its container sync after a refresh's diff; requests are still served from the last committed inventory meanwhile.
+- A tunnel drop or client disconnect no longer SIGKILLs a running `docker compose` deploy. The subprocess now gets SIGTERM and up to 30 seconds to stop before it is killed, the per-stack lock stays held until it exits and the whole process group is gone (with `docker compose` v2, Compose runs as a child of the Docker CLI, so the group is signalled, SIGKILLed after the grace period and reaped, not just the CLI process), and the `compose_op` audit record reports outcome `cancelled`.
+- Docs analytics events now carry `surface=docs`. The docs export uses basePath `/docs`, `usePathname()` strips it, and every docs pageview and CTA was tagged as an unknown marketing route.
+- Analytics on the marketing site and docs now send only from `portwing.codeswhat.com`. Previews, localhost and lookalike hosts no longer initialize PostHog or queue events.
+- Audit export cursors now carry a per-process generation, so a cursor saved before an agent restart gets the documented 409 instead of a 200 that silently skips records. Cursors are opaque strings; echo `X-Portwing-Next-Cursor` back as received.
+- `api_request`, `compose_op` and `exec_start` audit records now carry `key_id` for Ed25519-authenticated callers (the verified key in Standard mode, the session signing key in Edge mode), in the export buffer, the sink and the export stream.
+- The Grype waiver expiry check now reads the config with a real YAML parser (yq), so indentless lists, `package:` before `vulnerability:`, and `#`-leading lines inside a block-scalar reason can no longer hide an `expires:` date. It fails closed when yq isn't installed.
+
+### Security
+
+- Edge mode's WebSocket client moves to gorilla/websocket commit d67f41855da4 (pseudo-version v1.5.4-0.20240701034025) for GO-2026-6278 / GHSA-w67g-5rqw-f597: v1.5.3 generated frame mask keys from a weak PRNG. No tagged release carries the fix yet.
+- `golang.org/x/net` moves to v0.63.0 in the agent and in the bundled Docker Compose plugin (now `v5.5.1-portwing.7`) for GO-2026-6860 and GO-2026-6866.
+- The auth rate limiter keys IPv6 sources by /64 prefix, so rotating through addresses in one /64 no longer earns a fresh failure budget per address. IPv4 and IPv4-mapped IPv6 stay per address. Once 10,000 sources are tracked, untracked sources are now refused with 429 instead of bypassing the limiter; tracked sources keep working. Shared-secret tokens should be high-entropy; see SECURITY.md.
+
 ## [v1.4.3] - 2026-11-21
 
 ### Fixed

@@ -139,7 +139,7 @@ type Server struct {
 	dockerClient *docker.Client
 	dockerDialer func(network, address string) (net.Conn, error)
 	adapter      adapter.ServerAdapter
-	compose      *docker.ComposeManager
+	compose      composeExecutor
 	collector    *metrics.Collector
 	metrics      *metrics.Registry
 	rateLimiter  *RateLimiter
@@ -174,6 +174,17 @@ type Server struct {
 	// forwarding; tests replace it.
 	eventSubscribe adapter.EventSubscribe
 	pollCancel     context.CancelFunc
+
+	// baseCtx is the base context of every request the HTTP server accepts, so
+	// long-lived handlers (SSE, follow-mode logs, proxied streams) that derive
+	// from r.Context() end when Shutdown cancels baseCancel. Without it an open
+	// stream holds graceful shutdown to its deadline.
+	baseCtx    context.Context
+	baseCancel context.CancelFunc
+
+	// hijackIdle is hijackHalfCloseIdle captured at construction, so a handler
+	// never reads the package variable while a test is restoring it.
+	hijackIdle time.Duration
 	// hupDone is closed by Shutdown to stop the SIGHUP goroutine.
 	hupDone chan struct{}
 	// hupCh is the signal channel registered for SIGHUP; kept so Shutdown
@@ -295,6 +306,12 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		slog.Warn("no authentication configured: all requests will be accepted without credentials — set TOKEN, TOKEN_HASH, or AUTHORIZED_KEYS")
 	}
 
+	// A shared secret on a plaintext listener that isn't loopback travels in the
+	// clear, and Drydock refuses that pairing without DD_AGENT_ALLOW_INSECURE_SECRET.
+	if verifier != nil && (cfg.TLSCert == "" || cfg.TLSKey == "") && !config.IsLoopbackBind(cfg.BindAddress) {
+		slog.Warn("token authentication is enabled without TLS on a non-loopback address: the shared secret is sent in plaintext — set TLS_CERT and TLS_KEY, bind to loopback, or use AUTHORIZED_KEYS signing", "bindAddress", cfg.BindAddress)
+	}
+
 	// Set up enrollment handler if ENROLLMENT_TOKEN is configured.
 	var enroller *auth.Enroller
 	if cfg.EnrollmentToken != "" {
@@ -332,6 +349,8 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		execSem:      newConcurrencyLimiter(cfg.MaxExecSessions),
 	}
 	s.pollCtx, s.pollCancel = context.WithCancel(context.Background())
+	s.baseCtx, s.baseCancel = context.WithCancel(context.Background())
+	s.hijackIdle = hijackHalfCloseIdle
 
 	// Reload authorized_keys on SIGHUP so keys can be rotated or revoked
 	// without a restart. The nonce LRU is preserved across reloads.
@@ -412,7 +431,7 @@ func NewServer(cfg *config.Config, dockerClient *docker.Client, a adapter.Server
 		// owning the listener ourselves (see ListenAndServe below).
 		BaseContext: func(ln net.Listener) context.Context {
 			s.listenAddr.Store(ln.Addr())
-			return context.Background()
+			return s.baseCtx
 		},
 	}
 
@@ -601,6 +620,11 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(info)
 }
 
+// composeExecutor runs compose requests; *docker.ComposeManager in production.
+type composeExecutor interface {
+	Execute(ctx context.Context, req docker.ComposeRequest) (*docker.ComposeResponse, error)
+}
+
 // handleCompose dispatches Docker Compose operations.
 func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 	actor := s.rateLimiter.clientIP(r)
@@ -614,16 +638,18 @@ func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.compose.Execute(r.Context(), req)
 	if err != nil {
-		s.auditor.ComposeOp(actor, req.Operation, req.StackName, audit.OutcomeError)
+		s.auditor.ComposeOp(actor, req.Operation, req.StackName, audit.OutcomeError, auditKeyID(r))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	outcome := audit.OutcomeAllowed
-	if !resp.Success {
+	if resp.Cancelled {
+		outcome = audit.OutcomeCancelled
+	} else if !resp.Success {
 		outcome = audit.OutcomeError
 	}
-	s.auditor.ComposeOp(actor, req.Operation, req.StackName, outcome)
+	s.auditor.ComposeOp(actor, req.Operation, req.StackName, outcome, auditKeyID(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -848,8 +874,22 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Bidirectional proxy; io.Copy errors just mean one side closed.
+	//
+	// A controller FIN reads the same as a stdin half-close, so after it Docker
+	// is only CloseWrite'd and its output keeps relaying. To keep a dropped
+	// controller from pinning the Docker connection forever, Docker's read side
+	// gets an idle deadline from then on: hijackHalfCloseIdle without a byte
+	// from Docker closes both ends, and any output resets it. Tradeoff: a client
+	// that half-closes stdin and then waits longer than that in silence for
+	// output is disconnected.
 	var wg sync.WaitGroup
 	wg.Add(2)
+
+	var halfClosed atomic.Bool
+	idle := s.hijackIdle
+	if idle <= 0 {
+		idle = defaultHijackHalfCloseIdle
+	}
 
 	go func() {
 		defer wg.Done()
@@ -857,22 +897,55 @@ func (s *Server) handleDockerHijack(w http.ResponseWriter, r *http.Request) {
 			closeConnections()
 			return
 		}
-		if closeWriter, ok := dockerConn.(interface{ CloseWrite() error }); ok {
-			if err := closeWriter.CloseWrite(); err != nil {
-				closeConnections()
-			}
+		closeWriter, ok := dockerConn.(interface{ CloseWrite() error })
+		if !ok {
+			closeConnections()
 			return
 		}
-		closeConnections()
+		if err := closeWriter.CloseWrite(); err != nil {
+			closeConnections()
+			return
+		}
+		halfClosed.Store(true)
+		_ = dockerConn.SetReadDeadline(time.Now().Add(idle))
 	}()
 
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(clientConn, dockerBuf)
+		_, _ = io.Copy(clientConn, &idleDrainReader{
+			r:      dockerBuf,
+			conn:   dockerConn,
+			idle:   idle,
+			active: &halfClosed,
+		})
 		closeConnections()
 	}()
 
 	wg.Wait()
+}
+
+// hijackHalfCloseIdle bounds how long a hijacked session stays open with no
+// Docker output once the controller has closed its sending side. A package
+// variable so tests can shorten it; NewServer reads it once.
+var hijackHalfCloseIdle = defaultHijackHalfCloseIdle
+
+const defaultHijackHalfCloseIdle = 30 * time.Second
+
+// idleDrainReader re-arms conn's read deadline after every read that returns
+// data, once active is set, so the idle window restarts on each Docker output.
+type idleDrainReader struct {
+	r      io.Reader
+	conn   net.Conn
+	idle   time.Duration
+	active *atomic.Bool
+}
+
+func (d *idleDrainReader) Read(p []byte) (int, error) {
+	n, err := d.r.Read(p)
+	if n > 0 && d.active.Load() {
+		_ = d.conn.SetReadDeadline(time.Now().Add(d.idle))
+	}
+	return n, err
 }
 
 // failHijack answers a hijacked connection with a 502 and records it as the
@@ -899,7 +972,7 @@ func noteHijackStatus(w http.ResponseWriter, code int) {
 // with the outcome of its admission decision.
 func (s *Server) auditExecStart(r *http.Request, admitted bool) {
 	execID := strings.TrimSuffix(strings.TrimPrefix(docker.StripAPIVersion(r.URL.Path), "/exec/"), "/start")
-	s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID, audit.ExecOutcome(admitted))
+	s.auditor.ExecStart(s.rateLimiter.clientIP(r), r.URL.Path, execID, audit.ExecOutcome(admitted), auditKeyID(r))
 }
 
 // acquireExecSlot takes an exec session slot, or answers 503 and returns false
@@ -1085,6 +1158,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		// Stop the pollContainers goroutine.
 		if s.pollCancel != nil {
 			s.pollCancel()
+		}
+
+		// End long-lived streams so http.Server.Shutdown isn't held to its
+		// deadline by an open SSE, follow-log or event stream.
+		if s.baseCancel != nil {
+			s.baseCancel()
 		}
 
 		// Stop the SIGHUP reload goroutine.

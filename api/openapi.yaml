@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Portwing Agent API
-  version: 1.4.3
+  version: 1.5.0
   description: |
     Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
@@ -201,7 +201,7 @@ components:
         version:
           type: string
           description: Portwing agent version.
-          example: "1.4.3"
+          example: "1.5.0"
         uptimeSeconds:
           type: number
           minimum: 0
@@ -222,7 +222,7 @@ components:
         version:
           type: string
           description: Portwing agent version
-          example: "1.4.3"
+          example: "1.5.0"
         dockerVersion:
           type: string
           description: Docker Engine version string
@@ -347,12 +347,31 @@ components:
         files:
           type: object
           additionalProperties:
-            type: string
+            oneOf:
+              - type: string
+              - type: object
+                required: [content]
+                properties:
+                  content:
+                    type: string
+                    description: File content, plain or prefixed with `base64:`.
+                  mode:
+                    oneOf:
+                      - type: string
+                        pattern: '^[0-7]{1,4}$'
+                      - type: integer
+                        minimum: 0
+                    description: >
+                      Permission bits, as an octal string (`"0755"`) or an
+                      integer. Masked to 0755 (setuid, setgid, sticky and
+                      group/other write are dropped); the owner always keeps
+                      read and write. Defaults to 0600.
           description: >
             Files to write into the stack directory before execution.
             Keys are paths relative to the stack directory; values are
             file content (plain text) or base64-encoded content prefixed
-            with `base64:`. Paths are resolved and verified within the
+            with `base64:`, or an object carrying `content` and an optional
+            `mode`. Paths are resolved and verified within the
             stacks directory (path-traversal protected).
           example:
             "docker-compose.yml": "version: '3'\nservices:\n  web:\n    image: nginx\n"
@@ -434,6 +453,77 @@ components:
           type: boolean
         updateKind:
           $ref: '#/components/schemas/ContainerUpdateKind'
+        includeTags:
+          type: string
+        excludeTags:
+          type: string
+        transformTags:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        details:
+          $ref: '#/components/schemas/RuntimeDetails'
+
+    GenericContainer:
+      type: object
+      description: >
+        Container model returned by the generic adapter's
+        `GET /api/v1/containers`. Unlike the Drydock `Container`, the image
+        fields are plain strings and `updateKind` is a string, one of
+        `unknown`, `major`, `minor`, `patch` or `digest`.
+      required: [id, name, displayName, status, watcher, image, updateAvailable, updateKind]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        displayName:
+          type: string
+        displayIcon:
+          type: string
+        status:
+          type: string
+        watcher:
+          type: string
+        agent:
+          type: string
+        image:
+          type: object
+          required: [id, registry, name, tag]
+          properties:
+            id:
+              type: string
+            registry:
+              type: string
+              example: "docker.io"
+            name:
+              type: string
+              example: "library/nginx"
+            tag:
+              type: string
+              example: "1.27.0"
+            digest:
+              type: string
+            architecture:
+              type: string
+            os:
+              type: string
+            created:
+              type: string
+            size:
+              type: integer
+              format: int64
+        result:
+          $ref: '#/components/schemas/ContainerResult'
+        error:
+          $ref: '#/components/schemas/ContainerError'
+        updateAvailable:
+          type: boolean
+        updateKind:
+          type: string
+          enum: [unknown, major, minor, patch, digest]
         includeTags:
           type: string
         excludeTags:
@@ -619,7 +709,7 @@ components:
       properties:
         agentVersion:
           type: string
-          example: "1.4.3"
+          example: "1.5.0"
         protocolName:
           type: string
           example: "portwing"
@@ -709,7 +799,7 @@ components:
             carries the container ID instead.
         outcome:
           type: string
-          enum: [allowed, denied, error]
+          enum: [allowed, denied, error, cancelled]
           description: >-
             Result of the event. On `exec_start` it is the admission decision:
             `allowed` when the exec took an exec session slot, `denied` when
@@ -855,7 +945,7 @@ paths:
                 live: true
                 ready: true
                 mode: standard
-                version: "1.4.3"
+                version: "1.5.0"
                 uptimeSeconds: 120
                 docker: connected
                 controller: not_applicable
@@ -870,7 +960,7 @@ paths:
                 live: true
                 ready: false
                 mode: standard
-                version: "1.4.3"
+                version: "1.5.0"
                 uptimeSeconds: 120
                 docker: disconnected
                 controller: not_applicable
@@ -884,7 +974,7 @@ paths:
       description: >
         Available since v1.0. Requires
         KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
-        version 2 with no query parameters. Bearer credentials cannot manage
+        version 3 (or version 2 for a key not yet locked to v3, which is refused with `signature-locked`) and no query parameters. Bearer credentials cannot manage
         keys. Read the verified signer's own managed identity. Current and pending signers can read status.
       tags: [Auth]
       security:
@@ -914,7 +1004,7 @@ paths:
       description: >
         Available since v1.0. Requires
         KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
-        version 2 with no query parameters. Bearer credentials cannot manage
+        version 3 (or version 2 for a key not yet locked to v3, which is refused with `signature-locked`) and no query parameters. Bearer credentials cannot manage
         keys. The current signer stages a raw 32-byte Ed25519 successor. Both keys remain accepted until replacement proof commits.
       tags: [Auth]
       security:
@@ -957,7 +1047,7 @@ paths:
       description: >
         Available since v1.0. Requires
         KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
-        version 2 with no query parameters. Bearer credentials cannot manage
+        version 3 (or version 2 for a key not yet locked to v3, which is refused with `signature-locked`) and no query parameters. Bearer credentials cannot manage
         keys. Only the pending signer can retire its predecessor. Repeating a successful commit with the current signer is idempotent.
       tags: [Auth]
       security:
@@ -994,7 +1084,7 @@ paths:
       description: >
         Available since v1.0. Requires
         KEY_ROTATION_DIR and operator-owned AUTHORIZED_KEYS. Use signature
-        version 2 with no query parameters. Bearer credentials cannot manage
+        version 3 (or version 2 for a key not yet locked to v3, which is refused with `signature-locked`) and no query parameters. Bearer credentials cannot manage
         keys. Only the current signer can cancel its uncommitted successor. The current key stays active.
       tags: [Auth]
       security:
@@ -1126,7 +1216,8 @@ paths:
         Executes a Docker Compose sub-command within the managed stacks
         directory (`STACKS_DIR`, default `/data/stacks`). The request body
         specifies the operation, stack, optional files to write, and optional
-        env vars.
+        env vars. The request body is capped at 32 MiB; a larger body is
+        rejected with 400 before anything is written.
 
         **Security controls applied before execution:**
         - Stack path resolved to absolute and verified within `STACKS_DIR`
@@ -1443,7 +1534,7 @@ paths:
 
         **Example stream:**
         ```
-        data: {"type":"dd:ack","data":{"version":"1.4.3","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+        data: {"type":"dd:ack","data":{"version":"1.5.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
 
         data: {"type":"dd:watcher-snapshot","data":{"watcher":{...WatcherComponent...},"containers":[{...Container...}]}}
 
@@ -1922,8 +2013,11 @@ paths:
       summary: Container inventory (generic adapter)
       description: >
         Returns the cached container inventory built from the Docker daemon.
-        Available when `ADAPTER=generic`. The response shape is the same
-        `Container` model used by the Drydock-compatible endpoints.
+        Available when `ADAPTER=generic`. The response is the adapter's flat
+        container model (`GenericContainer`), not the Drydock wire shape:
+        `image.registry`, `image.tag` and `image.digest` are plain strings and
+        `updateKind` is a string. The Drydock-compatible `GET /api/containers`
+        reshapes the same inventory into the nested `Container` model.
       tags: [Generic]
       security:
         - bearerToken: []
@@ -1936,7 +2030,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Container'
+                  $ref: '#/components/schemas/GenericContainer'
         "401":
           description: Missing or invalid token.
         "429":

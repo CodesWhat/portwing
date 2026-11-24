@@ -31,6 +31,21 @@ type dockerInventorySnapshot struct {
 type dynamicDockerFixture struct {
 	mu        sync.RWMutex
 	inventory dockerInventorySnapshot
+	// onInspect, when set, runs in every inspect request after the response
+	// state is taken, so a blocked inspect answers with the state it began with.
+	onInspect func()
+}
+
+func (f *dynamicDockerFixture) SetOnInspect(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onInspect = fn
+}
+
+func (f *dynamicDockerFixture) inspectHook() func() {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.onInspect
 }
 
 func (f *dynamicDockerFixture) Set(snapshot dockerInventorySnapshot) {
@@ -466,6 +481,9 @@ func newDynamicDockerClient(t *testing.T) (*docker.Client, *dynamicDockerFixture
 		id = strings.TrimSuffix(id, "/json")
 
 		snapshot := fixture.Snapshot()
+		if hook := fixture.inspectHook(); hook != nil {
+			hook()
+		}
 		inspect, ok := snapshot.inspected[id]
 		if !ok {
 			http.NotFound(w, r)

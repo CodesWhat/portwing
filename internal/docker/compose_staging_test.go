@@ -106,7 +106,7 @@ func TestStageRootedFileFailures(t *testing.T) {
 		}
 		defer func() { _ = root.Close() }()
 
-		if _, err := stageRootedFile(root, filepath.Join("f", "x.yml"), []byte("y")); err == nil {
+		if _, err := stageRootedFile(root, filepath.Join("f", "x.yml"), []byte("y"), 0o600); err == nil {
 			t.Fatal("expected error staging below a regular file")
 		}
 		if left := stagedTempFiles(t, dir); len(left) != 0 {
@@ -128,7 +128,7 @@ func TestStageRootedFileFailures(t *testing.T) {
 		}
 		defer func() { _ = root.Close() }()
 
-		if _, err := stageRootedFile(root, filepath.Join("ro", "x.yml"), []byte("y")); err == nil {
+		if _, err := stageRootedFile(root, filepath.Join("ro", "x.yml"), []byte("y"), 0o600); err == nil {
 			t.Fatal("expected temp file creation to fail in a read-only directory")
 		}
 		if left := stagedTempFiles(t, dir); len(left) != 0 {
@@ -151,7 +151,7 @@ func TestWriteAndCloseReportsFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = closed.Close()
-	if err := writeAndClose(closed, []byte("y")); err == nil || !strings.Contains(err.Error(), "setting permissions") {
+	if err := writeAndClose(closed, []byte("y"), 0o600); err == nil || !strings.Contains(err.Error(), "setting permissions") {
 		t.Fatalf("closed file: err = %v, want a permissions error", err)
 	}
 
@@ -159,7 +159,7 @@ func TestWriteAndCloseReportsFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAndClose(readOnly, []byte("y")); err == nil {
+	if err := writeAndClose(readOnly, []byte("y"), 0o600); err == nil {
 		t.Fatal("expected a write error on a read-only handle")
 	}
 	if got, _ := os.ReadFile(path); string(got) != "x" { //nolint:gosec // test-owned temp file

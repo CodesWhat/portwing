@@ -24,6 +24,7 @@ fuzzers=(
 	"FuzzDecodeContainerLogStream|./internal/docker/"
 	"FuzzComposeRequestValidate|./internal/docker/"
 	"FuzzParseKeyLine|./internal/auth/"
+	"FuzzEdgeRequestPath|./internal/edge/"
 )
 
 # --- seed-replay tier (PW-7.37) ----------------------------------------------
@@ -95,14 +96,9 @@ lefthook_fuzz_entries="$(
 	' lefthook.yml
 )"
 
-caller_fuzz_inventory="$(
-	awk '
-		$0 == "      fuzzers-json: >-" {
-			getline
-			print
-		}
-	' .github/workflows/ci-verify.yml
-)"
+# The caller's list lives in .github/ci-fuzzers.json; the changes job narrows
+# it per PR. One compact object per line, same shape the workflow emits.
+caller_fuzz_inventory="$(jq -c '.[]' .github/ci-fuzzers.json)"
 
 # PW-2.1. A seed corpus regression is invisible from the outside: deleting
 # testdata/fuzz/<Target>/ still passes `go test`, and dropping the cache steps
@@ -127,7 +123,7 @@ for spec in "${fuzzers[@]}"; do
 	lefthook_entry="^[[:space:]]*\"${fuzzer_regex}[[:space:]]+${pkg_regex}\"([[:space:]]+\\\\|;[[:space:]]*do)[[:space:]]*$"
 
 	grep -Fq "${caller_mapping}" <<<"${caller_fuzz_inventory}" ||
-		fail "ci-verify.yml must run ${fuzzer} in ${pkg}"
+		fail ".github/ci-fuzzers.json must list ${fuzzer} in ${pkg}"
 	grep -Eq "${lefthook_entry}" <<<"${lefthook_fuzz_entries}" ||
 		fail "lefthook.yml must run ${fuzzer} in ${pkg}"
 	# Nightly's matrix still carries every target, replay tier included — the

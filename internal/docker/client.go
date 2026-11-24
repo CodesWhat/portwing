@@ -135,6 +135,11 @@ type Client struct {
 // NewClient). It matches config's default REQUEST_TIMEOUT of 30s.
 const defaultDialTimeout = 30 * time.Second
 
+// idleConnTimeout closes a pooled daemon connection that has sat idle this
+// long, so the per-connection goroutines from a burst of requests exit
+// instead of living until the process does.
+const idleConnTimeout = 90 * time.Second
+
 // NewClient creates a Docker API client that talks to the daemon via the
 // given Unix socket. requestTimeout is in seconds; it applies to normal
 // requests but not to streaming endpoints.
@@ -151,6 +156,7 @@ func NewClient(socketPath string, requestTimeout int) (*Client, error) {
 		},
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     idleConnTimeout,
 	}
 
 	streamTransport := &http.Transport{
@@ -159,6 +165,7 @@ func NewClient(socketPath string, requestTimeout int) (*Client, error) {
 		},
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     idleConnTimeout,
 	}
 
 	c := &Client{

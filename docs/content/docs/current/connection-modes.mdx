@@ -21,13 +21,37 @@ Otherwise
 
 **Status: fully implemented and production-ready.**
 
-Portwing runs a plain HTTP server on `PORT` (default `3000`). The Drydock controller connects inbound and drives the session: it calls `GET /api/containers`, `GET /api/watchers`, and `GET /api/triggers` during the handshake, then holds a long-lived SSE stream on `GET /api/events` for real-time container events. All Docker Engine API paths are transparently proxied through the agent.
+Portwing serves HTTP on `PORT` (default `3000`), or HTTPS when `TLS_CERT` / `TLS_KEY` are set. The Drydock controller connects inbound and drives the session: it calls `GET /api/containers`, `GET /api/watchers`, and `GET /api/triggers` during the handshake, then holds a long-lived SSE stream on `GET /api/events` for real-time container events. All Docker Engine API paths are transparently proxied through the agent.
 
 Standard mode is active whenever `DRYDOCK_URL` is **not** set. The controller authenticates with the `X-Dd-Agent-Secret` shared secret. Built-in TLS (`TLS_CERT` / `TLS_KEY`) accepts TLS 1.2 and later with modern cipher suites.
 
 ### Required networking
 
 The agent host must accept inbound TCP connections on `PORT`. Run Portwing behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik) — do not expose it on plain HTTP to the internet.
+
+### Behind a reverse proxy
+
+Portwing keys its failed-authentication rate limiter by the client's address. Behind a reverse proxy the direct peer is the proxy, so unless you tell Portwing otherwise every client shares the proxy's address and one client's failures count against all of them. A request with valid credentials is still never refused by that lockout, but the audit log and the limiter will attribute every request to the proxy.
+
+Set `TRUSTED_PROXIES` to the CIDR of your proxy so Portwing reads the real client from `X-Forwarded-For` (or `X-Real-IP`) instead. It only does so when the direct peer is inside one of those ranges; from any other peer the headers are ignored, so a client can't spoof its address by sending them. Portwing walks `X-Forwarded-For` from the right and takes the first hop that isn't itself a trusted proxy, and a hop that doesn't parse as an address stops the walk. The limiter then tracks each client separately: per IPv4 address, and per /64 for IPv6.
+
+```yaml
+services:
+  portwing:
+    environment:
+      # The Docker network your proxy runs on, not 0.0.0.0/0.
+      TRUSTED_PROXIES: 172.18.0.0/16
+```
+
+```nginx
+location / {
+    proxy_pass http://portwing:3000;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+}
+```
+
+Keep the CIDR to your actual proxy. A broad range such as `0.0.0.0/0` lets any client choose its own address and defeats the limiter.
 
 ### Standard mode environment variables
 
@@ -50,7 +74,7 @@ For the complete variable reference, see [Configuration](/configuration).
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.4.3
+    image: ghcr.io/codeswhat/portwing:1.5.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -63,8 +87,11 @@ services:
       - "3000:3000"
     environment:
       TOKEN_HASH: "${PORTWING_TOKEN_HASH}"
+      TLS_CERT: /certs/server.crt   # a token on a published port needs TLS
+      TLS_KEY: /certs/server.key
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/certs:ro
       - portwing-state:/data/credentials  # agent ID + v3 signature locks
 
 volumes:
@@ -176,7 +203,7 @@ On `SIGINT` or `SIGTERM` the agent closes all active exec sessions and sends a W
 ```yaml
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.4.3
+    image: ghcr.io/codeswhat/portwing:1.5.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]

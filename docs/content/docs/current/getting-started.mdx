@@ -37,6 +37,21 @@ docker compose -f docker-compose.with-sockguard.yml up -d
 
 This starts sockguard and Portwing as two separate containers sharing a filtered socket via a named volume. Sockguard writes a filtered Unix socket into that volume; Portwing talks to that filtered socket via `DOCKER_SOCKET` rather than mounting `/var/run/docker.sock` directly.
 
+<Callout type="info">
+**Bind mounts are denied until you allowlist them.** Sockguard inspects container-create bodies, and the bundled `sockguard.yaml` ships `request_body.container_create.allowed_bind_mounts: []`, an empty list. Any container Portwing (or Drydock through it) creates or recreates with a host bind mount is rejected with a 403 until that host path is listed there. To let Portwing manage a container that mounts `/srv/app`, add the path and restart sockguard:
+
+```yaml
+request_body:
+  container_create:
+    allowed_bind_mounts:
+      - /srv/app
+    allowed_runtimes:
+      - runc
+```
+
+Only list paths you intend containers to mount. Named volumes are not bind mounts and need no entry.
+</Callout>
+
 ```yaml filename="docker-compose.with-sockguard.yml"
 # Portwing + sockguard — two-layer defense.
 #
@@ -88,7 +103,7 @@ services:
       - SOCKGUARD_LISTEN_SOCKET=/var/run/sockguard/sockguard.sock
 
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.4.3
+    image: ghcr.io/codeswhat/portwing:1.5.0
     restart: unless-stopped
     depends_on:
       - sockguard
@@ -159,7 +174,7 @@ docker compose -f docker-compose.standard.yml up -d
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.4.3
+    image: ghcr.io/codeswhat/portwing:1.5.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -205,7 +220,7 @@ Edge mode lets Portwing dial **out** to your Drydock controller over a WebSocket
 </Callout>
 
 ```bash
-portwing keygen -comment "edge-host-01" > portwing_ed25519.pem
+docker run --rm ghcr.io/codeswhat/portwing:1.5.0 keygen -comment "edge-host-01" > portwing_ed25519.pem
 sudo chown 65532:65532 portwing_ed25519.pem && sudo chmod 0400 portwing_ed25519.pem
 export DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
 # Register the printed public key with your Drydock controller, then:
@@ -242,7 +257,7 @@ docker compose -f docker-compose.edge.yml up -d
 
 services:
   portwing:
-    image: ghcr.io/codeswhat/portwing:1.4.3
+    image: ghcr.io/codeswhat/portwing:1.5.0
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -274,6 +289,10 @@ volumes:
   portwing-state:
 ```
 
+`keygen` writes the private key (PKCS#8 PEM) and then an `authorized_keys` line to stdout, and its prompts to stderr, so the redirect above captures both in `portwing_ed25519.pem`. To print only the public line later, run `docker run --rm -v "$PWD/portwing_ed25519.pem:/key:ro" ghcr.io/codeswhat/portwing:1.5.0 keygen -pub-from /key -comment "edge-host-01"`.
+
+On the Drydock side, add that public line to `DD_PORTWING_AUTHORIZED_KEYS` (the controller's trusted-keys setting) and restart Drydock, or register it with `POST /api/v1/portwing/keys`. Drydock only accepts the edge hello from a key it has been told about.
+
 Set `DRYDOCK_URL` to your Drydock instance, `AGENT_NAME` to a unique identifier for the host, and `PRIVATE_KEY_FILE` to the agent's Ed25519 key (register its public key with Drydock). No control port needs to be published on the agent side. Use Drydock `v1.6.0-rc.11+` for the complete v0.9 watcher/update feature path. See [Connection Modes](/connection-modes) for a full comparison of standard vs. edge mode and the private operations-listener boundary.
 
 ---
@@ -294,7 +313,7 @@ docker run -d \
   -v portwing-state:/data/credentials \
   -p 127.0.0.1:3000:3000 \
   -e TOKEN=$(openssl rand -hex 24) \
-  ghcr.io/codeswhat/portwing:1.4.3
+  ghcr.io/codeswhat/portwing:1.5.0
 ```
 
 Without `TOKEN`, `TOKEN_HASH`, or `AUTHORIZED_KEYS`, Standard mode refuses to
