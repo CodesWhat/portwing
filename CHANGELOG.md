@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.5.0] - 2026-11-24
+
 ### Added
 
 - Standard mode logs a startup WARN when token authentication is enabled, TLS is off and the listen address isn't loopback, since the shared secret then travels in plaintext and Drydock refuses that pairing.
