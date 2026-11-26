@@ -69,7 +69,9 @@ func RequestDeadline(method, path string, hintMs int64, haveHint bool, def time.
 		}
 		return max(d, MinRequestTimeout), true
 	}
-	if method != http.MethodPost {
+	// REQUEST_TIMEOUT=0 disables the total timeout, so the auto rules (which only
+	// ever extend a bounded default) leave the call unbounded.
+	if def <= 0 || method != http.MethodPost {
 		return def, false
 	}
 	pathOnly, query, _ := strings.Cut(path, "?")
@@ -113,12 +115,13 @@ func AsTimeout(err error) (*TimeoutError, bool) {
 	return nil, false
 }
 
-// DefaultTimeout returns the client's normal per-request timeout.
+// DefaultTimeout returns the client's normal per-request timeout. Zero means
+// REQUEST_TIMEOUT=0 disabled it.
 func (c *Client) DefaultTimeout() time.Duration {
-	if c.httpClient != nil && c.httpClient.Timeout > 0 {
-		return c.httpClient.Timeout
+	if c.httpClient == nil {
+		return defaultDialTimeout
 	}
-	return defaultDialTimeout
+	return c.httpClient.Timeout
 }
 
 // deadlineClient is the non-stream client without its total Timeout, so a
@@ -133,7 +136,7 @@ func (c *Client) deadlineClient() *http.Client {
 // and body read, as Client.Timeout does. The deadline's cancel runs when the
 // returned body is closed, so the caller must close it.
 func (c *Client) DoWithDeadline(ctx context.Context, method, path string, headers http.Header, body io.Reader, d time.Duration) (*http.Response, error) {
-	dctx, cancel := context.WithTimeout(ctx, d)
+	dctx, cancel := withOptionalTimeout(ctx, d)
 	resp, err := c.do(dctx, method, path, headers, body, c.deadlineClient())
 	if err != nil {
 		cancel()
@@ -146,7 +149,7 @@ func (c *Client) DoWithDeadline(ctx context.Context, method, path string, header
 // DoRawWithDeadline is DoRaw with a per-call deadline; see DoWithDeadline.
 func (c *Client) DoRawWithDeadline(req *http.Request, d time.Duration) (*http.Response, error) {
 	parent := req.Context()
-	dctx, cancel := context.WithTimeout(parent, d)
+	dctx, cancel := withOptionalTimeout(parent, d)
 	// #nosec G704 -- caller rewrites requests to the fixed local Docker endpoint before forwarding.
 	resp, err := c.deadlineClient().Do(req.WithContext(dctx))
 	if err != nil {
@@ -155,6 +158,15 @@ func (c *Client) DoRawWithDeadline(req *http.Request, d time.Duration) (*http.Re
 	}
 	resp.Body = &deadlineBody{ReadCloser: resp.Body, parent: parent, ctx: dctx, cancel: cancel, d: d}
 	return resp, nil
+}
+
+// withOptionalTimeout bounds ctx by d, or only makes it cancelable when d is
+// not positive (REQUEST_TIMEOUT=0).
+func withOptionalTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, d)
 }
 
 func wrapDeadline(parent, dctx context.Context, d time.Duration, err error) error {

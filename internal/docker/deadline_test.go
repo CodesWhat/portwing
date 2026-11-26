@@ -39,6 +39,35 @@ func TestParseTimeoutHeader(t *testing.T) {
 	}
 }
 
+func TestRequestDeadlineDisabledDefault(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"/containers/a/stop?t=60", "/containers/a/wait", "/info"} {
+		if d, explicit := RequestDeadline("POST", path, 0, false, 0); d != 0 || explicit {
+			t.Errorf("%s: RequestDeadline = %v, %v; want unbounded", path, d, explicit)
+		}
+	}
+	if d, _ := RequestDeadline("POST", "/images/load", 5000, true, 0); d != 5*time.Second {
+		t.Errorf("hint with disabled default = %v, want 5s", d)
+	}
+}
+
+func TestDoWithDeadline_ZeroIsUnbounded(t *testing.T) {
+	t.Parallel()
+	sock := startUnixHTTPServer(t, slowDockerd(300*time.Millisecond))
+	c, err := NewClient(sock, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.DoWithDeadline(context.Background(), http.MethodGet, "/info", nil, nil, c.DefaultTimeout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if b, _ := io.ReadAll(resp.Body); string(b) != "done" {
+		t.Fatalf("body = %q", b)
+	}
+}
+
 func TestRequestDeadline(t *testing.T) {
 	t.Parallel()
 	def := 30 * time.Second
@@ -132,7 +161,7 @@ func TestDoWithDeadline_TimeoutIsCoded(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	_, err = c.DoWithDeadline(context.Background(), http.MethodGet, "/info", nil, nil, 300*time.Millisecond)
+	_, err = c.DoWithDeadline(context.Background(), http.MethodGet, "/info", nil, nil, 300*time.Millisecond) //nolint:bodyclose // always an error here, no response
 	if _, ok := AsTimeout(err); !ok {
 		t.Fatalf("err = %v, want TimeoutError", err)
 	}
@@ -150,7 +179,7 @@ func TestDoWithDeadline_ParentCancelIsNotTimeout(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(100*time.Millisecond, cancel)
-	_, err = c.DoWithDeadline(ctx, http.MethodGet, "/info", nil, nil, 10*time.Second)
+	_, err = c.DoWithDeadline(ctx, http.MethodGet, "/info", nil, nil, 10*time.Second) //nolint:bodyclose // always an error here, no response
 	if err == nil {
 		t.Fatal("want error")
 	}
@@ -207,7 +236,7 @@ func TestDoRawWithDeadline(t *testing.T) {
 	}
 
 	req, _ = http.NewRequest(http.MethodPost, "http://localhost/containers/a/wait", nil)
-	_, err = c.DoRawWithDeadline(req, 200*time.Millisecond)
+	_, err = c.DoRawWithDeadline(req, 200*time.Millisecond) //nolint:bodyclose // always an error here, no response
 	if _, ok := AsTimeout(err); !ok {
 		t.Fatalf("err = %v, want TimeoutError", err)
 	}

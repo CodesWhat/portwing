@@ -76,6 +76,14 @@ Drydock parses SSE frames as `data: <json>\n\n`. Each frame is a JSON object wit
 
 Every 15 seconds Portwing writes a `: heartbeat` comment line (followed by a blank line) on the stream. Drydock arms its 45 s stalled-stream watchdog only after the first heartbeat, so this lets it detect a half-open stream, and it keeps proxies with short idle timeouts from cutting a quiet one. The comment isn't an event, so `AgentClient` ignores it when parsing.
 
+### Per-request timeout hint
+
+Blocking Docker calls time out at `REQUEST_TIMEOUT` (30 s by default). When the agent advertises `dd:request-timeout`, a controller can send a per-request hint: `timeoutMs` on an Edge `request` frame, or the `X-Portwing-Timeout-Ms` header in Standard mode (digits only, at most 7 characters). The value clamps to 1 s to 15 min, and anything malformed means "no hint". It only applies to non-stream calls, and the deadline starts when the call is dispatched, so a `bodyStream` upload isn't counted against it. Portwing strips the header before the request reaches the Docker daemon.
+
+With no hint, `stop` and `restart` with `t=N` get `max(REQUEST_TIMEOUT, N + 15 s)` (capped at 15 min) and `wait` gets 15 min, so `docker stop -t 60` through the Standard proxy works too.
+
+A deadline overrun comes back as an Edge `error` frame with `code: "request_timeout"`, or in Standard mode as a `504` with `X-Portwing-Code: request_timeout` when the request carried the hint or hit one of those auto-deadline routes. A plain default-timeout request keeps its `502`. The daemon may still finish the operation, so re-inspect before assuming state. Controllers should arm their own timer at `timeoutMs + 5000` ms.
+
 ### `dd:ack`
 
 Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, `lastSeen`, `logLevel`, and `pollInterval` from the payload.
@@ -94,10 +102,13 @@ Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`,
     "logLevel": "info",
     "pollInterval": "5m0s",
     "containers": {"total": 3, "running": 2, "stopped": 1},
-    "images": 2
+    "images": 2,
+    "capabilities": ["dd:container-sync", "dd:container-event", "dd:logs", "dd:request-timeout"]
   }
 }
 ```
+
+`capabilities` repeats the `/_portwing/info` list so the controller doesn't need an extra authenticated call to discover optional features such as `dd:request-timeout`.
 
 <Callout type="info">
 `memoryGb` is read from `/proc/meminfo` (the binary stays cgo-free) and rounded to one decimal GiB; non-Linux hosts report `0`, which Drydock accepts. `pollInterval` is the agent's `DD_POLL_INTERVAL` rendered as a Go duration string — the field is informational and displayed as-is. Portwing 0.5.x and earlier sent `memoryGb: 0` and omitted `logLevel`/`pollInterval`.
@@ -307,7 +318,8 @@ Handshake sequence:
     "capabilities": [
       "compose", "exec", "metrics", "events",
       "edge-response-body-b64", "edge-request-body-stream",
-      "dd:container-sync", "dd:container-event", "dd:logs"
+      "dd:container-sync", "dd:container-event", "dd:logs",
+      "dd:request-timeout"
     ],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
