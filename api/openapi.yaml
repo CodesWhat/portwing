@@ -825,6 +825,13 @@ components:
         key_id:
           type: string
           description: hex(SHA-256(pubkey)[:8]).
+        reason:
+          type: string
+          maxLength: 32
+          description: >-
+            Why an edge request or compose operation was cancelled, as the
+            controller gave it in a `dd:cancel` frame. Present only on
+            `cancelled` records that carry one.
 
     AuditResponse:
       type: object

@@ -29,6 +29,8 @@ func FuzzEnvelope(f *testing.F) {
 	f.Add([]byte(`{"type":"dd:trigger_request","data":{"triggerType":"restart","triggerName":"web","containerId":"c1"}}`))
 	f.Add([]byte(`{"type":"dd:container_log_request","data":{"containerId":"c1","tail":100}}`))
 	f.Add([]byte(`{"type":"dd:container_delete_request","data":{"containerId":"c1"}}`))
+	f.Add([]byte(`{"type":"dd:cancel","data":{"requestId":"r1","reason":"timeout"}}`))
+	f.Add([]byte(`{"type":"dd:cancel","data":{"requestId":123}}`))
 	// Welcome seeds: TypeWelcome is otherwise unreached by any seed above, and
 	// (*WelcomeMessage).UnmarshalJSON is the only statement-bearing function
 	// in this package, so FuzzEnvelope scored 0.00% coverage without these.
@@ -96,6 +98,9 @@ func FuzzEnvelope(f *testing.F) {
 			_ = json.Unmarshal(env.Data, &m)
 		case TypeContainerEvent:
 			var m ContainerEventMessage
+			_ = json.Unmarshal(env.Data, &m)
+		case TypeDDCancel:
+			var m DDCancelMessage
 			_ = json.Unmarshal(env.Data, &m)
 		case TypeError:
 			var m ErrorMessage

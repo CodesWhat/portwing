@@ -151,10 +151,49 @@ and rejects binary bodies before sending any request.
 An interrupted upload never sends `stream_end`. The controller may send an
 `error` frame with `code: "request-cancelled"` and the upload's `requestId` to
 discard a pending reassembly immediately. This cancels only the upload stage,
-not a Docker request already dispatched after `stream_end`. Older agents ignore
+not a Docker request already dispatched after `stream_end` (`dd:cancel`, below, is
+the superset that also cancels a dispatched request). Older agents ignore
 that error and discard the incomplete upload on their existing idle timeout;
 they never receive a terminal frame that could dispatch a partial body.
 Disconnects discard pending uploads through the existing connection cleanup.
+
+`dd:cancel` lets the controller abandon one in-flight request by id. The agent
+advertises it in `hello.capabilities` (Edge only; Standard mode cancels by
+closing the HTTP connection, and doesn't list it in `/_portwing/info`). A
+controller must not send the frame to an agent whose hello lacks the token.
+The frame is `{"type":"dd:cancel","data":{"requestId":"<1..128 bytes>","reason":"timeout"}}`.
+`reason` is optional, at most 32 bytes (longer is truncated), and is only logged
+and written to the audit record, never branched on. The agent handles the frame
+on the read pump with no admission, and an empty or over-long `requestId` is
+ignored.
+
+- A pending `bodyStream` upload is discarded with no frame, exactly like
+  `error{code:"request-cancelled"}`. `dd:cancel` is a strict superset of it, and
+  that error keeps its upload-only meaning.
+- An in-flight `request` has its context cancelled. The Docker round trip
+  aborts, the handler returns, and the admission slot, any raw exec slot and any
+  streamed-body byte reservation are released. A compose request gets its
+  existing SIGTERM with a bounded wait. The audit record has outcome
+  `cancelled` and the reason.
+- An in-flight `dd:container_log_request` with `stream: true` is cancelled like
+  `dd:container_log_cancel` and ends with the existing
+  `dd:container_log_end{reason:"canceled"}`.
+- An unknown or already finished id is a silent no-op with no frame. Buffered
+  `dd:container_log_request`, `dd:container_delete_request` and exec sessions
+  (which end on `exec_end`) are not cancelled by this frame.
+
+For a request the agent processed a cancel for, it sends at most one terminal
+frame, after the slots are released, so seeing it means capacity is free. If the
+response header was not yet sent, that frame is `error` with
+`code: "cancelled"` and message `request cancelled`. If a stream's
+`response{isStream:true}` was already sent, it is `stream_end` with
+`reason: "cancelled"`, not an `error`. Frames queued before the agent processed
+the cancel (`stream` chunks, even a finished `response`) can still arrive, and a
+controller drops frames for ids it no longer tracks. If the real response wins
+the race, no `cancelled` frame follows. `cancelled` doesn't mean the Docker side
+effect was undone: a cancelled `stop`, `pull` or `compose up` may have completed
+or half-completed, so re-inspect. An older agent ignores `dd:cancel`, and an
+older controller never sends it, so neither side changes behavior.
 
 All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
@@ -175,7 +214,8 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 | `metrics` | Agent -> Server | Host metrics payload |
 | `container_event` | Agent -> Server | Docker lifecycle event; used instead of a duplicate controller event stream |
 | `ping` / `pong` | Either | Keepalive (30s default) |
-| `error` | Either | Error with optional `code` |
+| `error` | Either | Error with optional `code`; `cancelled` is the terminal frame for a request the controller cancelled with `dd:cancel` before any response header |
+| `dd:cancel` | Server -> Agent | Abandon one in-flight request by `requestId` (see `dd:cancel` above); only sent to an agent whose hello carries the `dd:cancel` capability |
 | `exec_start` | Server -> Agent | Start interactive exec session |
 | `exec_ready` | Agent -> Server | Exec session attached |
 | `exec_input` | Server -> Agent | Terminal input (base64) |

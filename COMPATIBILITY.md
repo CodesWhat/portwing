@@ -107,6 +107,16 @@ the negotiated `edge-key-rotation` capability. The wire remains `portwing/1.0`
 and `DrydockCompat` remains `1.4.0`; wire compatibility alone does not establish
 rotation support. See the [operator guide](docs/content/docs/current/authentication.mdx#controller-assisted-rotation).
 
+### Edge request cancellation
+
+An Edge agent advertises `dd:cancel` in its hello. A controller that sends the
+`dd:cancel` frame for a request it gave up on frees the agent's admission slot
+and aborts the Docker call. The controller must only send it to an agent that
+advertised the token, and it keeps its own timer cleanup either way. An older
+agent ignores the frame, and an older controller never sends it. The wire
+remains `portwing/1.0` and `DrydockCompat` remains `1.4.0`. Standard mode has
+no such frame: closing the HTTP connection cancels the request.
+
 ## Wire compatibility versus feature compatibility
 
 `DrydockCompat` answers whether the two sides can parse and maintain the stable

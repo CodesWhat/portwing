@@ -530,7 +530,7 @@ func TestSendHelloMergesAdapterCapabilities(t *testing.T) {
 	if !found {
 		t.Errorf("Capabilities = %v, want to contain custom-cap", hello.Capabilities)
 	}
-	want := []string{"compose", "exec", "metrics", "events", protocol.CapResponseBodyBase64, protocol.CapRequestBodyStream, protocol.CapRequestTimeout, "custom-cap"}
+	want := []string{"compose", "exec", "metrics", "events", protocol.CapResponseBodyBase64, protocol.CapRequestBodyStream, protocol.CapRequestTimeout, protocol.CapCancel, "custom-cap"}
 	if len(hello.Capabilities) != len(want) {
 		t.Fatalf("Capabilities = %v, want %v", hello.Capabilities, want)
 	}

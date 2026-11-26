@@ -224,6 +224,7 @@ func TestHandleMessageRespondsWhileHandlerPoolFull(t *testing.T) {
 		{"watch container", protocol.TypeDDWatchContainerRequest, protocol.TypeDDWatchContainerResponse},
 		{"trigger", protocol.TypeDDTriggerRequest, protocol.TypeDDTriggerResponse},
 		{"cancel logs", protocol.TypeDDContainerLogCancel, ""},
+		{"dd cancel", protocol.TypeDDCancel, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

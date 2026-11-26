@@ -303,6 +303,13 @@ type Client struct {
 	// streamSem bounds concurrent in-flight request handlers (maxStreams).
 	streamSem chan struct{}
 
+	// inflight maps RequestID to the tracked request goroutine, so a dd:cancel
+	// frame (CapCancel) can cancel it. Filled by serveTracked inside an
+	// admitted streamSem slot, so it never exceeds maxStreams. Guarded by
+	// inflightMu.
+	inflightMu sync.Mutex
+	inflight   map[string]*inflightRequest
+
 	// containerMetricsOnce guards containerCollector, the one collector every
 	// scrape of the health server's /metrics shares so overlapping scrapes
 	// cost Docker a single stats pool.
@@ -876,6 +883,10 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	// stream_end died with the connection, so the next one starts with a
 	// clean pending table instead of rejecting the controller's retries.
 	c.failAllPendingBodies()
+	// And the in-flight registry: a handler still draining its shutdown grace
+	// must not hold its id against the controller's retry on the next
+	// connection.
+	c.clearInflight()
 
 	// Close connection.
 	c.connMu.Lock()
@@ -930,6 +941,10 @@ func (c *Client) sendHello(ctx context.Context) error {
 		protocol.CapRequestBodyStream,
 		// Both Docker proxy paths honor the hint whatever adapter is loaded.
 		protocol.CapRequestTimeout,
+		// dd:cancel: the controller may abandon one in-flight request by id
+		// (see handleCancelFrame). A controller that doesn't know the token
+		// never sends the frame.
+		protocol.CapCancel,
 	}
 	capabilities = append(capabilities, c.adapter.Capabilities()...)
 	if err := c.initKeyRotation(); err != nil {
@@ -1087,9 +1102,13 @@ func (c *Client) readPump(ctx context.Context) error {
 			select {
 			case c.streamSem <- struct{}{}:
 				target := c.currentOutboundTarget()
+				release := sync.OnceFunc(func() { <-c.streamSem })
+				// Register before spawning so a dd:cancel right behind this
+				// request on the wire can't beat the goroutine to the registry.
+				tr := c.registerRequest(ctx, req.RequestID)
 				go func() {
-					defer func() { <-c.streamSem }()
-					c.handleRequestTo(ctx, req, target)
+					defer release()
+					c.serveRegistered(tr, req, target, release)
 				}()
 			default:
 				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
@@ -1166,12 +1185,18 @@ func (c *Client) readPump(ctx context.Context) error {
 				// reservation finishPendingBody just made and releases it on
 				// every exit. Doing the admission check here instead would
 				// need a second release site on the rejection branch.
-				go c.dispatchStreamedBody(ctx, req, target, reservation)
+				// Register on the pump, before the body leaves pendingBodies'
+				// cancel window, so a dd:cancel right after stream_end finds it.
+				tr := c.registerRequest(ctx, req.RequestID)
+				go c.dispatchRegisteredBody(ctx, tr, req, target, reservation)
 				continue
 			}
 			if !c.adapter.HandleMessage(ctx, sender, env.Type, env.Data) {
 				slog.Debug("unhandled message type", "type", applog.Sanitize(env.Type))
 			}
+
+		case protocol.TypeDDCancel:
+			c.handleCancelFrame(ctx, sender, env)
 
 		case protocol.TypePing:
 			var ping protocol.PingMessage
@@ -1263,14 +1288,17 @@ func (c *Client) registerPendingBody(req protocol.RequestMessage, target outboun
 
 // cancelPendingBody abandons an upload without ever dispatching a partial body.
 // Older agents ignore the cancellation frame and expire the upload normally.
-func (c *Client) cancelPendingBody(requestID string) {
+// It reports whether a pending upload was registered under requestID.
+func (c *Client) cancelPendingBody(requestID string) bool {
 	c.pendingBodiesMu.Lock()
 	pb := c.pendingBodies[requestID]
 	delete(c.pendingBodies, requestID)
 	c.pendingBodiesMu.Unlock()
-	if pb != nil {
-		pb.timer.Stop()
+	if pb == nil {
+		return false
 	}
+	pb.timer.Stop()
+	return true
 }
 
 // appendPendingBody decodes and appends one stream chunk to the pending body
@@ -1508,7 +1536,15 @@ func (c *Client) releaseDispatchingBody(reservation uint64) {
 // per stream_end is cheap even on the rejection branch, because the
 // production send path enqueues without blocking.
 func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestMessage, target outboundTarget, reservation uint64) {
+	c.dispatchRegisteredBody(ctx, c.registerRequest(ctx, req.RequestID), req, target, reservation)
+}
+
+// dispatchRegisteredBody is dispatchStreamedBody for a request the read pump
+// already registered, which closes the cancel gap between stream_end and the
+// goroutine start. It owns tr: every exit untracks it.
+func (c *Client) dispatchRegisteredBody(ctx context.Context, tr *trackedRequest, req protocol.RequestMessage, target outboundTarget, reservation uint64) {
 	defer c.releaseDispatchingBody(reservation)
+	defer tr.untrack()
 
 	// Bound concurrent request handlers (maxStreams), the same admission
 	// check an inline-body request gets in readPump. Reject rather than wait:
@@ -1516,8 +1552,14 @@ func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestM
 	// it against the aggregate budget for as long as the agent stayed busy.
 	select {
 	case c.streamSem <- struct{}{}:
-		defer func() { <-c.streamSem }()
-		c.handleRequestTo(ctx, req, target)
+		// The slot and the byte reservation are both freed before a
+		// cancelled terminal frame goes out, so that frame means capacity.
+		release := sync.OnceFunc(func() {
+			<-c.streamSem
+			c.releaseDispatchingBody(reservation)
+		})
+		defer release()
+		c.serveRegistered(tr, req, target, release)
 	default:
 		slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
 		c.auditRefusedRawExecStart(req.Method, req.Path, target.auditKeyID())
@@ -1646,6 +1688,10 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	}
 
 	if err != nil {
+		if reason, ok := cancelledByController(ctx); ok {
+			c.auditCancelledAPI(req, 0, msEdge(start), target, reason)
+			return
+		}
 		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, 0, msEdge(start), target.auditKeyID())
 		// Best-effort error reply; connection loss will surface on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, dockerErrorMessage(req.RequestID, err))
@@ -1660,6 +1706,9 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	}
 
 	if isStream {
+		if e := inflightFrom(ctx); e != nil {
+			e.headerSent.Store(true)
+		}
 		// Send initial response header; best-effort — connection loss surfaces on the read pump.
 		_ = c.sendTypedMessageTo(target, protocol.TypeResponse, protocol.ResponseMessage{
 			RequestID:   req.RequestID,
@@ -1681,6 +1730,13 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		buf := pool.GetStreamBuffer()
 		var streamErr error
 		for {
+			// A dd:cancel ends the stream here, with no further chunk; the
+			// terminal stream_end is sent by serveTracked after release.
+			if reason, ok := cancelledByController(ctx); ok {
+				pool.PutStreamBuffer(buf)
+				c.auditCancelledAPI(req, resp.StatusCode, msEdge(start), target, reason)
+				return
+			}
 			n, readErr := resp.Body.Read(buf)
 			if n > 0 {
 				encoded := base64.StdEncoding.EncodeToString(buf[:n])
@@ -1689,6 +1745,10 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 					Data:      encoded,
 				}); sendErr != nil {
 					pool.PutStreamBuffer(buf)
+					if reason, ok := cancelledByController(ctx); ok {
+						c.auditCancelledAPI(req, resp.StatusCode, msEdge(start), target, reason)
+						return
+					}
 					slog.Warn("abandoning docker response stream: send failed",
 						"requestId", applog.Sanitize(req.RequestID),
 						"path", applog.Sanitize(auditPath(req.Path)),
@@ -1699,6 +1759,11 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			}
 			if readErr != nil {
 				if !errors.Is(readErr, io.EOF) {
+					if reason, ok := cancelledByController(ctx); ok {
+						pool.PutStreamBuffer(buf)
+						c.auditCancelledAPI(req, resp.StatusCode, msEdge(start), target, reason)
+						return
+					}
 					streamErr = readErr
 				}
 				break
@@ -1735,6 +1800,10 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		// as a successful response.
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 		if err != nil {
+			if reason, ok := cancelledByController(ctx); ok {
+				c.auditCancelledAPI(req, resp.StatusCode, msEdge(start), target, reason)
+				return
+			}
 			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start), target.auditKeyID())
 			msg := dockerErrorMessage(req.RequestID, err)
 			if msg.Code == "" {
@@ -1834,6 +1903,16 @@ func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.Reques
 	}
 
 	resp, err := c.compose.Execute(ctx, composeReq)
+	// Decide first, mark second: cancelledByController makes serveTracked emit
+	// the terminal frame, so it may only run on the path that returns without
+	// sending one. A controller cancel that lands while the request waits on the
+	// stack lock returns Success:false, Cancelled:false, nil error, and still
+	// counts as cancelled.
+	if reason, ok := controllerCancelReason(ctx); ok && (err != nil || resp == nil || resp.Cancelled || !resp.Success) {
+		cancelledByController(ctx)
+		c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, audit.OutcomeCancelled, target.auditKeyID(), audit.WithReason(reason))
+		return
+	}
 	if err != nil {
 		c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, audit.OutcomeError, target.auditKeyID())
 		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{

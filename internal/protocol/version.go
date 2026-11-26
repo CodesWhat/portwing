@@ -49,6 +49,16 @@ const (
 	// controller must not send the hint unless it saw this token.
 	CapRequestTimeout = "dd:request-timeout"
 
+	// CapCancel is the capability token, advertised in the Edge hello, for
+	// the dd:cancel frame: the controller may abandon one in-flight request
+	// by id. Edge only; Standard mode cancels by closing the HTTP connection.
+	// A controller must not send dd:cancel unless the hello carried it.
+	CapCancel = "dd:cancel"
+
+	// ErrorCodeCancelled is the code on the terminal error frame for a
+	// request the controller cancelled before any response header was sent.
+	ErrorCodeCancelled = "cancelled"
+
 	CapKeyRotation  = "edge-key-rotation"
 	KeyRotationPath = "/_portwing/auth/rotation"
 
