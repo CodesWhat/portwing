@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -53,6 +54,12 @@ func (d *blockingDocker) DoWithHeaders(ctx context.Context, method, path string,
 	d.entered.Add(1)
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+// DoWithDeadline routes through this wrapper's DoWithHeaders; the embedded
+// fakeDocker's version would call its own and skip the blocking.
+func (d *blockingDocker) DoWithDeadline(ctx context.Context, method, path string, h http.Header, body io.Reader, _ time.Duration) (*http.Response, error) {
+	return d.DoWithHeaders(ctx, method, path, h, body)
 }
 
 func (d *blockingDocker) DoStreamWithHeaders(ctx context.Context, method, path string, h http.Header, body io.Reader) (*http.Response, error) {
@@ -316,6 +323,10 @@ type execBlockingDocker struct {
 
 func (d *execBlockingDocker) DoWithHeaders(ctx context.Context, method, path string, h http.Header, body io.Reader) (*http.Response, error) {
 	return d.blockExec(ctx)
+}
+
+func (d *execBlockingDocker) DoWithDeadline(ctx context.Context, method, path string, h http.Header, body io.Reader, _ time.Duration) (*http.Response, error) {
+	return d.DoWithHeaders(ctx, method, path, h, body)
 }
 
 func (d *execBlockingDocker) DoStreamWithHeaders(ctx context.Context, method, path string, h http.Header, body io.Reader) (*http.Response, error) {
