@@ -585,6 +585,95 @@ Never pair `TOKEN` with plain HTTP on a port published to all interfaces. If the
 
 ---
 
+## Controller-Managed Upgrades
+
+Portwing has no self-updater, host package manager or privileged helper, and
+this release adds none. A controller upgrades a Portwing container the same way
+it upgrades any other workload: through the Docker API calls Portwing already
+proxies. Drydock owns the sequencing, the health decision and the rollback
+policy. Portwing only needs to start up with the same identity.
+
+### Edge mode, no agent change
+
+The sequence below works against any Portwing that proxies the Docker API. It
+starts the replacement before it stops the old agent, so the controller learns
+whether the new container can reach it before anything is lost.
+
+1. Through the old agent, pull the target image by digest and inspect the old
+   container.
+2. Create a candidate under a different container name. Keep the same
+   `AGENT_NAME` and `AGENT_ID`, the same `PRIVATE_KEY_FILE` secret, the same
+   `/data/credentials` state volume, the same Docker socket mount and the same
+   restart policy. Only the image changes.
+3. Start the candidate. It dials the controller and passes signature
+   verification, but the old agent still holds the name, so it gets
+   `agent-already-connected`. That code is transient, so the candidate keeps
+   retrying. Using the rejected hello as a readiness check needs Drydock
+   support: today Drydock replies `agent-already-connected` and keeps no record
+   of the hello, so confirm your Drydock version retains it before relying on
+   this step. Without that, step 6 is your only confirmation. The rejected hello still carries `version` and `hostname`, which
+   shows the candidate runs, holds the right key and can reach the controller.
+   `hostname` is the candidate's short container ID unless you override it, so
+   the controller can match it to the container it created.
+4. Through the old agent, stop the old container. The old agent dies mid-call,
+   and the controller should treat that disconnect as expected, not as a
+   failure.
+5. The candidate connects on its next retry. Backoff starts at 1 second and
+   doubles to a 60 second cap, and jitter can stretch each wait by up to 25%. Allow
+   about 75 seconds plus connect and handshake time in the worst case.
+6. Verify the new `hello.version` is the target and the inventory sync arrives.
+   Only then remove the old container. Until this point it was stopped, not
+   removed.
+
+Keep the previous image digest, not a tag. A rollback after a successful
+upgrade is the same sequence run in reverse against that digest.
+
+Proxied requests are bound by the agent's `REQUEST_TIMEOUT` (30 seconds by
+default, configurable). Streaming requests such as image pulls have no total
+timeout. Keep the stop timeout (`t`) well under `REQUEST_TIMEOUT`, or raise
+`REQUEST_TIMEOUT` on the old agent before the upgrade.
+
+### Standard mode is out of scope
+
+A candidate can't bind the published port while the old agent holds it, and the
+controller can't restart anything once the old agent is stopped. Don't use a
+controller-driven self-upgrade for a Standard mode agent. Redeploy it yourself
+(for example `docker compose pull && docker compose up -d`), or run the
+candidate on a different port and re-point the controller's stored URL after
+the swap.
+
+### Rollback gap
+
+Once the controller stops the old agent through that agent, it has no other
+channel to the host. If the candidate never connects, nothing can start the old
+container again, because rollback itself needs a working agent.
+
+| When it fails | What's recoverable |
+|---------------|--------------------|
+| Before the old agent is stopped (steps 1 to 3) | Everything. Remove the candidate through the old agent. |
+| After the old agent is stopped, and the candidate never connects (steps 4 to 5) | Not from the controller. The host is unreachable until someone starts the old container. |
+| After the candidate connected (step 6 onward) | Everything, as long as the new agent stays connected. Roll back through it to the retained digest. If it connects, sends inventory, then crashes or drops, the controller has no working agent again and host-side recovery applies. |
+
+The step 3 check shrinks the unrecoverable window to a candidate that proved it
+could dial and then failed anyway. It doesn't remove it. When a host shows as
+unreachable after an upgrade, an operator with host access recovers it:
+
+```bash
+docker ps -a --filter name=portwing
+docker start <old-container-name>
+```
+
+Start the old container, wait for it to reconnect, then remove the candidate
+and investigate (`docker logs <candidate>`). If the old container was already
+removed, recreate it from the previous image digest with the same identity and
+volume.
+
+Portwing doesn't close this gap itself. Doing so would mean the agent stops a
+sibling container on its own initiative, which crosses the no-self-updater
+line. If you need automated recovery past step 4, raise it as a feature request.
+
+---
+
 ## Compatibility Matrix
 
 <Callout type="info">

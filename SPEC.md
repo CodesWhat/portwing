@@ -664,6 +664,27 @@ without drawing the duplicate-`requestId` rejection of §3.3.
 - Sends WebSocket close frame (code 1000, reason "shutdown")
 - HTTP server: `Shutdown()` with 10s timeout
 
+### 13.4 Controller-Managed Upgrades
+
+Portwing has no self-updater. A controller upgrades an Edge mode agent with the
+proxied Docker API: pull by digest, create a candidate with the same
+`AGENT_NAME`, `AGENT_ID`, `PRIVATE_KEY_FILE` secret, `STATE_DIR` volume, socket
+mount and restart policy, start it, then stop the old container through the old
+agent. While the old agent is connected the candidate's hello is rejected with
+`agent-already-connected` (retryable, section 13.1); the rejected hello's
+`version` and `hostname` prove the candidate can reach the controller. After the
+old agent stops, the candidate connects on its next retry (worst case about 75s plus handshake: the 60s cap plus up to 25% jitter). The
+controller removes the old container only after the new `hello.version` and the
+inventory sync arrive, and treats the old agent's disconnect during the stop as
+expected. No wire behavior changes.
+
+Rollback gap: once the old agent is stopped, a candidate that never connects
+leaves the host unreachable from the controller, because rollback needs a
+working agent. An operator starts the old container on the host. Standard mode
+self-upgrade is out of scope: the candidate can't bind the published port while
+the old agent holds it. See the Drydock Integration page for the operator
+procedure.
+
 ## 14. Build and Release
 
 ### 14.1 Targets
