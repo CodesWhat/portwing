@@ -21,8 +21,8 @@ func TestLoadOrCreateEnrolledKeyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if !key.Created || !key.Pending {
-		t.Fatalf("fresh key must be created and pending: %+v", key)
+	if !key.Pending {
+		t.Fatalf("fresh key must be pending: %+v", key)
 	}
 	info, err := os.Stat(key.Path)
 	if err != nil {
@@ -47,7 +47,7 @@ func TestLoadOrCreateEnrolledKeyLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reload: %v", err)
 		}
-		if again.Created || !again.Pending {
+		if !again.Pending {
 			t.Fatalf("reload must reuse the pending key: %+v", again)
 		}
 		got, _ := os.ReadFile(key.Path)
@@ -63,11 +63,13 @@ func TestLoadOrCreateEnrolledKeyLifecycle(t *testing.T) {
 		t.Fatalf("confirm is idempotent: %v", err)
 	}
 	confirmed, err := LoadOrCreateEnrolledKey(dir, true)
-	if err != nil || confirmed.Pending || confirmed.Created {
+	if err != nil || confirmed.Pending {
 		t.Fatalf("confirmed key: %+v, %v", confirmed, err)
 	}
 }
 
+// Covers corrupt content only; permission modes are in
+// TestLoadOrCreateEnrolledKeyRefusesLoosePermissions.
 func TestLoadOrCreateEnrolledKeyRefusesUnsafeExistingKey(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bits")
@@ -84,6 +86,93 @@ func TestLoadOrCreateEnrolledKeyRefusesUnsafeExistingKey(t *testing.T) {
 	if string(got) != "not a key" {
 		t.Fatal("existing file was overwritten")
 	}
+}
+
+func TestLoadOrCreateEnrolledKeyRefusesLoosePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits")
+	}
+	for _, mode := range []os.FileMode{0o644, 0o660} {
+		t.Run(mode.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			key, err := LoadOrCreateEnrolledKey(dir, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(key.Path, mode); err != nil { //nolint:gosec // loose-permission fixture
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(key.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadOrCreateEnrolledKey(dir, true); err == nil {
+				t.Fatalf("a %04o enrolled key must be refused", mode)
+			}
+			after, err := os.ReadFile(key.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Fatal("the key was regenerated")
+			}
+		})
+	}
+
+	// Group-readable 0640 is accepted, matching the other credential files
+	// (see TestParseAuthorizedKeys_GroupReadableAccepted).
+	t.Run("0640 accepted", func(t *testing.T) {
+		dir := t.TempDir()
+		key, err := LoadOrCreateEnrolledKey(dir, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(key.Path, 0o640); err != nil { //nolint:gosec // group-readable fixture
+			t.Fatal(err)
+		}
+		if _, err := LoadOrCreateEnrolledKey(dir, false); err != nil {
+			t.Fatalf("0640 must be accepted: %v", err)
+		}
+	})
+
+	// The existence check uses Lstat and the load follows links, so a symlink
+	// to a valid 0600 key elsewhere is accepted as that key.
+	t.Run("symlink to a valid key", func(t *testing.T) {
+		other := t.TempDir()
+		target, err := LoadOrCreateEnrolledKey(other, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := os.Symlink(target.Path, filepath.Join(dir, EnrolledKeyFileName)); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		got, err := LoadOrCreateEnrolledKey(dir, true)
+		if err != nil {
+			t.Fatalf("symlink to a valid 0600 key: %v", err)
+		}
+		if got.Pending {
+			t.Fatal("no marker in the link directory, so the key is confirmed")
+		}
+	})
+
+	t.Run("symlink to a loose key", func(t *testing.T) {
+		other := t.TempDir()
+		target, err := LoadOrCreateEnrolledKey(other, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(target.Path, 0o644); err != nil { //nolint:gosec // loose-permission fixture
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := os.Symlink(target.Path, filepath.Join(dir, EnrolledKeyFileName)); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if _, err := LoadOrCreateEnrolledKey(dir, true); err == nil {
+			t.Fatal("a symlink to a loose key must be refused")
+		}
+	})
 }
 
 func TestLoadOrCreateEnrolledKeyUnwritableDir(t *testing.T) {
