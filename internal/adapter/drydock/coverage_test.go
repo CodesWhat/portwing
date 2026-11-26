@@ -50,6 +50,7 @@ func TestCapabilities(t *testing.T) {
 		"dd:container-sync":  true,
 		"dd:container-event": true,
 		"dd:logs":            true,
+		"dd:request-timeout": true,
 	}
 	for _, c := range caps {
 		if !want[c] {

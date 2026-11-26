@@ -44,6 +44,11 @@ const (
 	// hello advertised this token.
 	CapRequestBodyStream = "edge-request-body-stream"
 
+	// CapRequestTimeout gates the per-request timeout hint: Edge
+	// request.timeoutMs and the Standard X-Portwing-Timeout-Ms header. A
+	// controller must not send the hint unless it saw this token.
+	CapRequestTimeout = "dd:request-timeout"
+
 	CapKeyRotation  = "edge-key-rotation"
 	KeyRotationPath = "/_portwing/auth/rotation"
 
@@ -52,6 +57,20 @@ const (
 	// code on a legacy dd:container_log_response. Match on it, not on the
 	// human-readable message.
 	ErrorCodeResponseTooLarge = "response_too_large"
+
+	// ErrorCodeRequestTimeout is the code on an edge `error` frame (and the
+	// X-Portwing-Code header on a Standard 504) when a non-stream Docker round
+	// trip exceeded its deadline. The Docker operation may still complete on
+	// the daemon, so the controller must re-inspect before assuming state.
+	ErrorCodeRequestTimeout = "request_timeout"
+
+	// RequestTimeoutHeader carries the Standard-mode timeout hint. Portwing
+	// strips it before the request reaches dockerd.
+	RequestTimeoutHeader = "X-Portwing-Timeout-Ms"
+
+	// CodeHeader names the response header carrying a machine-readable error
+	// code on a Standard-mode failure.
+	CodeHeader = "X-Portwing-Code"
 )
 
 // AgentVersion is the agent build version. It must be a var, not a const:

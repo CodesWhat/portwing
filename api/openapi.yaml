@@ -278,7 +278,7 @@ components:
             adapter and optional feature declarations.
           items:
             type: string
-          example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:container-event", "dd:logs"]
+          example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:container-event", "dd:logs", "dd:request-timeout"]
 
     ComposeRequest:
       type: object
@@ -1534,7 +1534,7 @@ paths:
 
         **Example stream:**
         ```
-        data: {"type":"dd:ack","data":{"version":"1.5.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+        data: {"type":"dd:ack","data":{"version":"1.5.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3,"capabilities":["dd:container-sync","dd:container-event","dd:logs","dd:request-timeout"]}}
 
         data: {"type":"dd:watcher-snapshot","data":{"watcher":{...WatcherComponent...},"containers":[{...Container...}]}}
 

@@ -98,7 +98,8 @@ sequenceDiagram
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
                       "edge-response-body-b64", "edge-request-body-stream",
-                      "dd:container-sync", "dd:container-event", "dd:logs"],
+                      "dd:container-sync", "dd:container-event", "dd:logs",
+                      "dd:request-timeout"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
     "triggerTypes": []
@@ -226,6 +227,47 @@ stable signal for an over-cap non-stream edge response: the `error` frame
 carries `code: "response_too_large"` alongside the human-readable `message`
 (`{"message":"response exceeds 16777216 bytes; use a streaming request","code":"response_too_large","requestId":"..."}`).
 Match on `code`; the message text can change.
+
+#### Per-request timeout hint (`dd:request-timeout`)
+
+Non-stream Docker calls time out at `REQUEST_TIMEOUT` (30 s by default), which
+a `stop?t=60`, a long `wait` or an `images/load` can't meet. An agent that
+advertises `dd:request-timeout` (Edge `hello.capabilities`, Standard
+`/_portwing/info` capabilities and the `dd:ack` event) accepts a per-request
+hint, and a controller must not send it unless it saw the token.
+
+| Mode | Carrier | Form |
+|------|---------|------|
+| Edge | `request.timeoutMs` | JSON integer, milliseconds |
+| Standard | `X-Portwing-Timeout-Ms` header | ASCII decimal digits, at most 7 characters |
+
+- The value clamps to `[1000, 900000]` ms. A missing, zero, negative,
+  non-integer or non-numeric value is "no hint" and the default applies; the
+  field is advisory and never rejects a request.
+- It applies only to non-stream Docker round trips. Stream-classified routes,
+  hijacked exec/attach, `/_portwing/compose` and the buffered
+  `dd:container_log_*` and `dd:container_delete_*` pairs ignore it.
+- The deadline starts when the Docker call is dispatched, so for a
+  `bodyStream: true` request it starts after `stream_end`. It covers header and
+  body read. Edge's frame liveness bounds (`writeWait`, stream stall, body idle
+  timeout) don't scale with it.
+- Without a hint, `POST /containers/{id}/stop?t=N` and `/restart?t=N` get
+  `max(REQUEST_TIMEOUT, N + 15 s)` capped at 15 min (`t=-1` gets 15 min), and
+  `POST /containers/{id}/wait` gets 15 min. An explicit hint wins. With
+  `REQUEST_TIMEOUT=0` the default stays unbounded and only a hint adds a limit.
+- Edge answers a deadline overrun with an `error` frame carrying
+  `code: "request_timeout"` and `message` `docker request exceeded <duration>`;
+  this applies to the default deadline too. Standard answers `504` with
+  `X-Portwing-Code: request_timeout`, but only when the request carried the hint
+  or hit an auto-deadline route. A plain default-timeout request keeps its `502`.
+  Standard holds the response status until the first body byte, so a daemon
+  that sends headers and then stalls still gets the `504`; a stall after body
+  bytes were sent aborts the connection instead of ending a truncated `200`.
+  Every adapter advertises `dd:request-timeout`, since both proxy paths honor it.
+- The daemon may still finish the operation after the agent gives up, so a
+  controller re-inspects before assuming state. A controller timer should run
+  `timeoutMs + 5000` ms so the coded error wins the race.
+- Standard strips `X-Portwing-Timeout-Ms` before the request reaches dockerd.
 
 ## 4. Standard Mode HTTP API
 

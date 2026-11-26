@@ -34,8 +34,8 @@ func TestInfoCapabilitiesPreserveFirstOccurrence(t *testing.T) {
 		name          string
 		adapter, want []string
 	}{
-		{"nil adapter", nil, []string{"compose", "exec", "metrics", "events"}},
-		{"overlap", []string{"events", "future", "exec", "future", "Events"}, []string{"compose", "exec", "metrics", "events", "future", "Events"}},
+		{"nil adapter", nil, []string{"compose", "exec", "metrics", "events", "dd:request-timeout"}},
+		{"overlap", []string{"events", "future", "exec", "future", "Events"}, []string{"compose", "exec", "metrics", "events", "dd:request-timeout", "future", "Events"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client, stop := newStubDockerClient(t)
