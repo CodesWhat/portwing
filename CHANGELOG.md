@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- CI: a promotion PR whose merged tree equals a dev tree that a full push run already verified now reports Lint, Workflow Security, GoReleaser Config and Qlty Check from that run instead of repeating them, at step level, so every required context still reports success. Build & Test, Govulncheck, Commit Message, fuzzing, CodeQL, Codecov and Website Browser Checks still run in full, and any lookup error falls back to the full run.
+
 ## [v1.5.0] - 2026-11-24
 
 ### Added
