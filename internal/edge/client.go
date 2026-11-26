@@ -697,6 +697,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		closeWebSocket(conn, "controller rejected hello")
 		// Controller-supplied text could echo the single-use enrollment code.
 		errMsg.Message = c.redactEnrollCode(errMsg.Message)
+		errMsg.Code = c.redactEnrollCode(errMsg.Code)
 		rejErr := fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, errMsg.Code)
 		if parsed && isTerminalHelloRejection(errMsg.Code) && c.keyRotation != nil {
 			if rolledBack, err := c.keyRotation.RejectTrial(); err != nil {

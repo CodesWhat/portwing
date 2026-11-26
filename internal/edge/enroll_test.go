@@ -11,8 +11,10 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,17 +162,19 @@ func TestPendingKeyWithoutCodeConfirmsOnWelcome(t *testing.T) {
 }
 
 func TestEnrollRejectionMatrix(t *testing.T) {
+	const freshCodeHint = "retry with a fresh ENROLL_CODE"
 	tests := []struct {
 		code      string
 		wantFatal bool
+		wantHint  bool
 	}{
-		{"enroll-code-invalid", true},
-		{"enroll-code-expired", true},
-		{"enroll-code-used", true},
-		{"enroll-code-revoked", true},
-		{"enroll-key-invalid", true},
-		{"enroll-disabled", true},
-		{"enroll-rate-limited", false},
+		{"enroll-code-invalid", true, true},
+		{"enroll-code-expired", true, true},
+		{"enroll-code-used", true, true},
+		{"enroll-code-revoked", true, true},
+		{"enroll-key-invalid", true, true},
+		{"enroll-disabled", true, true},
+		{"enroll-rate-limited", false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.code, func(t *testing.T) {
@@ -191,6 +195,9 @@ func TestEnrollRejectionMatrix(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), testEnrollCode) {
 				t.Fatal("error leaks the code")
+			}
+			if got := strings.Contains(err.Error(), freshCodeHint); got != tc.wantHint {
+				t.Fatalf("hint present = %v, want %v (%v)", got, tc.wantHint, err)
 			}
 			// The key stays, unconfirmed, so a fresh code reuses it.
 			if _, err := os.Stat(keyPath); err != nil {
@@ -318,5 +325,194 @@ func TestEnrollWelcomeWithoutAckKeepsPending(t *testing.T) {
 				t.Fatalf("marker must stay pending without an ack: %v", err)
 			}
 		})
+	}
+}
+
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+func TestEnrollUnparseableRejectionEchoingCodeIsRedacted(t *testing.T) {
+	buf := captureSlog(t)
+
+	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+		readHello(t, ctrl)
+		// A JSON string, not an ErrorMessage object.
+		sendEnvelope(t, ctrl, protocol.TypeError, "bad code "+testEnrollCode)
+	})
+	c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+	_, err := c.connect(context.Background())
+	if err == nil {
+		t.Fatal("connect returned nil")
+	}
+	if errors.Is(err, errFatal) {
+		t.Fatalf("an unparseable rejection must stay retryable: %v", err)
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "unparseable error payload") || !strings.Contains(logs, "bad code ") || !strings.Contains(logs, "[redacted]") {
+		t.Fatalf("expected the redacted unparseable-payload warning, got:\n%s", logs)
+	}
+	if strings.Contains(logs, testEnrollCode) || strings.Contains(err.Error(), testEnrollCode) {
+		t.Fatalf("echoed code leaked: err=%v logs=%s", err, logs)
+	}
+}
+
+func TestEnrollRejectionEchoingCodeInCodeFieldIsRedacted(t *testing.T) {
+	for name, code := range map[string]string{
+		"unknown code":  testEnrollCode,
+		"prefixed code": "oops " + testEnrollCode,
+		"terminal code": "enroll-code-used",
+	} {
+		t.Run(name, func(t *testing.T) {
+			buf := captureSlog(t)
+			srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+				readHello(t, ctrl)
+				sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{Code: code, Message: "echo " + testEnrollCode})
+			})
+			c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+			_, err := c.connect(context.Background())
+			if err == nil {
+				t.Fatal("connect returned nil")
+			}
+			if wantFatal := code == "enroll-code-used"; errors.Is(err, errFatal) != wantFatal {
+				t.Fatalf("fatal = %v, want %v (%v)", errors.Is(err, errFatal), wantFatal, err)
+			}
+			if strings.Contains(err.Error(), testEnrollCode) || strings.Contains(buf.String(), testEnrollCode) {
+				t.Fatalf("echoed code leaked: err=%v logs=%s", err, buf.String())
+			}
+		})
+	}
+}
+
+func TestPendingKeyUnparseableWelcomeKeepsPending(t *testing.T) {
+	for name, code := range map[string]string{"no code": "", "with code": testEnrollCode} {
+		t.Run(name, func(t *testing.T) {
+			srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+				readHello(t, ctrl)
+				sendEnvelope(t, ctrl, protocol.TypeWelcome, "notanobject")
+			})
+			cfg := enrollConfig(t, srv, code)
+			marker := cfg.EnrollMarkerPath
+			c := newWireClient(t, cfg)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, _ = c.connect(ctx)
+			if _, err := os.Stat(marker); err != nil {
+				t.Fatalf("marker must stay pending after an unparseable welcome: %v", err)
+			}
+			if cfg.EnrollMarkerPath != marker || cfg.EnrollCode != code {
+				t.Fatal("enrollment must not be marked confirmed")
+			}
+		})
+	}
+}
+
+func TestPendingKeyWithoutCodeUnknownKeyHint(t *testing.T) {
+	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+		readHello(t, ctrl)
+		sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{Code: "unknown-key", Message: "nope"})
+	})
+	c := newWireClient(t, enrollConfig(t, srv, ""))
+	_, err := c.connect(context.Background())
+	if !errors.Is(err, errFatal) {
+		t.Fatalf("want terminal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "no ENROLL_CODE is set") {
+		t.Fatalf("missing the no-code hint: %v", err)
+	}
+}
+
+// enrollLoadEnv points config.Load at a fresh state dir and the given
+// controller URL with a code set.
+func enrollLoadEnv(t *testing.T, url string, kv ...string) {
+	t.Helper()
+	t.Setenv("DRYDOCK_URL", url)
+	t.Setenv("STATE_DIR", t.TempDir())
+	t.Setenv("ENROLL_CODE", testEnrollCode)
+	for i := 0; i+1 < len(kv); i += 2 {
+		t.Setenv(kv[i], kv[i+1])
+	}
+}
+
+func TestEnrollTLSSkipVerifyRefusedSendsNoHello(t *testing.T) {
+	_, caCert, caKey := generateTestCA(t)
+	var hellos atomic.Int32
+	srv := newTLSControllerServer(t, generateTestLeafCert(t, caCert, caKey), func(ctrl *websocket.Conn) {
+		hellos.Add(1)
+		readHello(t, ctrl)
+	})
+	enrollLoadEnv(t, srv, "TLS_SKIP_VERIFY", "true")
+
+	_, err := config.Load()
+	if err == nil || !strings.Contains(err.Error(), "TLS_SKIP_VERIFY") || !strings.Contains(err.Error(), "ALLOW_INSECURE_ENROLLMENT") {
+		t.Fatalf("want a startup refusal naming TLS_SKIP_VERIFY and the override, got %v", err)
+	}
+	if strings.Contains(err.Error(), testEnrollCode) {
+		t.Fatal("error leaks the code")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := hellos.Load(); n != 0 {
+		t.Fatalf("controller saw %d connections, want 0", n)
+	}
+}
+
+func TestEnrollTLSSkipVerifyAllowedReachesController(t *testing.T) {
+	_, caCert, caKey := generateTestCA(t)
+	var got protocol.HelloMessage
+	srv := newTLSControllerServer(t, generateTestLeafCert(t, caCert, caKey), func(ctrl *websocket.Conn) {
+		got, _ = readHello(t, ctrl)
+		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{
+			PollInterval: 30,
+			Config:       map[string]string{"enrolled": "true"},
+			Capabilities: []string{protocol.CapEnroll},
+		})
+	})
+	enrollLoadEnv(t, srv, "TLS_SKIP_VERIFY", "true", "ALLOW_INSECURE_ENROLLMENT", "true")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("explicitly allowed insecure enrollment: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = newWireClient(t, cfg).connect(ctx)
+	if got.Enroll == nil || got.Enroll.Code != testEnrollCode {
+		t.Fatalf("controller did not receive the enrollment hello: %+v", got.Enroll)
+	}
+}
+
+func TestEnrollWithTrustedCAAndVerificationOn(t *testing.T) {
+	caPEM, caCert, caKey := generateTestCA(t)
+	var got protocol.HelloMessage
+	srv := newTLSControllerServer(t, generateTestLeafCert(t, caCert, caKey), func(ctrl *websocket.Conn) {
+		got, _ = readHello(t, ctrl)
+		sendWelcomeMsg(t, ctrl, protocol.WelcomeMessage{PollInterval: 30})
+	})
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caFile, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	enrollLoadEnv(t, srv, "CA_CERT", caFile)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("verified TLS enrollment: %v", err)
+	}
+	if cfg.TLSSkipVerify {
+		t.Fatal("verification must stay on")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	established, err := newWireClient(t, cfg).connect(ctx)
+	if !established {
+		t.Fatalf("connect against the trusted CA failed: %v", err)
+	}
+	if got.Enroll == nil || got.Enroll.Code != testEnrollCode {
+		t.Fatal("controller did not receive the enrollment code")
 	}
 }
