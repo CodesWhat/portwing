@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Core message types.
@@ -144,6 +145,37 @@ type RequestMessage struct {
 	// tar build context, or any payload too large for a single 16 MB
 	// WebSocket frame) is not. When true, Body is left empty.
 	BodyStream bool `json:"bodyStream,omitempty"`
+	// TimeoutMs is the controller's advisory deadline hint for a non-stream
+	// Docker round trip, honored only when the agent advertised
+	// CapRequestTimeout. It decodes leniently: a malformed value is "no hint",
+	// never a rejected request.
+	TimeoutMs *TimeoutHint `json:"timeoutMs,omitempty"`
+}
+
+// TimeoutHint is an advisory millisecond count. UnmarshalJSON never fails, so
+// a string, float, null-ish or out-of-range value leaves Valid false instead of
+// making the whole request undecodable.
+type TimeoutHint struct {
+	Ms    int64
+	Valid bool
+}
+
+func (h *TimeoutHint) UnmarshalJSON(b []byte) error {
+	*h = TimeoutHint{}
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "null" {
+		return nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return nil
+	}
+	h.Ms, h.Valid = n, true
+	return nil
+}
+
+func (h TimeoutHint) MarshalJSON() ([]byte, error) {
+	return []byte(strconv.FormatInt(h.Ms, 10)), nil
 }
 
 type ResponseMessage struct {

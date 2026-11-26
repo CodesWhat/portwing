@@ -53,6 +53,7 @@ var hopByHopHeaders = map[string]bool{
 var portwingAuthHeaders = []string{
 	"Authorization",
 	"X-Portwing-Token",
+	protocol.RequestTimeoutHeader,
 	"X-Dd-Agent-Secret",
 	auth.HeaderKeyID,
 	auth.HeaderTimestamp,
@@ -704,12 +705,23 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	stripPortwingAuthHeaders(proxyReq.Header)
 
 	var resp *http.Response
+	deadlineExplicit := false
 	if isStream {
 		resp, err = s.dockerClient.DoStreamRaw(proxyReq)
 	} else {
-		resp, err = s.dockerClient.DoRaw(proxyReq)
+		hintMs, haveHint := docker.ParseTimeoutHeader(r.Header.Get(protocol.RequestTimeoutHeader))
+		var deadline time.Duration
+		deadline, deadlineExplicit = docker.RequestDeadline(r.Method, r.URL.RequestURI(), hintMs, haveHint, s.dockerClient.DefaultTimeout())
+		resp, err = s.dockerClient.DoRawWithDeadline(proxyReq, deadline)
 	}
 	if err != nil {
+		// A coded 504 goes only to a caller that sent the hint or hit an
+		// auto-deadline route; a plain default-timeout request keeps its 502.
+		if _, timedOut := docker.AsTimeout(err); timedOut && deadlineExplicit {
+			w.Header().Set(protocol.CodeHeader, protocol.ErrorCodeRequestTimeout)
+			http.Error(w, err.Error(), http.StatusGatewayTimeout)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}

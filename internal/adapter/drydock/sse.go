@@ -164,6 +164,9 @@ type ackDataBody struct {
 	PollInterval  string        `json:"pollInterval,omitempty"`
 	Containers    ackContainers `json:"containers"`
 	Images        int           `json:"images"`
+	// Capabilities repeats /_portwing/info capabilities so the controller
+	// needs no extra authenticated call to discover dd:request-timeout.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type ackContainers struct {
@@ -207,7 +210,8 @@ func (b *SSEBroadcaster) buildAckPayload() []byte {
 				Running: running,
 				Stopped: stopped,
 			},
-			Images: len(imageSet),
+			Images:       len(imageSet),
+			Capabilities: capabilities(),
 		},
 	}
 

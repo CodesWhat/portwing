@@ -398,6 +398,7 @@ type fakeDocker struct {
 	doCalls    []doCall
 	doEntered  chan struct{}
 	doGate     chan struct{}
+	deadlines  []time.Duration
 
 	metricContainers []docker.ContainerJSON
 	metricStats      map[string]*docker.ContainerStatsResponse
@@ -522,6 +523,15 @@ func (f *fakeDocker) DoWithHeaders(_ context.Context, method, path string, heade
 		<-gate
 	}
 	return resp, err
+}
+
+func (f *fakeDocker) DefaultTimeout() time.Duration { return 30 * time.Second }
+
+func (f *fakeDocker) DoWithDeadline(ctx context.Context, method, path string, headers http.Header, body io.Reader, d time.Duration) (*http.Response, error) {
+	f.mu.Lock()
+	f.deadlines = append(f.deadlines, d)
+	f.mu.Unlock()
+	return f.DoWithHeaders(ctx, method, path, headers, body)
 }
 
 func (f *fakeDocker) DoStream(_ context.Context, method, path string, body io.Reader) (*http.Response, error) {

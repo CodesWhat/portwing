@@ -192,6 +192,8 @@ type dockerAPI interface {
 	Ping(ctx context.Context) error
 	Do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error)
 	DoWithHeaders(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error)
+	DoWithDeadline(ctx context.Context, method, path string, headers http.Header, body io.Reader, d time.Duration) (*http.Response, error)
+	DefaultTimeout() time.Duration
 	DoStream(ctx context.Context, method, path string, body io.Reader) (*http.Response, error)
 	DoStreamWithHeaders(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error)
 	CreateExec(ctx context.Context, containerID string, cmd []string, user string, tty bool) (string, error)
@@ -1630,16 +1632,21 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 	if isStream {
 		resp, err = c.dockerClient.DoStreamWithHeaders(ctx, req.Method, req.Path, requestHeaders, bodyReader)
 	} else {
-		resp, err = c.dockerClient.DoWithHeaders(ctx, req.Method, req.Path, requestHeaders, bodyReader)
+		// The deadline starts here, at dispatch, so for a bodyStream request
+		// it begins after stream_end and never eats the upload stage.
+		var hintMs int64
+		haveHint := req.TimeoutMs != nil && req.TimeoutMs.Valid
+		if haveHint {
+			hintMs = req.TimeoutMs.Ms
+		}
+		deadline, _ := docker.RequestDeadline(req.Method, req.Path, hintMs, haveHint, c.dockerClient.DefaultTimeout())
+		resp, err = c.dockerClient.DoWithDeadline(ctx, req.Method, req.Path, requestHeaders, bodyReader, deadline)
 	}
 
 	if err != nil {
 		c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, 0, msEdge(start), target.auditKeyID())
 		// Best-effort error reply; connection loss will surface on the read pump.
-		_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
-			Message:   err.Error(),
-			RequestID: req.RequestID,
-		})
+		_ = c.sendTypedMessageTo(target, protocol.TypeError, dockerErrorMessage(req.RequestID, err))
 		return
 	}
 	defer resp.Body.Close()
@@ -1727,10 +1734,11 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 		if err != nil {
 			c.auditor.APIRequest(c.redactedControllerURL(), req.Method, auditPath(req.Path), audit.OutcomeError, resp.StatusCode, msEdge(start), target.auditKeyID())
-			_ = c.sendTypedMessageTo(target, protocol.TypeError, protocol.ErrorMessage{
-				Message:   fmt.Sprintf("reading Docker response: %v", err),
-				RequestID: req.RequestID,
-			})
+			msg := dockerErrorMessage(req.RequestID, err)
+			if msg.Code == "" {
+				msg.Message = fmt.Sprintf("reading Docker response: %v", err)
+			}
+			_ = c.sendTypedMessageTo(target, protocol.TypeError, msg)
 			return
 		}
 		if int64(len(body)) > maxResponseBody {
@@ -1787,6 +1795,20 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 			})
 		}
 	}
+}
+
+// dockerErrorMessage builds the error frame for a failed non-stream Docker
+// call. A deadline overrun gets the stable request_timeout code; anything else
+// keeps the uncoded message it always had.
+func dockerErrorMessage(requestID string, err error) protocol.ErrorMessage {
+	if te, ok := docker.AsTimeout(err); ok {
+		return protocol.ErrorMessage{
+			Message:   fmt.Sprintf("docker request exceeded %s", te.After),
+			Code:      protocol.ErrorCodeRequestTimeout,
+			RequestID: requestID,
+		}
+	}
+	return protocol.ErrorMessage{Message: err.Error(), RequestID: requestID}
 }
 
 // handleComposeRequest decodes and executes a compose request against the
