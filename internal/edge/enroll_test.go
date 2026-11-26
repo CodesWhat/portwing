@@ -275,3 +275,48 @@ func TestEnrollRejectionClassifiers(t *testing.T) {
 		t.Error("enroll-rate-limited should be a known transient code")
 	}
 }
+
+func TestEnrollRejectionEchoingCodeIsRedacted(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+		readHello(t, ctrl)
+		sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{Code: "enroll-code-invalid", Message: "bad code " + testEnrollCode})
+	})
+	c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+	_, err := c.connect(context.Background())
+	if err == nil {
+		t.Fatal("connect returned nil")
+	}
+	if strings.Contains(err.Error(), testEnrollCode) || strings.Contains(buf.String(), testEnrollCode) {
+		t.Fatalf("echoed code leaked: err=%v logs=%s", err, buf.String())
+	}
+}
+
+func TestEnrollWelcomeWithoutAckKeepsPending(t *testing.T) {
+	welcomes := map[string]protocol.WelcomeMessage{
+		"no-config": {PollInterval: 30, Capabilities: []string{protocol.CapEnroll}},
+		"no-cap":    {PollInterval: 30, Config: map[string]string{"enrolled": "true"}},
+		"not-true":  {PollInterval: 30, Config: map[string]string{"enrolled": "false"}, Capabilities: []string{protocol.CapEnroll}},
+	}
+	for name, w := range welcomes {
+		t.Run(name, func(t *testing.T) {
+			srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+				readHello(t, ctrl)
+				sendWelcomeMsg(t, ctrl, w)
+			})
+			cfg := enrollConfig(t, srv, testEnrollCode)
+			marker := cfg.EnrollMarkerPath
+			c := newWireClient(t, cfg)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, _ = c.connect(ctx)
+			if _, err := os.Stat(marker); err != nil {
+				t.Fatalf("marker must stay pending without an ack: %v", err)
+			}
+		})
+	}
+}

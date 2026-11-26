@@ -198,3 +198,31 @@ func TestEnrollKeyRotationDirAcceptsEnrolledKey(t *testing.T) {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }
+
+func TestExplicitKeyIgnoresInvalidEnrollConfig(t *testing.T) {
+	privPEM, _, err := auth.GenerateKeyPair("t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "mine.pem")
+	if err := os.WriteFile(keyPath, privPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string][]string{
+		"invalid code":     {"ENROLL_CODE", "abc"},
+		"unreadable file":  {"ENROLL_CODE_FILE", "/nonexistent"},
+		"conflicting vars": {"ENROLL_CODE", testEnrollCode, "ENROLL_CODE_FILE", "/nonexistent"},
+	}
+	for name, kv := range cases {
+		t.Run(name, func(t *testing.T) {
+			setEnv(t, append([]string{"DRYDOCK_URL", "https://drydock.example.com", "STATE_DIR", t.TempDir(), "PRIVATE_KEY_FILE", keyPath}, kv...)...)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("explicit key must win over bad enrollment config: %v", err)
+			}
+			if cfg.PrivateKeyFile != keyPath || cfg.EnrollCode != "" {
+				t.Fatalf("unexpected cfg: %+v", cfg)
+			}
+		})
+	}
+}

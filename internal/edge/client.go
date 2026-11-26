@@ -695,6 +695,8 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		var errMsg protocol.ErrorMessage
 		parsed := json.Unmarshal(env.Data, &errMsg) == nil
 		closeWebSocket(conn, "controller rejected hello")
+		// Controller-supplied text could echo the single-use enrollment code.
+		errMsg.Message = c.redactEnrollCode(errMsg.Message)
 		rejErr := fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, errMsg.Code)
 		if parsed && isTerminalHelloRejection(errMsg.Code) && c.keyRotation != nil {
 			if rolledBack, err := c.keyRotation.RejectTrial(); err != nil {
@@ -707,7 +709,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		switch {
 		case !parsed:
 			// No reliable code to classify on — treat as retryable.
-			slog.Warn("controller rejected hello with an unparseable error payload", "raw", string(env.Data))
+			slog.Warn("controller rejected hello with an unparseable error payload", "raw", c.redactEnrollCode(string(env.Data)))
 		case isTerminalHelloRejection(errMsg.Code):
 			// Retrying the same configuration cannot change the outcome, so fail
 			// fast (wrap errFatal) instead of reconnecting forever.
@@ -743,9 +745,11 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	c.welcomePollInterval = 0
 
 	var welcome protocol.WelcomeMessage
+	welcomeParsed := false
 	if err := json.Unmarshal(env.Data, &welcome); err != nil {
 		slog.Warn("could not parse welcome payload", "error", err)
 	} else {
+		welcomeParsed = true
 		c.connMu.Lock()
 		c.controllerCaps = welcome.Capabilities
 		c.connMu.Unlock()
@@ -785,7 +789,11 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		}
 	}
 
-	c.confirmEnrollment()
+	if welcomeParsed && c.welcomeAcksEnrollment(welcome) {
+		c.confirmEnrollment()
+	} else if c.cfg.EnrollMarkerPath != "" {
+		slog.Warn("welcome did not acknowledge enrollment; keeping the enrollment pending")
+	}
 
 	if c.keyRotation != nil {
 		if changed, err := c.keyRotation.Confirm(); err != nil {
@@ -2755,6 +2763,25 @@ func (c *Client) confirmEnrollment() {
 	c.cfg.EnrollMarkerPath = ""
 	c.cfg.EnrollCode = ""
 	slog.Info("enrollment confirmed: the controller registered this agent's key; ENROLL_CODE is no longer needed")
+}
+
+// redactEnrollCode strips the in-flight enrollment code from controller text.
+func (c *Client) redactEnrollCode(s string) string {
+	if c.cfg.EnrollCode == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, c.cfg.EnrollCode, "[redacted]")
+}
+
+// welcomeAcksEnrollment reports whether a parsed welcome confirms the pending
+// key. While a code is in flight the controller must advertise dd:enroll and
+// set config.enrolled="true". A pending key with no code (a retry after the
+// controller already registered it) is confirmed by any parsed welcome.
+func (c *Client) welcomeAcksEnrollment(w protocol.WelcomeMessage) bool {
+	if c.cfg.EnrollCode == "" {
+		return true
+	}
+	return w.Config["enrolled"] == "true" && slices.Contains(w.Capabilities, protocol.CapEnroll)
 }
 
 // enrollRejectionHint explains a terminal rejection to an operator who is

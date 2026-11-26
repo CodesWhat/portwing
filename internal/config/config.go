@@ -165,9 +165,13 @@ func Load() (*Config, error) {
 
 	// First-start Edge enrollment (dd:enroll). An explicit PRIVATE_KEY_FILE
 	// always wins and ignores the code. Standard mode ignores it too.
-	enrollCode, err := loadEnrollCode()
-	if err != nil {
-		return nil, err
+	var enrollCode string
+	if privateKeyFile == "" {
+		var err error
+		enrollCode, err = loadEnrollCode()
+		if err != nil {
+			return nil, err
+		}
 	}
 	var enrolled enrolledKey
 	if drydockURL != "" && privateKeyFile == "" {
@@ -177,6 +181,7 @@ func Load() (*Config, error) {
 			}
 		}
 		dir, explicit := resolveStateDir(keyRotationDir)
+		var err error
 		enrolled, err = resolveEnrolledKey(dir, explicit, enrollCode)
 		if err != nil {
 			return nil, err

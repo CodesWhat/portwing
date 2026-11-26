@@ -114,3 +114,17 @@ func TestWriteFileExclusiveRefusesExisting(t *testing.T) {
 		t.Fatalf("overwritten: %q", got)
 	}
 }
+
+func TestWriteFileExclusiveFailsClosedWithoutLinks(t *testing.T) {
+	prev := linkFile
+	linkFile = func(string, string) error { return errors.New("links unsupported") }
+	t.Cleanup(func() { linkFile = prev })
+
+	path := filepath.Join(t.TempDir(), "k")
+	if err := writeFileExclusive(path, []byte("one")); err == nil {
+		t.Fatal("must fail closed when no-replace link is unavailable")
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("nothing may be written: %v", err)
+	}
+}

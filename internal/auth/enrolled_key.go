@@ -92,6 +92,9 @@ func ConfirmEnrolledKey(markerPath string) error {
 	return syncRotationStateDirectory(filepath.Dir(markerPath))
 }
 
+// linkFile is os.Link, replaceable in tests.
+var linkFile = os.Link
+
 // writeFileExclusive durably writes data to path with mode 0600 and fails with
 // os.ErrExist if path already exists.
 func writeFileExclusive(path string, data []byte) error {
@@ -113,17 +116,14 @@ func writeFileExclusive(path string, data []byte) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := os.Link(tmp, path); err != nil {
+	if err := linkFile(tmp, path); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return err
 		}
-		// Filesystems without hard links: fall back to a checked rename.
-		if _, statErr := os.Lstat(path); statErr == nil {
-			return os.ErrExist
-		}
-		if err := os.Rename(tmp, path); err != nil {
-			return err
-		}
+		// No atomic no-replace primitive here (e.g. a filesystem without hard
+		// links): a check-then-rename would race a concurrent start and could
+		// replace a key, so fail closed.
+		return fmt.Errorf("exclusive create needs hard link support: %w", err)
 	}
 	return syncRotationStateDirectory(dir)
 }
