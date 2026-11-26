@@ -14,6 +14,9 @@ import (
 const (
 	EnrolledKeyFileName     = "enrolled-edge-key.pem"
 	EnrolledPendingFileName = "enrolled-edge-key.pending"
+	// EnrolledLockFileName is the sidecar flock file that serializes key
+	// creation and confirmation in the same directory.
+	EnrolledLockFileName = ".enrolled-edge-key.lock"
 )
 
 // ErrNoEnrolledKey means no enrolled key exists and no code was supplied to
@@ -37,26 +40,20 @@ type EnrolledKey struct {
 // place). An existing key is never overwritten, and one that fails the
 // credential permission checks is a hard error. Without a key and without
 // canCreate it returns ErrNoEnrolledKey. The marker goes down first so a crash
-// can never leave a key that looks confirmed.
+// can never leave a key that looks confirmed. Creation runs under an exclusive
+// lock on the directory (see EnrolledLockFileName), and only the start that
+// publishes the key creates the marker.
 func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 	key := EnrolledKey{
 		Path:       filepath.Join(dir, EnrolledKeyFileName),
 		MarkerPath: filepath.Join(dir, EnrolledPendingFileName),
 	}
-	_, statErr := os.Lstat(key.Path)
-	if statErr == nil {
-		if err := checkEnrolledKeyDir(dir); err != nil {
-			return key, err
-		}
-		if _, err := LoadPrivateKey(key.Path); err != nil {
-			return key, fmt.Errorf("enrolled key: %w", err)
-		}
-		_, markerErr := os.Lstat(key.MarkerPath)
-		key.Pending = markerErr == nil
-		return key, nil
+	exists, err := enrolledKeyExists(key.Path)
+	if err != nil {
+		return key, err
 	}
-	if !errors.Is(statErr, os.ErrNotExist) {
-		return key, fmt.Errorf("checking enrolled key %q: %w", key.Path, statErr)
+	if exists {
+		return loadExistingEnrolledKey(dir, key)
 	}
 	if !canCreate {
 		return key, ErrNoEnrolledKey
@@ -70,26 +67,79 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 	if err := checkEnrolledKeyDir(dir); err != nil {
 		return key, err
 	}
+	// The check-and-create section below runs under an exclusive directory
+	// lock, so no other start can publish a key, mark one pending or confirm
+	// one while this start decides what to do.
+	release, err := flockExclusive(filepath.Join(dir, EnrolledLockFileName))
+	if err != nil {
+		return key, fmt.Errorf("locking enrolled key directory: %w", err)
+	}
+	defer release()
+	// Re-check under the lock: a start that was delayed before it got here may
+	// find a key another start published (and even confirmed) meanwhile. That
+	// key is loaded as it stands; no marker is created for it.
+	exists, err = enrolledKeyExists(key.Path)
+	if err != nil {
+		return key, err
+	}
+	if exists {
+		return loadExistingEnrolledKey(dir, key)
+	}
 	pemData, _, err := generateKeyPair("")
 	if err != nil {
 		return key, fmt.Errorf("generating enrolled key: %w", err)
 	}
-	// The marker is created exclusively. ErrExist means another start (or an
-	// earlier crashed one) already marked it, which is fine.
-	if err := createMarkerExclusive(key.MarkerPath); err != nil && !errors.Is(err, os.ErrExist) {
-		return key, fmt.Errorf("writing enrollment marker: %w", err)
+	// The marker goes down before the key so a crash can never leave a key
+	// that looks confirmed. ErrExist is a leftover from a crashed start (no
+	// key exists, and we hold the lock), which still marks the key pending.
+	markerCreated := true
+	if err := createMarkerExclusive(key.MarkerPath); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return key, fmt.Errorf("writing enrollment marker: %w", err)
+		}
+		markerCreated = false
 	}
 	if err := writeFileExclusive(key.Path, pemData); err != nil {
 		if !errors.Is(err, os.ErrExist) {
+			// Nothing was published. Remove only a marker this start made.
+			if markerCreated {
+				_ = os.Remove(key.MarkerPath)
+			}
 			return key, fmt.Errorf("writing enrolled key: %w", err)
 		}
-		// A concurrent first start won. The marker may be shared with it
-		// (it can have seen ours and linked its key, still unconfirmed), so
-		// it stays: a key that was never confirmed must not read as
-		// confirmed. The worst case is one extra pending cycle.
-		return LoadOrCreateEnrolledKey(dir, false)
+		// Only reachable where the lock is not enforced (no flock on this
+		// platform): a start outside the lock won. The marker may be shared
+		// with it, so it stays and the winner's key is loaded.
+		return loadExistingEnrolledKey(dir, key)
 	}
 	key.Pending = true
+	return key, nil
+}
+
+// enrolledKeyExists reports whether anything sits at the key path, replaceable
+// in tests.
+var enrolledKeyExists = func(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking enrolled key %q: %w", path, err)
+}
+
+// loadExistingEnrolledKey validates and loads the key at key.Path and reports
+// whether its pending marker is still present.
+func loadExistingEnrolledKey(dir string, key EnrolledKey) (EnrolledKey, error) {
+	if err := checkEnrolledKeyDir(dir); err != nil {
+		return key, err
+	}
+	if _, err := LoadPrivateKey(key.Path); err != nil {
+		return key, fmt.Errorf("enrolled key: %w", err)
+	}
+	_, markerErr := os.Lstat(key.MarkerPath)
+	key.Pending = markerErr == nil
 	return key, nil
 }
 
@@ -112,8 +162,14 @@ func checkEnrolledKeyDir(dir string) error {
 }
 
 // ConfirmEnrolledKey removes the pending marker once the controller accepted
-// the key. A missing marker is not an error.
+// the key. A missing marker is not an error. It takes the same directory lock
+// as creation, so it cannot interleave with a start that is publishing a key.
 func ConfirmEnrolledKey(markerPath string) error {
+	release, err := flockExclusive(filepath.Join(filepath.Dir(markerPath), EnrolledLockFileName))
+	if err != nil {
+		return fmt.Errorf("removing enrollment marker: locking enrolled key directory: %w", err)
+	}
+	defer release()
 	if err := os.Remove(markerPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("removing enrollment marker: %w", err)
 	}

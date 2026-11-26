@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -268,14 +269,26 @@ func TestLoadOrCreateEnrolledKeyFailureModes(t *testing.T) {
 }
 
 func TestConfirmEnrolledKeyReportsRemovalFailure(t *testing.T) {
-	notADir := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	err := ConfirmEnrolledKey(filepath.Join(notADir, EnrolledPendingFileName))
-	if err == nil || !strings.Contains(err.Error(), "removing enrollment marker") {
-		t.Fatalf("want a removal error, got %v", err)
-	}
+	t.Run("lock unavailable", func(t *testing.T) {
+		notADir := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := ConfirmEnrolledKey(filepath.Join(notADir, EnrolledPendingFileName))
+		if err == nil || !strings.Contains(err.Error(), "removing enrollment marker") {
+			t.Fatalf("want a removal error, got %v", err)
+		}
+	})
+	t.Run("marker cannot be removed", func(t *testing.T) {
+		marker := filepath.Join(t.TempDir(), EnrolledPendingFileName)
+		if err := os.MkdirAll(filepath.Join(marker, "child"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		err := ConfirmEnrolledKey(marker)
+		if err == nil || !strings.Contains(err.Error(), "removing enrollment marker") {
+			t.Fatalf("want a removal error, got %v", err)
+		}
+	})
 }
 
 func TestLoadOrCreateEnrolledKeyDirPermissions(t *testing.T) {
@@ -312,19 +325,34 @@ func TestLoadOrCreateEnrolledKeyDirPermissions(t *testing.T) {
 	}
 }
 
+// onFirstDirCheck runs fn once, the first time a start checks its directory,
+// which is before it takes the directory lock. It stands in for a peer that
+// finishes while this start is still delayed.
+func onFirstDirCheck(t *testing.T, fn func()) {
+	t.Helper()
+	prev := statDir
+	t.Cleanup(func() { statDir = prev })
+	statDir = func(p string) (os.FileInfo, error) {
+		statDir = prev
+		fn()
+		return prev(p)
+	}
+}
+
 func TestLoadOrCreateEnrolledKeyConcurrentFirstStart(t *testing.T) {
-	t.Run("winner still pending", func(t *testing.T) {
+	t.Run("winner publishes before our marker step fails", func(t *testing.T) {
 		dir := t.TempDir()
-		prev := generateKeyPair
-		t.Cleanup(func() { generateKeyPair = prev })
-		generateKeyPair = func(s string) ([]byte, string, error) {
-			// The winner finishes its whole first start while we generate.
-			generateKeyPair = prev
+		prev := openMarkerFile
+		t.Cleanup(func() { openMarkerFile = prev })
+		onFirstDirCheck(t, func() {
 			if _, err := LoadOrCreateEnrolledKey(dir, true); err != nil {
-				t.Fatalf("winner: %v", err)
+				t.Errorf("winner: %v", err)
 			}
-			return prev(s)
-		}
+			openMarkerFile = func(string) (markerFile, error) {
+				t.Error("a start that lost the race must not touch the marker")
+				return nil, errors.New("marker step failed")
+			}
+		})
 		key, err := LoadOrCreateEnrolledKey(dir, true)
 		if err != nil {
 			t.Fatalf("loser must load the winner's key, got %v", err)
@@ -332,42 +360,163 @@ func TestLoadOrCreateEnrolledKeyConcurrentFirstStart(t *testing.T) {
 		if !key.Pending {
 			t.Fatalf("winner has not confirmed: %+v", key)
 		}
+		if _, err := os.Lstat(key.MarkerPath); err != nil {
+			t.Fatalf("winner's pending marker must survive: %v", err)
+		}
 		if _, err := LoadPrivateKey(key.Path); err != nil {
 			t.Fatalf("key unusable: %v", err)
 		}
 	})
 
 	t.Run("winner already confirmed", func(t *testing.T) {
-		// Fail-safe: we cannot tell a stray marker from one another start
-		// is relying on, so the marker stays and the key reads as pending.
-		// It clears on the next welcome; the reverse (a never-confirmed key
-		// read as confirmed) would drop the enrollment code.
+		// A delayed start must not re-mark a confirmed key as pending, which
+		// would resend a consumed enrollment code.
 		dir := t.TempDir()
-		prev := generateKeyPair
-		t.Cleanup(func() { generateKeyPair = prev })
-		generateKeyPair = func(s string) ([]byte, string, error) {
-			generateKeyPair = prev
+		prev := openMarkerFile
+		t.Cleanup(func() { openMarkerFile = prev })
+		onFirstDirCheck(t, func() {
 			won, err := LoadOrCreateEnrolledKey(dir, true)
 			if err != nil {
-				t.Fatalf("winner: %v", err)
+				t.Errorf("winner: %v", err)
+				return
 			}
 			if err := ConfirmEnrolledKey(won.MarkerPath); err != nil {
-				t.Fatalf("confirm: %v", err)
+				t.Errorf("confirm: %v", err)
 			}
-			return prev(s)
-		}
+			openMarkerFile = func(string) (markerFile, error) {
+				t.Error("no marker may be created for a confirmed key")
+				return nil, errors.New("unexpected marker")
+			}
+		})
 		key, err := LoadOrCreateEnrolledKey(dir, true)
 		if err != nil {
 			t.Fatalf("loser must load the winner's key, got %v", err)
 		}
-		if !key.Pending {
-			t.Fatalf("marker is kept, key must read pending: %+v", key)
+		if key.Pending {
+			t.Fatalf("confirmed key must stay confirmed: %+v", key)
 		}
-		if err := ConfirmEnrolledKey(key.MarkerPath); err != nil {
-			t.Fatalf("confirm: %v", err)
+		if _, err := os.Lstat(key.MarkerPath); err == nil {
+			t.Fatal("no marker may exist for a confirmed key")
 		}
-		if again, err := LoadOrCreateEnrolledKey(dir, false); err != nil || again.Pending {
-			t.Fatalf("confirming clears the marker: %+v %v", again, err)
+	})
+
+	t.Run("two goroutines on one dir", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("no directory lock on this platform")
+		}
+		dir := t.TempDir()
+		const starts = 8
+		keys := make([]EnrolledKey, starts)
+		errs := make([]error, starts)
+		gate := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range starts {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-gate
+				keys[i], errs[i] = LoadOrCreateEnrolledKey(dir, true)
+			}()
+		}
+		close(gate)
+		wg.Wait()
+		for i := range starts {
+			if errs[i] != nil {
+				t.Fatalf("start %d: %v", i, errs[i])
+			}
+			if !keys[i].Pending {
+				t.Fatalf("start %d: unconfirmed key must read pending: %+v", i, keys[i])
+			}
+		}
+		if _, err := os.Lstat(keys[0].MarkerPath); err != nil {
+			t.Fatalf("marker must exist: %v", err)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pems := 0
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".pem") {
+				pems++
+			}
+			if strings.HasPrefix(e.Name(), ".enroll-") {
+				t.Fatalf("temp file left behind: %s", e.Name())
+			}
+		}
+		if pems != 1 {
+			t.Fatalf("want exactly one key, got %d", pems)
+		}
+	})
+}
+
+func TestLoadOrCreateEnrolledKeyFailedLinkRemovesOnlyItsOwnMarker(t *testing.T) {
+	failLink := func(t *testing.T) {
+		prev := linkFile
+		t.Cleanup(func() { linkFile = prev })
+		linkFile = func(string, string) error { return errors.New("links unsupported") }
+	}
+	t.Run("own marker is removed", func(t *testing.T) {
+		dir := t.TempDir()
+		failLink(t)
+		if _, err := LoadOrCreateEnrolledKey(dir, true); err == nil {
+			t.Fatal("want a link failure")
+		}
+		if _, err := os.Lstat(filepath.Join(dir, EnrolledPendingFileName)); err == nil {
+			t.Fatal("a marker this start made must go when no key was published")
+		}
+	})
+	t.Run("a marker left by an earlier start stays", func(t *testing.T) {
+		dir := t.TempDir()
+		marker := filepath.Join(dir, EnrolledPendingFileName)
+		if err := os.WriteFile(marker, []byte("pending\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		failLink(t)
+		if _, err := LoadOrCreateEnrolledKey(dir, true); err == nil {
+			t.Fatal("want a link failure")
+		}
+		if _, err := os.Lstat(marker); err != nil {
+			t.Fatalf("a marker this start did not make must stay: %v", err)
+		}
+	})
+}
+
+func TestLoadOrCreateEnrolledKeyAdoptsCrashLeftoverMarker(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, EnrolledPendingFileName), []byte("pending\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := LoadOrCreateEnrolledKey(dir, true)
+	if err != nil || !key.Pending {
+		t.Fatalf("a leftover marker must not block creation: %+v %v", key, err)
+	}
+}
+
+func TestEnrolledKeyLockFailures(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("no directory lock on this platform")
+		}
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, EnrolledLockFileName), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadOrCreateEnrolledKey(dir, true); err == nil || !strings.Contains(err.Error(), "locking enrolled key directory") {
+			t.Fatalf("want a lock error, got %v", err)
+		}
+	})
+	t.Run("key path cannot be checked under the lock", func(t *testing.T) {
+		dir := t.TempDir()
+		// The first check sees no key; before the locked re-check the key
+		// path turns into something Lstat cannot reach.
+		onFirstDirCheck(t, func() {
+			prev := enrolledKeyExists
+			t.Cleanup(func() { enrolledKeyExists = prev })
+			enrolledKeyExists = func(string) (bool, error) { return false, errors.New("stat failed") }
+		})
+		if _, err := LoadOrCreateEnrolledKey(dir, true); err == nil || !strings.Contains(err.Error(), "stat failed") {
+			t.Fatalf("want the stat error, got %v", err)
 		}
 	})
 }
