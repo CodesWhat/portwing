@@ -608,7 +608,10 @@ whether the new container can reach it before anything is lost.
 3. Start the candidate. It dials the controller and passes signature
    verification, but the old agent still holds the name, so it gets
    `agent-already-connected`. That code is transient, so the candidate keeps
-   retrying. The rejected hello still carries `version` and `hostname`, which
+   retrying. Using the rejected hello as a readiness check needs Drydock
+   support: today Drydock replies `agent-already-connected` and keeps no record
+   of the hello, so confirm your Drydock version retains it before relying on
+   this step. Without that, step 6 is your only confirmation. The rejected hello still carries `version` and `hostname`, which
    shows the candidate runs, holds the right key and can reach the controller.
    `hostname` is the candidate's short container ID unless you override it, so
    the controller can match it to the container it created.
@@ -616,7 +619,8 @@ whether the new container can reach it before anything is lost.
    and the controller should treat that disconnect as expected, not as a
    failure.
 5. The candidate connects on its next retry. Backoff starts at 1 second and
-   doubles to 60 seconds with jitter, so allow about a minute in the worst case.
+   doubles to a 60 second cap, and jitter can stretch each wait by up to 25%. Allow
+   about 75 seconds plus connect and handshake time in the worst case.
 6. Verify the new `hello.version` is the target and the inventory sync arrives.
    Only then remove the old container. Until this point it was stopped, not
    removed.
@@ -624,10 +628,10 @@ whether the new container can reach it before anything is lost.
 Keep the previous image digest, not a tag. A rollback after a successful
 upgrade is the same sequence run in reverse against that digest.
 
-Agents that advertise `dd:request-timeout` and `dd:cancel` can be upgraded
-without limits on the stop and wait calls. Older agents still work, but every
-proxied request dies at 30 seconds, so keep the stop timeout (`t`) to about 20
-seconds or less.
+Proxied requests are bound by the agent's `REQUEST_TIMEOUT` (30 seconds by
+default, configurable). Streaming requests such as image pulls have no total
+timeout. Keep the stop timeout (`t`) well under `REQUEST_TIMEOUT`, or raise
+`REQUEST_TIMEOUT` on the old agent before the upgrade.
 
 ### Standard mode is out of scope
 
@@ -648,7 +652,7 @@ container again, because rollback itself needs a working agent.
 |---------------|--------------------|
 | Before the old agent is stopped (steps 1 to 3) | Everything. Remove the candidate through the old agent. |
 | After the old agent is stopped, and the candidate never connects (steps 4 to 5) | Not from the controller. The host is unreachable until someone starts the old container. |
-| After the candidate connected (step 6 onward) | Everything. Roll back through the new agent to the retained digest. |
+| After the candidate connected (step 6 onward) | Everything, as long as the new agent stays connected. Roll back through it to the retained digest. If it connects, sends inventory, then crashes or drops, the controller has no working agent again and host-side recovery applies. |
 
 The step 3 check shrinks the unrecoverable window to a candidate that proved it
 could dial and then failed anyway. It doesn't remove it. When a host shows as

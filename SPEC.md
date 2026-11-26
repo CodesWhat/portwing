@@ -673,7 +673,7 @@ mount and restart policy, start it, then stop the old container through the old
 agent. While the old agent is connected the candidate's hello is rejected with
 `agent-already-connected` (retryable, section 13.1); the rejected hello's
 `version` and `hostname` prove the candidate can reach the controller. After the
-old agent stops, the candidate connects on its next retry (up to about 60s). The
+old agent stops, the candidate connects on its next retry (worst case about 75s plus handshake: the 60s cap plus up to 25% jitter). The
 controller removes the old container only after the new `hello.version` and the
 inventory sync arrive, and treats the old agent's disconnect during the stop as
 expected. No wire behavior changes.
