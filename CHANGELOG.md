@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Docs describe how a controller-managed Portwing upgrade works today with no agent change, why Standard mode is out of scope, and the rollback gap if the replacement never connects, with the operator recovery steps.
+
 ## [v1.5.0] - 2026-11-24
 
 ### Added
