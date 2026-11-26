@@ -705,8 +705,8 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		parsed := json.Unmarshal(env.Data, &errMsg) == nil
 		closeWebSocket(conn, "controller rejected hello")
 		// Controller-supplied text could echo the single-use enrollment code.
-		errMsg.Message = c.redactEnrollCode(errMsg.Message)
-		errMsg.Code = c.redactEnrollCode(errMsg.Code)
+		errMsg.Message = applog.SanitizeField(c.redactEnrollCode(errMsg.Message), maxLoggedControllerText)
+		errMsg.Code = applog.SanitizeField(c.redactEnrollCode(errMsg.Code), maxLoggedControllerText)
 		rejErr := fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, errMsg.Code)
 		if parsed && isTerminalHelloRejection(errMsg.Code) && c.keyRotation != nil {
 			if rolledBack, err := c.keyRotation.RejectTrial(); err != nil {
@@ -719,7 +719,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		switch {
 		case !parsed:
 			// No reliable code to classify on — treat as retryable.
-			slog.Warn("controller rejected hello with an unparseable error payload", "raw", c.redactEnrollCode(string(env.Data)))
+			slog.Warn("controller rejected hello with an unparseable error payload", "raw", applog.SanitizeField(c.redactEnrollCode(string(env.Data)), maxLoggedControllerText))
 		case isTerminalHelloRejection(errMsg.Code):
 			// Retrying the same configuration cannot change the outcome, so fail
 			// fast (wrap errFatal) instead of reconnecting forever.
@@ -757,7 +757,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	var welcome protocol.WelcomeMessage
 	welcomeParsed := false
 	if err := json.Unmarshal(env.Data, &welcome); err != nil {
-		slog.Warn("could not parse welcome payload", "error", err)
+		slog.Warn("could not parse welcome payload", "error", applog.SanitizeField(c.redactEnrollCode(err.Error()), maxLoggedControllerText))
 	} else {
 		welcomeParsed = true
 		c.connMu.Lock()
@@ -2868,6 +2868,9 @@ func (c *Client) confirmEnrollment() {
 	c.cfg.EnrollCode = ""
 	slog.Info("enrollment confirmed: the controller registered this agent's key; ENROLL_CODE is no longer needed")
 }
+
+// maxLoggedControllerText bounds controller-supplied text written to logs.
+const maxLoggedControllerText = 512
 
 // redactEnrollCode strips the in-flight enrollment code from controller text.
 func (c *Client) redactEnrollCode(s string) string {

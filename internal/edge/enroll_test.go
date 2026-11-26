@@ -516,3 +516,52 @@ func TestEnrollWithTrustedCAAndVerificationOn(t *testing.T) {
 		t.Fatal("controller did not receive the enrollment code")
 	}
 }
+
+func TestRejectionLogsNeutraliseControllerText(t *testing.T) {
+	buf := captureSlog(t)
+	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+		readHello(t, ctrl)
+		sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{
+			Code:    "forged\r\nlevel=ERROR msg=pwned\x1b[2J",
+			Message: "line1\nlevel=ERROR msg=pwned " + strings.Repeat("x", 5000),
+		})
+	})
+	c := newWireClient(t, enrollConfig(t, srv, ""))
+	if _, err := c.connect(context.Background()); err == nil {
+		t.Fatal("connect returned nil")
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "controller rejected hello") {
+		t.Fatalf("expected a rejection log, got:\n%s", logs)
+	}
+	if strings.Contains(logs, "\x1b") || strings.Contains(logs, "\r") {
+		t.Fatalf("control characters reached the log: %q", logs)
+	}
+	for _, line := range strings.Split(strings.TrimRight(logs, "\n"), "\n") {
+		if !strings.HasPrefix(line, "time=") {
+			t.Fatalf("controller text forged a log line: %q", line)
+		}
+	}
+	if strings.Contains(logs, strings.Repeat("x", maxLoggedControllerText+1)) {
+		t.Fatal("controller text was not bounded")
+	}
+}
+
+func TestWelcomeParseErrorEchoingCodeIsRedacted(t *testing.T) {
+	buf := captureSlog(t)
+	srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+		readHello(t, ctrl)
+		sendEnvelope(t, ctrl, protocol.TypeWelcome, map[string]any{"pollInterval": testEnrollCode})
+	})
+	c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = c.connect(ctx)
+	logs := buf.String()
+	if !strings.Contains(logs, "could not parse welcome payload") {
+		t.Fatalf("expected the welcome parse warning, got:\n%s", logs)
+	}
+	if strings.Contains(logs, testEnrollCode) {
+		t.Fatalf("echoed code leaked: %s", logs)
+	}
+}

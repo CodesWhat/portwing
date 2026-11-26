@@ -594,14 +594,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 	hostname, _ := os.Hostname()
 
-	capabilities := []string{
-		"compose",
-		"exec",
-		"metrics",
-		"events",
-		protocol.CapRequestTimeout,
-	}
-	capabilities = protocol.MergeCapabilities(capabilities, s.adapter.Capabilities())
+	capabilities := protocol.MergeCapabilities(protocol.StandardCapabilities(), s.adapter.Capabilities())
 
 	info := map[string]any{
 		"version":       protocol.AgentVersion,

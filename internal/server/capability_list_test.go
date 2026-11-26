@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"github.com/codeswhat/portwing/internal/adapter"
+	"github.com/codeswhat/portwing/internal/adapter/drydock"
 	"github.com/codeswhat/portwing/internal/docker"
+	"github.com/codeswhat/portwing/internal/protocol"
 )
 
 type capabilityListAdapter struct {
@@ -64,6 +66,36 @@ func TestInfoCapabilitiesPreserveFirstOccurrence(t *testing.T) {
 				t.Fatalf("capabilities=%v, want%v", body.Capabilities, tc.want)
 			}
 		})
+	}
+}
+
+// The Drydock dd:ack list is StandardCapabilities merged with the adapter's own
+// capabilities; /_portwing/info must be built from exactly the same inputs.
+func TestInfoCapabilitiesMatchDrydockAckComposition(t *testing.T) {
+	t.Parallel()
+	client, stop := newStubDockerClient(t)
+	defer stop()
+	dd := drydock.NewAdapter(client, "test-agent", drydock.AgentInfo{})
+	s, err := NewServer(minimalConfig(), client, dd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := s.Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
+	response := httptest.NewRecorder()
+	s.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://localhost/_portwing/info", nil))
+	var body struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	want := protocol.MergeCapabilities(protocol.StandardCapabilities(), dd.Capabilities())
+	if !slices.Equal(body.Capabilities, want) {
+		t.Fatalf("info capabilities=%v, want %v", body.Capabilities, want)
 	}
 }
 

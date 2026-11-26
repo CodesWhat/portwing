@@ -211,7 +211,7 @@ func (b *SSEBroadcaster) buildAckPayload() []byte {
 				Stopped: stopped,
 			},
 			Images:       len(imageSet),
-			Capabilities: capabilities(),
+			Capabilities: protocol.MergeCapabilities(protocol.StandardCapabilities(), capabilities()),
 		},
 	}
 
