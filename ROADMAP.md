@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.5.0`.
+> Portwing is stable software. The current release line is `v1.6.0`.
 > The v1.2 line requires TLS for enrollment by default and uses a glibc-free
 > container runtime.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
@@ -89,10 +89,11 @@ a calendar date:
   the HTTP API surface, the environment-variable surface, and the
   MCP tool surface and `DrydockCompat` wire contract are defined in
   [STABILITY.md](STABILITY.md).
-- **Completed for v0.8 — Package-manager distribution.** A Homebrew tap and
-  signed/checksummed `deb`/`rpm` packages
+- **Completed for v0.8 — Package-manager distribution.** Signed/checksummed `deb`/`rpm` packages
   built through the existing GoReleaser pipeline, so installation doesn't
   require a container image or pulling the raw binary off GitHub Releases.
+  A Homebrew tap shipped alongside them at the time and has since been
+  retired along with the macOS binaries; Mac users run the container image.
 - **Completed for v0.8 — Continuous edge logs.** The `dd:container_log_*`
   namespace now supports correlated stdout/stderr chunks, explicit end/error
   frames, viewer cancellation, bounded agent/controller queues, and a legacy

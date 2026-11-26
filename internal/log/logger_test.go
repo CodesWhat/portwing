@@ -67,3 +67,27 @@ func TestSanitizeEscapesLineBreaks(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeField(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		max  int
+		want string
+	}{
+		{"plain", "hello", 10, "hello"},
+		{"line breaks removed", "a\r\nb\nc\rd", 10, "abcd"},
+		{"control dropped", "a\x00\x1b[2Jb\x7f", 20, "a[2Jb"},
+		{"truncated", "abcdefgh", 3, "abc..."},
+		{"truncated by runes", "ééééé", 2, "éé..."},
+		{"exact length kept", "abc", 3, "abc"},
+		{"no bound", "abcdefgh", 0, "abcdefgh"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SanitizeField(tc.in, tc.max); got != tc.want {
+				t.Fatalf("SanitizeField(%q, %d) = %q, want %q", tc.in, tc.max, got, tc.want)
+			}
+		})
+	}
+}

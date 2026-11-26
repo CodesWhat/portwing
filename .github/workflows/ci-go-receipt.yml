@@ -1,0 +1,308 @@
+name: Go CI (tree receipt)
+
+# Called by ci-verify.yml in place of the org Go CI workflow when a promotion
+# PR's tree equals a dev/** tree that a full push run already verified (the
+# "Tree receipt" step of the changes job there).
+#
+# Why a second workflow instead of a flag on the org one: the org workflow is
+# pinned by SHA and posts the required "Go CI / ..." contexts. A nested job
+# that skips posts its context SKIPPED, which races the real result (see the
+# promotion-pr-dual-run-race note in ci-verify.yml). This file posts the same
+# names, so every required context still reports SUCCESS, and it short-circuits
+# at step level instead of skipping:
+#
+#   * Lint, Workflow Security, GoReleaser Config and Qlty Check depend only on
+#     the tree, so they report the receipt and do no work. The exception is
+#     osv-scanner inside Qlty Check, which re-runs on the Go lockfile because
+#     advisories move without a commit.
+#   * Build & Test stays real: Codecov and codecov/patch read its coverage
+#     artifact from this run.
+#   * Govulncheck stays real: the advisory database moves without a commit.
+#   * Commit Message stays real: it reads the PR's commits, not the tree.
+#   * Fuzzing stays real (the same selection ci-verify.yml makes).
+#
+# The job bodies below are copies of the org workflow's. Keep them in step with
+# it when the pin in ci-verify.yml moves.
+on:
+  workflow_call:
+    inputs:
+      receipt-run-id:
+        description: ID of the ci-verify push run whose tree this PR repeats
+        required: true
+        type: string
+      receipt-sha:
+        description: Commit that run verified
+        required: true
+        type: string
+      go-version-file:
+        required: false
+        type: string
+        default: go.mod
+      go-cache-dependency-path:
+        required: false
+        type: string
+        default: go.sum
+      fuzzers-json:
+        required: false
+        type: string
+        default: "[]"
+
+permissions: {}
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >-
+            api.github.com:443
+            dl.google.com:443
+            github.com:443
+            go.dev:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            sum.golang.org:443
+            tmaproduction.blob.core.windows.net:443
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache-dependency-path: ${{ inputs.go-cache-dependency-path }}
+
+      - name: Run repository Go test gate
+        env:
+          MODULE_DIRECTORY: .
+        run: ./scripts/ci/go-test.sh
+
+      - name: Upload Go test artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: go-test-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/go-test/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  govulncheck:
+    name: Govulncheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >-
+            api.github.com:443
+            dl.google.com:443
+            github.com:443
+            go.dev:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            sum.golang.org:443
+            tmaproduction.blob.core.windows.net:443
+            vuln.go.dev:443
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache-dependency-path: ${{ inputs.go-cache-dependency-path }}
+
+      - name: Run repository govulncheck gate
+        env:
+          MODULE_DIRECTORY: .
+        run: ./scripts/ci/go-govulncheck.sh
+
+  commit-message:
+    name: Commit Message
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >-
+            github.com:443
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run repository commit-message gate
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: ./scripts/ci/commit-message.sh
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Report the tree receipt
+        env:
+          GATE: Lint
+          RECEIPT_RUN_ID: ${{ inputs.receipt-run-id }}
+          RECEIPT_SHA: ${{ inputs.receipt-sha }}
+        run: 'echo "${GATE}: tree receipt, same tree as ${RECEIPT_SHA}, verified green in ci-verify run ${RECEIPT_RUN_ID}; not re-run."'
+
+  workflow-security:
+    name: Workflow Security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Report the tree receipt
+        env:
+          GATE: Workflow Security
+          RECEIPT_RUN_ID: ${{ inputs.receipt-run-id }}
+          RECEIPT_SHA: ${{ inputs.receipt-sha }}
+        run: 'echo "${GATE}: tree receipt, same tree as ${RECEIPT_SHA}, verified green in ci-verify run ${RECEIPT_RUN_ID}; not re-run."'
+
+  goreleaser:
+    name: GoReleaser Config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Report the tree receipt
+        env:
+          GATE: GoReleaser Config
+          RECEIPT_RUN_ID: ${{ inputs.receipt-run-id }}
+          RECEIPT_SHA: ${{ inputs.receipt-sha }}
+        run: 'echo "${GATE}: tree receipt, same tree as ${RECEIPT_SHA}, verified green in ci-verify run ${RECEIPT_RUN_ID}; not re-run."'
+
+  qlty:
+    name: Qlty Check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      # Advisories are published without a commit, so osv-scanner re-runs on the
+      # promotion tree under this same required context.
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >-
+            api.github.com:443
+            api.osv.dev:443
+            dl.google.com:443
+            github.com:443
+            go.dev:443
+            osv-vulnerabilities.storage.googleapis.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            storage.googleapis.com:443
+            sum.golang.org:443
+            tmaproduction.blob.core.windows.net:443
+
+      - name: Report the tree receipt
+        env:
+          GATE: Qlty Check
+          RECEIPT_RUN_ID: ${{ inputs.receipt-run-id }}
+          RECEIPT_SHA: ${{ inputs.receipt-sha }}
+        run: 'echo "${GATE}: tree receipt, same tree as ${RECEIPT_SHA}, verified green in ci-verify run ${RECEIPT_RUN_ID}; not re-run."'
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache-dependency-path: ${{ inputs.go-cache-dependency-path }}
+
+      - name: Run osv-scanner on the Go lockfile
+        env:
+          MODULE_DIRECTORY: .
+        run: ./scripts/ci/go-osv-receipt.sh
+
+  fuzz:
+    name: "Go Fuzz (${{ matrix.fuzzer.name }})"
+    if: inputs.fuzzers-json != '' && fromJSON(inputs.fuzzers-json)[0] != null
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzzer: ${{ fromJSON(inputs.fuzzers-json) }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >-
+            api.github.com:443
+            dl.google.com:443
+            github.com:443
+            go.dev:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            tmaproduction.blob.core.windows.net:443
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache-dependency-path: ${{ inputs.go-cache-dependency-path }}
+
+      - name: Run repository Go fuzzer
+        env:
+          FUZZER: ${{ matrix.fuzzer.name }}
+          MODULE_DIRECTORY: .
+          PKG: ${{ matrix.fuzzer.pkg }}
+        run: ./scripts/ci/go-fuzz.sh
+
+      - name: Upload Go fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: go-fuzz-${{ matrix.fuzzer.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/go-fuzz/
+          if-no-files-found: ignore
+          retention-days: 14

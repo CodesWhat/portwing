@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Portwing Agent API
-  version: 1.5.0
+  version: 1.6.0
   description: |
     Portwing is a lightweight remote Docker agent for the Drydock container
     monitoring platform. This specification covers the **Standard Mode** HTTP API
@@ -201,7 +201,7 @@ components:
         version:
           type: string
           description: Portwing agent version.
-          example: "1.5.0"
+          example: "1.6.0"
         uptimeSeconds:
           type: number
           minimum: 0
@@ -222,7 +222,7 @@ components:
         version:
           type: string
           description: Portwing agent version
-          example: "1.5.0"
+          example: "1.6.0"
         dockerVersion:
           type: string
           description: Docker Engine version string
@@ -275,10 +275,12 @@ components:
             types remain reserved but unadvertised. Since v1.3,
             Standard info and Edge hello lists emit each case-sensitive
             capability once, preserving its first occurrence across core,
-            adapter and optional feature declarations.
+            adapter and optional feature declarations. An Edge agent adds
+            dd:enroll to its hello only while it is enrolling with a
+            single-use code.
           items:
             type: string
-          example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:container-event", "dd:logs"]
+          example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:container-event", "dd:logs", "dd:request-timeout"]
 
     ComposeRequest:
       type: object
@@ -709,7 +711,7 @@ components:
       properties:
         agentVersion:
           type: string
-          example: "1.5.0"
+          example: "1.6.0"
         protocolName:
           type: string
           example: "portwing"
@@ -825,6 +827,13 @@ components:
         key_id:
           type: string
           description: hex(SHA-256(pubkey)[:8]).
+        reason:
+          type: string
+          maxLength: 32
+          description: >-
+            Why an edge request or compose operation was cancelled, as the
+            controller gave it in a `dd:cancel` frame. Present only on
+            `cancelled` records that carry one.
 
     AuditResponse:
       type: object
@@ -945,7 +954,7 @@ paths:
                 live: true
                 ready: true
                 mode: standard
-                version: "1.5.0"
+                version: "1.6.0"
                 uptimeSeconds: 120
                 docker: connected
                 controller: not_applicable
@@ -960,7 +969,7 @@ paths:
                 live: true
                 ready: false
                 mode: standard
-                version: "1.5.0"
+                version: "1.6.0"
                 uptimeSeconds: 120
                 docker: disconnected
                 controller: not_applicable
@@ -1534,7 +1543,7 @@ paths:
 
         **Example stream:**
         ```
-        data: {"type":"dd:ack","data":{"version":"1.5.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3}}
+        data: {"type":"dd:ack","data":{"version":"1.6.0","os":"linux","arch":"amd64","cpus":4,"memoryGb":0,"uptimeSeconds":3600,"lastSeen":"2024-07-23T10:00:00Z","containers":{"total":5,"running":4,"stopped":1},"images":3,"capabilities":["dd:container-sync","dd:container-event","dd:logs","dd:request-timeout"]}}
 
         data: {"type":"dd:watcher-snapshot","data":{"watcher":{...WatcherComponent...},"containers":[{...Container...}]}}
 
@@ -2191,6 +2200,19 @@ paths:
           schema:
             type: string
           example: "containers/json"
+        - name: X-Portwing-Timeout-Ms
+          in: header
+          required: false
+          description: >
+            Per-request deadline hint in milliseconds, honored only when the
+            agent advertises `dd:request-timeout`. ASCII decimal digits, at
+            most 7 characters; clamped to 1000..900000. Anything else means
+            no hint. Applies to non-stream calls only, and Portwing strips it
+            before the request reaches the Docker daemon.
+          schema:
+            type: string
+            pattern: '^[0-9]{1,7}$'
+          example: "60000"
       responses:
         "200":
           description: Response from Docker daemon (format varies by endpoint).
@@ -2200,6 +2222,18 @@ paths:
           description: Rate limit exceeded.
         "502":
           description: Docker daemon unreachable or returned an error.
+        "504":
+          description: >
+            A non-stream call exceeded its deadline (the timeout hint, or an
+            auto-deadline on `stop`, `restart` and `wait`). Carries
+            `X-Portwing-Code: request_timeout`. The daemon may still finish
+            the operation, so re-inspect before assuming state. A plain
+            default-timeout request keeps its `502`.
+          headers:
+            X-Portwing-Code:
+              schema:
+                type: string
+                enum: [request_timeout]
         "403":
           $ref: '#/components/responses/ForbiddenOrigin'
 

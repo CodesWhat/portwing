@@ -4,6 +4,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -165,5 +166,57 @@ func TestDDContainerLogStreamMessageJSONRoundTrips(t *testing.T) {
 				t.Fatalf("round trip = %s, want %s", roundTrip, encoded)
 			}
 		})
+	}
+}
+
+func TestTimeoutHintDecodesLeniently(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		in   string
+		want TimeoutHint
+	}{
+		{`60000`, TimeoutHint{Ms: 60000, Valid: true}},
+		{` 7 `, TimeoutHint{Ms: 7, Valid: true}},
+		{`null`, TimeoutHint{}},
+		{``, TimeoutHint{}},
+		{`"5000"`, TimeoutHint{}},
+		{`1.5`, TimeoutHint{}},
+		{`99999999999999999999`, TimeoutHint{}},
+	} {
+		got := TimeoutHint{Ms: 1, Valid: true}
+		if err := got.UnmarshalJSON([]byte(tc.in)); err != nil {
+			t.Fatalf("UnmarshalJSON(%q) = %v, want no error", tc.in, err)
+		}
+		if got != tc.want {
+			t.Errorf("UnmarshalJSON(%q) = %+v, want %+v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRequestMessageTimeoutHintRoundTrip(t *testing.T) {
+	t.Parallel()
+	out, err := json.Marshal(RequestMessage{RequestID: "r", Method: "GET", Path: "/x", TimeoutMs: &TimeoutHint{Ms: 4500, Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"timeoutMs":4500`) {
+		t.Fatalf("hint not marshaled as a bare number: %s", out)
+	}
+	var back RequestMessage
+	if err := json.Unmarshal([]byte(`{"requestId":"r","timeoutMs":"junk"}`), &back); err != nil {
+		t.Fatalf("a malformed hint must not reject the request: %v", err)
+	}
+	if back.TimeoutMs == nil || back.TimeoutMs.Valid {
+		t.Fatalf("malformed hint = %+v, want present but not valid", back.TimeoutMs)
+	}
+}
+
+func TestEnrollBlockNeverPrintsCode(t *testing.T) {
+	t.Parallel()
+	e := EnrollBlock{Code: "super-secret-enroll-code", PublicKey: "k"}
+	for _, got := range []string{e.String(), e.GoString(), fmt.Sprintf("%v %+v %#v", e, e, e)} {
+		if strings.Contains(got, e.Code) {
+			t.Fatalf("code leaked: %q", got)
+		}
 	}
 }

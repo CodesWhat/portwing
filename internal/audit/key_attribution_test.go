@@ -79,3 +79,44 @@ func TestKeyAttribution(t *testing.T) {
 		})
 	}
 }
+
+func TestWithReasonReachesRingRecord(t *testing.T) {
+	t.Parallel()
+	l, closeLog, err := New("", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+	l.APIRequest("actor", "GET", "/x", OutcomeCancelled, 0, 1, WithReason("timeout"))
+	l.ComposeOp("actor", "up", "web", OutcomeCancelled, WithReason("client-abort"))
+	l.APIRequest("actor", "GET", "/y", OutcomeAllowed, 200, 1)
+	recs := l.Records(10)
+	if len(recs) != 3 {
+		t.Fatalf("records = %d, want 3", len(recs))
+	}
+	if recs[2].Reason != "timeout" || recs[1].Reason != "client-abort" || recs[0].Reason != "" {
+		t.Errorf("reasons = %q %q %q", recs[2].Reason, recs[1].Reason, recs[0].Reason)
+	}
+}
+
+func TestReasonReachesSinkAndRing(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/audit.log"
+	l, closeLog, err := New(path, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.APIRequest("actor", "GET", "/x", OutcomeCancelled, 499, 1, WithReason("client\nabort"))
+	closeLog()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"reason":"client\\nabort"`) {
+		t.Fatalf("sink record lacks the sanitized reason: %s", data)
+	}
+	if recs := l.Records(1); len(recs) != 1 || recs[0].Reason != "client\nabort" {
+		t.Fatalf("ring record = %+v", recs)
+	}
+}

@@ -228,7 +228,7 @@ export const TERM_SCENES: TermScene[] = [
       },
       {
         k: "out",
-        s: '< {"agentId":"b5c0221c-70aa-407a-89ce-b1bea40fa3f6","agentName":"<hostname>","capabilities":["compose","exec","metrics","events","dd:container-sync","dd:logs"],"dockerVersion":"27.3.1","hostname":"<hostname>","mode":"standard","uptime":"1.880765917s","version":"{{version}}"}',
+        s: '< {"agentId":"b5c0221c-70aa-407a-89ce-b1bea40fa3f6","agentName":"<hostname>","capabilities":["compose","exec","metrics","events","dd:request-timeout","dd:container-sync","dd:container-event","dd:logs"],"dockerVersion":"27.3.1","hostname":"<hostname>","mode":"standard","uptime":"1.880765917s","version":"{{version}}"}',
       },
       {
         k: "out",
@@ -328,7 +328,7 @@ export const TERM_SCENES: TermScene[] = [
       },
       {
         k: "out",
-        s: '< {"agentId":"b5c0221c-70aa-407a-89ce-b1bea40fa3f6","agentName":"<hostname>","capabilities":["compose","exec","metrics","events","dd:container-sync","dd:logs"],"dockerVersion":"27.3.1","hostname":"<hostname>","mode":"standard","uptime":"2.7041535s","version":"{{version}}"}',
+        s: '< {"agentId":"b5c0221c-70aa-407a-89ce-b1bea40fa3f6","agentName":"<hostname>","capabilities":["compose","exec","metrics","events","dd:request-timeout","dd:container-sync","dd:container-event","dd:logs"],"dockerVersion":"27.3.1","hostname":"<hostname>","mode":"standard","uptime":"2.7041535s","version":"{{version}}"}',
       },
       {
         k: "out",

@@ -39,3 +39,16 @@ func TestMergeCapabilitiesContract(t *testing.T) {
 		})
 	}
 }
+
+func TestStandardCapabilitiesReturnsFreshList(t *testing.T) {
+	t.Parallel()
+	want := []string{"compose", "exec", "metrics", "events", CapRequestTimeout}
+	got := StandardCapabilities()
+	if !slices.Equal(got, want) {
+		t.Fatalf("StandardCapabilities() = %v, want %v", got, want)
+	}
+	got[0] = "mutated"
+	if StandardCapabilities()[0] != "compose" {
+		t.Fatal("callers share the returned slice")
+	}
+}

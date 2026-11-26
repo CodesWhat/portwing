@@ -287,26 +287,12 @@ func overlayRotationKeys(roots map[string]*AuthorizedKey, rotations map[string]r
 }
 
 func WriteRotationState(path string, data []byte) error {
-	f, err := createRotationStateFile(filepath.Dir(path), ".rotation-")
-	if err != nil {
-		return fmt.Errorf("creating rotation state: %w", err)
-	}
-	defer func() { _ = os.Remove(f.Name()) }()
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("writing rotation state: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("syncing rotation state: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("closing rotation state: %w", err)
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
-		return fmt.Errorf("replacing rotation state: %w", err)
-	}
-	return syncRotationStateDirectory(filepath.Dir(path))
+	return writeFileVia(path, data, ".rotation-", func(tmp, dst string) error {
+		if err := os.Rename(tmp, dst); err != nil {
+			return fmt.Errorf("replacing rotation state: %w", err)
+		}
+		return nil
+	})
 }
 
 func syncRotationStateDirectory(path string) error {

@@ -18,3 +18,11 @@ func MergeCapabilities(groups ...[]string) []string {
 	}
 	return merged
 }
+
+// StandardCapabilities returns the capabilities every Standard-mode agent
+// advertises regardless of adapter. /_portwing/info and the Drydock dd:ack
+// event both build their list from it plus the adapter's own capabilities, so
+// the two never disagree.
+func StandardCapabilities() []string {
+	return []string{"compose", "exec", "metrics", "events", CapRequestTimeout}
+}

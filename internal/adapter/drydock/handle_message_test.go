@@ -224,6 +224,7 @@ func TestHandleMessageRespondsWhileHandlerPoolFull(t *testing.T) {
 		{"watch container", protocol.TypeDDWatchContainerRequest, protocol.TypeDDWatchContainerResponse},
 		{"trigger", protocol.TypeDDTriggerRequest, protocol.TypeDDTriggerResponse},
 		{"cancel logs", protocol.TypeDDContainerLogCancel, ""},
+		{"dd cancel", protocol.TypeDDCancel, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -271,5 +272,13 @@ func TestHandleMessageRespondsWhileHandlerPoolFull(t *testing.T) {
 				t.Fatal("shared slot count changed")
 			}
 		})
+	}
+}
+
+func TestHandleMessageInvalidDDCancelIsHandledAndIgnored(t *testing.T) {
+	t.Parallel()
+	a := &Adapter{}
+	if !a.HandleMessage(context.Background(), newSyncCaptureSender(), protocol.TypeDDCancel, json.RawMessage(`"not an object"`)) {
+		t.Fatal("a malformed dd:cancel must still be consumed")
 	}
 }

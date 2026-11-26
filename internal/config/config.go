@@ -96,6 +96,13 @@ type Config struct {
 	// Edge-mode private key for signed hello (PRIVATE_KEY_FILE)
 	PrivateKeyFile string
 	KeyRotationDir string
+
+	// First-start Edge enrollment. EnrollMarkerPath is set while an enrolled
+	// key is unconfirmed; EnrollCode is the single-use code to send with it
+	// (empty when none is configured). Both are cleared once the controller
+	// welcomes the key. The code is a credential: never log or audit it.
+	EnrollCode       string
+	EnrollMarkerPath string
 }
 
 func Load() (*Config, error) {
@@ -153,11 +160,56 @@ func Load() (*Config, error) {
 
 	drydockURL := getEnv("DRYDOCK_URL", "")
 	keyRotationDir := getEnv("KEY_ROTATION_DIR", "")
+	privateKeyFile := getEnv("PRIVATE_KEY_FILE", "")
+	allowInsecureEnrollment := getEnvBool("ALLOW_INSECURE_ENROLLMENT", false)
+	tlsSkipVerify := getEnvBool("TLS_SKIP_VERIFY", false)
+
+	// First-start Edge enrollment (dd:enroll). An explicit PRIVATE_KEY_FILE
+	// always wins and ignores the code. Standard mode never reads it.
+	var enrollCode string
+	var enrolled enrolledKey
+	if drydockURL != "" && privateKeyFile == "" {
+		dir, explicit := resolveStateDir(keyRotationDir)
+		// A confirmed key makes the code (and its file) irrelevant, so probe
+		// without creating anything before reading it.
+		if !hasConfirmedEnrolledKey(dir) {
+			var err error
+			enrollCode, err = loadEnrollCode()
+			if err != nil {
+				return nil, err
+			}
+		}
+		if enrollCode != "" {
+			scheme := getURLScheme(drydockURL)
+			if (scheme == "http" || scheme == "ws" || tlsSkipVerify) && !allowInsecureEnrollment {
+				if tlsSkipVerify && scheme != "http" && scheme != "ws" {
+					return nil, fmt.Errorf("refusing to send an enrollment code while certificate verification is disabled (TLS_SKIP_VERIFY=true): enable verification or set ALLOW_INSECURE_ENROLLMENT=true")
+				}
+				return nil, fmt.Errorf("refusing to send an enrollment code over plaintext controller URL %q: use https:// or wss://, or set ALLOW_INSECURE_ENROLLMENT=true", applog.RedactURL(drydockURL))
+			}
+		}
+		var err error
+		enrolled, err = resolveEnrolledKey(dir, explicit, enrollCode)
+		if err != nil {
+			return nil, err
+		}
+		privateKeyFile = enrolled.path
+		if enrolled.code != "" {
+			if scheme := getURLScheme(drydockURL); scheme == "http" || scheme == "ws" {
+				slog.Warn("sending the enrollment code over a plaintext scheme: it travels in clear, so use ALLOW_INSECURE_ENROLLMENT=true only for trusted local testing")
+			}
+			if tlsSkipVerify {
+				slog.Warn("sending the enrollment code with certificate verification disabled: anyone on the path can capture it, so use ALLOW_INSECURE_ENROLLMENT=true only for trusted local testing")
+			}
+		}
+	} else if drydockURL == "" && (getEnv("ENROLL_CODE", "") != "" || getEnv("ENROLL_CODE_FILE", "") != "") {
+		slog.Warn("ENROLL_CODE is set but DRYDOCK_URL is not: enrollment is an Edge mode feature, ignoring the code")
+	}
 	if keyRotationDir != "" {
 		if drydockURL == "" && authorizedKeysFile == "" {
 			return nil, fmt.Errorf("KEY_ROTATION_DIR requires AUTHORIZED_KEYS in standard mode")
 		}
-		if drydockURL != "" && getEnv("PRIVATE_KEY_FILE", "") == "" {
+		if drydockURL != "" && privateKeyFile == "" {
 			return nil, fmt.Errorf("KEY_ROTATION_DIR requires PRIVATE_KEY_FILE in edge mode")
 		}
 	}
@@ -165,16 +217,15 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone")
 	}
 	if drydockURL != "" && token == "" && tokenHash == "" && authorizedKeysFile == "" {
-		privateKeyFile := getEnv("PRIVATE_KEY_FILE", "")
 		if privateKeyFile == "" {
-			return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires TOKEN, AUTHORIZED_KEYS, or PRIVATE_KEY_FILE")
+			return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires TOKEN, AUTHORIZED_KEYS, or PRIVATE_KEY_FILE (or ENROLL_CODE for first-start enrollment)")
 		}
 	}
 	// Drydock categorically rejects token-only agents (ed25519-required); a
-	// PRIVATE_KEY_FILE must always be present in edge mode so startup fails fast
-	// with a clear message rather than looping forever on a rejected hello.
-	if drydockURL != "" && getEnv("PRIVATE_KEY_FILE", "") == "" {
-		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents")
+	// key must always be present in edge mode so startup fails fast with a
+	// clear message rather than looping forever on a rejected hello.
+	if drydockURL != "" && privateKeyFile == "" {
+		return nil, fmt.Errorf("edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication, or ENROLL_CODE to enroll a new key on first start; drydock rejects token-only agents")
 	}
 
 	// Edge mode's controller auth is one-directional: portwing signs its hello
@@ -246,7 +297,7 @@ func Load() (*Config, error) {
 		Token:                      token,
 		TokenHash:                  tokenHash,
 		CACert:                     getEnv("CA_CERT", ""),
-		TLSSkipVerify:              getEnvBool("TLS_SKIP_VERIFY", false),
+		TLSSkipVerify:              tlsSkipVerify,
 		Port:                       getEnv("PORT", "3000"),
 		BindAddress:                getEnv("BIND_ADDRESS", bindAddressDefault),
 		TLSCert:                    tlsCert,
@@ -283,10 +334,13 @@ func Load() (*Config, error) {
 		SignatureMinVersion: signatureMinVersion,
 
 		EnrollmentToken:         enrollmentToken,
-		AllowInsecureEnrollment: getEnvBool("ALLOW_INSECURE_ENROLLMENT", false),
+		AllowInsecureEnrollment: allowInsecureEnrollment,
 
-		PrivateKeyFile: getEnv("PRIVATE_KEY_FILE", ""),
+		PrivateKeyFile: privateKeyFile,
 		KeyRotationDir: keyRotationDir,
+
+		EnrollCode:       enrolled.code,
+		EnrollMarkerPath: enrolled.marker,
 	}
 
 	if _, err := ParseOriginAllowlist(cfg.AllowedOrigins); err != nil {

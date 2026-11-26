@@ -40,7 +40,16 @@ DRYDOCK_URL set + PRIVATE_KEY_FILE set  ->  Edge Mode (outbound WebSocket)
 DRYDOCK_URL unset                       ->  Standard Mode (inbound HTTP server)
 ```
 
-`PRIVATE_KEY_FILE` is mandatory whenever `DRYDOCK_URL` is set: the controller's edge endpoint is Ed25519-only and rejects token-only agents. `TOKEN` or `AUTHORIZED_KEYS` may also be set, but neither satisfies the edge-mode requirement on its own, and the checks are ordered: `TOKEN_HASH` set without `TOKEN` or `AUTHORIZED_KEYS` fails first with a `TOKEN_HASH`-specific error (`requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone`), even if `PRIVATE_KEY_FILE` is also set. Past that check, `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is a fatal startup error (`edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents`), not a silent fallback to Standard Mode.
+`PRIVATE_KEY_FILE` is mandatory whenever `DRYDOCK_URL` is set, unless first-start enrollment supplies the key (see below): the controller's edge endpoint is Ed25519-only and rejects token-only agents. `TOKEN` or `AUTHORIZED_KEYS` may also be set, but neither satisfies the edge-mode requirement on its own, and the checks are ordered: `TOKEN_HASH` set without `TOKEN` or `AUTHORIZED_KEYS` fails first with a `TOKEN_HASH`-specific error (`requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone`), even if `PRIVATE_KEY_FILE` is also set. Past that check, `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is a fatal startup error (`edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents`), not a silent fallback to Standard Mode.
+
+**First-start enrollment (`dd:enroll`).** With `DRYDOCK_URL` set, no `PRIVATE_KEY_FILE`, and `ENROLL_CODE` (or `ENROLL_CODE_FILE`) set, the agent resolves its key from `<STATE_DIR>/enrolled-edge-key.pem`:
+
+1. A confirmed key (no `enrolled-edge-key.pending` marker) is used and the code is ignored.
+2. A pending key is reused and the code, if configured, is sent again.
+3. With no key, the agent generates Ed25519, writes the pending marker, then the PEM (0600, temp file, fsync, exclusive link, never overwriting), and refuses to start if `STATE_DIR` isn't writable.
+4. With no key and no code, startup fails as before.
+
+The hello gains an additive `data.enroll` block, `{"code": "<20..128 chars [A-Za-z0-9_-]>", "publicKey": "<base64 raw 32-byte Ed25519 key>"}`, and `hello.capabilities` gains `dd:enroll`. Both appear only while enrolling. The hello is signed with the new key as usual; the signature is the proof of possession. While a code is in flight, a `welcome` confirms enrollment only if `welcome.capabilities` contains `dd:enroll` and `welcome.config.enrolled` is `"true"`; then the marker is deleted and the code is dropped. A `welcome` without both leaves the pending marker and the code in place, and the agent sends the code again on reconnect. A pending key that connects with no code configured (a retry after the controller already registered the key) is confirmed by any parsed `welcome`. The code is never logged or audited. The code is refused over `http://`/`ws://`, or when `TLS_SKIP_VERIFY=true`, unless `ALLOW_INSECURE_ENROLLMENT=true` (`ALLOW_INSECURE_EDGE_URL` still applies too). Rejection `error` frames use `enroll-code-invalid`, `enroll-code-expired`, `enroll-code-used`, `enroll-code-revoked`, `enroll-key-invalid` and `enroll-disabled` (terminal, key kept so a fresh code reuses it) and `enroll-rate-limited` (retried with backoff). An old controller answers `unknown-key`, which the agent reports as enrollment not accepted. This is agent-side only until Drydock confirms the controller side.
 
 ### 2.2 Standard Mode
 
@@ -98,7 +107,8 @@ sequenceDiagram
     "hostname": "my-server",
     "capabilities": ["compose", "exec", "metrics", "events",
                       "edge-response-body-b64", "edge-request-body-stream",
-                      "dd:container-sync", "dd:container-event", "dd:logs"],
+                      "dd:container-sync", "dd:container-event", "dd:logs",
+                      "dd:request-timeout", "dd:cancel"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
     "triggerTypes": []
@@ -150,10 +160,49 @@ and rejects binary bodies before sending any request.
 An interrupted upload never sends `stream_end`. The controller may send an
 `error` frame with `code: "request-cancelled"` and the upload's `requestId` to
 discard a pending reassembly immediately. This cancels only the upload stage,
-not a Docker request already dispatched after `stream_end`. Older agents ignore
+not a Docker request already dispatched after `stream_end` (`dd:cancel`, below, is
+the superset that also cancels a dispatched request). Older agents ignore
 that error and discard the incomplete upload on their existing idle timeout;
 they never receive a terminal frame that could dispatch a partial body.
 Disconnects discard pending uploads through the existing connection cleanup.
+
+`dd:cancel` lets the controller abandon one in-flight request by id. The agent
+advertises it in `hello.capabilities` (Edge only; Standard mode cancels by
+closing the HTTP connection, and doesn't list it in `/_portwing/info`). A
+controller must not send the frame to an agent whose hello lacks the token.
+The frame is `{"type":"dd:cancel","data":{"requestId":"<1..128 bytes>","reason":"timeout"}}`.
+`reason` is optional, at most 32 bytes (longer is truncated), and is only logged
+and written to the audit record, never branched on. The agent handles the frame
+on the read pump with no admission, and an empty or over-long `requestId` is
+ignored.
+
+- A pending `bodyStream` upload is discarded with no frame, exactly like
+  `error{code:"request-cancelled"}`. `dd:cancel` is a strict superset of it, and
+  that error keeps its upload-only meaning.
+- An in-flight `request` has its context cancelled. The Docker round trip
+  aborts, the handler returns, and the admission slot, any raw exec slot and any
+  streamed-body byte reservation are released. A compose request gets its
+  existing SIGTERM with a bounded wait. The audit record has outcome
+  `cancelled` and the reason.
+- An in-flight `dd:container_log_request` with `stream: true` is cancelled like
+  `dd:container_log_cancel` and ends with the existing
+  `dd:container_log_end{reason:"canceled"}`.
+- An unknown or already finished id is a silent no-op with no frame. Buffered
+  `dd:container_log_request`, `dd:container_delete_request` and exec sessions
+  (which end on `exec_end`) are not cancelled by this frame.
+
+For a request the agent processed a cancel for, it sends at most one terminal
+frame, after the slots are released, so seeing it means capacity is free. If the
+response header was not yet sent, that frame is `error` with
+`code: "cancelled"` and message `request cancelled`. If a stream's
+`response{isStream:true}` was already sent, it is `stream_end` with
+`reason: "cancelled"`, not an `error`. Frames queued before the agent processed
+the cancel (`stream` chunks, even a finished `response`) can still arrive, and a
+controller drops frames for ids it no longer tracks. If the real response wins
+the race, no `cancelled` frame follows. `cancelled` doesn't mean the Docker side
+effect was undone: a cancelled `stop`, `pull` or `compose up` may have completed
+or half-completed, so re-inspect. An older agent ignores `dd:cancel`, and an
+older controller never sends it, so neither side changes behavior.
 
 All JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`; see `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
@@ -174,7 +223,8 @@ The Drydock `/api/portwing/ws` endpoint requires the Ed25519 fields (`pubKeyId`,
 | `metrics` | Agent -> Server | Host metrics payload |
 | `container_event` | Agent -> Server | Docker lifecycle event; used instead of a duplicate controller event stream |
 | `ping` / `pong` | Either | Keepalive (30s default) |
-| `error` | Either | Error with optional `code` |
+| `error` | Either | Error with optional `code`; `cancelled` is the terminal frame for a request the controller cancelled with `dd:cancel` before any response header |
+| `dd:cancel` | Server -> Agent | Abandon one in-flight request by `requestId` (see `dd:cancel` above); only sent to an agent whose hello carries the `dd:cancel` capability |
 | `exec_start` | Server -> Agent | Start interactive exec session |
 | `exec_ready` | Agent -> Server | Exec session attached |
 | `exec_input` | Server -> Agent | Terminal input (base64) |
@@ -226,6 +276,47 @@ stable signal for an over-cap non-stream edge response: the `error` frame
 carries `code: "response_too_large"` alongside the human-readable `message`
 (`{"message":"response exceeds 16777216 bytes; use a streaming request","code":"response_too_large","requestId":"..."}`).
 Match on `code`; the message text can change.
+
+#### Per-request timeout hint (`dd:request-timeout`)
+
+Non-stream Docker calls time out at `REQUEST_TIMEOUT` (30 s by default), which
+a `stop?t=60`, a long `wait` or an `images/load` can't meet. An agent that
+advertises `dd:request-timeout` (Edge `hello.capabilities`, Standard
+`/_portwing/info` capabilities and the `dd:ack` event) accepts a per-request
+hint, and a controller must not send it unless it saw the token.
+
+| Mode | Carrier | Form |
+|------|---------|------|
+| Edge | `request.timeoutMs` | JSON integer, milliseconds |
+| Standard | `X-Portwing-Timeout-Ms` header | ASCII decimal digits, at most 7 characters |
+
+- The value clamps to `[1000, 900000]` ms. A missing, zero, negative,
+  non-integer or non-numeric value is "no hint" and the default applies; the
+  field is advisory and never rejects a request.
+- It applies only to non-stream Docker round trips. Stream-classified routes,
+  hijacked exec/attach, `/_portwing/compose` and the buffered
+  `dd:container_log_*` and `dd:container_delete_*` pairs ignore it.
+- The deadline starts when the Docker call is dispatched, so for a
+  `bodyStream: true` request it starts after `stream_end`. It covers header and
+  body read. Edge's frame liveness bounds (`writeWait`, stream stall, body idle
+  timeout) don't scale with it.
+- Without a hint, `POST /containers/{id}/stop?t=N` and `/restart?t=N` get
+  `max(REQUEST_TIMEOUT, N + 15 s)` capped at 15 min (`t=-1` gets 15 min), and
+  `POST /containers/{id}/wait` gets 15 min. An explicit hint wins. With
+  `REQUEST_TIMEOUT=0` the default stays unbounded and only a hint adds a limit.
+- Edge answers a deadline overrun with an `error` frame carrying
+  `code: "request_timeout"` and `message` `docker request exceeded <duration>`;
+  this applies to the default deadline too. Standard answers `504` with
+  `X-Portwing-Code: request_timeout`, but only when the request carried the hint
+  or hit an auto-deadline route. A plain default-timeout request keeps its `502`.
+  Standard holds the response status until the first body byte, so a daemon
+  that sends headers and then stalls still gets the `504`; a stall after body
+  bytes were sent aborts the connection instead of ending a truncated `200`.
+  Every adapter advertises `dd:request-timeout`, since both proxy paths honor it.
+- The daemon may still finish the operation after the agent gives up, so a
+  controller re-inspects before assuming state. A controller timer should run
+  `timeoutMs + 5000` ms so the coded error wins the race.
+- Standard strips `X-Portwing-Timeout-Ms` before the request reaches dockerd.
 
 ## 4. Standard Mode HTTP API
 
@@ -664,12 +755,33 @@ without drawing the duplicate-`requestId` rejection of §3.3.
 - Sends WebSocket close frame (code 1000, reason "shutdown")
 - HTTP server: `Shutdown()` with 10s timeout
 
+### 13.4 Controller-Managed Upgrades
+
+Portwing has no self-updater. A controller upgrades an Edge mode agent with the
+proxied Docker API: pull by digest, create a candidate with the same
+`AGENT_NAME`, `AGENT_ID`, `PRIVATE_KEY_FILE` secret, `STATE_DIR` volume, socket
+mount and restart policy, start it, then stop the old container through the old
+agent. While the old agent is connected the candidate's hello is rejected with
+`agent-already-connected` (retryable, section 13.1); the rejected hello's
+`version` and `hostname` prove the candidate can reach the controller. After the
+old agent stops, the candidate connects on its next retry (worst case about 75s plus handshake: the 60s cap plus up to 25% jitter). The
+controller removes the old container only after the new `hello.version` and the
+inventory sync arrive, and treats the old agent's disconnect during the stop as
+expected. No wire behavior changes.
+
+Rollback gap: once the old agent is stopped, a candidate that never connects
+leaves the host unreachable from the controller, because rollback needs a
+working agent. An operator starts the old container on the host. Standard mode
+self-upgrade is out of scope: the candidate can't bind the published port while
+the old agent holds it. See the Drydock Integration page for the operator
+procedure.
+
 ## 14. Build and Release
 
 ### 14.1 Targets
 
 - **Binaries:** `CGO_ENABLED=0`, `-trimpath`, `-s -w` (stripped)
-- **OS/Arch:** linux/amd64, linux/arm64, linux/arm/v7, darwin/amd64, darwin/arm64
+- **OS/Arch:** linux/amd64, linux/arm64, linux/arm/v7 (no macOS binaries; Mac users run the container image)
 - **Docker:** Multi-arch manifest at `ghcr.io/codeswhat/portwing`
 - **Runtime images:** `scratch` on amd64, arm64 and arm/v7, with Alpine certificates and metadata.
 
