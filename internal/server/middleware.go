@@ -895,7 +895,8 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 func serveRecorded(next http.Handler, rw http.ResponseWriter, r *http.Request, finish func()) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+			// net/http compares the sentinel by identity, so a wrapped one is a real panic.
+			if err, ok := rec.(error); ok && err == http.ErrAbortHandler { //nolint:errorlint // net/http recognizes only the exact abort sentinel.
 				finish()
 			}
 			panic(rec)
