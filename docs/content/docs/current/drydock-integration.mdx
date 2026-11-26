@@ -319,7 +319,7 @@ Handshake sequence:
       "compose", "exec", "metrics", "events",
       "edge-response-body-b64", "edge-request-body-stream",
       "dd:container-sync", "dd:container-event", "dd:logs",
-      "dd:request-timeout"
+      "dd:request-timeout", "dd:cancel"
     ],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
@@ -687,8 +687,10 @@ upgrade is the same sequence run in reverse against that digest.
 
 Proxied requests are bound by the agent's `REQUEST_TIMEOUT` (30 seconds by
 default, configurable). Streaming requests such as image pulls have no total
-timeout. Keep the stop timeout (`t`) well under `REQUEST_TIMEOUT`, or raise
-`REQUEST_TIMEOUT` on the old agent before the upgrade.
+timeout. A `stop` with `t=N` gets `max(REQUEST_TIMEOUT, N + 15 s)` on its own,
+so the stop in step 4 needs no change. See
+[per-request timeout hint](#per-request-timeout-hint) to set a deadline
+explicitly.
 
 ### Standard mode is out of scope
 

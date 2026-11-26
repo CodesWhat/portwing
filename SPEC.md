@@ -108,7 +108,7 @@ sequenceDiagram
     "capabilities": ["compose", "exec", "metrics", "events",
                       "edge-response-body-b64", "edge-request-body-stream",
                       "dd:container-sync", "dd:container-event", "dd:logs",
-                      "dd:request-timeout"],
+                      "dd:request-timeout", "dd:cancel"],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
     "triggerTypes": []

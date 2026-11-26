@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Edge tests pin how encoded dot segments are handled in proxied paths and the bounds of the response size cap. Test coverage only, no runtime change.
 - Docs describe how a controller-managed Portwing upgrade works today with no agent change, why Standard mode is out of scope, and the rollback gap if the replacement never connects, with the operator recovery steps.
 - New `dd:request-timeout` capability. A controller can send a per-request deadline hint, `timeoutMs` on an Edge request or the `X-Portwing-Timeout-Ms` header in Standard mode, clamped to 1 s to 15 min, so a long `stop`, `wait`, `images/load` or prune no longer dies at `REQUEST_TIMEOUT`. The hint is advisory (malformed means no hint), non-stream only, and starts counting at dispatch. `dd:ack` now also lists the agent's capabilities.
 - `POST /containers/{id}/stop` and `/restart` with `t=N` get a deadline of `max(REQUEST_TIMEOUT, N + 15 s)`, and `/wait` gets 15 min, without needing a hint, so `docker stop -t 60` through the Standard proxy works.
@@ -22,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- macOS binaries and the Homebrew cask are no longer published. The binary wasn't Developer ID signed, so Gatekeeper blocked it on real Macs. On a Mac, run the container image with Docker Desktop, OrbStack or Colima. `scripts/install.sh` now exits with that pointer on macOS.
+- BREAKING: macOS binaries and the Homebrew cask are no longer published. The binary wasn't Developer ID signed, so Gatekeeper blocked it on real Macs. On a Mac, run the container image with Docker Desktop, OrbStack or Colima. `scripts/install.sh` now exits with that pointer on macOS.
 
 ## [v1.5.0] - 2026-11-24
 
