@@ -178,7 +178,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Resolve container manifest digest
         id: manifest-digest
@@ -590,60 +589,3 @@ jobs:
               test -f /usr/lib/systemd/system/portwing.service
               grep -Fq "ExecStart=/usr/bin/portwing" /usr/lib/systemd/system/portwing.service
             '
-
-  verify-homebrew:
-    name: "Verify Homebrew"
-    needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
-    runs-on: macos-26
-    timeout-minutes: 35
-    permissions:
-      contents: read
-    env:
-      HOMEBREW_NO_ANALYTICS: "1"
-      HOMEBREW_NO_AUTO_UPDATE: "1"
-
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            formulae.brew.sh:443
-            github.com:443
-            raw.githubusercontent.com:443
-            release-assets.githubusercontent.com:443
-
-      # The cask reaches tap main only after the tap opens its PR and
-      # auto-merges it once the cask audit passes, so wait for this version.
-      - name: Wait for the tap PR to merge
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          max_attempts=40
-          for attempt in $(seq 1 "${max_attempts}"); do
-            cask="$(gh api -H 'Accept: application/vnd.github.raw' \
-              'repos/CodesWhat/homebrew-tap/contents/Casks/portwing.rb?ref=main' || true)"
-            if grep -Fq "version \"${version}\"" <<<"${cask}"; then
-              echo "Tap main has portwing ${version} (attempt ${attempt})"
-              exit 0
-            fi
-            echo "Attempt ${attempt}/${max_attempts}: tap main does not have portwing ${version} yet"
-            if [ "${attempt}" -lt "${max_attempts}" ]; then
-              sleep 30
-            fi
-          done
-          pr="$(gh pr list --repo CodesWhat/homebrew-tap --head "portwing-${version}" \
-            --state all --json url,state --jq '.[] | "\(.state) \(.url)"' || true)"
-          echo "::error::Timed out after about 20 minutes waiting for Casks/portwing.rb on CodesWhat/homebrew-tap main to contain version \"${version}\". Tap PR for portwing-${version}: ${pr:-none found}"
-          exit 1
-
-      - name: Verify Homebrew cask install
-        run: |
-          brew tap CodesWhat/tap https://github.com/CodesWhat/homebrew-tap.git
-          brew install --cask codeswhat/tap/portwing
-          portwing version
-          brew uninstall --cask portwing

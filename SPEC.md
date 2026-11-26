@@ -781,7 +781,7 @@ procedure.
 ### 14.1 Targets
 
 - **Binaries:** `CGO_ENABLED=0`, `-trimpath`, `-s -w` (stripped)
-- **OS/Arch:** linux/amd64, linux/arm64, linux/arm/v7, darwin/amd64, darwin/arm64
+- **OS/Arch:** linux/amd64, linux/arm64, linux/arm/v7 (no macOS binaries; Mac users run the container image)
 - **Docker:** Multi-arch manifest at `ghcr.io/codeswhat/portwing`
 - **Runtime images:** `scratch` on amd64, arm64 and arm/v7, with Alpine certificates and metadata.
 
