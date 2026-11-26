@@ -4,6 +4,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -249,7 +250,7 @@ func TestTimeoutErrorMessageAndUnwrap(t *testing.T) {
 	if got := err.Error(); got != "docker request exceeded 1m30s: unexpected EOF" {
 		t.Fatalf("Error() = %q", got)
 	}
-	if err.Unwrap() != inner {
+	if !errors.Is(err.Unwrap(), inner) {
 		t.Fatal("Unwrap did not return the wrapped error")
 	}
 }

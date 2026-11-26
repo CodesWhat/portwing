@@ -3,6 +3,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,7 +60,8 @@ func TestAuthMiddlewareRecordsAbortedResponses(t *testing.T) {
 
 			func() {
 				defer func() {
-					if rec := recover(); rec != http.ErrAbortHandler {
+					rec := recover()
+					if err, _ := rec.(error); !errors.Is(err, http.ErrAbortHandler) {
 						t.Fatalf("recovered %v, want http.ErrAbortHandler", rec)
 					}
 				}()

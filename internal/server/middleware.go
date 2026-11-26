@@ -895,7 +895,7 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 func serveRecorded(next http.Handler, rw http.ResponseWriter, r *http.Request, finish func()) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			if rec == http.ErrAbortHandler {
+			if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 				finish()
 			}
 			panic(rec)
