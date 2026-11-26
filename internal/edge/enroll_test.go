@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -389,6 +390,41 @@ func TestEnrollRejectionEchoingCodeInCodeFieldIsRedacted(t *testing.T) {
 	}
 }
 
+func TestHelloRejectionClassifiesOnRawCodeNotSanitizedLog(t *testing.T) {
+	for _, code := range []string{"unknown-key\x00", "enroll-code-used\t", "enroll-code-used\x00" + testEnrollCode} {
+		t.Run(fmt.Sprintf("%q", code), func(t *testing.T) {
+			buf := captureSlog(t)
+			srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+				readHello(t, ctrl)
+				sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{Code: code, Message: "nope"})
+			})
+			c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+			_, err := c.connect(context.Background())
+			if err == nil {
+				t.Fatal("connect returned nil")
+			}
+			if errors.Is(err, errFatal) {
+				t.Fatalf("a code that only matches after sanitizing must stay retryable, got fatal: %v", err)
+			}
+			logs := buf.String()
+			if !strings.Contains(logs, "unrecognized code") {
+				t.Fatalf("expected the unrecognized-code warning, got:\n%s", logs)
+			}
+			for _, out := range []string{logs, err.Error()} {
+				if strings.ContainsAny(out, "\x00\t") && out == err.Error() {
+					t.Fatalf("control char in error: %q", out)
+				}
+				if strings.Contains(out, testEnrollCode) {
+					t.Fatalf("enrollment code leaked: %q", out)
+				}
+			}
+			if strings.Contains(logs, "\x00") {
+				t.Fatalf("control char in logs: %q", logs)
+			}
+		})
+	}
+}
+
 func TestPendingKeyUnparseableWelcomeKeepsPending(t *testing.T) {
 	for name, code := range map[string]string{"no code": "", "with code": testEnrollCode} {
 		t.Run(name, func(t *testing.T) {
@@ -563,5 +599,79 @@ func TestWelcomeParseErrorEchoingCodeIsRedacted(t *testing.T) {
 	}
 	if strings.Contains(logs, testEnrollCode) {
 		t.Fatalf("echoed code leaked: %s", logs)
+	}
+}
+
+// splitCodeVariants returns the enrollment code with a control sequence
+// inserted mid-code, the shapes SanitizeField strips after redaction.
+func splitCodeVariants() map[string]string {
+	c := testEnrollCode
+	return map[string]string{
+		"lf":   c[:5] + "\n" + c[5:],
+		"crlf": c[:5] + "\r\n" + c[5:],
+		"nul":  c[:5] + "\x00" + c[5:],
+	}
+}
+
+func TestEnrollRejectionWithSplitCodeIsRedacted(t *testing.T) {
+	for name, split := range splitCodeVariants() {
+		t.Run(name, func(t *testing.T) {
+			buf := captureSlog(t)
+			srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+				readHello(t, ctrl)
+				sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{Code: "x-" + split, Message: "bad code " + split})
+			})
+			c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+			_, err := c.connect(context.Background())
+			if err == nil {
+				t.Fatal("connect returned nil")
+			}
+			if strings.Contains(err.Error(), testEnrollCode) || strings.Contains(buf.String(), testEnrollCode) {
+				t.Fatalf("split code leaked: err=%v logs=%s", err, buf.String())
+			}
+		})
+	}
+}
+
+func TestEnrollUnparseableRejectionWithSplitCodeIsRedacted(t *testing.T) {
+	for name, split := range splitCodeVariants() {
+		t.Run(name, func(t *testing.T) {
+			buf := captureSlog(t)
+			srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+				readHello(t, ctrl)
+				sendEnvelope(t, ctrl, protocol.TypeError, "bad code "+split)
+			})
+			c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+			if _, err := c.connect(context.Background()); err == nil {
+				t.Fatal("connect returned nil")
+			}
+			if strings.Contains(buf.String(), testEnrollCode) {
+				t.Fatalf("split code leaked: %s", buf.String())
+			}
+		})
+	}
+}
+
+func TestEnrollWelcomeParseErrorWithSplitCodeIsRedacted(t *testing.T) {
+	for name, split := range splitCodeVariants() {
+		t.Run(name, func(t *testing.T) {
+			buf := captureSlog(t)
+			srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+				readHello(t, ctrl)
+				// A number where a string is expected puts the key in the parse error.
+				sendEnvelope(t, ctrl, protocol.TypeWelcome, map[string]any{"config": map[string]any{split: 1}})
+			})
+			c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, _ = c.connect(ctx)
+			logs := buf.String()
+			if !strings.Contains(logs, "could not parse welcome payload") {
+				t.Fatalf("expected the welcome parse warning, got:\n%s", logs)
+			}
+			if strings.Contains(logs, testEnrollCode) {
+				t.Fatalf("split code leaked: %s", logs)
+			}
+		})
 	}
 }

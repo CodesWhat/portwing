@@ -1,0 +1,9 @@
+# Used by scripts/ci/go-osv-receipt.sh. Mirrors the osv-scanner triage in
+# .qlty/qlty.toml; keep the two in step.
+
+# GO-2026-5932 is in golang.org/x/crypto/openpgp, which Portwing does not
+# import (only argon2 is used). The advisory has no fixed version, so a bump
+# can't clear it. Revisit if Portwing ever imports x/crypto/openpgp.
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = "Unused transitive subpackage (x/crypto/openpgp), no fixed version; govulncheck reports it unreachable"

@@ -76,7 +76,7 @@ func TestSanitizeField(t *testing.T) {
 		want string
 	}{
 		{"plain", "hello", 10, "hello"},
-		{"line breaks escaped", "a\r\nb", 10, `a\r\nb`},
+		{"line breaks removed", "a\r\nb\nc\rd", 10, "abcd"},
 		{"control dropped", "a\x00\x1b[2Jb\x7f", 20, "a[2Jb"},
 		{"truncated", "abcdefgh", 3, "abc..."},
 		{"truncated by runes", "ééééé", 2, "éé..."},
