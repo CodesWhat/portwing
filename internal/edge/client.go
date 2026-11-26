@@ -713,6 +713,10 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 			// fast (wrap errFatal) instead of reconnecting forever.
 			slog.Error("controller rejected hello with a terminal code, not retrying",
 				"code", errMsg.Code, "message", errMsg.Message)
+			if hint := c.enrollRejectionHint(errMsg.Code); hint != "" {
+				slog.Error(hint)
+				rejErr = fmt.Errorf("%w: %s", rejErr, hint)
+			}
 			return false, fmt.Errorf("%w: %w", errFatal, rejErr)
 		case !isKnownHelloRejection(errMsg.Code):
 			// Unrecognized code: default to retry (no regression vs. before this
@@ -780,6 +784,8 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 			}
 		}
 	}
+
+	c.confirmEnrollment()
 
 	if c.keyRotation != nil {
 		if changed, err := c.keyRotation.Confirm(); err != nil {
@@ -928,6 +934,9 @@ func (c *Client) sendHello(ctx context.Context) error {
 		protocol.CapRequestBodyStream,
 	}
 	capabilities = append(capabilities, c.adapter.Capabilities()...)
+	if c.cfg.EnrollCode != "" {
+		capabilities = append(capabilities, protocol.CapEnroll)
+	}
 	if err := c.initKeyRotation(); err != nil {
 		return fmt.Errorf("configuring key rotation: %w", err)
 	}
@@ -1030,6 +1039,12 @@ func (c *Client) signHello(_ context.Context, hello *protocol.HelloMessage) erro
 	hello.Timestamp = tsUnix
 	hello.Nonce = nonce
 	hello.Signature = base64.RawURLEncoding.EncodeToString(sig)
+	if c.cfg.EnrollCode != "" {
+		hello.Enroll = &protocol.EnrollBlock{
+			Code:      c.cfg.EnrollCode,
+			PublicKey: base64.StdEncoding.EncodeToString(pub),
+		}
+	}
 	// Do not set TokenHash when using Ed25519 auth.
 	hello.TokenHash = ""
 
@@ -2723,4 +2738,39 @@ func (c *Client) redactedControllerURL() string {
 func auditPath(path string) string {
 	pathOnly, _, _ := strings.Cut(path, "?")
 	return pathOnly
+}
+
+// confirmEnrollment makes an enrolled key permanent once the controller
+// welcomed it: the pending marker goes away and the single-use code is dropped
+// from memory. A welcome for a pending key without a code also confirms it,
+// since a controller only welcomes a registered key. Nothing here logs the code.
+func (c *Client) confirmEnrollment() {
+	if c.cfg.EnrollMarkerPath == "" {
+		return
+	}
+	if err := auth.ConfirmEnrolledKey(c.cfg.EnrollMarkerPath); err != nil {
+		slog.Warn("controller accepted the enrolled key but the local confirmation failed; the next start will reuse it", "error", err)
+		return
+	}
+	c.cfg.EnrollMarkerPath = ""
+	c.cfg.EnrollCode = ""
+	slog.Info("enrollment confirmed: the controller registered this agent's key; ENROLL_CODE is no longer needed")
+}
+
+// enrollRejectionHint explains a terminal rejection to an operator who is
+// mid-enrollment. The generated key stays on disk, so a fresh code reuses it.
+func (c *Client) enrollRejectionHint(code string) string {
+	if c.cfg.EnrollMarkerPath == "" {
+		return ""
+	}
+	if code == "unknown-key" {
+		if c.cfg.EnrollCode == "" {
+			return "the controller does not know the enrolled key and no ENROLL_CODE is set; supply a fresh code or register the key"
+		}
+		return "the controller did not accept enrollment (it may not support it, or the code is unknown); the generated key is kept, so retry with a fresh ENROLL_CODE"
+	}
+	if strings.HasPrefix(code, "enroll-") {
+		return "enrollment was not accepted; the generated key is kept, so retry with a fresh ENROLL_CODE"
+	}
+	return ""
 }

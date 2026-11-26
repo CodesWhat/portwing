@@ -33,6 +33,15 @@ var terminalHelloRejectCodes = map[string]bool{
 	"parse-error":        true, // malformed hello envelope / missing required fields
 	"expected-hello":     true, // first frame was not a hello (client bug)
 	"agent-name-claimed": true, // name already bound to a different pubKeyId
+
+	// First-start enrollment (dd:enroll). The generated key stays on disk,
+	// unconfirmed, so the operator can supply a fresh code and reuse it.
+	"enroll-code-invalid": true, // unknown or malformed code
+	"enroll-code-expired": true, // past expiry
+	"enroll-code-used":    true, // consumed by a different key
+	"enroll-code-revoked": true, // operator revoked it
+	"enroll-key-invalid":  true, // bad publicKey, id mismatch or bad signature
+	"enroll-disabled":     true, // controller has enrollment off
 }
 
 // transientHelloRejectCodes are rejections tied to server-side or timing state
@@ -47,6 +56,7 @@ var transientHelloRejectCodes = map[string]bool{
 	"rate-limited":            true, // per-key admission window exceeded
 	"registry-full":           true, // name-binding map full (prunes over time)
 	"agent-already-connected": true, // prior session not yet torn down (reconnect race)
+	"enroll-rate-limited":     true, // too many enrollment attempts (retry with backoff)
 }
 
 // isTerminalHelloRejection reports whether a hello-rejection Code is fatal, i.e.
