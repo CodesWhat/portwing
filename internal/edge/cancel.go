@@ -23,7 +23,7 @@ type controllerCancel struct{ reason string }
 func (e *controllerCancel) Error() string { return "request cancelled by controller" }
 
 // inflightRequest is one tracked request goroutine. The handler records on it
-// what the terminal frame owes the controller, and serveTracked sends that
+// what the terminal frame owes the controller, and serveRegistered sends that
 // frame only after the request's slots are released.
 type inflightRequest struct {
 	cancel context.CancelCauseFunc
@@ -110,15 +110,6 @@ func (c *Client) cancelInflight(requestID, reason string) bool {
 	}
 	e.cancel(&controllerCancel{reason: reason})
 	return true
-}
-
-// serveTracked runs one request handler under a cancellable, registered
-// context. release frees the caller's admission slot (and any budget); it is
-// called before the terminal cancelled frame so seeing that frame means
-// capacity is free. release must be idempotent: callers also defer it.
-func (c *Client) serveTracked(ctx context.Context, req protocol.RequestMessage, target outboundTarget, release func()) {
-	tr := c.registerRequest(ctx, req.RequestID)
-	c.serveRegistered(tr, req, target, release)
 }
 
 // trackedRequest is a request already registered in the inflight registry but

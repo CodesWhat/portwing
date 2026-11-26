@@ -304,7 +304,7 @@ type Client struct {
 	streamSem chan struct{}
 
 	// inflight maps RequestID to the tracked request goroutine, so a dd:cancel
-	// frame (CapCancel) can cancel it. Filled by serveTracked inside an
+	// frame (CapCancel) can cancel it. Filled by serveRegistered inside an
 	// admitted streamSem slot, so it never exceeds maxStreams. Guarded by
 	// inflightMu.
 	inflightMu sync.Mutex
@@ -1731,7 +1731,7 @@ func (c *Client) handleRequestTo(ctx context.Context, req protocol.RequestMessag
 		var streamErr error
 		for {
 			// A dd:cancel ends the stream here, with no further chunk; the
-			// terminal stream_end is sent by serveTracked after release.
+			// terminal stream_end is sent by serveRegistered after release.
 			if reason, ok := cancelledByController(ctx); ok {
 				pool.PutStreamBuffer(buf)
 				c.auditCancelledAPI(req, resp.StatusCode, msEdge(start), target, reason)
@@ -1903,7 +1903,7 @@ func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.Reques
 	}
 
 	resp, err := c.compose.Execute(ctx, composeReq)
-	// Decide first, mark second: cancelledByController makes serveTracked emit
+	// Decide first, mark second: cancelledByController makes serveRegistered emit
 	// the terminal frame, so it may only run on the path that returns without
 	// sending one. A controller cancel that lands while the request waits on the
 	// stack lock returns Success:false, Cancelled:false, nil error, and still
