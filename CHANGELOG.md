@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Edge first-start enrollment. Set `ENROLL_CODE` (or `ENROLL_CODE_FILE`) with `DRYDOCK_URL` and no `PRIVATE_KEY_FILE`, and the agent generates an Ed25519 key under `STATE_DIR` (0600, written atomically, never overwritten), sends the single-use code in its signed hello, and drops the code once the controller welcomes it. Later starts connect without the code. It advertises the `dd:enroll` capability only while enrolling, so old controllers aren't affected, and it needs a Drydock that supports it. An explicit `PRIVATE_KEY_FILE` always wins. The seven `enroll-*` rejection codes are classified (six terminal, `enroll-rate-limited` retries).
+
 ## [v1.5.0] - 2026-11-24
 
 ### Added

@@ -40,7 +40,16 @@ DRYDOCK_URL set + PRIVATE_KEY_FILE set  ->  Edge Mode (outbound WebSocket)
 DRYDOCK_URL unset                       ->  Standard Mode (inbound HTTP server)
 ```
 
-`PRIVATE_KEY_FILE` is mandatory whenever `DRYDOCK_URL` is set: the controller's edge endpoint is Ed25519-only and rejects token-only agents. `TOKEN` or `AUTHORIZED_KEYS` may also be set, but neither satisfies the edge-mode requirement on its own, and the checks are ordered: `TOKEN_HASH` set without `TOKEN` or `AUTHORIZED_KEYS` fails first with a `TOKEN_HASH`-specific error (`requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone`), even if `PRIVATE_KEY_FILE` is also set. Past that check, `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is a fatal startup error (`edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents`), not a silent fallback to Standard Mode.
+`PRIVATE_KEY_FILE` is mandatory whenever `DRYDOCK_URL` is set, unless first-start enrollment supplies the key (see below): the controller's edge endpoint is Ed25519-only and rejects token-only agents. `TOKEN` or `AUTHORIZED_KEYS` may also be set, but neither satisfies the edge-mode requirement on its own, and the checks are ordered: `TOKEN_HASH` set without `TOKEN` or `AUTHORIZED_KEYS` fails first with a `TOKEN_HASH`-specific error (`requires TOKEN or AUTHORIZED_KEYS, not TOKEN_HASH alone`), even if `PRIVATE_KEY_FILE` is also set. Past that check, `DRYDOCK_URL` without `PRIVATE_KEY_FILE` is a fatal startup error (`edge mode (DRYDOCK_URL) requires PRIVATE_KEY_FILE for Ed25519 authentication; drydock rejects token-only agents`), not a silent fallback to Standard Mode.
+
+**First-start enrollment (`dd:enroll`).** With `DRYDOCK_URL` set, no `PRIVATE_KEY_FILE`, and `ENROLL_CODE` (or `ENROLL_CODE_FILE`) set, the agent resolves its key from `<STATE_DIR>/enrolled-edge-key.pem`:
+
+1. A confirmed key (no `enrolled-edge-key.pending` marker) is used and the code is ignored.
+2. A pending key is reused and the code, if configured, is sent again.
+3. With no key, the agent generates Ed25519, writes the pending marker, then the PEM (0600, temp file, fsync, exclusive link, never overwriting), and refuses to start if `STATE_DIR` isn't writable.
+4. With no key and no code, startup fails as before.
+
+The hello gains an additive `data.enroll` block, `{"code": "<20..128 chars [A-Za-z0-9_-]>", "publicKey": "<base64 raw 32-byte Ed25519 key>"}`, and `hello.capabilities` gains `dd:enroll`. Both appear only while enrolling. The hello is signed with the new key as usual; the signature is the proof of possession. On `welcome` the marker is deleted and the code is dropped; the code is never logged or audited. The code is refused over `http://`/`ws://` unless `ALLOW_INSECURE_ENROLLMENT=true` (`ALLOW_INSECURE_EDGE_URL` still applies too). Rejection `error` frames use `enroll-code-invalid`, `enroll-code-expired`, `enroll-code-used`, `enroll-code-revoked`, `enroll-key-invalid` and `enroll-disabled` (terminal, key kept so a fresh code reuses it) and `enroll-rate-limited` (retried with backoff). An old controller answers `unknown-key`, which the agent reports as enrollment not accepted. This is agent-side only until Drydock confirms the controller side.
 
 ### 2.2 Standard Mode
 

@@ -320,6 +320,10 @@ All Edge Mode JSON application messages are wrapped in an `Envelope` (`{"type": 
 
 When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `nonce`, and `signature` fields shown above, and Drydock verifies the signature against the agent's registered public key. The `tokenHash` field (SHA-256 of the shared token) is only a fallback for non-edge endpoints — the Drydock `/api/portwing/ws` endpoint rejects token-hash hellos with `ed25519-required`.
 
+### First-start enrollment
+
+With `ENROLL_CODE` set and no `PRIVATE_KEY_FILE`, the hello carries an extra `data.enroll` block (`code` and `publicKey`, the base64 raw Ed25519 public key) and `dd:enroll` in `capabilities`. The hello is signed with the freshly generated key, and the controller verifies it against `enroll.publicKey` before consuming the code. On `welcome` the agent marks the key confirmed and later starts connect normally without the code. The agent stops on `enroll-code-invalid`, `enroll-code-expired`, `enroll-code-used`, `enroll-code-revoked`, `enroll-key-invalid` and `enroll-disabled`, keeping the generated key so a fresh code reuses it, and retries `enroll-rate-limited`. This needs controller support; an older controller answers `unknown-key`.
+
 ### Capability negotiation
 
 The `edge-response-body-b64` value in `hello.capabilities` is negotiated, not

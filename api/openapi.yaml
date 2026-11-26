@@ -275,7 +275,9 @@ components:
             types remain reserved but unadvertised. Since v1.3,
             Standard info and Edge hello lists emit each case-sensitive
             capability once, preserving its first occurrence across core,
-            adapter and optional feature declarations.
+            adapter and optional feature declarations. An Edge agent adds
+            dd:enroll to its hello only while it is enrolling with a
+            single-use code.
           items:
             type: string
           example: ["compose", "exec", "metrics", "events", "dd:container-sync", "dd:container-event", "dd:logs"]
