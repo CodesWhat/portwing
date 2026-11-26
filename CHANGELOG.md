@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.6.0] - 2026-11-26
+
 ### Added
 
 - Edge tests pin how encoded dot segments are handled in proxied paths and the bounds of the response size cap. Test coverage only, no runtime change.

@@ -32,23 +32,28 @@ establish that support. The option is disabled by default and doesn't apply to E
 
 | Portwing version | Drydock wire connection | Watcher/update feature compatibility | sockguard preset | Wire compat (`DrydockCompat` / `serverCompatLevel`) |
 |---|---|---|---|---|
-| v1.5.0 (release metadata) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` (wire pairings; HTTP signature v3 needs Drydock 1.9 or later) | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
+| v1.6.0 (release metadata) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` (wire pairings; HTTP signature v3 needs Drydock 1.9 or later) | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v1.3.x (unsupported) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` (wire pairings; HTTP signature v3 needs Drydock 1.9 or later) | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v1.2.x (unsupported) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` (wire pairings; HTTP signature v3 needs Drydock 1.9 or later) | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v1.1.x (unsupported) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` (HTTP signature v3 needs Drydock 1.9 or later) | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v1.0.x (unsupported) | 1.7.x, 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 | v0.9.x (unsupported) | 1.6.x; 1.5.x with `DD_EXPERIMENTAL_PORTWING=true` | `v1.6.0-rc.11+` | `portwing.yaml`, `portwing-with-exec.yaml`, `portwing-with-compose.yaml` | `1.4.0` |
 
-v1.5.0 keeps the existing wire and watcher/update contract. HTTP signature
+v1.6.0 keeps the existing wire and watcher/update contract. HTTP signature
 version 3 needs Drydock 1.9 or later; Drydock 1.7 and 1.6 keep working with
 version 2 and legacy signatures, which v1.4 still accepts (see
 [HTTP signature compatibility](#http-signature-compatibility)). Only the latest stable line receives security fixes; see [SECURITY.md](SECURITY.md) for support boundaries.
+
+The `dd:request-timeout`, `dd:cancel` and `dd:enroll` capabilities added in
+v1.6 need a Drydock release that implements the controller side. No Drydock
+release does yet; it lands in Drydock's next minor. Until then Portwing
+advertises them and Drydock ignores them, and `DrydockCompat` stays `1.4.0`.
 
 Since v1.2, enrollment requires native TLS or HTTPS reported by a trusted proxy.
 `ALLOW_INSECURE_ENROLLMENT=true` explicitly permits plaintext enrollment for
 trusted local testing.
 
-The current release line is v1.5.0; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. Its exact published artifacts
+The current release line is v1.6.0; [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. Its exact published artifacts
 must pass a fresh hosted matrix after the release is cut. The historical runs
 below do not verify this build.
 

@@ -201,12 +201,12 @@ export function GetStarted() {
 `}
               <span className="y-c"># Debian / Ubuntu</span>
               {`
-sudo apt install ./portwing_1.5.0_linux_amd64.deb
+sudo apt install ./portwing_1.6.0_linux_amd64.deb
 
 `}
               <span className="y-c"># Fedora / RHEL</span>
               {`
-sudo rpm --install ./portwing_1.5.0_linux_amd64.rpm`}
+sudo rpm --install ./portwing_1.6.0_linux_amd64.rpm`}
             </code>
           </pre>
         </div>
