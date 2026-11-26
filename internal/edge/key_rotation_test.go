@@ -377,7 +377,7 @@ func TestManagedHelloCapabilitiesPreserveFirstOccurrence(t *testing.T) {
 	}
 	var hello protocol.HelloMessage
 	decodeData(t, expectType(t, ctrl, protocol.TypeHello), &hello)
-	want := []string{"compose", "exec", "metrics", "events", protocol.CapResponseBodyBase64, protocol.CapRequestBodyStream, protocol.CapKeyRotation, "custom-cap"}
+	want := []string{"compose", "exec", "metrics", "events", protocol.CapResponseBodyBase64, protocol.CapRequestBodyStream, protocol.CapRequestTimeout, protocol.CapKeyRotation, "custom-cap"}
 	if !slices.Equal(hello.Capabilities, want) {
 		t.Fatalf("capabilities=%v, want%v", hello.Capabilities, want)
 	}

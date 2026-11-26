@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,5 +161,58 @@ func TestRequestTimeoutHintDecodesLeniently(t *testing.T) {
 		if got != tc.valid || (got && req.TimeoutMs.Ms != tc.ms) {
 			t.Errorf("%s: hint = %+v, want valid=%v ms=%d", tc.json, req.TimeoutMs, tc.valid, tc.ms)
 		}
+	}
+}
+
+// The contract's headline cases, checked on the deadline handed to the Docker
+// client rather than by sleeping through 60 or 90 seconds.
+func TestRequestTimeoutDeadlinesForStopAndWait(t *testing.T) {
+	for _, tc := range []struct {
+		name, path string
+		hint       *protocol.TimeoutHint
+		want       time.Duration
+	}{
+		{"stop hint 60s", "/containers/a/stop", hint(60000), 60 * time.Second},
+		{"wait hint 90s", "/containers/a/wait", hint(90000), 90 * time.Second},
+		{"stop t=60 auto", "/containers/a/stop?t=60", nil, 75 * time.Second},
+		{"wait auto", "/containers/a/wait", nil, docker.MaxRequestTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, ctrl := newTestClient(t)
+			fd := &fakeDocker{doResp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}}
+			c.dockerClient = fd
+			runReadPump(t, c)
+			sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+				RequestID: "d", Method: http.MethodPost, Path: tc.path, TimeoutMs: tc.hint,
+			})
+			expectType(t, ctrl, protocol.TypeResponse)
+			fd.mu.Lock()
+			defer fd.mu.Unlock()
+			if len(fd.deadlines) != 1 || fd.deadlines[0] != tc.want {
+				t.Fatalf("deadlines = %v, want [%v]", fd.deadlines, tc.want)
+			}
+		})
+	}
+}
+
+func TestRequestTimeoutAutoDeadlineForWait(t *testing.T) {
+	c, ctrl := newTestClient(t)
+	c.dockerClient = slowSocketDocker(t, 1500*time.Millisecond)
+	runReadPump(t, c)
+
+	sendEnvelope(t, ctrl, protocol.TypeRequest, protocol.RequestMessage{
+		RequestID: "wait", Method: http.MethodPost, Path: "/containers/a/wait?condition=next-exit",
+	})
+	var resp protocol.ResponseMessage
+	decodeData(t, expectType(t, ctrl, protocol.TypeResponse), &resp)
+	if resp.RequestID != "wait" || resp.StatusCode != http.StatusOK {
+		t.Fatalf("response = %+v", resp)
+	}
+}
+
+func TestHelloAdvertisesRequestTimeout(t *testing.T) {
+	_, _, hello := managedEdgeClient(t)
+	if !slices.Contains(hello.Capabilities, protocol.CapRequestTimeout) {
+		t.Fatalf("hello capabilities %v missing %q", hello.Capabilities, protocol.CapRequestTimeout)
 	}
 }

@@ -260,6 +260,10 @@ hint, and a controller must not send it unless it saw the token.
   this applies to the default deadline too. Standard answers `504` with
   `X-Portwing-Code: request_timeout`, but only when the request carried the hint
   or hit an auto-deadline route. A plain default-timeout request keeps its `502`.
+  Standard holds the response status until the first body byte, so a daemon
+  that sends headers and then stalls still gets the `504`; a stall after body
+  bytes were sent aborts the connection instead of ending a truncated `200`.
+  Every adapter advertises `dd:request-timeout`, since both proxy paths honor it.
 - The daemon may still finish the operation after the agent gives up, so a
   controller re-inspects before assuming state. A controller timer should run
   `timeoutMs + 5000` ms so the coded error wins the race.

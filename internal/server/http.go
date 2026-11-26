@@ -599,6 +599,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"exec",
 		"metrics",
 		"events",
+		protocol.CapRequestTimeout,
 	}
 	capabilities = protocol.MergeCapabilities(capabilities, s.adapter.Capabilities())
 
@@ -709,23 +710,27 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 	if isStream {
 		resp, err = s.dockerClient.DoStreamRaw(proxyReq)
 	} else {
-		hintMs, haveHint := docker.ParseTimeoutHeader(r.Header.Get(protocol.RequestTimeoutHeader))
 		var deadline time.Duration
-		deadline, deadlineExplicit = docker.RequestDeadline(r.Method, r.URL.RequestURI(), hintMs, haveHint, s.dockerClient.DefaultTimeout())
+		deadline, deadlineExplicit = s.dockerDeadline(r)
 		resp, err = s.dockerClient.DoRawWithDeadline(proxyReq, deadline)
 	}
 	if err != nil {
-		// A coded 504 goes only to a caller that sent the hint or hit an
-		// auto-deadline route; a plain default-timeout request keeps its 502.
-		if _, timedOut := docker.AsTimeout(err); timedOut && deadlineExplicit {
-			w.Header().Set(protocol.CodeHeader, protocol.ErrorCodeRequestTimeout)
-			http.Error(w, err.Error(), http.StatusGatewayTimeout)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeProxyError(w, err, deadlineExplicit)
 		return
 	}
 	defer resp.Body.Close()
+
+	// A non-stream response is held back until its first body byte arrives, so
+	// a daemon that sends headers and then stalls past the deadline can still be
+	// answered with the coded 504 instead of a committed 200.
+	var first []byte
+	if !isStream {
+		first, err = readFirstChunk(resp.Body)
+		if err != nil {
+			writeProxyError(w, err, deadlineExplicit)
+			return
+		}
+	}
 
 	// Copy response headers.
 	copyHeaders(w.Header(), resp.Header)
@@ -737,8 +742,75 @@ func (s *Server) handleDockerProxy(w http.ResponseWriter, r *http.Request) {
 			panic(http.ErrAbortHandler)
 		}
 	} else {
-		// io.Copy to a ResponseWriter: errors indicate a dropped client connection.
-		_, _ = io.Copy(w, resp.Body)
+		if !copyProxyBody(w, resp.Body, first) {
+			// The status is already committed, so a failed or timed-out daemon
+			// read can't become a coded error. Abort the connection so the caller
+			// sees a failure rather than a truncated success.
+			panic(http.ErrAbortHandler)
+		}
+	}
+}
+
+// dockerDeadline resolves the deadline for a non-stream proxied request from
+// the Standard-mode hint header and the auto-deadline rules.
+func (s *Server) dockerDeadline(r *http.Request) (time.Duration, bool) {
+	hintMs, haveHint := docker.ParseTimeoutHeader(r.Header.Get(protocol.RequestTimeoutHeader))
+	return docker.RequestDeadline(r.Method, r.URL.RequestURI(), hintMs, haveHint, s.dockerClient.DefaultTimeout())
+}
+
+// writeProxyError answers a failed Docker round trip. A coded 504 goes only to
+// a caller that sent the hint or hit an auto-deadline route; a plain
+// default-timeout request keeps its 502.
+func writeProxyError(w http.ResponseWriter, err error, deadlineExplicit bool) {
+	if _, timedOut := docker.AsTimeout(err); timedOut && deadlineExplicit {
+		w.Header().Set(protocol.CodeHeader, protocol.ErrorCodeRequestTimeout)
+		http.Error(w, err.Error(), http.StatusGatewayTimeout)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusBadGateway)
+}
+
+// readFirstChunk reads up to 32 KiB so the caller can fail cleanly before any
+// header is written. A clean EOF with no bytes is an empty body, not an error.
+func readFirstChunk(body io.Reader) ([]byte, error) {
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := body.Read(buf)
+		if n > 0 {
+			return buf[:n], nil
+		}
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+// copyProxyBody writes first and then the rest of body to w. It reports false
+// when the daemon side failed mid-body; a failed client write is a dropped
+// connection and is not reported.
+func copyProxyBody(w io.Writer, body io.Reader, first []byte) bool {
+	if len(first) > 0 {
+		if _, err := w.Write(first); err != nil {
+			return true
+		}
+	}
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return true
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		if err != nil {
+			return false
+		}
 	}
 }
 

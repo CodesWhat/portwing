@@ -928,6 +928,8 @@ func (c *Client) sendHello(ctx context.Context) error {
 		// doesn't recognize this token simply never sends bodyStream=true
 		// and nothing changes for it.
 		protocol.CapRequestBodyStream,
+		// Both Docker proxy paths honor the hint whatever adapter is loaded.
+		protocol.CapRequestTimeout,
 	}
 	capabilities = append(capabilities, c.adapter.Capabilities()...)
 	if err := c.initKeyRotation(); err != nil {
