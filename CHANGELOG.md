@@ -1798,7 +1798,6 @@ here is a feature request; each entry below traces to a confirmed defect.
   moving the unshipped work back to a dev branch, and both are decisions about
   what users see rather than something to quietly resolve.
 
-
 ### Removed
 
 - **The local `CODE_OF_CONDUCT.md`, in favour of the organisation-wide one.**
@@ -2139,7 +2138,6 @@ here is a feature request; each entry below traces to a confirmed defect.
   branch protection" that weakened it. The list now mirrors the live
   ruleset, and the header documents that a stale list removes checks.
 
-
 ### Removed
 
 - **Retired the duplicate govulncheck job from `security-grype.yml`.** It
@@ -2261,7 +2259,6 @@ here is a feature request; each entry below traces to a confirmed defect.
   `refs/tags/v*` protection ruleset (deletion/update/non-fast-forward,
   no `required_signatures`) lands separately as an org-side settings
   change.
-
 
 ### Removed
 
@@ -2588,7 +2585,6 @@ here is a feature request; each entry below traces to a confirmed defect.
 
 - **Corrupted edge log output**: `dd:container_log_response.logs` now strips Docker's 8-byte multiplexed stream-frame headers for non-TTY containers (the same de-muxing the HTTP `/logs` route does) while passing a TTY container's raw stream through unchanged, so logs are plain text instead of text interleaved with binary frame headers (non-TTY) and are no longer garbled by demuxing a header-less stream (TTY).
 - **Kubernetes example manifests**: `examples/kubernetes/standard.yaml` and `edge.yaml` mounted the Compose stacks directory (`/data/stacks`) as an `emptyDir`, which Kubernetes wipes on pod recreation — silently breaking `down`/`ps`/`stop`/`restart`/`logs` for every stack a prior `up` had deployed. Both now use a `hostPath` volume (with a note to pre-create it owned by UID 65532, since `fsGroup` does not apply to `hostPath`). The edge manifest's `portwing keygen` setup command was also missing its `> portwing_ed25519.pem` redirect, leaving the following `kubectl create secret --from-file=…` step referencing a file that was never written.
-
 
 ### Removed
 
