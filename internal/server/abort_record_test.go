@@ -4,6 +4,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,5 +117,43 @@ func TestAuthMiddlewareDoesNotRecordOtherPanicsAsAllowed(t *testing.T) {
 	reg.WritePrometheus(&out, metrics.EscapeLabelValue)
 	if strings.Contains(out.String(), `portwing_http_requests_total{method="GET"`) {
 		t.Fatalf("panic was counted as a completed request:\n%s", out.String())
+	}
+}
+
+// net/http only treats the exact http.ErrAbortHandler value as an abort, so a
+// wrapped sentinel is a real panic and must not be recorded as allowed.
+func TestAuthMiddlewareDoesNotRecordWrappedAbortAsAllowed(t *testing.T) {
+	t.Parallel()
+
+	logPath := t.TempDir() + "/audit.log"
+	l, closeLog, err := audit.New(logPath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := metrics.NewRegistry()
+	rl := NewRateLimiter()
+	t.Cleanup(rl.Stop)
+	wrapped := fmt.Errorf("wrap: %w", http.ErrAbortHandler)
+	h := rl.AuthMiddlewareWithEd25519(nil, Ed25519Config{}, l, reg, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(wrapped)
+	}))
+
+	func() {
+		defer func() {
+			if rec := recover(); rec != any(wrapped) {
+				t.Fatalf("recovered %v, want the wrapped error", rec)
+			}
+		}()
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+	}()
+	closeLog()
+
+	if data, _ := readFile(logPath); strings.Contains(data, audit.EventAPIRequest) {
+		t.Fatalf("wrapped abort was audited as an allowed request:\n%s", data)
+	}
+	var out strings.Builder
+	reg.WritePrometheus(&out, metrics.EscapeLabelValue)
+	if strings.Contains(out.String(), `portwing_http_requests_total{method="GET"`) {
+		t.Fatalf("wrapped abort was counted as a completed request:\n%s", out.String())
 	}
 }
