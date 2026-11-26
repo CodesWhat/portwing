@@ -705,9 +705,9 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		parsed := json.Unmarshal(env.Data, &errMsg) == nil
 		closeWebSocket(conn, "controller rejected hello")
 		// Controller-supplied text could echo the single-use enrollment code.
-		errMsg.Message = applog.SanitizeField(c.redactEnrollCode(errMsg.Message), maxLoggedControllerText)
+		errMsg.Message = c.logControllerText(errMsg.Message)
 		// Classification stays on the raw code; only the logged copy is sanitized.
-		loggedCode := applog.SanitizeField(c.redactEnrollCode(errMsg.Code), maxLoggedControllerText)
+		loggedCode := c.logControllerText(errMsg.Code)
 		rejErr := fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, loggedCode)
 		if parsed && isTerminalHelloRejection(errMsg.Code) && c.keyRotation != nil {
 			if rolledBack, err := c.keyRotation.RejectTrial(); err != nil {
@@ -720,7 +720,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		switch {
 		case !parsed:
 			// No reliable code to classify on — treat as retryable.
-			slog.Warn("controller rejected hello with an unparseable error payload", "raw", applog.SanitizeField(c.redactEnrollCode(string(env.Data)), maxLoggedControllerText))
+			slog.Warn("controller rejected hello with an unparseable error payload", "raw", c.logControllerText(string(env.Data)))
 		case isTerminalHelloRejection(errMsg.Code):
 			// Retrying the same configuration cannot change the outcome, so fail
 			// fast (wrap errFatal) instead of reconnecting forever.
@@ -758,7 +758,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	var welcome protocol.WelcomeMessage
 	welcomeParsed := false
 	if err := json.Unmarshal(env.Data, &welcome); err != nil {
-		slog.Warn("could not parse welcome payload", "error", applog.SanitizeField(c.redactEnrollCode(err.Error()), maxLoggedControllerText))
+		slog.Warn("could not parse welcome payload", "error", c.logControllerText(err.Error()))
 	} else {
 		welcomeParsed = true
 		c.connMu.Lock()
@@ -2872,6 +2872,13 @@ func (c *Client) confirmEnrollment() {
 
 // maxLoggedControllerText bounds controller-supplied text written to logs.
 const maxLoggedControllerText = 512
+
+// logControllerText prepares controller-supplied text for logs: control
+// characters go first so a line break can't split the enrollment code past the
+// redaction, then the code is redacted, then the length is bounded.
+func (c *Client) logControllerText(s string) string {
+	return applog.SanitizeField(c.redactEnrollCode(applog.StripControl(s)), maxLoggedControllerText)
+}
 
 // redactEnrollCode strips the in-flight enrollment code from controller text.
 func (c *Client) redactEnrollCode(s string) string {
