@@ -98,10 +98,10 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 // It applies to this directory only; other state paths keep the looser
 // CheckStateWritable rule.
 func checkEnrolledKeyDir(dir string) error {
-	if runtime.GOOS == "windows" {
+	if enrolledKeyGOOS == "windows" {
 		return nil
 	}
-	info, err := os.Stat(dir)
+	info, err := statDir(dir)
 	if err != nil {
 		return fmt.Errorf("checking enrolled key directory: %w", err)
 	}
@@ -123,7 +123,7 @@ func ConfirmEnrolledKey(markerPath string) error {
 // createMarkerExclusive durably creates the pending marker, failing with
 // os.ErrExist only when a regular file is already there.
 func createMarkerExclusive(path string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // fixed path under the validated state dir
+	f, err := openMarkerFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			info, statErr := lstatFile(path)
@@ -154,6 +154,29 @@ func createMarkerExclusive(path string) error {
 	}
 	return syncRotationStateDirectory(filepath.Dir(path))
 }
+
+// markerFile is the slice of *os.File createMarkerExclusive writes through.
+type markerFile interface {
+	WriteString(string) (int, error)
+	Sync() error
+	Close() error
+}
+
+// openMarkerFile exclusively creates the marker, replaceable in tests.
+var openMarkerFile = func(path string) (markerFile, error) {
+	// #nosec G304 -- marker path is the package-built name under the validated state directory.
+	f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// statDir is os.Stat, replaceable in tests.
+var statDir = os.Stat
+
+// enrolledKeyGOOS is runtime.GOOS, replaceable in tests.
+var enrolledKeyGOOS = runtime.GOOS
 
 // lstatFile is os.Lstat, replaceable in tests.
 var lstatFile = os.Lstat
