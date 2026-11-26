@@ -51,6 +51,7 @@ const (
 	TypeDDContainerLogCancel      = "dd:container_log_cancel"
 	TypeDDContainerDeleteRequest  = "dd:container_delete_request"
 	TypeDDContainerDeleteResponse = "dd:container_delete_response"
+	TypeDDCancel                  = "dd:cancel"
 )
 
 type Envelope struct {
@@ -371,6 +372,20 @@ type DDContainerLogErrorMessage struct {
 	ContainerID string `json:"containerId"`
 	Error       string `json:"error"`
 }
+
+// DDCancelMessage is the controller's request to abandon one in-flight
+// request on this connection (CapCancel). Reason is advisory, at most 32
+// bytes, and is only logged and audited, never branched on.
+type DDCancelMessage struct {
+	RequestID string `json:"requestId"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// MaxCancelRequestIDLen and MaxCancelReasonLen bound the dd:cancel fields.
+const (
+	MaxCancelRequestIDLen = 128
+	MaxCancelReasonLen    = 32
+)
 
 type DDContainerLogCancelMessage struct {
 	RequestID   string `json:"requestId"`
