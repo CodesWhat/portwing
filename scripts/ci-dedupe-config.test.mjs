@@ -253,6 +253,7 @@ function runReceiptStep({
   runs = [],
   jobs = {},
   failApi = false,
+  failJobsFor = [],
 }) {
   const section = jobSection(workflow, "changes");
   const script = section
@@ -276,7 +277,7 @@ ${failApi ? "exit 1" : ""}
 case "$2" in
   */git/commits/*) sha="\${2##*/}"; jq -er --arg sha "$sha" '.[$sha]' "${dir}/trees.json" ;;
   */workflows/ci-verify.yml/runs*) cat "${dir}/runs.json" ;;
-  */actions/runs/*/jobs*) id="$2"; id="\${id#*/runs/}"; id="\${id%%/*}"; jq -c --arg id "$id" '{jobs: (.[$id] // [])}' "${dir}/jobs.json" ;;
+  */actions/runs/*/jobs*) id="$2"; id="\${id#*/runs/}"; id="\${id%%/*}"; case " ${failJobsFor.join(" ")} " in *" $id "*) exit 1 ;; esac; jq -c --arg id "$id" '{jobs: (.[$id] // [])}' "${dir}/jobs.json" ;;
   *) exit 1 ;;
 esac
 `,
@@ -375,6 +376,17 @@ test("tree receipt: skips a stood-down newer run and uses an older full one", ()
   assert.equal(out.receipt_run, "4");
 });
 
+test("tree receipt: a jobs API error on any candidate means no receipt, never an older run", () => {
+  const out = runReceiptStep({
+    runs: [goodRun(6), goodRun(4)],
+    jobs: { 6: greenJobs, 4: greenJobs },
+    failJobsFor: [6],
+  });
+  assert.equal(out.receipt, "false");
+  assert.equal(out.receipt_run, "");
+  assert.equal(out.receipt_sha, "");
+});
+
 test("go-ci and go-ci-receipt are mutually exclusive and share one caller name", () => {
   const goCi = jobSection(workflow, "go-ci");
   const receipt = jobSection(workflow, "go-ci-receipt");
@@ -435,4 +447,53 @@ test("jobs that must always run in full stay free of receipt logic", () => {
   ]) {
     assert.doesNotMatch(jobSection(workflow, id), /receipt/u, id);
   }
+});
+
+const stepIfs = (job) => [...job.matchAll(/^ {8}if: (.*)$/gmu)].map((m) => m[1]);
+
+test("the receipt workflow's gate steps always run; only artifact uploads carry an if", () => {
+  for (const id of [
+    "test",
+    "govulncheck",
+    "commit-message",
+    "lint",
+    "workflow-security",
+    "goreleaser",
+    "qlty",
+  ]) {
+    const ifs = stepIfs(jobSection(receiptWorkflow, id));
+    for (const condition of ifs) {
+      assert.equal(
+        condition,
+        "always()",
+        `${id} step if must be only the artifact upload's always()`,
+      );
+    }
+  }
+  const test_ = jobSection(receiptWorkflow, "test");
+  assert.deepEqual(stepIfs(test_), ["always()"]);
+  assert.match(
+    test_,
+    /- name: Upload Go test artifacts\n {8}if: always\(\)/u,
+    "the only guarded step in Build & Test is the artifact upload",
+  );
+  assert.deepEqual(stepIfs(jobSection(receiptWorkflow, "govulncheck")), []);
+  assert.deepEqual(stepIfs(jobSection(receiptWorkflow, "commit-message")), []);
+  const fuzz = jobSection(receiptWorkflow, "fuzz");
+  assert.deepEqual(stepIfs(fuzz), ["always()"]);
+  assert.match(fuzz, /- name: Upload Go fuzz artifacts\n {8}if: always\(\)/u);
+});
+
+test("CodeQL, codecov/patch and Browser Checks are never short-circuited by the receipt", () => {
+  assert.deepEqual(stepIfs(jobSection(workflow, "codeql")), []);
+  assert.deepEqual(stepIfs(jobSection(workflow, "website-browser-checks")), ["failure()"]);
+  const codecov = jobSection(workflow, "codecov");
+  assert.doesNotMatch(jobLevelIf(codecov), /receipt/u);
+  // Only the chained outcome guards: resolve -> download -> validate -> upload.
+  assert.deepEqual(stepIfs(codecov), [
+    "steps.coverage-artifact.outcome == 'success'",
+    "steps.coverage-download.outcome == 'success'",
+    "steps.coverage-profile.outcome == 'success'",
+  ]);
+  assert.match(codecov, /needs: \[changes, go-ci, go-ci-receipt\]/u);
 });

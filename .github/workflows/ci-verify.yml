@@ -165,7 +165,7 @@ jobs:
           # The receipt run must itself have run the gates for real: the jobs API is
           # read and each gate must be a success there, which rules out a push run
           # that stood down as covered, and a PR run that used a receipt. Any API
-          # error, missing run or doubt means "no receipt" and the full run.
+          # error (the newest candidate's jobs included), missing run or doubt means "no receipt" and the full run.
           # No `-e`: a failed lookup must mean "no receipt", never a red job.
           receipt=false
           receipt_run=""
@@ -188,8 +188,12 @@ jobs:
                     jq -r --arg tree "${head_tree}" '[.workflow_runs[] | select(.conclusion == "success" and .head_commit.tree_id == $tree)] | sort_by(.created_at) | reverse | .[0:5][] | "\(.id) \(.head_sha)"' 2>/dev/null)" || runs=""
                   while read -r id sha; do
                     [ -n "${id}" ] || continue
-                    jobs="$(gh api "repos/${REPO}/actions/runs/${id}/jobs?per_page=100" --paginate 2>/dev/null | jq -s '[.[].jobs[]]' 2>/dev/null)" || jobs=""
-                    [ -n "${jobs}" ] || continue
+                    # An API error is doubt, not a stood-down run: stop here rather
+                    # than fall through to an older candidate.
+                    if ! jobs="$(gh api "repos/${REPO}/actions/runs/${id}/jobs?per_page=100" --paginate 2>/dev/null | jq -s '[.[].jobs[]]' 2>/dev/null)" || [ -z "${jobs}" ]; then
+                      reason="could not read the jobs of ci-verify run ${id}"
+                      break
+                    fi
                     ok=true
                     for gate in "${gates[@]}"; do
                       jq -e --arg gate "${gate}" 'any(.[]; .name == $gate and .conclusion == "success")' <<<"${jobs}" >/dev/null 2>&1 || ok=false
