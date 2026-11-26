@@ -34,6 +34,8 @@ func TestEdgeEncodedDotSegmentsStayVerbatimUnderVersionPrefix(t *testing.T) {
 		"/containers/%252e%252e/info",
 		"/containers/%2e%2e%2f%2e%2e%2finfo",
 		"/%2e%2e",
+		"/%2e%2e/_portwing/compose",
+		"/%2e%2e%2f_portwing%2fcompose",
 	}
 	for _, p := range paths {
 		t.Run(p, func(t *testing.T) {
@@ -47,6 +49,9 @@ func TestEdgeEncodedDotSegmentsStayVerbatimUnderVersionPrefix(t *testing.T) {
 			})
 			next()
 
+			if hits := daemon.forbiddenHits(); len(hits) != 0 {
+				t.Fatalf("daemon reached a forbidden route for %q: %v", p, hits)
+			}
 			got := daemon.seen()
 			if len(got) != 1 {
 				t.Fatalf("daemon saw %v, want exactly one request and no followed redirect", got)
@@ -88,9 +93,11 @@ func TestOverCapResponseIsNeverBufferedPastTheCap(t *testing.T) {
 	if e.RequestID != "endless" || e.Code != protocol.ErrorCodeResponseTooLarge {
 		t.Fatalf("error = %+v, want response_too_large for request endless", e)
 	}
-	// io.ReadAll grows in chunks, so allow one read buffer of slack past the
-	// one-byte-over limit; an unbounded read would never return at all.
-	if got := reader.read.Load(); got > maxResponseBody+64*1024 {
-		t.Fatalf("read %d bytes, want the read bounded near the %d cap", got, int64(maxResponseBody))
+	// The LimitReader hands the source exactly maxResponseBody+1 bytes: the cap
+	// plus the one overflow probe byte. endlessReader counts what it was asked
+	// to fill, and io.ReadAll's buffer only requests what the limit still
+	// allows, so any read past the probe byte is a loosened cap.
+	if got := reader.read.Load(); got > maxResponseBody+1 {
+		t.Fatalf("read %d bytes, want at most %d (cap plus the overflow probe byte)", got, int64(maxResponseBody)+1)
 	}
 }

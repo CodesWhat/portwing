@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -33,6 +34,10 @@ import (
 type edgeCleaningDaemon struct {
 	mu   sync.Mutex
 	uris []string
+	// forbidden records requests the daemon would actually serve (decoded path
+	// already clean) from outside the version prefix or on a gated Portwing
+	// route: the sentinel for "a spelling reached a handler it must not".
+	forbidden []string
 }
 
 func (d *edgeCleaningDaemon) handler(w http.ResponseWriter, r *http.Request) {
@@ -42,13 +47,25 @@ func (d *edgeCleaningDaemon) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	d.mu.Lock()
 	d.uris = append(d.uris, r.RequestURI)
+	cleaned := path.Clean(r.URL.Path)
+	if cleaned == r.URL.Path && (!strings.HasPrefix(cleaned, "/v1.44/") ||
+		strings.HasPrefix(strings.TrimPrefix(cleaned, "/v1.44"), composeRequestPrefix) ||
+		strings.HasPrefix(strings.TrimPrefix(cleaned, "/v1.44"), protocol.KeyRotationPath)) {
+		d.forbidden = append(d.forbidden, r.RequestURI)
+	}
 	d.mu.Unlock()
-	if cleaned := path.Clean(r.URL.Path); cleaned != r.URL.Path {
+	if cleaned != r.URL.Path {
 		w.Header().Set("Location", cleaned)
 		w.WriteHeader(http.StatusMovedPermanently)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (d *edgeCleaningDaemon) forbiddenHits() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.forbidden...)
 }
 
 func (d *edgeCleaningDaemon) seen() []string {
