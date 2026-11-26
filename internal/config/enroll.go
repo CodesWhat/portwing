@@ -84,3 +84,11 @@ func resolveEnrolledKey(stateDir string, explicit bool, code string) (enrolledKe
 	}
 	return out, nil
 }
+
+// hasConfirmedEnrolledKey reports whether dir holds a valid, confirmed
+// (non-pending) enrolled key. It never creates anything; any problem reading
+// the key counts as "not confirmed" so resolveEnrolledKey reports it.
+func hasConfirmedEnrolledKey(dir string) bool {
+	key, err := auth.LoadOrCreateEnrolledKey(dir, false)
+	return err == nil && !key.Pending
+}
