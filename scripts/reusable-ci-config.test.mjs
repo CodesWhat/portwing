@@ -297,7 +297,7 @@ test("the contract rejects a moving reusable ref and a reintroduced bridge", () 
     "  legacy-build:",
     '    name: "Build & Test"',
     "    needs: go-ci",
-    "    runs-on: ubuntu-24.04",
+    "    runs-on: ubuntu-26.04",
     "",
     "",
   ].join("\n");

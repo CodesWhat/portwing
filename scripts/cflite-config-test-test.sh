@@ -275,7 +275,7 @@ assert_rejected \
 # A job-level group overrides the shared one and puts the two writers back in
 # parallel, while the workflow-level block still reads correct.
 reset_fixtures
-insert_before "${batch_fixture}" "    runs-on: ubuntu-24.04" \
+insert_before "${batch_fixture}" "    runs-on: ubuntu-26.04" \
 	"    concurrency:" "      group: batch-only"
 assert_rejected \
 	"must not override the shared concurrency group" \
