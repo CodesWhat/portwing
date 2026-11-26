@@ -61,9 +61,10 @@ The `msg` field is always an empty string; all semantic content lives in the nam
 | `actor` | string | Client IP address or edge peer URL |
 | `method` | string | HTTP method or message type; only present on `api_request`, `auth_failure`, and `rate_limited` events |
 | `path` | string | HTTP path or message path; only present on `api_request`, `auth_failure`, and `rate_limited` events |
-| `outcome` | string | One of `allowed`, `denied`, `error`, or `cancelled` (a compose operation whose request ended before it finished) |
+| `outcome` | string | One of `allowed`, `denied`, `error`, or `cancelled` (a compose operation or Edge request that ended before it finished, including one the controller cancelled with `dd:cancel`) |
 | `status` | integer | HTTP status code; omitted when not applicable |
 | `duration_ms` | float | Request duration in milliseconds; omitted when not measured |
+| `reason` | string | Why an Edge request or compose operation was cancelled, as the controller gave it in `dd:cancel` (at most 32 bytes, for example `timeout`); present only on `cancelled` records that carry one |
 
 ### Event types
 

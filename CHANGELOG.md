@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Edge agents advertise a `dd:cancel` capability and accept a `dd:cancel` frame (`requestId`, optional `reason`) that abandons one in-flight request. The Docker call or stream is cancelled, the admission slot, exec slot and streamed-body budget are released, and a pending upload is discarded like `request-cancelled`. The agent then sends one terminal frame: `error` with `code: "cancelled"`, or `stream_end` with `reason: "cancelled"` once a stream header was sent. An unknown or finished id is a silent no-op. Audit records for a cancelled request carry outcome `cancelled` and the controller's reason. Old controllers never send the frame, so nothing changes for them.
+
 ## [v1.5.0] - 2026-11-24
 
 ### Added
