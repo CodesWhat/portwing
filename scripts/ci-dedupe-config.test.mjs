@@ -510,6 +510,10 @@ test("the receipt's Qlty Check re-runs osv-scanner on the Go lockfile with its e
   const script = fs.readFileSync(path.join(ROOT, "scripts/ci/go-osv-receipt.sh"), "utf8");
   assert.match(script, /osv-scanner\/v2\/cmd\/osv-scanner@v\d+\.\d+\.\d+ scan source/u);
   assert.match(script, /--lockfile go\.mod/u);
+  // Policy exception: package-lock.json is deliberately not rescanned here. It is
+  // excluded from osv-scanner in Qlty and covered by the Grype Dependency Scan (Go + npm) in security-grype.yml.
+  assert.doesNotMatch(script, /--lockfile[^\n]*package-lock\.json/u);
+  assert.match(script, /package-lock\.json is excluded there on purpose/u);
   assert.match(script, /--config \.github\/osv-scanner\.toml/u);
   const config = fs.readFileSync(path.join(ROOT, ".github/osv-scanner.toml"), "utf8");
   const qltyConfig = fs.readFileSync(path.join(ROOT, ".qlty/qlty.toml"), "utf8");
