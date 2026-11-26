@@ -26,10 +26,11 @@ func Sanitize(value string) string {
 }
 
 // SanitizeField makes an untrusted value safe to log as a single field: line
-// breaks stay visible as escapes, other control characters are dropped, and the
-// result is cut to at most maxRunes runes with an ellipsis marking the cut.
+// breaks and other control characters are dropped, and the result is cut to at
+// most maxRunes runes with an ellipsis marking the cut.
 func SanitizeField(value string, maxRunes int) string {
-	value = Sanitize(value)
+	value = strings.ReplaceAll(value, "\n", "")
+	value = strings.ReplaceAll(value, "\r", "")
 	value = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return -1
