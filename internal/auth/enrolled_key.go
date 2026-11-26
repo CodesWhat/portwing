@@ -61,6 +61,9 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 	if !canCreate {
 		return key, ErrNoEnrolledKey
 	}
+	if err := checkEnrolledKeyDir(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return key, err
+	}
 	if err := CheckStateWritable(dir); err != nil {
 		return key, fmt.Errorf("cannot persist an enrolled key: %w", err)
 	}
@@ -73,25 +76,17 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 	}
 	// The marker is created exclusively. ErrExist means another start (or an
 	// earlier crashed one) already marked it, which is fine.
-	markerCreated := true
-	if err := createMarkerExclusive(key.MarkerPath); err != nil {
-		if !errors.Is(err, os.ErrExist) {
-			return key, fmt.Errorf("writing enrollment marker: %w", err)
-		}
-		markerCreated = false
+	if err := createMarkerExclusive(key.MarkerPath); err != nil && !errors.Is(err, os.ErrExist) {
+		return key, fmt.Errorf("writing enrollment marker: %w", err)
 	}
 	if err := writeFileExclusive(key.Path, pemData); err != nil {
 		if !errors.Is(err, os.ErrExist) {
 			return key, fmt.Errorf("writing enrolled key: %w", err)
 		}
-		// A concurrent first start won. If its marker was already gone when
-		// ours went down, the winner had confirmed, so our marker is stray:
-		// remove it so a confirmed key is never re-marked pending.
-		if markerCreated {
-			if rmErr := os.Remove(key.MarkerPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-				return key, fmt.Errorf("removing stray enrollment marker: %w", rmErr)
-			}
-		}
+		// A concurrent first start won. The marker may be shared with it
+		// (it can have seen ours and linked its key, still unconfirmed), so
+		// it stays: a key that was never confirmed must not read as
+		// confirmed. The worst case is one extra pending cycle.
 		return LoadOrCreateEnrolledKey(dir, false)
 	}
 	key.Pending = true
@@ -131,7 +126,13 @@ func createMarkerExclusive(path string) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // fixed path under the validated state dir
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			if info, statErr := os.Lstat(path); statErr != nil || !info.Mode().IsRegular() {
+			info, statErr := lstatFile(path)
+			if errors.Is(statErr, os.ErrNotExist) {
+				// Confirmed and removed between our open and stat: the
+				// caller's key link then fails with ErrExist and it reloads.
+				return err
+			}
+			if statErr != nil || !info.Mode().IsRegular() {
 				return fmt.Errorf("enrollment marker path %q is not a regular file", path)
 			}
 		}
@@ -153,6 +154,9 @@ func createMarkerExclusive(path string) error {
 	}
 	return syncRotationStateDirectory(filepath.Dir(path))
 }
+
+// lstatFile is os.Lstat, replaceable in tests.
+var lstatFile = os.Lstat
 
 // linkFile is os.Link, replaceable in tests.
 var linkFile = os.Link
