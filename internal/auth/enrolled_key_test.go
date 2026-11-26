@@ -433,3 +433,103 @@ func TestCreateMarkerExclusiveMarkerGoneBeforeLstat(t *testing.T) {
 		t.Fatalf("a vanished marker must read as ErrExist, got %v", err)
 	}
 }
+
+func TestCheckEnrolledKeyDirWindowsSkipsModeCheck(t *testing.T) {
+	prev := enrolledKeyGOOS
+	t.Cleanup(func() { enrolledKeyGOOS = prev })
+	enrolledKeyGOOS = "windows"
+	if err := checkEnrolledKeyDir(filepath.Join(t.TempDir(), "missing")); err != nil {
+		t.Fatalf("windows has no POSIX modes to check: %v", err)
+	}
+}
+
+func TestCheckEnrolledKeyDirStatFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes")
+	}
+	err := checkEnrolledKeyDir(filepath.Join(t.TempDir(), "missing"))
+	if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "checking enrolled key directory") {
+		t.Fatalf("want a wrapped not-exist error, got %v", err)
+	}
+}
+
+func TestLoadOrCreateEnrolledKeyDirTurnsUnsafeAfterWritableProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes")
+	}
+	dir := t.TempDir()
+	prev := statDir
+	t.Cleanup(func() { statDir = prev })
+	calls := 0
+	statDir = func(p string) (os.FileInfo, error) {
+		calls++
+		if calls == 1 {
+			// First check: the directory is not there yet.
+			return nil, os.ErrNotExist
+		}
+		// Second check: another process made it group-writable meanwhile.
+		if err := os.Chmod(p, 0o770); err != nil { //nolint:gosec // writable directory fixture
+			t.Fatal(err)
+		}
+		return prev(p)
+	}
+	_, err := LoadOrCreateEnrolledKey(dir, true)
+	if err == nil || !strings.Contains(err.Error(), "chmod 700") {
+		t.Fatalf("want the unsafe-directory error, got %v", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(dir, EnrolledKeyFileName)); statErr == nil {
+		t.Fatal("no key may be written into an unsafe directory")
+	}
+}
+
+type fakeMarkerFile struct {
+	writeErr, syncErr, closeErr error
+	closed                      bool
+}
+
+func (f *fakeMarkerFile) WriteString(s string) (int, error) { return len(s), f.writeErr }
+func (f *fakeMarkerFile) Sync() error                       { return f.syncErr }
+func (f *fakeMarkerFile) Close() error                      { f.closed = true; return f.closeErr }
+
+func TestCreateMarkerExclusiveIOFailuresCleanUp(t *testing.T) {
+	boom := errors.New("disk on fire")
+	cases := []struct {
+		name string
+		file *fakeMarkerFile
+	}{
+		{"write fails", &fakeMarkerFile{writeErr: boom}},
+		{"sync fails", &fakeMarkerFile{syncErr: boom}},
+		{"close fails", &fakeMarkerFile{closeErr: boom}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), EnrolledPendingFileName)
+			if err := os.WriteFile(path, []byte("partial"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			prev := openMarkerFile
+			t.Cleanup(func() { openMarkerFile = prev })
+			openMarkerFile = func(string) (markerFile, error) { return tc.file, nil }
+			if err := createMarkerExclusive(path); !errors.Is(err, boom) {
+				t.Fatalf("want the I/O error, got %v", err)
+			}
+			if _, err := os.Lstat(path); err == nil {
+				t.Fatal("a half-written marker must be removed")
+			}
+			if !tc.file.closed {
+				t.Fatal("the file must be closed")
+			}
+		})
+	}
+}
+
+func TestCreateMarkerExclusiveRefusesNonRegularMarker(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, EnrolledPendingFileName)
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := createMarkerExclusive(path); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("want a not-regular error, got %v", err)
+	}
+}
