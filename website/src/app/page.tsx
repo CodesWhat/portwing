@@ -88,7 +88,7 @@ export default function Home() {
     url: BASE_URL,
     description: SITE_CONFIG.description,
     applicationCategory: "DeveloperApplication",
-    operatingSystem: "Linux, macOS, Docker",
+    operatingSystem: "Linux, Docker",
     license: SITE_CONFIG.licenseUrl,
     downloadUrl: GITHUB_RELEASES_URL,
     installUrl: `${BASE_URL}/docs/installation`,

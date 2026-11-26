@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Edge tests pin how encoded dot segments are handled in proxied paths and the bounds of the response size cap. Test coverage only, no runtime change.
+- Docs describe how a controller-managed Portwing upgrade works today with no agent change, why Standard mode is out of scope, and the rollback gap if the replacement never connects, with the operator recovery steps.
+- New `dd:request-timeout` capability. A controller can send a per-request deadline hint, `timeoutMs` on an Edge request or the `X-Portwing-Timeout-Ms` header in Standard mode, clamped to 1 s to 15 min, so a long `stop`, `wait`, `images/load` or prune no longer dies at `REQUEST_TIMEOUT`. The hint is advisory (malformed means no hint), non-stream only, and starts counting at dispatch. `dd:ack` now also lists the agent's capabilities.
+- `POST /containers/{id}/stop` and `/restart` with `t=N` get a deadline of `max(REQUEST_TIMEOUT, N + 15 s)`, and `/wait` gets 15 min, without needing a hint, so `docker stop -t 60` through the Standard proxy works.
+- Edge first-start enrollment. Set `ENROLL_CODE` (or `ENROLL_CODE_FILE`) with `DRYDOCK_URL` and no `PRIVATE_KEY_FILE`, and the agent generates an Ed25519 key under `STATE_DIR` (0600, written atomically, never overwritten), sends the single-use code in its signed hello, and drops the code once the controller welcomes it. Later starts connect without the code. It advertises the `dd:enroll` capability only while enrolling, so old controllers aren't affected, and it needs a Drydock that supports it. An explicit `PRIVATE_KEY_FILE` always wins. The seven `enroll-*` rejection codes are classified (six terminal, `enroll-rate-limited` retries).
+
+### Changed
+
+- CI: a promotion PR whose merged tree equals a dev tree that a full push run already verified now reports Lint, Workflow Security, GoReleaser Config and Qlty Check from that run instead of repeating them, at step level, so every required context still reports success. Build & Test, Govulncheck, Commit Message, fuzzing, CodeQL, Codecov and Website Browser Checks still run in full, and any lookup error falls back to the full run.
+- A non-stream Docker deadline overrun now returns an Edge `error` frame with `code: "request_timeout"`. Standard mode answers `504` with `X-Portwing-Code: request_timeout` when the request carried the hint or hit an auto-deadline route, and keeps `502` for a plain default timeout. Standard also strips `X-Portwing-Timeout-Ms` before forwarding to the daemon.
+- Edge agents advertise a `dd:cancel` capability and accept a `dd:cancel` frame (`requestId`, optional `reason`) that abandons one in-flight request. The Docker call or stream is cancelled, the admission slot, exec slot and streamed-body budget are released, and a pending upload is discarded like `request-cancelled`. The agent then sends one terminal frame: `error` with `code: "cancelled"`, or `stream_end` with `reason: "cancelled"` once a stream header was sent. An unknown or finished id is a silent no-op. Audit records for a cancelled request carry outcome `cancelled` and the controller's reason. Old controllers never send the frame, so nothing changes for them.
+
+### Removed
+
+- BREAKING: macOS binaries and the Homebrew cask are no longer published. The binary wasn't Developer ID signed, so Gatekeeper blocked it on real Macs. On a Mac, run the container image with Docker Desktop, OrbStack or Colima. `scripts/install.sh` now exits with that pointer on macOS.
+
 ## [v1.5.0] - 2026-11-24
 
 ### Added

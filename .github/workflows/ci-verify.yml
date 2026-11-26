@@ -6,12 +6,10 @@ run-name: >-
     format('CI — {0}', github.ref_name)
   }}
 
-# TODO(ci-tree-receipt): a promotion PR (dev/v1.0 -> main) re-verifies a tree
-# the dev push run already verified. Not implemented here: the tree-receipt
-# action isn't in CodesWhat/.github yet. When it lands, use it to skip that
-# second run while keeping every required context reported (ops standard:
-# standards/ci.md, "Preserve every required context when reducing duplicate or
-# superseded work").
+# A promotion PR (dev/v1.0 -> main) whose tree equals a dev tree that a full
+# push run already verified runs a "tree receipt" variant of Go CI (see the
+# "Tree receipt" step in the changes job and ci-go-receipt.yml). Every required
+# context still reports SUCCESS from the PR run; nothing is skipped.
 on:
   push:
     branches: [main, "dev/**"]
@@ -65,10 +63,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     outputs:
       push_covered: ${{ steps.covered.outputs.push_covered }}
+      receipt: ${{ steps.receipt.outputs.receipt }}
+      receipt_run: ${{ steps.receipt.outputs.receipt_run }}
+      receipt_sha: ${{ steps.receipt.outputs.receipt_sha }}
       fuzzers_json: ${{ steps.fuzzers.outputs.fuzzers_json }}
     steps:
       # Block, because this job runs setup-go (scripts/setup-go-egress-config-test.sh
@@ -136,6 +138,87 @@ jobs:
           esac
           echo "push_covered=${covered}" >> "$GITHUB_OUTPUT"
 
+      - name: Tree receipt
+        id: receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          # Tree receipt. A promotion PR repeats a tree the dev push run verified
+          # when its head is a dev/** branch of this repo, its merge result adds
+          # nothing to that head (merge tree == head tree), and a successful push
+          # run of this workflow on that branch ran the tree-only Go gates against
+          # an identical tree. Then ci-go-receipt.yml runs in place of the org Go CI
+          # and reports Lint, Workflow Security, GoReleaser Config and Qlty Check
+          # from the receipt, at step level, so every required context is SUCCESS
+          # rather than SKIPPED. Everything else (Build & Test, Govulncheck,
+          # Commit Message, fuzzing, CodeQL, Website Browser Checks, Secrets,
+          # Dependency Review, Release Contract) runs in full.
+          #
+          # The receipt run must itself have run the gates for real: the jobs API is
+          # read and each gate must be a success there, which rules out a push run
+          # that stood down as covered, and a PR run that used a receipt. Any API
+          # error (the newest candidate's jobs included), missing run or doubt means "no receipt" and the full run.
+          # No `-e`: a failed lookup must mean "no receipt", never a red job.
+          receipt=false
+          receipt_run=""
+          receipt_sha=""
+          reason="not a promotion pull request"
+          gates=("Go CI / Build & Test" "Go CI / Govulncheck" "Go CI / Lint" "Go CI / Workflow Security" "Go CI / GoReleaser Config" "Go CI / Qlty Check")
+
+          if [ "${EVENT_NAME}" = "pull_request" ] && [ "${BASE_REF}" = "main" ] && [ "${HEAD_REPO}" = "${REPO}" ]; then
+            case "${HEAD_REF}" in
+              dev/*)
+                head_tree="$(gh api "repos/${REPO}/git/commits/${HEAD_SHA}" --jq .tree.sha 2>/dev/null)" || head_tree=""
+                merge_tree="$(gh api "repos/${REPO}/git/commits/${MERGE_SHA}" --jq .tree.sha 2>/dev/null)" || merge_tree=""
+                if [ -z "${head_tree}" ] || [ -z "${merge_tree}" ]; then
+                  reason="could not read the head or merge tree"
+                elif [ "${head_tree}" != "${merge_tree}" ]; then
+                  reason="the merge result differs from the PR head tree"
+                else
+                  reason="no successful push run on ${HEAD_REF} verified tree ${head_tree}"
+                  runs="$(gh api "repos/${REPO}/actions/workflows/ci-verify.yml/runs?event=push&status=success&branch=${HEAD_REF}&per_page=50" 2>/dev/null |
+                    jq -r --arg tree "${head_tree}" '[.workflow_runs[] | select(.conclusion == "success" and .head_commit.tree_id == $tree)] | sort_by(.created_at) | reverse | .[0:5][] | "\(.id) \(.head_sha)"' 2>/dev/null)" || runs=""
+                  while read -r id sha; do
+                    [ -n "${id}" ] || continue
+                    # An API error is doubt, not a stood-down run: stop here rather
+                    # than fall through to an older candidate.
+                    if ! jobs="$(gh api "repos/${REPO}/actions/runs/${id}/jobs?per_page=100" --paginate 2>/dev/null | jq -s '[.[].jobs[]]' 2>/dev/null)" || [ -z "${jobs}" ]; then
+                      reason="could not read the jobs of ci-verify run ${id}"
+                      break
+                    fi
+                    ok=true
+                    for gate in "${gates[@]}"; do
+                      jq -e --arg gate "${gate}" 'any(.[]; .name == $gate and .conclusion == "success")' <<<"${jobs}" >/dev/null 2>&1 || ok=false
+                    done
+                    if [ "${ok}" = true ]; then
+                      receipt=true
+                      receipt_run="${id}"
+                      receipt_sha="${sha}"
+                      reason="tree ${head_tree} verified by ci-verify run ${id} on ${sha}"
+                      break
+                    fi
+                  done <<<"${runs}"
+                fi
+                ;;
+              *) reason="head is not a dev/** branch of this repository" ;;
+            esac
+          fi
+
+          echo "Tree receipt: ${receipt} (${reason})"
+          {
+            echo "receipt=${receipt}"
+            echo "receipt_run=${receipt_run}"
+            echo "receipt_sha=${receipt_sha}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -197,7 +280,7 @@ jobs:
     needs: changes
     # `!cancelled()` so a failed changes job runs everything rather than
     # skipping it (an empty push_covered is not 'true').
-    if: ${{ !cancelled() && needs.changes.outputs.push_covered != 'true' }}
+    if: ${{ !cancelled() && needs.changes.outputs.push_covered != 'true' && needs.changes.outputs.receipt != 'true' }}
     permissions:
       actions: read
       contents: read
@@ -309,6 +392,23 @@ jobs:
         release-assets.githubusercontent.com:443
         tmaproduction.blob.core.windows.net:443
 
+  # The tree-receipt variant of go-ci: same "Go CI" caller name, so the nested
+  # contexts keep their required names. Mutually exclusive with go-ci.
+  go-ci-receipt:
+    name: "Go CI"
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.push_covered != 'true' && needs.changes.outputs.receipt == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-go-receipt.yml  # zizmor: ignore[self-repository]
+    with:
+      receipt-run-id: ${{ needs.changes.outputs.receipt_run }}
+      receipt-sha: ${{ needs.changes.outputs.receipt_sha }}
+      go-version-file: go.mod
+      go-cache-dependency-path: go.sum
+      fuzzers-json: >-
+        ${{ (needs.changes.result == 'success' && needs.changes.outputs.fuzzers_json) || ((github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && '[{"name":"FuzzParsePHC","pkg":"./internal/server/"},{"name":"FuzzParseTrustedProxies","pkg":"./internal/server/"},{"name":"FuzzParseImageRef","pkg":"./internal/adapter/"},{"name":"FuzzParseLabels","pkg":"./internal/adapter/drydock/"},{"name":"FuzzMCPHandler","pkg":"./internal/mcp/"},{"name":"FuzzEnvelope","pkg":"./internal/protocol/"},{"name":"FuzzVerifyRequest","pkg":"./internal/auth/"},{"name":"FuzzDecodeContainerLogStream","pkg":"./internal/docker/"},{"name":"FuzzComposeRequestValidate","pkg":"./internal/docker/"},{"name":"FuzzParseKeyLine","pkg":"./internal/auth/"},{"name":"FuzzEdgeRequestPath","pkg":"./internal/edge/"}]' || '[]') }}
+
   node-ci:
     name: "Node CI"
     needs: changes
@@ -416,7 +516,7 @@ jobs:
 
   codecov:
     name: "Coverage: Codecov Upload"
-    needs: [changes, go-ci]
+    needs: [changes, go-ci, go-ci-receipt]
     if: ${{ !cancelled() && needs.changes.outputs.push_covered != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10

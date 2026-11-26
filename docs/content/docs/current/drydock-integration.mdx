@@ -76,6 +76,14 @@ Drydock parses SSE frames as `data: <json>\n\n`. Each frame is a JSON object wit
 
 Every 15 seconds Portwing writes a `: heartbeat` comment line (followed by a blank line) on the stream. Drydock arms its 45 s stalled-stream watchdog only after the first heartbeat, so this lets it detect a half-open stream, and it keeps proxies with short idle timeouts from cutting a quiet one. The comment isn't an event, so `AgentClient` ignores it when parsing.
 
+### Per-request timeout hint
+
+Blocking Docker calls time out at `REQUEST_TIMEOUT` (30 s by default). When the agent advertises `dd:request-timeout`, a controller can send a per-request hint: `timeoutMs` on an Edge `request` frame, or the `X-Portwing-Timeout-Ms` header in Standard mode (digits only, at most 7 characters). The value clamps to 1 s to 15 min, and anything malformed means "no hint". It only applies to non-stream calls, and the deadline starts when the call is dispatched, so a `bodyStream` upload isn't counted against it. Portwing strips the header before the request reaches the Docker daemon.
+
+With no hint, `stop` and `restart` with `t=N` get `max(REQUEST_TIMEOUT, N + 15 s)` (capped at 15 min) and `wait` gets 15 min, so `docker stop -t 60` through the Standard proxy works too.
+
+A deadline overrun comes back as an Edge `error` frame with `code: "request_timeout"`, or in Standard mode as a `504` with `X-Portwing-Code: request_timeout` when the request carried the hint or hit one of those auto-deadline routes. A plain default-timeout request keeps its `502`. The daemon may still finish the operation, so re-inspect before assuming state. Controllers should arm their own timer at `timeoutMs + 5000` ms.
+
 ### `dd:ack`
 
 Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`, `memoryGb`, `uptimeSeconds`, `lastSeen`, `logLevel`, and `pollInterval` from the payload.
@@ -94,10 +102,13 @@ Sent on every new SSE connection. Drydock reads `version`, `os`, `arch`, `cpus`,
     "logLevel": "info",
     "pollInterval": "5m0s",
     "containers": {"total": 3, "running": 2, "stopped": 1},
-    "images": 2
+    "images": 2,
+    "capabilities": ["dd:container-sync", "dd:container-event", "dd:logs", "dd:request-timeout"]
   }
 }
 ```
+
+`capabilities` repeats the `/_portwing/info` list so the controller doesn't need an extra authenticated call to discover optional features such as `dd:request-timeout`.
 
 <Callout type="info">
 `memoryGb` is read from `/proc/meminfo` (the binary stays cgo-free) and rounded to one decimal GiB; non-Linux hosts report `0`, which Drydock accepts. `pollInterval` is the agent's `DD_POLL_INTERVAL` rendered as a Go duration string — the field is informational and displayed as-is. Portwing 0.5.x and earlier sent `memoryGb: 0` and omitted `logLevel`/`pollInterval`.
@@ -307,7 +318,8 @@ Handshake sequence:
     "capabilities": [
       "compose", "exec", "metrics", "events",
       "edge-response-body-b64", "edge-request-body-stream",
-      "dd:container-sync", "dd:container-event", "dd:logs"
+      "dd:container-sync", "dd:container-event", "dd:logs",
+      "dd:request-timeout", "dd:cancel"
     ],
     "drydockCompat": "1.4.0",
     "watcherTypes": ["docker"],
@@ -319,6 +331,10 @@ Handshake sequence:
 All Edge Mode JSON application messages are wrapped in an `Envelope` (`{"type": ..., "data": ...}`, `internal/protocol/messages.go`) — the fields above live under `data`, not at the top level. (WebSocket ping/pong/close control frames are not wrapped.)
 
 When `PRIVATE_KEY_FILE` is set, the hello carries the `pubKeyId`, `timestamp`, `nonce`, and `signature` fields shown above, and Drydock verifies the signature against the agent's registered public key. The `tokenHash` field (SHA-256 of the shared token) is only a fallback for non-edge endpoints — the Drydock `/api/portwing/ws` endpoint rejects token-hash hellos with `ed25519-required`.
+
+### First-start enrollment
+
+With `ENROLL_CODE` set and no `PRIVATE_KEY_FILE`, the hello carries an extra `data.enroll` block (`code` and `publicKey`, the base64 raw Ed25519 public key) and `dd:enroll` in `capabilities`. The hello is signed with the freshly generated key, and the controller verifies it against `enroll.publicKey` before consuming the code. While a code is in flight, the agent marks the key confirmed only when the `welcome` carries `dd:enroll` in `capabilities` and `config.enrolled` set to `"true"`, and later starts connect normally without the code. A `welcome` without both leaves the key pending and the code is sent again on reconnect. A pending key that connects with no code configured is confirmed by any parsed `welcome`. The agent stops on `enroll-code-invalid`, `enroll-code-expired`, `enroll-code-used`, `enroll-code-revoked`, `enroll-key-invalid` and `enroll-disabled`, keeping the generated key so a fresh code reuses it, and retries `enroll-rate-limited`. This needs controller support; an older controller answers `unknown-key`.
 
 ### Capability negotiation
 
@@ -354,10 +370,49 @@ and rejects binary bodies before sending any request.
 An interrupted upload never sends `stream_end`. The controller may send an
 `error` frame with `code: "request-cancelled"` and the upload's `requestId` to
 discard a pending reassembly immediately. This cancels only the upload stage,
-not a Docker request already dispatched after `stream_end`. Older agents ignore
+not a Docker request already dispatched after `stream_end` (`dd:cancel`, below, is
+the superset that also cancels a dispatched request). Older agents ignore
 that error and discard the incomplete upload on their existing idle timeout;
 they never receive a terminal frame that could dispatch a partial body.
 Disconnects discard pending uploads through the existing connection cleanup.
+
+`dd:cancel` lets the controller abandon one in-flight request by id. The agent
+advertises it in `hello.capabilities` (Edge only; Standard mode cancels by
+closing the HTTP connection, and doesn't list it in `/_portwing/info`). A
+controller must not send the frame to an agent whose hello lacks the token.
+The frame is `{"type":"dd:cancel","data":{"requestId":"<1..128 bytes>","reason":"timeout"}}`.
+`reason` is optional, at most 32 bytes (longer is truncated), and is only logged
+and written to the audit record, never branched on. The agent handles the frame
+on the read pump with no admission, and an empty or over-long `requestId` is
+ignored.
+
+- A pending `bodyStream` upload is discarded with no frame, exactly like
+  `error{code:"request-cancelled"}`. `dd:cancel` is a strict superset of it, and
+  that error keeps its upload-only meaning.
+- An in-flight `request` has its context cancelled. The Docker round trip
+  aborts, the handler returns, and the admission slot, any raw exec slot and any
+  streamed-body byte reservation are released. A compose request gets its
+  existing SIGTERM with a bounded wait. The audit record has outcome
+  `cancelled` and the reason.
+- An in-flight `dd:container_log_request` with `stream: true` is cancelled like
+  `dd:container_log_cancel` and ends with the existing
+  `dd:container_log_end{reason:"canceled"}`.
+- An unknown or already finished id is a silent no-op with no frame. Buffered
+  `dd:container_log_request`, `dd:container_delete_request` and exec sessions
+  (which end on `exec_end`) are not cancelled by this frame.
+
+For a request the agent processed a cancel for, it sends at most one terminal
+frame, after the slots are released, so seeing it means capacity is free. If the
+response header was not yet sent, that frame is `error` with
+`code: "cancelled"` and message `request cancelled`. If a stream's
+`response{isStream:true}` was already sent, it is `stream_end` with
+`reason: "cancelled"`, not an `error`. Frames queued before the agent processed
+the cancel (`stream` chunks, even a finished `response`) can still arrive, and a
+controller drops frames for ids it no longer tracks. If the real response wins
+the race, no `cancelled` frame follows. `cancelled` doesn't mean the Docker side
+effect was undone: a cancelled `stop`, `pull` or `compose up` may have completed
+or half-completed, so re-inspect. An older agent ignores `dd:cancel`, and an
+older controller never sends it, so neither side changes behavior.
 
 ### Edge Mode Message Types
 
@@ -374,7 +429,8 @@ Disconnects discard pending uploads through the existing connection cleanup.
 | `metrics` | Agent → Controller | Host metrics payload |
 | `container_event` | Agent → Controller | Docker lifecycle event; used instead of a duplicate controller event stream |
 | `ping` / `pong` | Either | Keepalive (30s default) |
-| `error` | Either | Error with optional `code` |
+| `error` | Either | Error with optional `code`; `cancelled` is the terminal frame for a request cancelled with `dd:cancel` before any response header |
+| `dd:cancel` | Controller → Agent | Abandon one in-flight request by `requestId`; only sent to an agent whose hello carries the `dd:cancel` capability |
 
 On a response stream (an image pull, a build, a `logs?follow`, a container
 export, the event stream) the terminal `stream_end` carries one of two
@@ -384,6 +440,7 @@ export, the event stream) the terminal `stream_end` carries one of two
 |---|---|
 | `complete` | The Docker response body ended cleanly at EOF. Every byte the daemon produced is on the wire. |
 | `error` | The body ended early: the daemon died mid-stream, a declared `Content-Length` was never reached, or a read failed partway through. The bytes already sent are a prefix, not the whole payload. |
+| `cancelled` | The controller sent `dd:cancel` for this request after the stream header went out. Treat the payload as abandoned, like `error`, and re-inspect any side effect. |
 
 A controller that treats `error` as `complete` will accept a truncated image
 layer or tar archive as a finished one, so branch on the value rather than on
@@ -582,6 +639,97 @@ The `TOKEN` value on the Portwing side must match the `secret` value on the Dryd
 <Callout type="warn">
 Never pair `TOKEN` with plain HTTP on a port published to all interfaces. If the controller runs on the same host, publish `127.0.0.1:3000:3000` instead of `3000:3000` and leave TLS off; Drydock still needs `DD_AGENT_ALLOW_INSECURE_SECRET=true` for that plaintext hop, so prefer TLS or [Ed25519 request signing](/authentication#4-ed25519-per-client-keys), which sends no shared secret at all.
 </Callout>
+
+---
+
+## Controller-Managed Upgrades
+
+Portwing has no self-updater, host package manager or privileged helper, and
+this release adds none. A controller upgrades a Portwing container the same way
+it upgrades any other workload: through the Docker API calls Portwing already
+proxies. Drydock owns the sequencing, the health decision and the rollback
+policy. Portwing only needs to start up with the same identity.
+
+### Edge mode, no agent change
+
+The sequence below works against any Portwing that proxies the Docker API. It
+starts the replacement before it stops the old agent, so the controller learns
+whether the new container can reach it before anything is lost.
+
+1. Through the old agent, pull the target image by digest and inspect the old
+   container.
+2. Create a candidate under a different container name. Keep the same
+   `AGENT_NAME` and `AGENT_ID`, the same `PRIVATE_KEY_FILE` secret, the same
+   `/data/credentials` state volume, the same Docker socket mount and the same
+   restart policy. Only the image changes.
+3. Start the candidate. It dials the controller and passes signature
+   verification, but the old agent still holds the name, so it gets
+   `agent-already-connected`. That code is transient, so the candidate keeps
+   retrying. Using the rejected hello as a readiness check needs Drydock
+   support: today Drydock replies `agent-already-connected` and keeps no record
+   of the hello, so confirm your Drydock version retains it before relying on
+   this step. Without that, step 6 is your only confirmation. The rejected hello still carries `version` and `hostname`, which
+   shows the candidate runs, holds the right key and can reach the controller.
+   `hostname` is the candidate's short container ID unless you override it, so
+   the controller can match it to the container it created.
+4. Through the old agent, stop the old container. The old agent dies mid-call,
+   and the controller should treat that disconnect as expected, not as a
+   failure.
+5. The candidate connects on its next retry. Backoff starts at 1 second and
+   doubles to a 60 second cap, and jitter can stretch each wait by up to 25%. Allow
+   about 75 seconds plus connect and handshake time in the worst case.
+6. Verify the new `hello.version` is the target and the inventory sync arrives.
+   Only then remove the old container. Until this point it was stopped, not
+   removed.
+
+Keep the previous image digest, not a tag. A rollback after a successful
+upgrade is the same sequence run in reverse against that digest.
+
+Proxied requests are bound by the agent's `REQUEST_TIMEOUT` (30 seconds by
+default, configurable). Streaming requests such as image pulls have no total
+timeout. A `stop` with `t=N` gets `max(REQUEST_TIMEOUT, N + 15 s)` on its own,
+so the stop in step 4 needs no change. See
+[per-request timeout hint](#per-request-timeout-hint) to set a deadline
+explicitly.
+
+### Standard mode is out of scope
+
+A candidate can't bind the published port while the old agent holds it, and the
+controller can't restart anything once the old agent is stopped. Don't use a
+controller-driven self-upgrade for a Standard mode agent. Redeploy it yourself
+(for example `docker compose pull && docker compose up -d`), or run the
+candidate on a different port and re-point the controller's stored URL after
+the swap.
+
+### Rollback gap
+
+Once the controller stops the old agent through that agent, it has no other
+channel to the host. If the candidate never connects, nothing can start the old
+container again, because rollback itself needs a working agent.
+
+| When it fails | What's recoverable |
+|---------------|--------------------|
+| Before the old agent is stopped (steps 1 to 3) | Everything. Remove the candidate through the old agent. |
+| After the old agent is stopped, and the candidate never connects (steps 4 to 5) | Not from the controller. The host is unreachable until someone starts the old container. |
+| After the candidate connected (step 6 onward) | Everything, as long as the new agent stays connected. Roll back through it to the retained digest. If it connects, sends inventory, then crashes or drops, the controller has no working agent again and host-side recovery applies. |
+
+The step 3 check shrinks the unrecoverable window to a candidate that proved it
+could dial and then failed anyway. It doesn't remove it. When a host shows as
+unreachable after an upgrade, an operator with host access recovers it:
+
+```bash
+docker ps -a --filter name=portwing
+docker start <old-container-name>
+```
+
+Start the old container, wait for it to reconnect, then remove the candidate
+and investigate (`docker logs <candidate>`). If the old container was already
+removed, recreate it from the previous image digest with the same identity and
+volume.
+
+Portwing doesn't close this gap itself. Doing so would mean the agent stops a
+sibling container on its own initiative, which crosses the no-self-updater
+line. If you need automated recovery past step 4, raise it as a feature request.
 
 ---
 

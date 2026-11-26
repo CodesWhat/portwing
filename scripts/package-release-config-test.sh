@@ -333,23 +333,13 @@ require_text ".goreleaser.yml" "nfpms:" "GoReleaser must define native Linux pac
 require_text ".goreleaser.yml" "formats: [deb, rpm]" "GoReleaser must build deb and rpm packages"
 require_text ".goreleaser.yml" "src: scripts/portwing.service" "native packages must include the systemd unit"
 require_text ".goreleaser.yml" "dst: /usr/lib/systemd/system/portwing.service" "the systemd unit must use the portable package path"
-require_text ".goreleaser.yml" "homebrew_casks:" "GoReleaser must publish a Homebrew cask"
-require_text ".goreleaser.yml" "skip_upload: auto" "prereleases must not update the stable Homebrew channel"
-require_text ".goreleaser.yml" 'token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"' "Homebrew publishing must use the dedicated tap token"
-# Tap main is protected, so the cask goes out as a push to a version-specific
-# head branch. The tap's own workflow opens and auto-merges the PR, which keeps
-# HOMEBREW_TAP_TOKEN at contents write; a pull_request block here would need
-# pull-requests write too.
-require_exactly_one_active ".goreleaser.yml" \
-	'^      branch:' \
-	'      branch: portwing-{{ .Version }}' \
-	"Homebrew publishing must push a version-specific head branch, never tap main"
-if active_lines ".goreleaser.yml" | grep -qE '^      branch: main$'; then
-	echo "FAIL: Homebrew publishing must not push directly to tap main (.goreleaser.yml has an active head 'branch: main')" >&2
-	failures=$((failures + 1))
-fi
-if active_lines ".goreleaser.yml" | grep -qE '^[[:space:]]+pull_request:'; then
-	echo "FAIL: Homebrew publishing must not open the pull request itself, the tap workflow does (.goreleaser.yml has an active pull_request block that would need pull-requests write on the tap credential)" >&2
+# macOS binaries and the Homebrew cask are no longer published: the binary was
+# never Developer ID signed, so Gatekeeper blocked it. Mac users run the image.
+reject_text ".goreleaser.yml" "homebrew_casks:" "GoReleaser must not publish a Homebrew cask"
+reject_text ".goreleaser.yml" "brews:" "GoReleaser must not publish a Homebrew formula"
+reject_text ".goreleaser.yml" "HOMEBREW_TAP_TOKEN" "GoReleaser must not use the Homebrew tap credential"
+if active_lines ".goreleaser.yml" | grep -qiE '^[[:space:]]+- (darwin|windows)$'; then
+	echo "FAIL: GoReleaser must build linux binaries only (.goreleaser.yml has an active darwin or windows goos entry)" >&2
 	failures=$((failures + 1))
 fi
 public_site="https://portwing.codeswhat.com"
@@ -681,26 +671,12 @@ if git grep -F -- "$protected_site" -- . \
 	failures=$((failures + 1))
 fi
 
-# shellcheck disable=SC2016 # GitHub evaluates these literals in release.yml.
-require_text ".github/workflows/release.yml" 'HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}' "the release must pass the tap token to GoReleaser"
+reject_text ".github/workflows/release.yml" "HOMEBREW_TAP_TOKEN" "the release must not pass the tap credential to GoReleaser"
 require_text ".github/workflows/release.yml" "Verify deb package install" "the release must install-test the deb package"
 require_text ".github/workflows/release.yml" "Verify rpm package install" "the release must install-test the rpm package"
-require_text ".github/workflows/release.yml" "Verify Homebrew cask install" "the release must install-test the published Homebrew cask"
-require_text ".github/workflows/release.yml" "Wait for the tap PR to merge" "verify-homebrew must wait for the tap PR to merge before installing the cask"
-verify_homebrew_job="$(awk '/^  verify-homebrew:/ { in_job = 1; print; next } in_job && /^  [A-Za-z0-9_-]+:/ { in_job = 0 } in_job { print }' .github/workflows/release.yml)"
-# shellcheck disable=SC2016 # the patterns are literal workflow text
-if ! grep -qF 'max_attempts=40' <<<"${verify_homebrew_job}" ||
-	! grep -qF 'for attempt in $(seq 1 "${max_attempts}")' <<<"${verify_homebrew_job}" ||
-	! grep -qF 'sleep 30' <<<"${verify_homebrew_job}" ||
-	grep -qE 'while (true|:)|until ' <<<"${verify_homebrew_job}"; then
-	echo "FAIL: verify-homebrew's tap wait must be a bounded loop (40 attempts, 30 s apart, no while/until)" >&2
-	failures=$((failures + 1))
-fi
-homebrew_timeout="$(grep -E '^    timeout-minutes:' <<<"${verify_homebrew_job}" | head -n 1 | tr -dc '0-9')"
-if [ -z "${homebrew_timeout}" ] || [ "${homebrew_timeout}" -le 20 ]; then
-	echo "FAIL: verify-homebrew timeout-minutes (${homebrew_timeout:-unset}) must exceed the 20 minute tap wait" >&2
-	failures=$((failures + 1))
-fi
+reject_text ".github/workflows/release.yml" "verify-homebrew" "the release must not carry a Verify Homebrew job"
+reject_text ".github/workflows/release.yml" "Verify Homebrew" "the release must not carry a Verify Homebrew job"
+reject_text ".github/workflows/release.yml" "macos-" "the release must not run on macOS runners"
 require_text ".github/workflows/release.yml" "ubuntu:24.04@sha256:" "the deb smoke image must be digest-pinned"
 require_text ".github/workflows/release.yml" "fedora:42@sha256:" "the rpm smoke image must be digest-pinned"
 # shellcheck disable=SC2016 # The workflow expands GITHUB_REF_NAME.
@@ -965,7 +941,7 @@ if [ -f "NOTICE" ]; then
 	require_text "NOTICE" "Copyright (c) 2026 CodesWhat" "NOTICE must preserve the project copyright"
 fi
 if [ -f "docs/content/docs/current/installation.mdx" ]; then
-	require_text "docs/content/docs/current/installation.mdx" "brew install --cask codeswhat/tap/portwing" "Homebrew installation must be documented"
+	reject_text "docs/content/docs/current/installation.mdx" "brew install --cask" "Homebrew installation must not be documented"
 	require_text "docs/content/docs/current/installation.mdx" "apt install" "deb installation must be documented"
 	require_text "docs/content/docs/current/installation.mdx" "rpm --install" "rpm installation must be documented"
 	require_text "docs/content/docs/current/installation.mdx" "Upgrade" "package upgrades must be documented"
@@ -974,13 +950,13 @@ if [ -f "docs/content/docs/current/installation.mdx" ]; then
 	require_text "docs/content/docs/current/installation.mdx" "checksums.txt" "artifact verification must be linked to package installation"
 fi
 
-require_text "README.md" "brew install --cask codeswhat/tap/portwing" "the repository landing page must advertise Homebrew installation"
+reject_text "README.md" "brew install --cask" "the repository landing page must not advertise Homebrew installation"
 require_text "README.md" "/docs/installation" "the repository landing page must link the full package guide"
 # shellcheck disable=SC2016 # The documented shell command expands VERSION.
 require_text "docs/content/docs/current/verification.mdx" 'release.yml@refs/tags/v${VERSION}' "public verification instructions must bind signatures to the selected tag"
-require_text "RELEASING.md" "HOMEBREW_TAP_TOKEN" "maintainer release docs must name the tap publishing credential"
+reject_text "RELEASING.md" "HOMEBREW_TAP_TOKEN" "maintainer release docs must not name the retired tap publishing credential"
 require_text "RELEASING.md" "verify-native-packages" "maintainer release docs must describe the native package gate"
-require_text "website/src/components/get-started.tsx" "codeswhat/tap/portwing" "the website must advertise the Homebrew cask"
+reject_text "website/src/components/get-started.tsx" "codeswhat/tap/portwing" "the website must not advertise the Homebrew cask"
 require_text "website/src/components/get-started.tsx" "apt install ./portwing_" "the website must advertise the deb package"
 
 require_text "scripts/ci/go-release-check.sh" "bash scripts/package-release-config-test.sh" "CI release adapter must enforce the package release contract"

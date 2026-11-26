@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Core message types.
@@ -51,6 +52,7 @@ const (
 	TypeDDContainerLogCancel      = "dd:container_log_cancel"
 	TypeDDContainerDeleteRequest  = "dd:container_delete_request"
 	TypeDDContainerDeleteResponse = "dd:container_delete_response"
+	TypeDDCancel                  = "dd:cancel"
 )
 
 type Envelope struct {
@@ -76,7 +78,23 @@ type HelloMessage struct {
 	Timestamp int64  `json:"timestamp,omitempty"`
 	Nonce     string `json:"nonce,omitempty"`
 	Signature string `json:"signature,omitempty"`
+
+	// Enroll is present only on a first-start enrollment hello (CapEnroll).
+	Enroll *EnrollBlock `json:"enroll,omitempty"`
 }
+
+// EnrollBlock carries the single-use enrollment code and the public key the
+// controller should register. The hello signature, made with the matching
+// private key, is the proof of possession. Code is a credential and must never
+// be logged or audited.
+type EnrollBlock struct {
+	Code      string `json:"code"`
+	PublicKey string `json:"publicKey"`
+}
+
+// String and GoString keep the code out of accidental %v and %#v output.
+func (e EnrollBlock) String() string   { return "enroll{redacted}" }
+func (e EnrollBlock) GoString() string { return "enroll{redacted}" }
 
 type WelcomeMessage struct {
 	PollInterval int               `json:"pollInterval"`
@@ -144,6 +162,37 @@ type RequestMessage struct {
 	// tar build context, or any payload too large for a single 16 MB
 	// WebSocket frame) is not. When true, Body is left empty.
 	BodyStream bool `json:"bodyStream,omitempty"`
+	// TimeoutMs is the controller's advisory deadline hint for a non-stream
+	// Docker round trip, honored only when the agent advertised
+	// CapRequestTimeout. It decodes leniently: a malformed value is "no hint",
+	// never a rejected request.
+	TimeoutMs *TimeoutHint `json:"timeoutMs,omitempty"`
+}
+
+// TimeoutHint is an advisory millisecond count. UnmarshalJSON never fails, so
+// a string, float, null-ish or out-of-range value leaves Valid false instead of
+// making the whole request undecodable.
+type TimeoutHint struct {
+	Ms    int64
+	Valid bool
+}
+
+func (h *TimeoutHint) UnmarshalJSON(b []byte) error {
+	*h = TimeoutHint{}
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "null" {
+		return nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return nil
+	}
+	h.Ms, h.Valid = n, true
+	return nil
+}
+
+func (h TimeoutHint) MarshalJSON() ([]byte, error) {
+	return []byte(strconv.FormatInt(h.Ms, 10)), nil
 }
 
 type ResponseMessage struct {
@@ -371,6 +420,20 @@ type DDContainerLogErrorMessage struct {
 	ContainerID string `json:"containerId"`
 	Error       string `json:"error"`
 }
+
+// DDCancelMessage is the controller's request to abandon one in-flight
+// request on this connection (CapCancel). Reason is advisory, at most 32
+// bytes, and is only logged and audited, never branched on.
+type DDCancelMessage struct {
+	RequestID string `json:"requestId"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// MaxCancelRequestIDLen and MaxCancelReasonLen bound the dd:cancel fields.
+const (
+	MaxCancelRequestIDLen = 128
+	MaxCancelReasonLen    = 32
+)
 
 type DDContainerLogCancelMessage struct {
 	RequestID   string `json:"requestId"`

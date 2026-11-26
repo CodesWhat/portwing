@@ -27,16 +27,12 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
       - arm64
       - arm
     goarm:
       - "7"
-    ignore:
-      - goos: darwin
-        goarch: arm
 
 archives:
   - id: default
@@ -172,24 +168,3 @@ dockers_v2:
     # is additive to the archive-level `sboms:` block above, which covers the
     # binaries but not the image's OS packages.
     sbom: "true"
-
-homebrew_casks:
-  - name: portwing
-    ids:
-      - default
-    binaries:
-      - portwing
-    homepage: https://portwing.codeswhat.com/
-    description: Security-first remote Docker agent for Drydock and standalone API clients
-    caveats: |
-      Portwing needs access to a Docker socket and authentication configuration.
-      See https://portwing.codeswhat.com/docs/installation before starting it.
-    skip_upload: auto
-    repository:
-      owner: CodesWhat
-      name: homebrew-tap
-      branch: portwing-{{ .Version }}
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    commit_author:
-      name: goreleaserbot
-      email: security@codeswhat.com

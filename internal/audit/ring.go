@@ -26,6 +26,7 @@ type Record struct {
 	Container  string    `json:"container,omitempty"`
 	ExecID     string    `json:"exec_id,omitempty"`
 	KeyID      string    `json:"key_id,omitempty"`
+	Reason     string    `json:"reason,omitempty"`
 }
 
 // ring is a fixed-capacity circular buffer of Records. It is safe for

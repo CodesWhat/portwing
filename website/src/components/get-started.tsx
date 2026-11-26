@@ -195,9 +195,8 @@ export function GetStarted() {
           </div>
           <pre>
             <code>
-              <span className="y-c"># macOS (latest stable release)</span>
+              <span className="y-c"># macOS: no native binary, run the container image</span>
               {`
-brew install --cask codeswhat/tap/portwing
 
 `}
               <span className="y-c"># Debian / Ubuntu</span>

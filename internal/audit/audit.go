@@ -100,7 +100,29 @@ const (
 // Option adjusts an audit record before it is written.
 type Option func(*options)
 
-type options struct{ keyID string }
+type options struct{ keyID, reason string }
+
+// WithReason records why an operation ended early, such as the reason a
+// controller gave when it cancelled an in-flight request. An empty reason
+// leaves the field out.
+func WithReason(reason string) Option { return func(o *options) { o.reason = reason } }
+
+// reasonOf returns the reason set by WithReason, or "".
+func reasonOf(opts []Option) string {
+	var o options
+	for _, f := range opts {
+		f(&o)
+	}
+	return o.reason
+}
+
+// reasonAttr appends the reason attribute to attrs when reason is set.
+func reasonAttr(reason string, attrs []slog.Attr) []slog.Attr {
+	if reason != "" {
+		attrs = append(attrs, slog.String("reason", applog.Sanitize(reason)))
+	}
+	return attrs
+}
 
 // WithKeyID attributes a record to the Ed25519 key that authenticated the
 // caller. An empty id leaves the record unattributed.
@@ -238,12 +260,13 @@ func (l *Logger) Stats() Stats {
 // APIRequest records an authenticated (or rejected) HTTP API call.
 func (l *Logger) APIRequest(actor, method, path, outcome string, status int, durationMs float64, opts ...Option) {
 	keyID := keyIDOf(opts)
+	reason := reasonOf(opts)
 	if l.log == nil && l.ring == nil {
 		return
 	}
 	if l.log != nil {
 		l.log.LogAttrs(context.Background(), slog.LevelInfo, "", keyAttr(
-			keyID, []slog.Attr{
+			keyID, reasonAttr(reason, []slog.Attr{
 				slog.String("event", EventAPIRequest),
 				slog.String("actor", applog.Sanitize(actor)),
 				slog.String("method", applog.Sanitize(method)),
@@ -251,7 +274,7 @@ func (l *Logger) APIRequest(actor, method, path, outcome string, status int, dur
 				slog.String("outcome", outcome),
 				slog.Int("status", status),
 				slog.Float64("duration_ms", durationMs),
-			})...)
+			}))...)
 	}
 	if l.ring != nil {
 		l.ring.push(Record{
@@ -264,6 +287,7 @@ func (l *Logger) APIRequest(actor, method, path, outcome string, status int, dur
 			Status:     status,
 			DurationMs: durationMs,
 			KeyID:      keyID,
+			Reason:     reason,
 		})
 	}
 }
@@ -323,18 +347,19 @@ func (l *Logger) RateLimited(actor, method, path string) {
 // ComposeOp records a Docker Compose lifecycle operation.
 func (l *Logger) ComposeOp(actor, operation, stack, outcome string, opts ...Option) {
 	keyID := keyIDOf(opts)
+	reason := reasonOf(opts)
 	if l.log == nil && l.ring == nil {
 		return
 	}
 	if l.log != nil {
 		l.log.LogAttrs(context.Background(), slog.LevelInfo, "", keyAttr(
-			keyID, []slog.Attr{
+			keyID, reasonAttr(reason, []slog.Attr{
 				slog.String("event", EventComposeOp),
 				slog.String("actor", applog.Sanitize(actor)),
 				slog.String("operation", applog.Sanitize(operation)),
 				slog.String("stack", applog.Sanitize(stack)),
 				slog.String("outcome", outcome),
-			})...)
+			}))...)
 	}
 	if l.ring != nil {
 		l.ring.push(Record{
@@ -345,6 +370,7 @@ func (l *Logger) ComposeOp(actor, operation, stack, outcome string, opts ...Opti
 			Stack:     stack,
 			Outcome:   outcome,
 			KeyID:     keyID,
+			Reason:    reason,
 		})
 	}
 }

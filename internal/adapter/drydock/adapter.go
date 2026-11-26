@@ -99,11 +99,14 @@ func NewAdapter(dockerClient *docker.Client, agentName string, info AgentInfo) *
 
 func (a *Adapter) Name() string { return "drydock" }
 
-func (a *Adapter) Capabilities() []string {
+func (a *Adapter) Capabilities() []string { return capabilities() }
+
+func capabilities() []string {
 	return []string{
 		"dd:container-sync",
 		"dd:container-event",
 		"dd:logs",
+		protocol.CapRequestTimeout,
 	}
 }
 
@@ -283,6 +286,19 @@ func (a *Adapter) HandleMessage(ctx context.Context, sender adapter.MessageSende
 			return true
 		}
 		a.cancelContainerLogStream(msg)
+		return true
+
+	case protocol.TypeDDCancel:
+		// The edge client claims its own request ids first; what reaches
+		// here is either a container log stream id or an unknown id, and
+		// an unknown id is a silent no-op. The stream's terminal frame is
+		// the existing dd:container_log_end.
+		var msg protocol.DDCancelMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			slog.Debug("invalid dd:cancel message", "error", err)
+			return true
+		}
+		a.cancelContainerLogStream(protocol.DDContainerLogCancelMessage{RequestID: msg.RequestID})
 		return true
 
 	case protocol.TypeDDContainerDeleteRequest:

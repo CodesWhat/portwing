@@ -32,8 +32,9 @@
    goreleaser release --snapshot --clean --skip=sign,docker,publish,sbom
    ```
 
-   The snapshot must produce all platform archives, Linux `deb`/`rpm`
-   packages, the generated Homebrew cask, and `checksums.txt` under `dist/`.
+   The snapshot must produce the Linux archives, Linux `deb`/`rpm`
+   packages, and `checksums.txt` under `dist/`. There are no macOS archives
+   and no Homebrew cask.
 
 5. **Update CHANGELOG.md**
 
@@ -173,8 +174,8 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 For a release candidate, pass an explicit version such as `1.5.0-rc.1`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
-marks it as a prerelease and leaves the stable container `latest` tag and
-Homebrew channel unchanged. Label its compatibility row `release candidate`
+marks it as a prerelease and leaves the stable container `latest` tag
+unchanged. Label its compatibility row `release candidate`
 instead of the stable `release metadata` label. Keep publication status linked
 to GitHub Releases rather than asserting that prepared channels already moved.
 The scheduled main-release monitor
@@ -208,15 +209,6 @@ those checks pass, without a manual environment approval. Administrators cannot
 bypass its protection rules. Keep the source-verification job read-only and
 outside the environment so untrusted tag content cannot receive publish
 permissions before those checks pass.
-
-The release job also requires **`HOMEBREW_TAP_TOKEN`** in the **`Production`**
-environment, a fine-grained token with Contents read/write access to
-`CodesWhat/homebrew-tap`; nothing beyond contents write is needed. The default
-`GITHUB_TOKEN` cannot publish to a different repository. The release pushes the
-cask to a `portwing-<version>` branch on the tap. The tap's own workflow opens
-the pull request and auto-merges it once its cask audit passes, so the cask is
-not on tap `main` the moment the release job ends. Prerelease tags render
-the cask for validation but do not upload it (`skip_upload: auto`).
 
 **Manual path** (if you need to override the computed version):
 
@@ -268,7 +260,7 @@ the Git-backed deployment or update its GitHub status.
 
 `release.yml` runs on the tag push:
 
-1. **GoReleaser** — builds all platform binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; pushes the stable Homebrew cask to a version branch on the tap; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
+1. **GoReleaser** — builds the Linux binaries, archives, native Linux packages, and checksums; keyless-signs each `deb`/`rpm` and the checksum manifest; builds and pushes the multi-arch container image to `ghcr.io/codeswhat/portwing`; cosign keyless-signs the images (`docker_signs`); attaches everything to the GitHub release
 2. **Attestations** — SLSA Build L2 provenance for every checksummed release asset (archives, native packages, and per-archive SBOMs) and for the container manifest (`gh attestation verify <asset> --repo CodesWhat/portwing`)
 3. **grype-published-image** — scans the pushed manifest by digest with Grype, once per published platform (`linux/amd64`, `linux/arm64`, `linux/arm/v7`), using `.grype.yaml` for suppressions. This checks what users actually pull at release time; `security-grype.yml` also rescans the latest published release and builds source images for all three platforms. Unlike `verify-published` this job is **not** gated on repository visibility; only its SARIF upload is, so the gate keeps working if the repo ever goes private.
 
@@ -301,14 +293,12 @@ the Git-backed deployment or update its GitHub status.
    platform list and thresholds.
 4. **verify-published** — pulls the published image and runs the exact `cosign verify` / `gh attestation verify` commands an operator would run. Skipped while the repo is private (Sigstore public-ledger verification requires a public repo); it activates automatically when the repo goes public.
 5. **verify-native-packages** — verifies every package's Sigstore bundle, installs the `amd64` deb and rpm in digest-pinned clean distribution containers, checks the systemd unit, and runs `portwing version`.
-6. **verify-homebrew** — on stable tags, installs the published cask on macOS, runs `portwing version`, and uninstalls it.
 
 **Verify the release:**
 
 - GitHub Actions: the `release.yml` run is green
 - GHCR image exists: `docker pull ghcr.io/codeswhat/portwing:<version>`
 - The release page has archives and native packages for every supported platform, each package has a `.bundle`, and `checksums.txt` lists them
-- `brew install --cask codeswhat/tap/portwing` installs the tagged stable release
 - `portwing version` (or `GET /api/v1/version`) on the new image reports the tagged version, not `0.1.0` — this catches ldflags injection regressions
 
 ---

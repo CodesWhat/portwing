@@ -658,12 +658,13 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncInFlight()
 				defer reg.DecInFlight()
 			}
-			next.ServeHTTP(rw, r)
-			auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
-			if reg != nil {
-				reg.IncRequest(r.Method, rw.code)
-				reg.ObserveRequestDuration(time.Since(start).Seconds())
-			}
+			serveRecorded(next, rw, r, func() {
+				auditor.APIRequest("", r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+				if reg != nil {
+					reg.IncRequest(r.Method, rw.code)
+					reg.ObserveRequestDuration(time.Since(start).Seconds())
+				}
+			})
 			return
 		}
 
@@ -784,12 +785,13 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 				reg.IncInFlight()
 				defer reg.DecInFlight()
 			}
-			next.ServeHTTP(rw, r)
-			auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start), audit.WithKeyID(keyID))
-			if reg != nil {
-				reg.IncRequest(r.Method, rw.code)
-				reg.ObserveRequestDuration(time.Since(start).Seconds())
-			}
+			serveRecorded(next, rw, r, func() {
+				auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start), audit.WithKeyID(keyID))
+				if reg != nil {
+					reg.IncRequest(r.Method, rw.code)
+					reg.ObserveRequestDuration(time.Since(start).Seconds())
+				}
+			})
 			return
 		}
 
@@ -873,13 +875,35 @@ func (rl *RateLimiter) AuthMiddlewareWithEd25519(
 			reg.IncInFlight()
 			defer reg.DecInFlight()
 		}
-		next.ServeHTTP(rw, r)
-		auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
-		if reg != nil {
-			reg.IncRequest(r.Method, rw.code)
-			reg.ObserveRequestDuration(time.Since(start).Seconds())
-		}
+		serveRecorded(next, rw, r, func() {
+			auditor.APIRequest(clientIP, r.Method, r.URL.Path, audit.OutcomeAllowed, rw.code, ms(start))
+			if reg != nil {
+				reg.IncRequest(r.Method, rw.code)
+				reg.ObserveRequestDuration(time.Since(start).Seconds())
+			}
+		})
 	})
+}
+
+// serveRecorded runs next and then finish, which records the audit entry and
+// metrics from the status the recorder captured. A handler that aborts a
+// response after committing its status panics with http.ErrAbortHandler so the
+// client sees the truncation; finish still runs for that sentinel so the
+// request is recorded once with the committed status, and the panic continues.
+// Any other panic skips finish: the status recorder still reads 200 there, and
+// RecoveryMiddleware turns it into a 500 that must not be logged as allowed.
+func serveRecorded(next http.Handler, rw http.ResponseWriter, r *http.Request, finish func()) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			// net/http compares the sentinel by identity, so a wrapped one is a real panic.
+			if err, ok := rec.(error); ok && err == http.ErrAbortHandler { //nolint:errorlint // net/http recognizes only the exact abort sentinel.
+				finish()
+			}
+			panic(rec)
+		}
+	}()
+	next.ServeHTTP(rw, r)
+	finish()
 }
 
 // rejectLockedOut answers a request whose credentials failed from a source

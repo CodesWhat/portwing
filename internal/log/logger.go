@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"unicode"
 )
 
 // SetupLogger configures the default slog logger with a JSON handler at the given level.
@@ -22,6 +23,25 @@ func SetupLogger(level string) {
 func Sanitize(value string) string {
 	value = strings.ReplaceAll(value, "\n", `\n`)
 	return strings.ReplaceAll(value, "\r", `\r`)
+}
+
+// SanitizeField makes an untrusted value safe to log as a single field: line
+// breaks stay visible as escapes, other control characters are dropped, and the
+// result is cut to at most maxRunes runes with an ellipsis marking the cut.
+func SanitizeField(value string, maxRunes int) string {
+	value = Sanitize(value)
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, value)
+	if maxRunes > 0 {
+		if runes := []rune(value); len(runes) > maxRunes {
+			return string(runes[:maxRunes]) + "..."
+		}
+	}
+	return value
 }
 
 func parseLevel(level string) slog.Level {
