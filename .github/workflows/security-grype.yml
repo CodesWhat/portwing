@@ -37,7 +37,7 @@ jobs:
     # the required "Go CI / Govulncheck" context, without paying for a
     # Docker build on every push.
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -169,7 +169,7 @@ jobs:
 
   grype-deps:
     name: "Security: Grype Dependency Scan (Go + npm)"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -385,7 +385,7 @@ jobs:
 
   gosec:
     name: "Security: Gosec SAST"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -477,7 +477,7 @@ jobs:
     # This job resolves the currently-published tag so the scan below can
     # re-check it every Monday whether or not a release went out that week.
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -532,7 +532,7 @@ jobs:
     # too, so the pull_request case is covered without repeating the event
     # check that gates the job above.
     if: needs.resolve-latest-release.outputs.version != ''
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read

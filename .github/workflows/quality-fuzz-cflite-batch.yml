@@ -74,7 +74,7 @@ concurrency:
 jobs:
   batch-fuzz:
     name: "ClusterFuzzLite (batch)"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # GitHub-hosted runners here kill a job with "The runner has received a
     # shutdown signal" once it sustains high CPU for roughly 14-19 minutes;
     # low-CPU jobs survive for hours. Measured repeatedly against this job on

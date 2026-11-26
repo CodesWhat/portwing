@@ -48,7 +48,7 @@ concurrency:
 jobs:
   deep-fuzz:
     name: "Fuzz ${{ matrix.fuzzer.name }}"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 75
 
     outputs:
@@ -550,7 +550,7 @@ jobs:
     name: "Record the fuzz run in the quality history"
     needs: deep-fuzz
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     permissions:
