@@ -3,8 +3,6 @@
 package auth
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -30,8 +28,6 @@ type EnrolledKey struct {
 	MarkerPath string
 	// Pending is true while the controller has not yet confirmed the key.
 	Pending bool
-	// Created is true when this call generated the key.
-	Created bool
 }
 
 // LoadOrCreateEnrolledKey returns the persisted enrolled key in dir. When none
@@ -64,13 +60,9 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 	if err := CheckStateWritable(dir); err != nil {
 		return key, fmt.Errorf("cannot persist an enrolled key: %w", err)
 	}
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	pemData, _, err := GenerateKeyPair("")
 	if err != nil {
 		return key, fmt.Errorf("generating enrolled key: %w", err)
-	}
-	pemData, err := MarshalPrivateKeyPEM(priv)
-	if err != nil {
-		return key, err
 	}
 	if err := WriteStateFile(key.MarkerPath, []byte("pending\n")); err != nil {
 		return key, fmt.Errorf("writing enrollment marker: %w", err)
@@ -79,7 +71,6 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 		return key, fmt.Errorf("writing enrolled key: %w", err)
 	}
 	key.Pending = true
-	key.Created = true
 	return key, nil
 }
 
@@ -98,32 +89,16 @@ var linkFile = os.Link
 // writeFileExclusive durably writes data to path with mode 0600 and fails with
 // os.ErrExist if path already exists.
 func writeFileExclusive(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	f, err := createRotationStateFile(dir, ".enroll-")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	defer func() { _ = os.Remove(tmp) }()
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := linkFile(tmp, path); err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return err
+	return writeFileVia(path, data, ".enroll-", func(tmp, dst string) error {
+		if err := linkFile(tmp, dst); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return err
+			}
+			// No atomic no-replace primitive here (e.g. a filesystem without
+			// hard links): a check-then-rename would race a concurrent start
+			// and could replace a key, so fail closed.
+			return fmt.Errorf("exclusive create needs hard link support: %w", err)
 		}
-		// No atomic no-replace primitive here (e.g. a filesystem without hard
-		// links): a check-then-rename would race a concurrent start and could
-		// replace a key, so fail closed.
-		return fmt.Errorf("exclusive create needs hard link support: %w", err)
-	}
-	return syncRotationStateDirectory(dir)
+		return nil
+	})
 }
