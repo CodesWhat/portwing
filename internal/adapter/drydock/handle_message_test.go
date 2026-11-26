@@ -274,3 +274,11 @@ func TestHandleMessageRespondsWhileHandlerPoolFull(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleMessageInvalidDDCancelIsHandledAndIgnored(t *testing.T) {
+	t.Parallel()
+	a := &Adapter{}
+	if !a.HandleMessage(context.Background(), newSyncCaptureSender(), protocol.TypeDDCancel, json.RawMessage(`"not an object"`)) {
+		t.Fatal("a malformed dd:cancel must still be consumed")
+	}
+}

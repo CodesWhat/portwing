@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -215,5 +216,64 @@ func TestWriteFileExclusiveFailsClosedWithoutLinks(t *testing.T) {
 	}
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("nothing may be written: %v", err)
+	}
+}
+
+func TestLoadOrCreateEnrolledKeyFailureModes(t *testing.T) {
+	t.Run("state dir is a file", func(t *testing.T) {
+		notADir := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadOrCreateEnrolledKey(notADir, true); err == nil {
+			t.Fatal("a state path that is a file must refuse")
+		}
+	})
+
+	t.Run("key generation fails", func(t *testing.T) {
+		prev := generateKeyPair
+		generateKeyPair = func(string) ([]byte, string, error) { return nil, "", errors.New("no entropy") }
+		t.Cleanup(func() { generateKeyPair = prev })
+		dir := t.TempDir()
+		if _, err := LoadOrCreateEnrolledKey(dir, true); err == nil || !strings.Contains(err.Error(), "generating enrolled key") {
+			t.Fatalf("want a generation error, got %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, EnrolledPendingFileName)); err == nil {
+			t.Fatal("no marker may be written before a key exists")
+		}
+	})
+
+	t.Run("marker cannot be written", func(t *testing.T) {
+		dir := t.TempDir()
+		// A directory where the marker file belongs makes the write fail.
+		if err := os.Mkdir(filepath.Join(dir, EnrolledPendingFileName), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadOrCreateEnrolledKey(dir, true); err == nil || !strings.Contains(err.Error(), "writing enrollment marker") {
+			t.Fatalf("want a marker error, got %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, EnrolledKeyFileName)); err == nil {
+			t.Fatal("no key may be written when the marker failed")
+		}
+	})
+
+	t.Run("key cannot be linked into place", func(t *testing.T) {
+		prev := linkFile
+		linkFile = func(string, string) error { return errors.New("links unsupported") }
+		t.Cleanup(func() { linkFile = prev })
+		if _, err := LoadOrCreateEnrolledKey(t.TempDir(), true); err == nil || !strings.Contains(err.Error(), "writing enrolled key") {
+			t.Fatalf("want a key write error, got %v", err)
+		}
+	})
+}
+
+func TestConfirmEnrolledKeyReportsRemovalFailure(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := ConfirmEnrolledKey(filepath.Join(notADir, EnrolledPendingFileName))
+	if err == nil || !strings.Contains(err.Error(), "removing enrollment marker") {
+		t.Fatalf("want a removal error, got %v", err)
 	}
 }

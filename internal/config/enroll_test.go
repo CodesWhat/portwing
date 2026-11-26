@@ -423,3 +423,12 @@ func TestResolveEnrolledKeyMissingImplicitDirRefuses(t *testing.T) {
 		t.Fatal("the directory must not be created")
 	}
 }
+
+func TestEnrollCodeFileUnreadable(t *testing.T) {
+	setEnv(t, "DRYDOCK_URL", "https://drydock.example.com", "STATE_DIR", t.TempDir(),
+		"ENROLL_CODE_FILE", filepath.Join(t.TempDir(), "missing"))
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "reading ENROLL_CODE_FILE") {
+		t.Fatalf("want a read error naming ENROLL_CODE_FILE, got %v", err)
+	}
+}

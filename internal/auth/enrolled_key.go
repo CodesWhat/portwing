@@ -60,7 +60,7 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 	if err := CheckStateWritable(dir); err != nil {
 		return key, fmt.Errorf("cannot persist an enrolled key: %w", err)
 	}
-	pemData, _, err := GenerateKeyPair("")
+	pemData, _, err := generateKeyPair("")
 	if err != nil {
 		return key, fmt.Errorf("generating enrolled key: %w", err)
 	}
@@ -85,6 +85,9 @@ func ConfirmEnrolledKey(markerPath string) error {
 
 // linkFile is os.Link, replaceable in tests.
 var linkFile = os.Link
+
+// generateKeyPair is GenerateKeyPair, replaceable in tests.
+var generateKeyPair = GenerateKeyPair
 
 // writeFileExclusive durably writes data to path with mode 0600 and fails with
 // os.ErrExist if path already exists.

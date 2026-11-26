@@ -98,3 +98,25 @@ func TestWithReasonReachesRingRecord(t *testing.T) {
 		t.Errorf("reasons = %q %q %q", recs[2].Reason, recs[1].Reason, recs[0].Reason)
 	}
 }
+
+func TestReasonReachesSinkAndRing(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/audit.log"
+	l, closeLog, err := New(path, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.APIRequest("actor", "GET", "/x", OutcomeCancelled, 499, 1, WithReason("client\nabort"))
+	closeLog()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"reason":"client\\nabort"`) {
+		t.Fatalf("sink record lacks the sanitized reason: %s", data)
+	}
+	if recs := l.Records(1); len(recs) != 1 || recs[0].Reason != "client\nabort" {
+		t.Fatalf("ring record = %+v", recs)
+	}
+}

@@ -40,10 +40,8 @@ func ParseTimeoutHeader(v string) (ms int64, ok bool) {
 			return 0, false
 		}
 	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		return 0, false
-	}
+	// At most seven ASCII digits always fit an int64, so this cannot fail.
+	n, _ := strconv.ParseInt(v, 10, 64)
 	return n, true
 }
 

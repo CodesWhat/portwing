@@ -241,3 +241,22 @@ func TestDoRawWithDeadline(t *testing.T) {
 		t.Fatalf("err = %v, want TimeoutError", err)
 	}
 }
+
+func TestTimeoutErrorMessageAndUnwrap(t *testing.T) {
+	t.Parallel()
+	inner := io.ErrUnexpectedEOF
+	err := &TimeoutError{After: 90 * time.Second, Err: inner}
+	if got := err.Error(); got != "docker request exceeded 1m30s: unexpected EOF" {
+		t.Fatalf("Error() = %q", got)
+	}
+	if err.Unwrap() != inner {
+		t.Fatal("Unwrap did not return the wrapped error")
+	}
+}
+
+func TestDefaultTimeoutWithoutHTTPClient(t *testing.T) {
+	t.Parallel()
+	if got := (&Client{}).DefaultTimeout(); got != defaultDialTimeout {
+		t.Fatalf("DefaultTimeout() = %v, want %v", got, defaultDialTimeout)
+	}
+}
