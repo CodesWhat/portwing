@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -384,6 +385,41 @@ func TestEnrollRejectionEchoingCodeInCodeFieldIsRedacted(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), testEnrollCode) || strings.Contains(buf.String(), testEnrollCode) {
 				t.Fatalf("echoed code leaked: err=%v logs=%s", err, buf.String())
+			}
+		})
+	}
+}
+
+func TestHelloRejectionClassifiesOnRawCodeNotSanitizedLog(t *testing.T) {
+	for _, code := range []string{"unknown-key\x00", "enroll-code-used\t", "enroll-code-used\x00" + testEnrollCode} {
+		t.Run(fmt.Sprintf("%q", code), func(t *testing.T) {
+			buf := captureSlog(t)
+			srv := newControllerServer(t, func(ctrl *websocket.Conn) {
+				readHello(t, ctrl)
+				sendEnvelope(t, ctrl, protocol.TypeError, protocol.ErrorMessage{Code: code, Message: "nope"})
+			})
+			c := newWireClient(t, enrollConfig(t, srv, testEnrollCode))
+			_, err := c.connect(context.Background())
+			if err == nil {
+				t.Fatal("connect returned nil")
+			}
+			if errors.Is(err, errFatal) {
+				t.Fatalf("a code that only matches after sanitizing must stay retryable, got fatal: %v", err)
+			}
+			logs := buf.String()
+			if !strings.Contains(logs, "unrecognized code") {
+				t.Fatalf("expected the unrecognized-code warning, got:\n%s", logs)
+			}
+			for _, out := range []string{logs, err.Error()} {
+				if strings.ContainsAny(out, "\x00\t") && out == err.Error() {
+					t.Fatalf("control char in error: %q", out)
+				}
+				if strings.Contains(out, testEnrollCode) {
+					t.Fatalf("enrollment code leaked: %q", out)
+				}
+			}
+			if strings.Contains(logs, "\x00") {
+				t.Fatalf("control char in logs: %q", logs)
 			}
 		})
 	}

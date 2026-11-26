@@ -706,8 +706,9 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 		closeWebSocket(conn, "controller rejected hello")
 		// Controller-supplied text could echo the single-use enrollment code.
 		errMsg.Message = applog.SanitizeField(c.redactEnrollCode(errMsg.Message), maxLoggedControllerText)
-		errMsg.Code = applog.SanitizeField(c.redactEnrollCode(errMsg.Code), maxLoggedControllerText)
-		rejErr := fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, errMsg.Code)
+		// Classification stays on the raw code; only the logged copy is sanitized.
+		loggedCode := applog.SanitizeField(c.redactEnrollCode(errMsg.Code), maxLoggedControllerText)
+		rejErr := fmt.Errorf("controller rejected hello: %s (%s)", errMsg.Message, loggedCode)
 		if parsed && isTerminalHelloRejection(errMsg.Code) && c.keyRotation != nil {
 			if rolledBack, err := c.keyRotation.RejectTrial(); err != nil {
 				return false, fmt.Errorf("rolling back rejected key trial: %w", err)
@@ -724,7 +725,7 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 			// Retrying the same configuration cannot change the outcome, so fail
 			// fast (wrap errFatal) instead of reconnecting forever.
 			slog.Error("controller rejected hello with a terminal code, not retrying",
-				"code", errMsg.Code, "message", errMsg.Message)
+				"code", loggedCode, "message", errMsg.Message)
 			if hint := c.enrollRejectionHint(errMsg.Code); hint != "" {
 				slog.Error(hint)
 				rejErr = fmt.Errorf("%w: %s", rejErr, hint)
@@ -735,9 +736,9 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 			// classifier), but log distinctly so a permanent-but-unknown code
 			// doesn't loop silently.
 			slog.Warn("controller rejected hello with an unrecognized code, retrying",
-				"code", errMsg.Code, "message", errMsg.Message)
+				"code", loggedCode, "message", errMsg.Message)
 		default:
-			slog.Warn("controller rejected hello, retrying", "code", errMsg.Code, "message", errMsg.Message)
+			slog.Warn("controller rejected hello, retrying", "code", loggedCode, "message", errMsg.Message)
 		}
 		return false, rejErr
 	}
