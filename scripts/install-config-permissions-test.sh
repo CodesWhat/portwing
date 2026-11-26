@@ -14,7 +14,7 @@ mkdir -p "${fixture_bin}"
 cat >"${fixture_bin}/uname" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
--s) printf 'Darwin\n' ;;
+-s) printf '%s\n' "${INSTALL_TEST_UNAME_S:-Linux}" ;;
 -m) printf 'x86_64\n' ;;
 *) exit 1 ;;
 esac
@@ -146,7 +146,17 @@ chown)
 	;;
 chmod) exec /bin/chmod "$@" ;;
 mkdir) exec /bin/mkdir "$@" ;;
-tee) exec /usr/bin/tee "$@" ;;
+tee)
+	# Service unit files target /etc; never write them for real.
+	case "${1:-}" in
+	/etc/*)
+		cat >/dev/null
+		exit 0
+		;;
+	esac
+	exec /usr/bin/tee "$@"
+	;;
+systemctl) exit 0 ;;
 *)
 	printf 'unexpected privileged command: %s\n' "${command_name}" >&2
 	exit 1
@@ -154,7 +164,13 @@ tee) exec /usr/bin/tee "$@" ;;
 esac
 EOF
 
+cat >"${fixture_bin}/systemctl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
 chmod +x \
+	"${fixture_bin}/systemctl" \
 	"${fixture_bin}/uname" \
 	"${fixture_bin}/curl" \
 	"${fixture_bin}/tar" \
@@ -169,7 +185,7 @@ sha256_file() {
 	fi
 }
 
-archive_name="portwing_0.0.0_darwin_amd64.tar.gz"
+archive_name="portwing_0.0.0_linux_amd64.tar.gz"
 
 # make_release <dir>: a fake release with a matching checksums.txt and bundle.
 make_release() {
@@ -371,7 +387,7 @@ run_verify_case checksum-mismatch "${mismatch_release}" "${base_path}" fail
 
 missing_release="${test_root}/release-missing-line"
 make_release "${missing_release}"
-printf '%s  %s\n' "$(sha256_file "${missing_release}/${archive_name}")" "portwing_0.0.0_linux_amd64.tar.gz" >"${missing_release}/checksums.txt"
+printf '%s  %s\n' "$(sha256_file "${missing_release}/${archive_name}")" "portwing_0.0.0_linux_arm64.tar.gz" >"${missing_release}/checksums.txt"
 run_verify_case missing-checksum-line "${missing_release}" "${base_path}" fail
 
 run_verify_case no-sha-tool "${default_release}" "${fixture_bin}:${nosha_bin}" fail
@@ -510,6 +526,26 @@ done
 if ! grep -Fq 'DRYDOCK_URL + PRIVATE_KEY_FILE' "${new_case}/etc/portwing/config" ||
 	! grep -Fq '# PRIVATE_KEY_FILE=' "${new_case}/etc/portwing/config"; then
 	echo "FAIL: generated Edge example must include its mandatory private key" >&2
+	failure=1
+fi
+
+# macOS binaries are no longer published; the installer must refuse on Darwin
+# before downloading or changing anything.
+darwin_case="${test_root}/darwin"
+prepare_case "${darwin_case}"
+darwin_status=0
+INSTALL_TEST_UNAME_S=Darwin \
+	INSTALL_TEST_CONFIG_DIR="${darwin_case}/etc/portwing" \
+	INSTALL_TEST_RELEASE_DIR="${default_release}" \
+	INSTALL_TEST_DOWNLOAD_DIR="${darwin_case}/download" \
+	INSTALL_TEST_OWNERSHIP_LOG="${darwin_case}/ownership.log" \
+	PATH="${fixture_bin}:/usr/bin:/bin" \
+	/bin/bash "${darwin_case}/install-under-test.sh" v0.0.0 >"${darwin_case}/out.log" 2>&1 || darwin_status=$?
+if [ "${darwin_status}" -eq 0 ] ||
+	! grep -Fq 'no longer published' "${darwin_case}/out.log" ||
+	! grep -Fq 'https://portwing.codeswhat.com/docs/installation' "${darwin_case}/out.log" ||
+	[ -e "${darwin_case}/usr/local/bin/portwing" ] || [ -e "${darwin_case}/download" ]; then
+	echo "FAIL: installer must refuse on macOS with a pointer to the container install" >&2
 	failure=1
 fi
 

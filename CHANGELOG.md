@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- macOS binaries and the Homebrew cask are no longer published. The binary wasn't Developer ID signed, so Gatekeeper blocked it on real Macs. On a Mac, run the container image with Docker Desktop, OrbStack or Colima. `scripts/install.sh` now exits with that pointer on macOS.
+
 ## [v1.5.0] - 2026-11-24
 
 ### Added

@@ -5,7 +5,7 @@
 #
 # Everything downloaded is verified before any extraction or sudo call:
 #   1. checksums.txt must list the archive and its SHA-256 must match
-#      (sha256sum, or shasum -a 256 on macOS). Always required.
+#      (sha256sum, or shasum -a 256). Always required.
 #   2. If cosign is on PATH, checksums.txt must verify against the release's
 #      keyless bundle (identity release.yml@refs/tags/<tag>, GitHub Actions
 #      OIDC issuer). A failed verification aborts the install.
@@ -35,7 +35,7 @@ error() {
 detect_os() {
 	case "$(uname -s)" in
 	Linux*) echo "linux" ;;
-	Darwin*) echo "darwin" ;;
+	Darwin*) error "macOS binaries are no longer published. Run Portwing as a container (Docker Desktop, OrbStack or Colima): https://portwing.codeswhat.com/docs/installation" ;;
 	*) error "Unsupported OS: $(uname -s)" ;;
 	esac
 }

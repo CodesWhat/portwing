@@ -122,7 +122,7 @@ export const roadmap: Milestone[] = [
     items: [
       "Edge mode graduated to production support — enabled by default in Drydock 1.6 and gated by a real cross-repo multi-agent load/soak",
       "Published stability policy — semver guarantees for the HTTP API, env-var surface, MCP tools, and DrydockCompat wire contract",
-      "Package-manager distribution — a Homebrew tap and apt/rpm packages via the existing GoReleaser pipeline",
+      "Package-manager distribution — apt/rpm packages via the existing GoReleaser pipeline",
       "Continuous edge live-tail under the dd: namespace, with cancellation, stdout/stderr framing, and bounded backpressure",
       "Mode-aware liveness/readiness, edge/backpressure metrics, stable cursor-based NDJSON audit export, and runnable observability examples",
     ],
