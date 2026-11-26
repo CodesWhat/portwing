@@ -424,7 +424,7 @@ test("the receipt workflow posts the required Go CI names without skipping any",
 });
 
 test("the receipt covers only tree-only gates; the rest stay real", () => {
-  for (const id of ["lint", "workflow-security", "goreleaser", "qlty"]) {
+  for (const id of ["lint", "workflow-security", "goreleaser"]) {
     const job = jobSection(receiptWorkflow, id);
     assert.match(job, /Report the tree receipt/u, id);
     assert.doesNotMatch(job, /uses: actions\/checkout/u, `${id} must not do the work`);
@@ -496,4 +496,24 @@ test("CodeQL, codecov/patch and Browser Checks are never short-circuited by the 
     "steps.coverage-profile.outcome == 'success'",
   ]);
   assert.match(codecov, /needs: \[changes, go-ci, go-ci-receipt\]/u);
+});
+
+test("the receipt's Qlty Check re-runs osv-scanner on the Go lockfile with its egress hosts", () => {
+  const qlty = jobSection(receiptWorkflow, "qlty");
+  assert.match(qlty, /name: Qlty Check/u, "must keep the required context name");
+  assert.match(qlty, /Report the tree receipt/u);
+  assert.match(qlty, /run: \.\/scripts\/ci\/go-osv-receipt\.sh/u);
+  assert.match(qlty, /egress-policy: block/u);
+  for (const host of ["api.osv.dev:443", "osv-vulnerabilities.storage.googleapis.com:443"]) {
+    assert.ok(qlty.includes(host), `receipt Qlty Check must allow ${host}`);
+  }
+  const script = fs.readFileSync(path.join(ROOT, "scripts/ci/go-osv-receipt.sh"), "utf8");
+  assert.match(script, /osv-scanner\/v2\/cmd\/osv-scanner@v\d+\.\d+\.\d+ scan source/u);
+  assert.match(script, /--lockfile go\.mod/u);
+  assert.match(script, /--config \.github\/osv-scanner\.toml/u);
+  const config = fs.readFileSync(path.join(ROOT, ".github/osv-scanner.toml"), "utf8");
+  const qltyConfig = fs.readFileSync(path.join(ROOT, ".qlty/qlty.toml"), "utf8");
+  for (const [, id] of qltyConfig.matchAll(/"osv-scanner:([A-Z0-9-]+)"/gu)) {
+    assert.ok(config.includes(`id = "${id}"`), `${id} is ignored in Qlty but not for the receipt`);
+  }
 });

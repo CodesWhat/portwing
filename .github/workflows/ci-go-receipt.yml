@@ -12,7 +12,9 @@ name: Go CI (tree receipt)
 # at step level instead of skipping:
 #
 #   * Lint, Workflow Security, GoReleaser Config and Qlty Check depend only on
-#     the tree, so they report the receipt and do no work.
+#     the tree, so they report the receipt and do no work. The exception is
+#     osv-scanner inside Qlty Check, which re-runs on the Go lockfile because
+#     advisories move without a commit.
 #   * Build & Test stays real: Codecov and codecov/patch read its coverage
 #     artifact from this run.
 #   * Govulncheck stays real: the advisory database moves without a commit.
@@ -206,16 +208,51 @@ jobs:
   qlty:
     name: Qlty Check
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
+      # Advisories are published without a commit, so osv-scanner re-runs on the
+      # promotion tree under this same required context.
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >-
+            api.github.com:443
+            api.osv.dev:443
+            dl.google.com:443
+            github.com:443
+            go.dev:443
+            osv-vulnerabilities.storage.googleapis.com:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            storage.googleapis.com:443
+            sum.golang.org:443
+            tmaproduction.blob.core.windows.net:443
+
       - name: Report the tree receipt
         env:
           GATE: Qlty Check
           RECEIPT_RUN_ID: ${{ inputs.receipt-run-id }}
           RECEIPT_SHA: ${{ inputs.receipt-sha }}
         run: 'echo "${GATE}: tree receipt, same tree as ${RECEIPT_SHA}, verified green in ci-verify run ${RECEIPT_RUN_ID}; not re-run."'
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache-dependency-path: ${{ inputs.go-cache-dependency-path }}
+
+      - name: Run osv-scanner on the Go lockfile
+        env:
+          MODULE_DIRECTORY: .
+        run: ./scripts/ci/go-osv-receipt.sh
 
   fuzz:
     name: "Go Fuzz (${{ matrix.fuzzer.name }})"
