@@ -277,3 +277,90 @@ func TestConfirmEnrolledKeyReportsRemovalFailure(t *testing.T) {
 		t.Fatalf("want a removal error, got %v", err)
 	}
 }
+
+func TestLoadOrCreateEnrolledKeyDirPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes")
+	}
+	for _, mode := range []os.FileMode{0o770, 0o720} {
+		dir := t.TempDir()
+		if err := os.Chmod(dir, mode); err != nil { //nolint:gosec // writable directory fixture
+			t.Fatal(err)
+		}
+		_, err := LoadOrCreateEnrolledKey(dir, true)
+		if err == nil || !strings.Contains(err.Error(), "chmod 700") || !strings.Contains(err.Error(), dir) {
+			t.Fatalf("mode %04o: want a chmod 700 error naming the dir, got %v", mode, err)
+		}
+		if _, statErr := os.Lstat(filepath.Join(dir, EnrolledKeyFileName)); statErr == nil {
+			t.Fatalf("mode %04o: no key may be written", mode)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // private directory fixture
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateEnrolledKey(dir, true); err != nil {
+		t.Fatalf("0700 must be accepted: %v", err)
+	}
+	// An existing key in a directory that later became group-writable refuses too.
+	if err := os.Chmod(dir, 0o770); err != nil { //nolint:gosec // writable directory fixture
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateEnrolledKey(dir, false); err == nil || !strings.Contains(err.Error(), "chmod 700") {
+		t.Fatalf("existing key in a group-writable dir: got %v", err)
+	}
+}
+
+func TestLoadOrCreateEnrolledKeyConcurrentFirstStart(t *testing.T) {
+	t.Run("winner still pending", func(t *testing.T) {
+		dir := t.TempDir()
+		prev := generateKeyPair
+		t.Cleanup(func() { generateKeyPair = prev })
+		generateKeyPair = func(s string) ([]byte, string, error) {
+			// The winner finishes its whole first start while we generate.
+			generateKeyPair = prev
+			if _, err := LoadOrCreateEnrolledKey(dir, true); err != nil {
+				t.Fatalf("winner: %v", err)
+			}
+			return prev(s)
+		}
+		key, err := LoadOrCreateEnrolledKey(dir, true)
+		if err != nil {
+			t.Fatalf("loser must load the winner's key, got %v", err)
+		}
+		if !key.Pending {
+			t.Fatalf("winner has not confirmed: %+v", key)
+		}
+		if _, err := LoadPrivateKey(key.Path); err != nil {
+			t.Fatalf("key unusable: %v", err)
+		}
+	})
+
+	t.Run("winner already confirmed", func(t *testing.T) {
+		dir := t.TempDir()
+		prev := generateKeyPair
+		t.Cleanup(func() { generateKeyPair = prev })
+		generateKeyPair = func(s string) ([]byte, string, error) {
+			generateKeyPair = prev
+			won, err := LoadOrCreateEnrolledKey(dir, true)
+			if err != nil {
+				t.Fatalf("winner: %v", err)
+			}
+			if err := ConfirmEnrolledKey(won.MarkerPath); err != nil {
+				t.Fatalf("confirm: %v", err)
+			}
+			return prev(s)
+		}
+		key, err := LoadOrCreateEnrolledKey(dir, true)
+		if err != nil {
+			t.Fatalf("loser must load the confirmed key, got %v", err)
+		}
+		if key.Pending {
+			t.Fatalf("a confirmed key must not turn pending: %+v", key)
+		}
+		if _, err := os.Lstat(key.MarkerPath); err == nil {
+			t.Fatal("stray marker left behind")
+		}
+	})
+}
