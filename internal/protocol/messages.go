@@ -78,7 +78,23 @@ type HelloMessage struct {
 	Timestamp int64  `json:"timestamp,omitempty"`
 	Nonce     string `json:"nonce,omitempty"`
 	Signature string `json:"signature,omitempty"`
+
+	// Enroll is present only on a first-start enrollment hello (CapEnroll).
+	Enroll *EnrollBlock `json:"enroll,omitempty"`
 }
+
+// EnrollBlock carries the single-use enrollment code and the public key the
+// controller should register. The hello signature, made with the matching
+// private key, is the proof of possession. Code is a credential and must never
+// be logged or audited.
+type EnrollBlock struct {
+	Code      string `json:"code"`
+	PublicKey string `json:"publicKey"`
+}
+
+// String and GoString keep the code out of accidental %v and %#v output.
+func (e EnrollBlock) String() string   { return "enroll{redacted}" }
+func (e EnrollBlock) GoString() string { return "enroll{redacted}" }
 
 type WelcomeMessage struct {
 	PollInterval int               `json:"pollInterval"`

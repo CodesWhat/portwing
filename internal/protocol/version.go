@@ -58,6 +58,10 @@ const (
 	// ErrorCodeCancelled is the code on the terminal error frame for a
 	// request the controller cancelled before any response header was sent.
 	ErrorCodeCancelled = "cancelled"
+	// CapEnroll gates first-start Edge enrollment. The agent advertises it in
+	// hello only while it is enrolling (it carries hello.data.enroll); the
+	// controller echoes it in welcome.capabilities when it accepted that hello.
+	CapEnroll = "dd:enroll"
 
 	CapKeyRotation  = "edge-key-rotation"
 	KeyRotationPath = "/_portwing/auth/rotation"
