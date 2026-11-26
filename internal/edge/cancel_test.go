@@ -457,3 +457,94 @@ func TestHelloAdvertisesCancelCapability(t *testing.T) {
 	}
 	t.Errorf("Capabilities = %v, want %q", hello.Capabilities, protocol.CapCancel)
 }
+
+// A dd:cancel sent right behind its request, with no wait for the handler to
+// reach Docker, must still find the id. The pump registers it before the
+// handler goroutine starts.
+func TestCancelRightBehindRequestIsNotLost(t *testing.T) {
+	t.Parallel()
+	_, _, w := newCancelClient(t)
+
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("early-%d", i)
+		sendEnvelope(t, w.c, protocol.TypeRequest, protocol.RequestMessage{RequestID: id, Method: "POST", Path: "/blocked/x"})
+		sendCancel(t, w, id, "timeout")
+		var em protocol.ErrorMessage
+		decodeData(t, expectType(t, w.c, protocol.TypeError), &em)
+		if em.Code != protocol.ErrorCodeCancelled || em.RequestID != id {
+			t.Fatalf("error = %+v, want cancelled for %s", em, id)
+		}
+	}
+	pingBarrier(t, w)
+}
+
+// A streamed upload cancelled right after its stream_end has the same window.
+func TestCancelRightBehindStreamEndIsNotLost(t *testing.T) {
+	t.Parallel()
+	_, _, w := newCancelClient(t)
+
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("early-up-%d", i)
+		sendEnvelope(t, w.c, protocol.TypeRequest, protocol.RequestMessage{RequestID: id, Method: "POST", Path: "/blocked/x", BodyStream: true})
+		sendEnvelope(t, w.c, protocol.TypeStreamEnd, protocol.StreamEndMessage{RequestID: id})
+		sendCancel(t, w, id, "timeout")
+		var em protocol.ErrorMessage
+		decodeData(t, expectType(t, w.c, protocol.TypeError), &em)
+		if em.Code != protocol.ErrorCodeCancelled || em.RequestID != id {
+			t.Fatalf("error = %+v, want cancelled for %s", em, id)
+		}
+	}
+	pingBarrier(t, w)
+}
+
+// lockWaitCompose models a compose request cancelled while it waits on the
+// stack lock: no error, Success:false, Cancelled:false.
+type lockWaitCompose struct{ entered atomic.Int32 }
+
+func (b *lockWaitCompose) Execute(ctx context.Context, _ docker.ComposeRequest) (*docker.ComposeResponse, error) {
+	b.entered.Add(1)
+	<-ctx.Done()
+	return &docker.ComposeResponse{Success: false}, nil
+}
+
+func TestCancelComposeDuringLockWaitEmitsOneCancelledFrame(t *testing.T) {
+	t.Parallel()
+	c, _, w := newCancelClient(t)
+	lc := &lockWaitCompose{}
+	c.compose = lc
+
+	body, _ := json.Marshal(docker.ComposeRequest{Operation: "up", StackName: "web"})
+	sendEnvelope(t, w.c, protocol.TypeRequest, protocol.RequestMessage{RequestID: "lw", Method: "POST", Path: composeRequestPrefix, Body: body})
+	waitFor(t, "compose entered", func() bool { return lc.entered.Load() == 1 })
+	sendCancel(t, w, "lw", "timeout")
+
+	var em protocol.ErrorMessage
+	decodeData(t, expectType(t, w.c, protocol.TypeError), &em)
+	if em.Code != protocol.ErrorCodeCancelled || em.RequestID != "lw" {
+		t.Errorf("error = %+v, want cancelled for lw", em)
+	}
+	rec := lastAudit(t, c)
+	if rec.Event != audit.EventComposeOp || rec.Outcome != audit.OutcomeCancelled || rec.Reason != "timeout" {
+		t.Errorf("audit = %+v, want compose_op cancelled timeout", rec)
+	}
+	// pingBarrier fails on any extra terminal frame ahead of the pong.
+	pingBarrier(t, w)
+}
+
+// A handler that outlives its connection must not hold its id against a retry
+// on the next one: teardown clears the registry.
+func TestClearInflightLetsRetryOnNewConnectionBeCancelled(t *testing.T) {
+	t.Parallel()
+	c := &Client{}
+	_, _, oldUntrack := c.trackRequest(context.Background(), "retry")
+	c.clearInflight() // old connection torn down, its handler still draining
+	ctx2, _, un2 := c.trackRequest(context.Background(), "retry")
+	if !c.cancelInflight("retry", "timeout") {
+		t.Fatal("retry on the new connection not cancellable by id")
+	}
+	if ctx2.Err() == nil {
+		t.Error("retry ctx not cancelled")
+	}
+	oldUntrack() // lingering handler finishing must not evict a successor
+	un2()
+}

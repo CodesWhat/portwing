@@ -881,6 +881,10 @@ func (c *Client) connect(ctx context.Context) (bool, error) {
 	// stream_end died with the connection, so the next one starts with a
 	// clean pending table instead of rejecting the controller's retries.
 	c.failAllPendingBodies()
+	// And the in-flight registry: a handler still draining its shutdown grace
+	// must not hold its id against the controller's retry on the next
+	// connection.
+	c.clearInflight()
 
 	// Close connection.
 	c.connMu.Lock()
@@ -1095,9 +1099,12 @@ func (c *Client) readPump(ctx context.Context) error {
 			case c.streamSem <- struct{}{}:
 				target := c.currentOutboundTarget()
 				release := sync.OnceFunc(func() { <-c.streamSem })
+				// Register before spawning so a dd:cancel right behind this
+				// request on the wire can't beat the goroutine to the registry.
+				tr := c.registerRequest(ctx, req.RequestID)
 				go func() {
 					defer release()
-					c.serveTracked(ctx, req, target, release)
+					c.serveRegistered(tr, req, target, release)
 				}()
 			default:
 				slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
@@ -1174,7 +1181,10 @@ func (c *Client) readPump(ctx context.Context) error {
 				// reservation finishPendingBody just made and releases it on
 				// every exit. Doing the admission check here instead would
 				// need a second release site on the rejection branch.
-				go c.dispatchStreamedBody(ctx, req, target, reservation)
+				// Register on the pump, before the body leaves pendingBodies'
+				// cancel window, so a dd:cancel right after stream_end finds it.
+				tr := c.registerRequest(ctx, req.RequestID)
+				go c.dispatchRegisteredBody(ctx, tr, req, target, reservation)
 				continue
 			}
 			if !c.adapter.HandleMessage(ctx, sender, env.Type, env.Data) {
@@ -1522,7 +1532,15 @@ func (c *Client) releaseDispatchingBody(reservation uint64) {
 // per stream_end is cheap even on the rejection branch, because the
 // production send path enqueues without blocking.
 func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestMessage, target outboundTarget, reservation uint64) {
+	c.dispatchRegisteredBody(ctx, c.registerRequest(ctx, req.RequestID), req, target, reservation)
+}
+
+// dispatchRegisteredBody is dispatchStreamedBody for a request the read pump
+// already registered, which closes the cancel gap between stream_end and the
+// goroutine start. It owns tr: every exit untracks it.
+func (c *Client) dispatchRegisteredBody(ctx context.Context, tr *trackedRequest, req protocol.RequestMessage, target outboundTarget, reservation uint64) {
 	defer c.releaseDispatchingBody(reservation)
+	defer tr.untrack()
 
 	// Bound concurrent request handlers (maxStreams), the same admission
 	// check an inline-body request gets in readPump. Reject rather than wait:
@@ -1537,7 +1555,7 @@ func (c *Client) dispatchStreamedBody(ctx context.Context, req protocol.RequestM
 			c.releaseDispatchingBody(reservation)
 		})
 		defer release()
-		c.serveTracked(ctx, req, target, release)
+		c.serveRegistered(tr, req, target, release)
 	default:
 		slog.Warn("concurrent request limit reached, rejecting", "max", maxStreams, "request_id", applog.Sanitize(req.RequestID))
 		c.auditRefusedRawExecStart(req.Method, req.Path, target.auditKeyID())
@@ -1861,7 +1879,13 @@ func (c *Client) handleComposeRequestTo(ctx context.Context, req protocol.Reques
 	}
 
 	resp, err := c.compose.Execute(ctx, composeReq)
-	if reason, ok := cancelledByController(ctx); ok && (err != nil || resp.Cancelled) {
+	// Decide first, mark second: cancelledByController makes serveTracked emit
+	// the terminal frame, so it may only run on the path that returns without
+	// sending one. A controller cancel that lands while the request waits on the
+	// stack lock returns Success:false, Cancelled:false, nil error, and still
+	// counts as cancelled.
+	if reason, ok := controllerCancelReason(ctx); ok && (err != nil || resp == nil || resp.Cancelled || !resp.Success) {
+		cancelledByController(ctx)
 		c.auditor.ComposeOp(c.redactedControllerURL(), composeReq.Operation, composeReq.StackName, audit.OutcomeCancelled, target.auditKeyID(), audit.WithReason(reason))
 		return
 	}

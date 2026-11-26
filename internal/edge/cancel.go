@@ -47,12 +47,24 @@ func inflightFrom(ctx context.Context) *inflightRequest {
 // returns the controller's reason. Handlers call it where a Docker call or
 // stream read failed, before sending their own terminal frame.
 func cancelledByController(ctx context.Context) (reason string, ok bool) {
-	var cc *controllerCancel
-	if !errors.As(context.Cause(ctx), &cc) {
+	reason, ok = controllerCancelReason(ctx)
+	if !ok {
 		return "", false
 	}
 	if e := inflightFrom(ctx); e != nil {
 		e.owed.Store(true)
+	}
+	return reason, true
+}
+
+// controllerCancelReason reports whether ctx was cancelled by a dd:cancel
+// frame without marking the request as owing a terminal frame. A handler that
+// still has to decide whether it ends as cancelled uses this, then calls
+// cancelledByController once it commits to suppressing its own frame.
+func controllerCancelReason(ctx context.Context) (string, bool) {
+	var cc *controllerCancel
+	if !errors.As(context.Cause(ctx), &cc) {
+		return "", false
 	}
 	return cc.reason, true
 }
@@ -105,7 +117,40 @@ func (c *Client) cancelInflight(requestID, reason string) bool {
 // called before the terminal cancelled frame so seeing that frame means
 // capacity is free. release must be idempotent: callers also defer it.
 func (c *Client) serveTracked(ctx context.Context, req protocol.RequestMessage, target outboundTarget, release func()) {
-	rctx, e, untrack := c.trackRequest(ctx, req.RequestID)
+	tr := c.registerRequest(ctx, req.RequestID)
+	c.serveRegistered(tr, req, target, release)
+}
+
+// trackedRequest is a request already registered in the inflight registry but
+// not yet running.
+type trackedRequest struct {
+	ctx     context.Context
+	e       *inflightRequest
+	untrack func()
+}
+
+// registerRequest registers requestID synchronously. Callers on the read pump
+// use it before spawning the handler goroutine, so a dd:cancel that follows on
+// the wire always finds the id instead of racing the goroutine's start.
+func (c *Client) registerRequest(ctx context.Context, requestID string) *trackedRequest {
+	rctx, e, untrack := c.trackRequest(ctx, requestID)
+	return &trackedRequest{ctx: rctx, e: e, untrack: untrack}
+}
+
+// clearInflight empties the registry. Connection teardown calls it: every
+// tracked handler's context derives from the connection and is already
+// cancelled, and a lingering handler must not hold its id against a retry on
+// the next connection. untrack compares by pointer, so a lingering handler's
+// own cleanup can't evict a successor.
+func (c *Client) clearInflight() {
+	c.inflightMu.Lock()
+	clear(c.inflight)
+	c.inflightMu.Unlock()
+}
+
+// serveRegistered runs a handler for a request registered by registerRequest.
+func (c *Client) serveRegistered(tr *trackedRequest, req protocol.RequestMessage, target outboundTarget, release func()) {
+	rctx, e, untrack := tr.ctx, tr.e, tr.untrack
 	func() {
 		defer untrack()
 		c.handleRequestTo(rctx, req, target)
