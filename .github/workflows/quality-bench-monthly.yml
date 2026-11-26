@@ -109,7 +109,7 @@ concurrency:
 jobs:
   benchmarks:
     name: "Go benchmarks (hot paths)"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       # gh run list / gh run download, to read the baseline artifact.

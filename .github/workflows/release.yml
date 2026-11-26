@@ -21,7 +21,7 @@ env:
 jobs:
   verify-release-source:
     name: "Verify Release Source"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       actions: read
@@ -87,7 +87,7 @@ jobs:
   release:
     name: "GoReleaser + Cosign"
     needs: verify-release-source
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     environment: Production
     permissions:
@@ -227,7 +227,7 @@ jobs:
   grype-published-image:
     name: "Security: Grype Published Image"
     needs: release
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -444,7 +444,7 @@ jobs:
   verify-published:
     name: "Verify Published"
     needs: release
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -497,7 +497,7 @@ jobs:
   verify-native-packages:
     name: "Verify Native Packages"
     needs: release
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read

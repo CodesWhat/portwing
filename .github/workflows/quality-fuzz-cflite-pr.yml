@@ -105,7 +105,7 @@ concurrency:
 jobs:
   code-change-fuzz:
     name: "ClusterFuzzLite (code change)"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Pulling base-builder-go, downloading the go1.27.2 toolchain, building eleven
     # libFuzzer targets, and 300 seconds of fuzzing. 30 minutes is roughly
     # double the expected wall time.
