@@ -160,6 +160,41 @@ and `current/` moves on to the new line. Layout and rules:
 Never edit a file under an archived `vX.Y/`. A correction goes in `current/`;
 an archive that no longer matches its tag fails the contract.
 
+## Before promoting: open code-scanning alerts
+
+`main`'s ruleset has a CodeQL `code_scanning` rule (alerts threshold `errors`,
+security threshold `high_or_higher`). It blocks a promotion PR that is green and
+approved when an open alert at that severity exists, and the required checks
+won't show why. Check the promotion PR before approving it.
+
+CodeQL files its PR analyses under `refs/pull/<n>/merge`, not `/head`, with
+`commit_sha` set to the PR's current `merge_commit_sha`. First confirm an
+analysis exists for exactly that commit. If none matches, the scan hasn't run
+on what you're merging, so stop and wait for it rather than treating the empty
+alert list as clean. Then count open alerts at high, critical or error, and
+approve only at 0:
+
+```sh
+set -euo pipefail
+n=<promotion PR number>
+mc=$(gh api "repos/CodesWhat/portwing/pulls/$n" --jq .merge_commit_sha)
+analysis=$(gh api --paginate "repos/CodesWhat/portwing/code-scanning/analyses?tool_name=CodeQL&ref=refs/pull/$n/merge" \
+  --jq ".[] | select(.commit_sha == \"$mc\") | .id")
+[ -n "$analysis" ] || { echo "no CodeQL analysis for $mc, stop" >&2; exit 1; }
+alerts=$(gh api --paginate "repos/CodesWhat/portwing/code-scanning/alerts?tool_name=CodeQL&ref=refs/pull/$n/merge&state=open" \
+  --jq '.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical" or .rule.severity == "error") | .number')
+echo "open high/critical/error alerts: $(printf '%s' "$alerts" | grep -c . || true)"   # must be 0
+```
+
+Fix real alerts on the dev branch and let the scan rerun. Dismiss a verified
+false positive with a reason that names the sanitizer or check. Never change
+or loosen the rule to get a promotion through.
+
+When a quality-report run needs a retry, rerun all jobs, not only the failed
+ones. `quality-report-aggregate` counts artifacts from the current attempt
+only, so a failed-jobs rerun leaves it short of the reports the earlier attempt
+already uploaded.
+
 ## Cutting the tag
 
 **Preferred path: use the `release-cut` workflow.**
@@ -171,7 +206,7 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
-For a release candidate, pass an explicit version such as `1.6.0-rc.1`.
+For a release candidate, pass an explicit version such as `1.6.1-rc.1`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag
@@ -277,11 +312,11 @@ the Git-backed deployment or update its GitHub status.
    failure gate still run without it, with findings retained in the job log.
 
    **Static runtime on every platform.** The images retain Alpine 3.24 release
-   metadata and CA certificates alongside static binaries. Docker CLI 29.9.2
+   metadata and CA certificates alongside static binaries. Docker CLI 29.10.1
    is an official per-architecture download pinned by SHA256 and built with Go
-   1.26.10. Compose is built from checksum-pinned upstream 5.5.1 source with
-   containerd 2.3.7, x/net 0.63.0, compression 1.20.2 and Go 1.27.4, identifies
-   itself as `v5.5.1-portwing.7`, and runs directly or as a CLI plugin.
+   1.27.4. Compose is built from checksum-pinned upstream 5.5.1 source with
+   containerd 2.3.7, x/net 0.63.0, compression 1.20.2, OpenTelemetry 1.47.0 and Go 1.27.4, identifies
+   itself as `v5.5.1-portwing.8`, and runs directly or as a CLI plugin.
    The recipes omit glibc packages and BusyBox. Image health checks use
    `portwing healthcheck` for HTTP/TLS probes, with HTTPS pinned to the
    configured `TLS_CERT` leaf. Source-image checks verify static linkage,
@@ -300,6 +335,8 @@ the Git-backed deployment or update its GitHub status.
 - GHCR image exists: `docker pull ghcr.io/codeswhat/portwing:<version>`
 - The release page has archives and native packages for every supported platform, each package has a `.bundle`, and `checksums.txt` lists them
 - `portwing version` (or `GET /api/v1/version`) on the new image reports the tagged version, not `0.1.0` — this catches ldflags injection regressions
+
+**Local image builds.** The from-source Dockerfiles keep Go build and module caches in BuildKit cache mounts, which never enter image layers. Lanes run NAS image builds one at a time, never with `--no-cache`, and never prune the NAS.
 
 ---
 

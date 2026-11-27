@@ -161,7 +161,7 @@ jobs:
       !(github.event.workflow_run.name == 'Quality: Deep Fuzz (monthly)' &&
         github.event.workflow_run.conclusion == 'failure' &&
         github.event.workflow_run.run_attempt == 1)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     permissions:
@@ -170,7 +170,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           allowed-endpoints: >

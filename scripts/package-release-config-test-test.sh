@@ -630,6 +630,32 @@ expect_release_contract_failure \
 	"the evidence exemption must not hide a stale reference elsewhere in COMPATIBILITY.md"
 mv "${compatibility_backup}" "${fixture}/COMPATIBILITY.md"
 
+# Peer versions that share the previous release number are exempt, but only as
+# the exact Drydock rc.11 minimum, Drydock matrix rows and the Sockguard run
+# link. A Portwing literal of the previous version must still fail, even on a
+# line that also carries an exempt peer reference.
+releasing_peer_backup="${fixture}/RELEASING.md.peer-backup"
+cp "${fixture}/RELEASING.md" "${releasing_peer_backup}"
+{
+	printf '\nUse Drydock \140v%s-rc.11+\140 for the full watcher/update contract.\n' "${previous_version}"
+	printf '| v1.0.0-rc.1 | v%s | v2.2.10 | PASS / PASS / PASS | Matrix run |\n' "${previous_version}"
+	printf 'Drydock v%s and Sockguard [v%s](https://github.com/CodesWhat/sockguard/actions/runs/1) passed.\n' "${previous_version}" "${previous_version}"
+} >>"${fixture}/RELEASING.md"
+if ! (cd "${fixture}" && bash scripts/package-release-config-test.sh >/dev/null); then
+	echo "FAIL: Drydock and Sockguard peer references to the previous version must be accepted" >&2
+	exit 1
+fi
+printf 'The current release line is \140v%s\140.\n' "${previous_version}" >>"${fixture}/RELEASING.md"
+expect_release_contract_failure \
+	"FAIL: stale references to v${previous_version} remain outside the changelog" \
+	"a Portwing previous-version literal must fail despite the peer-version exemption"
+cp "${releasing_peer_backup}" "${fixture}/RELEASING.md"
+printf 'Drydock \140v%s-rc.11+\140 with portwing:%s.\n' "${previous_version}" "${previous_version}" >>"${fixture}/RELEASING.md"
+expect_release_contract_failure \
+	"FAIL: stale references to v${previous_version} remain outside the changelog" \
+	"an exempt peer reference must not hide a stale Portwing image tag on the same line"
+mv "${releasing_peer_backup}" "${fixture}/RELEASING.md"
+
 releasing_stale_backup="${fixture}/RELEASING.md.stale-version-backup"
 cp "${fixture}/RELEASING.md" "${releasing_stale_backup}"
 printf '\nStale reference to v%s.\n' "${previous_version}" >>"${fixture}/RELEASING.md"

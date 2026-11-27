@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.6.0`.
+> Portwing is stable software. The current release line is `v1.6.1`.
 > The v1.2 line requires TLS for enrollment by default and uses a glibc-free
 > container runtime.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
@@ -156,14 +156,35 @@ a restart; Edge mode and reverse-proxy certificate headers are outside this opti
 each case-sensitive capability once, in first-seen order. Wire compatibility is
 unchanged.
 
-**In v1.4: container lifecycle events.** Container die, oom, stop, start and
+**Shipped in v1.4: container lifecycle events.** Container die, oom, stop, start and
 restart events are forwarded to Drydock as `dd:container_event` for state
-alerts, in Standard and Edge mode.
+alerts, in Standard and Edge mode. Patch releases through v1.4.3 fixed edge
+backpressure, log streaming, Compose project naming and release verification.
 
-Controller-managed upgrade/rollback waves remain controller-owned. Existing
-Portwing Docker API operations cover the verified Standard-mode replacement and
-rollback sequence. Reconnect verification found no failure requiring another Edge
-transport. New transport work needs a concrete failing case. Neither direction
+**Shipped in v1.5: correctness, robustness and gates.** A completion-plan pass
+fixed sporadic 429s on valid requests, signed Compose bodies up to the documented
+32 MiB, graceful shutdown with open streams, edge backpressure and upload
+budgets, and `docker compose` deploys killed by a dropped tunnel. It also
+tightened auth rate limiting, added audit cursor generations and `key_id` on
+audit records, and made Compose deploy file modes configurable.
+
+**Shipped in v1.6: request timeouts, cancel and enrollment.** The
+`dd:request-timeout` hint lets a controller set a per-request deadline for long
+Docker calls, `dd:cancel` abandons one in-flight Edge request, and Edge
+first-start enrollment (`ENROLL_CODE`) generates the agent key on the host. The
+macOS binaries and Homebrew cask were removed, so Mac users run the container
+image. CI also reuses a verified dev-tree run for promotion PRs. See
+[CHANGELOG.md](CHANGELOG.md).
+
+**Next.** The Drydock controller side of request timeouts, cancel and enrollment
+lands in Drydock's next minor. Until then Portwing advertises the capabilities
+and Drydock ignores them. Fixes after v1.6.1 ship in the next patch release.
+
+Controller-managed upgrade/rollback waves remain controller-owned. A controller can
+upgrade Portwing today with no agent change (the documented replacement sequence,
+Standard mode is out of scope, and the rollback gap is covered in
+[Drydock integration](https://portwing.codeswhat.com/docs/drydock-integration)).
+New transport work needs a concrete failing case. Neither direction
 expands the socket policy or introduces an agent self-update path.
 
 ## Non-goals

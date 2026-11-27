@@ -70,7 +70,7 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 	// The check-and-create section below runs under an exclusive directory
 	// lock, so no other start can publish a key, mark one pending or confirm
 	// one while this start decides what to do.
-	release, err := flockExclusive(filepath.Join(dir, EnrolledLockFileName))
+	release, err := flockEnrolledLock(filepath.Join(dir, EnrolledLockFileName))
 	if err != nil {
 		return key, fmt.Errorf("locking enrolled key directory: %w", err)
 	}
@@ -100,6 +100,13 @@ func LoadOrCreateEnrolledKey(dir string, canCreate bool) (EnrolledKey, error) {
 		markerCreated = false
 	}
 	if err := writeFileExclusive(key.Path, pemData); err != nil {
+		if wasPublished(err) {
+			// The key is linked into place; only its final directory sync
+			// failed. The marker must outlive it, or the next start sees an
+			// unregistered key and skips enrollment.
+			key.Pending = true
+			return key, fmt.Errorf("writing enrolled key: %w", err)
+		}
 		if !errors.Is(err, os.ErrExist) {
 			// Nothing was published. Remove only a marker this start made.
 			if markerCreated {
@@ -158,14 +165,14 @@ func checkEnrolledKeyDir(dir string) error {
 	if info.Mode().Perm()&0o022 != 0 {
 		return fmt.Errorf("enrolled key directory %q is group- or world-writable (mode %04o); run chmod 700 %q", dir, info.Mode().Perm(), dir)
 	}
-	return nil
+	return checkEnrolledDirOwner(info, dir)
 }
 
 // ConfirmEnrolledKey removes the pending marker once the controller accepted
 // the key. A missing marker is not an error. It takes the same directory lock
 // as creation, so it cannot interleave with a start that is publishing a key.
 func ConfirmEnrolledKey(markerPath string) error {
-	release, err := flockExclusive(filepath.Join(filepath.Dir(markerPath), EnrolledLockFileName))
+	release, err := flockEnrolledLock(filepath.Join(filepath.Dir(markerPath), EnrolledLockFileName))
 	if err != nil {
 		return fmt.Errorf("removing enrollment marker: locking enrolled key directory: %w", err)
 	}
@@ -220,9 +227,13 @@ type markerFile interface {
 
 // openMarkerFile exclusively creates the marker, replaceable in tests.
 var openMarkerFile = func(path string) (markerFile, error) {
-	// #nosec G304 -- marker path is the package-built name under the validated state directory.
-	f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := openNoFollow(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkPrivateRegularFile(f, path, "enrollment marker"); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
 		return nil, err
 	}
 	return f, nil

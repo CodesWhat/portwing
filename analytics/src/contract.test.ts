@@ -83,6 +83,7 @@ test("CTA events accept only real Portwing component combinations", () => {
       placement: "header",
     },
   });
+  assert.equal(buildCtaEvent("/", "docs_getting_started", "hero")?.properties.placement, "hero");
   assert.equal(buildCtaEvent("/", "docs_security" as never, "hero"), null);
   assert.equal(buildCtaEvent("/", "install_secure", "header"), null);
   assert.equal(buildCtaEvent("/", "free-form" as never, "hero"), null);

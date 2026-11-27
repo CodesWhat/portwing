@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -387,5 +388,27 @@ func TestStartContainerLogStreamAdmission(t *testing.T) {
 				t.Fatalf("refusal = %q, want %q", refusal.Error, tt.wantError)
 			}
 		})
+	}
+}
+
+// TestLogLogDecodeErrorStripsControlChars checks that a container ID carrying
+// CR/LF cannot forge a second log record.
+func TestLogLogDecodeErrorStripsControlChars(t *testing.T) {
+	logs := captureDebugLogs(t)
+
+	logLogDecodeError("abc\r\nlevel=ERROR msg=forged", errors.New("bad\nframe"))
+
+	got := logs.String()
+	if !strings.Contains(got, "decoding container logs") {
+		t.Fatalf("no decode record logged: %s", got)
+	}
+	if strings.Count(strings.TrimRight(got, "\n"), "\n") != 0 {
+		t.Fatalf("log output spans multiple lines: %q", got)
+	}
+	if strings.Contains(got, `\r`) || strings.Contains(got, `\n`) || strings.Contains(got, "\r") {
+		t.Fatalf("control characters reached the log: %q", got)
+	}
+	if !strings.Contains(got, "abclevel=ERROR") {
+		t.Fatalf("control characters were not stripped from the container id: %q", got)
 	}
 }

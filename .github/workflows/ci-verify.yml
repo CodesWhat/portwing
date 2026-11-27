@@ -60,7 +60,7 @@ jobs:
   #
   changes:
     name: "Changed Paths"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: read
@@ -78,7 +78,7 @@ jobs:
       # without -deps, so on a cold runner it needs the module proxy and the
       # checksum database as well as the toolchain-download hosts.
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           disable-sudo: true
@@ -285,7 +285,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: CodesWhat/.github/.github/workflows/go-ci.yml@29a963e6df100295bdd88c3d87dc1f73ceb30f65  # main, 2026-10-31
+    uses: CodesWhat/.github/.github/workflows/go-ci.yml@684a6b931e7802f1985e2cb4f6ea0c95861988e3  # main, 2026-11-26
     with:
       go-version-file: go.mod
       go-cache-dependency-path: go.sum
@@ -341,9 +341,11 @@ jobs:
         vuln.go.dev:443
       workflow-security-egress-policy: block
       workflow-security-allowed-endpoints: >-
+        files.pythonhosted.org:443
         ghcr.io:443
         github.com:443
         pkg-containers.githubusercontent.com:443
+        pypi.org:443
       commit-message-egress-policy: block
       commit-message-allowed-endpoints: github.com:443
       goreleaser-egress-policy: block
@@ -415,7 +417,7 @@ jobs:
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.push_covered != 'true' }}
     permissions:
       contents: read
-    uses: CodesWhat/.github/.github/workflows/node-ci.yml@29a963e6df100295bdd88c3d87dc1f73ceb30f65  # main, 2026-10-31
+    uses: CodesWhat/.github/.github/workflows/node-ci.yml@684a6b931e7802f1985e2cb4f6ea0c95861988e3  # main, 2026-11-26
     with:
       node-version: 26
       lockfile-path: package-lock.json
@@ -449,7 +451,7 @@ jobs:
   website-browser-checks:
     name: "Website Browser Checks"
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # The suite itself is about a minute. The rest is the image pull, npm ci and the site build.
     # Kept short on purpose: hosted runners kill sustained-CPU jobs past ~14 minutes.
     timeout-minutes: 12
@@ -466,7 +468,7 @@ jobs:
       # because Harden Runner hardens the VM it is started on and its steps would otherwise
       # run inside the container, outside what it can enforce.
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           # mcr.microsoft.com and its data host: the image pull. registry.npmjs.org: npm ci inside
@@ -518,7 +520,7 @@ jobs:
     name: "Coverage: Codecov Upload"
     needs: [changes, go-ci, go-ci-receipt]
     if: ${{ !cancelled() && needs.changes.outputs.push_covered != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: read
@@ -527,7 +529,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -590,14 +592,14 @@ jobs:
 
   secrets:
     name: "Security: Secrets"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -649,7 +651,7 @@ jobs:
     # Keep this job local: the explicit category preserves the default-branch
     # code-scanning identity while the organization workflow is canaried.
     if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       actions: read
@@ -658,7 +660,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -676,7 +678,7 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           # One non-matrix job on purpose. A matrix appends the leg value to
           # the check-run name even with a single entry (drydock requires
@@ -700,7 +702,7 @@ jobs:
         run: go build ./...
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           category: .github/workflows/ci.yml:codeql
 
@@ -711,14 +713,14 @@ jobs:
       (github.event_name == 'pull_request' ||
        (github.event_name == 'push' && !github.event.deleted &&
         (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -771,14 +773,14 @@ jobs:
   # from recurring.
   release-contract:
     name: "Release Contract"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           allowed-endpoints: >

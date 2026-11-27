@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Explicit stable or RC version, e.g. 1.6.0 or v1.6.0-rc.1. Leave blank to auto-compute from conventional commits since the last stable tag."
+        description: "Explicit stable or RC version, e.g. 1.6.1 or v1.6.1-rc.1. Leave blank to auto-compute from conventional commits since the last stable tag."
         required: false
         type: string
 
@@ -29,7 +29,7 @@ env:
 jobs:
   cut:
     name: "Release: Cut Tag"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     environment: Release
     permissions:
@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           allowed-endpoints: >

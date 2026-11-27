@@ -48,7 +48,7 @@ concurrency:
 jobs:
   deep-fuzz:
     name: "Fuzz ${{ matrix.fuzzer.name }}"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 75
 
     outputs:
@@ -86,7 +86,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           # The last three are the Actions cache service: the v2 API host plus
@@ -550,7 +550,7 @@ jobs:
     name: "Record the fuzz run in the quality history"
     needs: deep-fuzz
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     permissions:
@@ -558,7 +558,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           # Same set quality-mutation-monthly.yml's history job uses: github.com

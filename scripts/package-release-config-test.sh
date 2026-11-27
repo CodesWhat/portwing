@@ -654,6 +654,21 @@ if [ -n "${stale_previous_version_matches}" ]; then
 		# its matrix column cells carry it without naming the field.
 		index(tolower($0), "drydockcompat") { next }
 		index($0, "COMPATIBILITY.md:") == 1 && index($0, "| `" previous "` |") { next }
+		# Peer versions that merely share the previous release number: the Drydock
+		# v<previous>-rc.11 watcher/update minimum, Drydock v<previous> in a
+		# matrix row or sentence, and the Sockguard run link that names it. Strip
+		# them and fail only if the previous version is still named elsewhere on
+		# the line. Portwing RC references outside COMPATIBILITY.md still fail.
+		{
+			line = $0
+			esc = previous
+			gsub(/\./, "\\.", esc)
+			gsub("v" esc "-rc\\.11", "", line)
+			gsub("Drydock v" esc, "", line)
+			gsub("\\| v[0-9.]+-rc\\.[0-9]+ \\| v" esc " \\|", "", line)
+			gsub("\\[v" esc "\\]\\(https://github.com/CodesWhat/sockguard/", "", line)
+			if (index(line, previous) == 0) next
+		}
 		{ print }
 	' <<<"${stale_previous_version_matches}")"
 fi

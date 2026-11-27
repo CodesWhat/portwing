@@ -399,6 +399,18 @@ func (a *Adapter) handleTriggerRequest(sender adapter.MessageSender, msg protoco
 	})
 }
 
+// maxLoggedFieldRunes bounds an untrusted wire value written to a log line.
+const maxLoggedFieldRunes = 256
+
+// logLogDecodeError records a failed container log decode. The container ID
+// came off the wire, so control characters are stripped and the length capped
+// before it reaches the log.
+func logLogDecodeError(containerID string, err error) {
+	slog.Debug("decoding container logs",
+		"container", applog.SanitizeField(containerID, maxLoggedFieldRunes),
+		"error", applog.SanitizeField(err.Error(), maxLoggedFieldRunes))
+}
+
 func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.MessageSender, msg protocol.DDContainerLogRequestMessage) {
 	tail := ""
 	if msg.Tail > 0 {
@@ -444,7 +456,7 @@ func (a *Adapter) handleContainerLogRequest(ctx context.Context, sender adapter.
 	// use them and keep the error at debug.
 	data, err := docker.DecodeContainerLogs(docker.LimitContainerLogStream(body, maxContainerLogBytes))
 	if err != nil {
-		slog.Debug("decoding container logs", "container", msg.ContainerID, "error", err)
+		logLogDecodeError(msg.ContainerID, err)
 	}
 	// The limiter stops at the cap without saying whether more was waiting.
 	// Probe one byte so an oversized log errors out instead of being sent

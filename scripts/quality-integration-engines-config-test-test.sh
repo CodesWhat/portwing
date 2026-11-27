@@ -127,7 +127,7 @@ assert_rejected \
 
 # Job-level block reintroducing a write scope under the top-level read.
 reset_all
-sed -i.bak "s|^    runs-on: ubuntu-24.04$|&\n    permissions:\n      packages: write|" "${fixture}"
+sed -i.bak "s|^    runs-on: ubuntu-26.04$|&\n    permissions:\n      packages: write|" "${fixture}"
 assert_rejected \
 	"the integration job must not declare its own permissions block" \
 	"contract must reject a job-level permissions block"
@@ -151,7 +151,7 @@ assert_rejected \
 
 # continue-on-error at job level: every leg reports green regardless.
 reset_all
-sed -i.bak "s|^    runs-on: ubuntu-24.04$|&\n    continue-on-error: true|" "${fixture}"
+sed -i.bak "s|^    runs-on: ubuntu-26.04$|&\n    continue-on-error: true|" "${fixture}"
 assert_rejected \
 	"continue-on-error must not appear anywhere" \
 	"contract must reject job-level continue-on-error"

@@ -10,7 +10,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKFLOW = path.join(ROOT, ".github", "workflows", "ci-verify.yml");
 const LEFTHOOK = path.join(ROOT, "lefthook.yml");
 const COVERAGE = path.join(ROOT, "COVERAGE.md");
-const SHARED_SHA = "29a963e6df100295bdd88c3d87dc1f73ceb30f65";
+const SHARED_SHA = "684a6b931e7802f1985e2cb4f6ea0c95861988e3";
 
 const FIXED_SCRIPTS = new Map([
   ["go-test.sh", ["go mod verify", "go test -race", "COVERAGE_MIN"]],
@@ -297,7 +297,7 @@ test("the contract rejects a moving reusable ref and a reintroduced bridge", () 
     "  legacy-build:",
     '    name: "Build & Test"',
     "    needs: go-ci",
-    "    runs-on: ubuntu-24.04",
+    "    runs-on: ubuntu-26.04",
     "",
     "",
   ].join("\n");

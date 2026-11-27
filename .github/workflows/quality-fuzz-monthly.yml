@@ -95,7 +95,7 @@ concurrency:
 jobs:
   monthly-fuzz:
     name: "Fuzz ${{ matrix.fuzzer.name }} chunk ${{ matrix.chunk }} (monthly)"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # 15-minute ceiling per leg: one 12m fuzztime attempt (FUZZ_RETRIES=1,
     # see the Fuzz step below — a retry would re-run the full fuzztime and
     # blow this budget) plus ~2m of setup/checkout/cache overhead is ~14m,
@@ -130,7 +130,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           # The last three are the Actions cache service: the v2 API host plus
@@ -402,7 +402,7 @@ jobs:
     # salvage the other five legs' corpus for) but skips a cancelled run
     # entirely.
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
 
     # Shared with quality-fuzz-nightly.yml's corpus-touching job and keyed on
@@ -439,7 +439,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43  # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a  # v2.22.4
         with:
           egress-policy: block
           # Same list as the monthly-fuzz leg job above (sibling job, same

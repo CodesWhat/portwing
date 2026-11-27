@@ -792,10 +792,10 @@ certificates and package metadata, plus statically linked Portwing, Docker and
 Compose clients. No libc, shell, BusyBox, wget or package manager is installed
 in the runtime. The image runs as UID 65532.
 
-Docker CLI 29.9.2 comes from architecture-specific official static downloads
+Docker CLI 29.10.1 comes from architecture-specific official static downloads
 pinned by SHA256. Compose is built from checksum-pinned upstream 5.5.1 source
-with containerd 2.3.7, x/net 0.63.0 and klauspost/compress 1.20.2 using Go 1.27.4.
-It identifies itself as `v5.5.1-portwing.7` and is available directly and as a
+with containerd 2.3.7, x/net 0.63.0 and klauspost/compress 1.20.2 and OpenTelemetry 1.47.0 using Go 1.27.4.
+It identifies itself as `v5.5.1-portwing.8` and is available directly and as a
 Docker CLI plugin. Health probes run `/usr/bin/portwing healthcheck` with HTTP
 or TLS, according to the agent configuration.
 
