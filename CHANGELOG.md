@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - First-start enrollment is stricter about its key directory. A failed final directory sync after the key is linked no longer deletes the pending marker, so the next start still enrolls. The enrollment lock file and marker are opened without following symlinks, and the agent refuses a lock that isn't a private regular file it owns, or a key directory owned by another user.
 - A compose request whose `files` (or its `envVars` file) conflict, such as `0` next to `0/0`, or two keys that clean to the same path, is now rejected up front with a validation error. Before, validation accepted it and the write failed afterwards. Found by the nightly deep fuzz, with three regression seeds added.
+### Security
+
+- Container log decode failures no longer write the raw container ID to the debug log. Control characters are stripped and the value is length-capped first.
+- `Dockerfile` and `Dockerfile.release` no longer have a `FROM` line that resolves a build argument. The rootfs stage copies the three checksum-pinned Docker CLI tarballs and picks the one for the target architecture, which clears the Scorecard Pinned-Dependencies alerts.
 
 ## [v1.6.0] - 2026-11-26
 
