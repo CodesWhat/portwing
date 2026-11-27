@@ -341,9 +341,11 @@ jobs:
         vuln.go.dev:443
       workflow-security-egress-policy: block
       workflow-security-allowed-endpoints: >-
+        files.pythonhosted.org:443
         ghcr.io:443
         github.com:443
         pkg-containers.githubusercontent.com:443
+        pypi.org:443
       commit-message-egress-policy: block
       commit-message-allowed-endpoints: github.com:443
       goreleaser-egress-policy: block
