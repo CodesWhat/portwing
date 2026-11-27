@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Container log decode failures no longer write the raw container ID to the debug log. Control characters are stripped and the value is length-capped first.
 - `Dockerfile` and `Dockerfile.release` no longer have a `FROM` line that resolves a build argument. The rootfs stage copies the three checksum-pinned Docker CLI tarballs and picks the one for the target architecture, which clears the Scorecard Pinned-Dependencies alerts.
+### Changed
+
+- Compose project-name detection now parses with go-yaml v4 (was v3). Behavior is the same for valid compose files, and tests pin duplicate keys, anchors, merge keys, tabs and multi-document input.
 
 ## [v1.6.0] - 2026-11-26
 
