@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A compose request whose `files` (or its `envVars` file) conflict, such as `0` next to `0/0`, or two keys that clean to the same path, is now rejected up front with a validation error. Before, validation accepted it and the write failed afterwards. Found by the nightly deep fuzz, with three regression seeds added.
+
 ## [v1.6.0] - 2026-11-26
 
 ### Added
