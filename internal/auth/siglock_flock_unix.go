@@ -6,6 +6,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -23,6 +24,28 @@ func flockExclusive(path string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	return lockOpened(f)
+}
+
+// flockEnrolledLock is flockExclusive for the enrolled-key directory lock. It
+// refuses a symlink, and an existing lock that is not a regular private file
+// owned by the current user, so a peer on a shared volume cannot pre-seed the
+// lock and hold it.
+func flockEnrolledLock(path string) (func(), error) {
+	f, err := openNoFollow(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("opening enrolled key lock %q (symlinks are refused): %w", path, err)
+	}
+	if err := checkPrivateRegularFile(f, path, "enrolled key lock"); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return lockOpened(f)
+}
+
+// lockOpened takes the exclusive lock on f, closing f on failure.
+func lockOpened(f *os.File) (func(), error) {
+	var err error
 	for {
 		err = flockCall(int(f.Fd()), syscall.LOCK_EX)
 		if !errors.Is(err, syscall.EINTR) {

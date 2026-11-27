@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- First-start enrollment is stricter about its key directory. A failed final directory sync after the key is linked no longer deletes the pending marker, so the next start still enrolls. The enrollment lock file and marker are opened without following symlinks, and the agent refuses a lock that isn't a private regular file it owns, or a key directory owned by another user.
+
 ## [v1.6.0] - 2026-11-26
 
 ### Added
