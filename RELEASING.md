@@ -175,12 +175,15 @@ alert list as clean. Then count open alerts at high, critical or error, and
 approve only at 0:
 
 ```sh
+set -euo pipefail
 n=<promotion PR number>
 mc=$(gh api "repos/CodesWhat/portwing/pulls/$n" --jq .merge_commit_sha)
-gh api --paginate "repos/CodesWhat/portwing/code-scanning/analyses?tool_name=CodeQL&ref=refs/pull/$n/merge" \
-  --jq ".[] | select(.commit_sha == \"$mc\") | .id" | head -1   # empty: no analysis, don't approve
-gh api --paginate "repos/CodesWhat/portwing/code-scanning/alerts?ref=refs/pull/$n/merge&state=open" \
-  --jq '.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical" or .rule.severity == "error") | .number' | wc -l   # must be 0
+analysis=$(gh api --paginate "repos/CodesWhat/portwing/code-scanning/analyses?tool_name=CodeQL&ref=refs/pull/$n/merge" \
+  --jq ".[] | select(.commit_sha == \"$mc\") | .id")
+[ -n "$analysis" ] || { echo "no CodeQL analysis for $mc, stop" >&2; exit 1; }
+alerts=$(gh api --paginate "repos/CodesWhat/portwing/code-scanning/alerts?tool_name=CodeQL&ref=refs/pull/$n/merge&state=open" \
+  --jq '.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical" or .rule.severity == "error") | .number')
+echo "open high/critical/error alerts: $(printf '%s' "$alerts" | grep -c . || true)"   # must be 0
 ```
 
 Fix real alerts on the dev branch and let the scan rerun. Dismiss a verified
