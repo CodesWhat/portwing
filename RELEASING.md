@@ -336,6 +336,8 @@ the Git-backed deployment or update its GitHub status.
 - The release page has archives and native packages for every supported platform, each package has a `.bundle`, and `checksums.txt` lists them
 - `portwing version` (or `GET /api/v1/version`) on the new image reports the tagged version, not `0.1.0` — this catches ldflags injection regressions
 
+**Local image builds.** The from-source Dockerfiles keep Go build and module caches in BuildKit cache mounts, which never enter image layers. Lanes run NAS image builds one at a time, never with `--no-cache`, and never prune the NAS.
+
 ---
 
 ## If something goes wrong
