@@ -160,6 +160,28 @@ and `current/` moves on to the new line. Layout and rules:
 Never edit a file under an archived `vX.Y/`. A correction goes in `current/`;
 an archive that no longer matches its tag fails the contract.
 
+## Before promoting: open code-scanning alerts
+
+`main`'s ruleset has a CodeQL `code_scanning` rule (alerts threshold `errors`,
+security threshold `high_or_higher`). It blocks a promotion PR that is green and
+approved when an open alert at that severity exists on the merge ref, and the
+required checks won't show why. Look before opening or merging the promotion
+PR, on both the dev head and the promotion merge ref:
+
+```sh
+gh api "repos/CodesWhat/portwing/code-scanning/alerts?ref=refs/heads/dev/v1.0&state=open"
+gh api "repos/CodesWhat/portwing/code-scanning/alerts?ref=refs/pull/<n>/merge&state=open"
+```
+
+Fix real alerts on the dev branch first and let the scan rerun. Dismiss a
+verified false positive with a reason. Never change or loosen the rule to get a
+promotion through.
+
+When a quality-report run needs a retry, rerun all jobs, not only the failed
+ones. `quality-report-aggregate` counts artifacts from the current attempt
+only, so a failed-jobs rerun leaves it short of the reports the earlier attempt
+already uploaded.
+
 ## Cutting the tag
 
 **Preferred path: use the `release-cut` workflow.**
