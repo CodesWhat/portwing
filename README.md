@@ -485,7 +485,9 @@ High-level themes only; see [ROADMAP.md](ROADMAP.md) for direction and non-goals
 | **v1.1** ✅ | Audience-Bound Signatures | Ed25519 signature version 3 binds each request to one agent (Drydock 1.9+), stable persistent agent ID under `/data/credentials`, `SIGNATURE_MIN_VERSION`, `portwing signature-lock` for downgrade locks |
 | **v1.2** ✅ | Enrollment TLS and Container Runtime | Enrollment requires native TLS or HTTPS reported by a trusted proxy unless `ALLOW_INSECURE_ENROLLMENT=true` opts in for trusted testing. Static Docker/Compose clients remove the glibc runtime package on all three architectures |
 | **v1.3** ✅ | Native Client Certificates | Opt-in native Standard HTTPS client certificates, dedicated healthcheck credentials and unique capability advertisements. Existing request authentication is preserved |
-| **v1.4** | Container Lifecycle Events | Container die, oom, stop, start and restart events are forwarded to Drydock as `dd:container_event` for state alerts, in Standard and Edge mode |
+| **v1.4** ✅ | Container Lifecycle Events | Container die, oom, stop, start and restart events are forwarded to Drydock as `dd:container_event` for state alerts, in Standard and Edge mode |
+| **v1.5** ✅ | Correctness, Robustness and Gates | Completion-plan correctness fixes (spurious 429s, signed compose bodies, graceful shutdown, edge backpressure and upload budgets, compose deploy cancellation), stricter auth rate limiting, audit cursor generations and `key_id` on audit records, Compose deploy file modes, and tighter vulnerability gates |
+| **v1.6** ✅ | Timeouts, Cancel and Enrollment | `dd:request-timeout` per-request deadline hint, `dd:cancel` edge request cancellation, edge first-start enrollment with `ENROLL_CODE`, macOS binaries and the Homebrew cask removed (run the container image on a Mac), CI receipt reuse for promotion PRs. The Drydock controller side lands in Drydock's next minor |
 | **Post-v1** | Demand-Driven | Controller-owned upgrade and rollback waves; transport changes require a demonstrated deployment failure |
 
 SLSA Build L3 isn't tied to a version. It follows an org-shared reusable release workflow landing.

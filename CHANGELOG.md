@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- The bundled Docker CLI moves to 29.10.1 (built with Go 1.27.4) for GO-2026-6859, and the bundled Compose plugin (now `v5.5.1-portwing.8`) is rebuilt on OpenTelemetry v1.47.0 for GHSA-q7gw-24fr-5p69. CI now checks the linked OpenTelemetry SDK and trace versions in the shipped Compose binary.
+- The bundled Docker CLI moves to 29.10.1 (built with Go 1.27.4) for GO-2026-6859, and the bundled Compose plugin (now `v5.5.1-portwing.8`) is rebuilt on OpenTelemetry v1.47.0 for GHSA-q7gw-24fr-5p69. CI now checks the linked OpenTelemetry SDK and trace versions in the Compose binaries in the source-image scan.
 - Container log decode failures no longer write the raw container ID to the debug log. Control characters are stripped and the value is length-capped first.
 - `Dockerfile` and `Dockerfile.release` no longer have a `FROM` line that resolves a build argument. The rootfs stage copies the three checksum-pinned Docker CLI tarballs and picks the one for the target architecture, which clears the Scorecard Pinned-Dependencies alerts.
 

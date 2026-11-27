@@ -71,7 +71,7 @@ These metrics are always present and use the `portwing_` prefix.
 |--------|------|-------------|
 | `portwing_build_info` | gauge | Always `1`. Carries a `version` label with the agent version string. |
 | `portwing_uptime_seconds` | gauge | Seconds elapsed since the agent process started. |
-| `portwing_host_metrics_supported` | gauge | Whether the `/proc`-backed host fields (CPU, memory, network, uptime) could be read (`1`) or not (`0`, no procfs — e.g. native macOS). When `0`, those series are omitted rather than written as zeros. |
+| `portwing_host_metrics_supported` | gauge | Whether the `/proc`-backed host fields (CPU, memory, network, uptime) could be read (`1`) or not (`0`, no procfs, such as a non-Linux host). When `0`, those series are omitted rather than written as zeros. |
 | `portwing_host_cpu_usage_percent` | gauge | Host CPU usage percentage (delta between consecutive `/proc/stat` samples). Returns `0` on the first scrape — a second sample is needed for a meaningful value. |
 | `portwing_host_memory_total_bytes` | gauge | Total host memory in bytes (from `/proc/meminfo` `MemTotal`). |
 | `portwing_host_memory_used_bytes` | gauge | Used host memory in bytes (`MemTotal` minus available). |
