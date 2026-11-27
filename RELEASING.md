@@ -277,11 +277,11 @@ the Git-backed deployment or update its GitHub status.
    failure gate still run without it, with findings retained in the job log.
 
    **Static runtime on every platform.** The images retain Alpine 3.24 release
-   metadata and CA certificates alongside static binaries. Docker CLI 29.9.2
+   metadata and CA certificates alongside static binaries. Docker CLI 29.10.1
    is an official per-architecture download pinned by SHA256 and built with Go
-   1.26.10. Compose is built from checksum-pinned upstream 5.5.1 source with
-   containerd 2.3.7, x/net 0.63.0, compression 1.20.2 and Go 1.27.4, identifies
-   itself as `v5.5.1-portwing.7`, and runs directly or as a CLI plugin.
+   1.27.4. Compose is built from checksum-pinned upstream 5.5.1 source with
+   containerd 2.3.7, x/net 0.63.0, compression 1.20.2, OpenTelemetry 1.47.0 and Go 1.27.4, identifies
+   itself as `v5.5.1-portwing.8`, and runs directly or as a CLI plugin.
    The recipes omit glibc packages and BusyBox. Image health checks use
    `portwing healthcheck` for HTTP/TLS probes, with HTTPS pinned to the
    configured `TLS_CERT` leaf. Source-image checks verify static linkage,

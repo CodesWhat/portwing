@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The bundled Docker CLI moves to 29.10.1 (built with Go 1.27.4) for GO-2026-6859, and the bundled Compose plugin (now `v5.5.1-portwing.8`) is rebuilt on OpenTelemetry v1.47.0 for GHSA-q7gw-24fr-5p69. CI now checks the linked OpenTelemetry SDK and trace versions in the shipped Compose binary.
+
 ## [v1.6.0] - 2026-11-26
 
 ### Added

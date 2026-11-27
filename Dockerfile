@@ -14,26 +14,29 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 \
     go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwing
 
-# Compose v5.5.1 with patched containerd and x/net, isolated from Portwing modules.
+# Compose v5.5.1 with patched containerd, x/net and OpenTelemetry, isolated from Portwing modules.
 FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS compose-builder
 ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee621025f2 https://github.com/docker/compose/archive/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de.tar.gz /tmp/compose.tar.gz
 ARG TARGETARCH
 WORKDIR /compose
 RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \
-    && go get github.com/containerd/containerd/v2@v2.3.7 golang.org/x/net@v0.63.0 github.com/klauspost/compress@v1.20.2 \
+    && go get github.com/containerd/containerd/v2@v2.3.7 \
+        golang.org/x/net@v0.63.0 github.com/klauspost/compress@v1.20.2 \
+        go.opentelemetry.io/otel@v1.47.0 go.opentelemetry.io/otel/sdk@v1.47.0 \
+        go.opentelemetry.io/otel/trace@v1.47.0 \
     && go mod verify \
     && CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 go build -trimpath -tags e2e \
-        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.7" \
+        -ldflags="-w -X github.com/docker/compose/v5/internal.Version=v5.5.1-portwing.8" \
         -o /docker-compose ./cmd
 
 FROM scratch AS docker-amd64
-ADD --checksum=sha256:9ac225999fd5e863f7694c728ef23d480616b1e5639328fa309befd4243d69eb https://download.docker.com/linux/static/stable/x86_64/docker-29.9.2.tgz /tmp/docker.tgz
+ADD --checksum=sha256:061642059fa7f2ed9b2f04a327a951cff4249585cf04b2661c2a6539197c9962 https://download.docker.com/linux/static/stable/x86_64/docker-29.10.1.tgz /tmp/docker.tgz
 
 FROM scratch AS docker-arm64
-ADD --checksum=sha256:873b3e0207857c3b2f28392fb922f3ea6efe37620c16d4d4aaf2fef409c90b73 https://download.docker.com/linux/static/stable/aarch64/docker-29.9.2.tgz /tmp/docker.tgz
+ADD --checksum=sha256:a38c8a9ef6d17bce07499bfd3a3688542274769dc3b4f75c06ea2705fe65053e https://download.docker.com/linux/static/stable/aarch64/docker-29.10.1.tgz /tmp/docker.tgz
 
 FROM scratch AS docker-arm
-ADD --checksum=sha256:7b911fe928d628e4eb6af8714d9ac8ad38b450649b05f3966e54994e6d25f21b https://download.docker.com/linux/static/stable/armhf/docker-29.9.2.tgz /tmp/docker.tgz
+ADD --checksum=sha256:64e904668b30def335d933d5318b6310927a90a68570073d81741af78e71b1fd https://download.docker.com/linux/static/stable/armhf/docker-29.10.1.tgz /tmp/docker.tgz
 
 FROM docker-${TARGETARCH} AS docker-client
 
