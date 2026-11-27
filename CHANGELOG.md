@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.6.1] - 2026-11-27
+
 ### Changed
 
 - Docker builds keep the Go build and module caches in BuildKit cache mounts, so rebuilds skip re-downloading and recompiling unchanged packages. Image contents and release reproducibility are unchanged.

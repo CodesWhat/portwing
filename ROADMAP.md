@@ -1,6 +1,6 @@
 # Portwing Roadmap
 
-> Portwing is stable software. The current release line is `v1.6.0`.
+> Portwing is stable software. The current release line is `v1.6.1`.
 > The v1.2 line requires TLS for enrollment by default and uses a glibc-free
 > container runtime.
 > [GitHub Releases](https://github.com/CodesWhat/portwing/releases) lists what's published. This roadmap describes
@@ -178,7 +178,7 @@ image. CI also reuses a verified dev-tree run for promotion PRs. See
 
 **Next.** The Drydock controller side of request timeouts, cancel and enrollment
 lands in Drydock's next minor. Until then Portwing advertises the capabilities
-and Drydock ignores them. Fixes after v1.6.0 ship in the next patch release.
+and Drydock ignores them. Fixes after v1.6.1 ship in the next patch release.
 
 Controller-managed upgrade/rollback waves remain controller-owned. A controller can
 upgrade Portwing today with no agent change (the documented replacement sequence,
