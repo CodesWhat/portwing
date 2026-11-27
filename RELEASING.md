@@ -164,18 +164,28 @@ an archive that no longer matches its tag fails the contract.
 
 `main`'s ruleset has a CodeQL `code_scanning` rule (alerts threshold `errors`,
 security threshold `high_or_higher`). It blocks a promotion PR that is green and
-approved when an open alert at that severity exists on the merge ref, and the
-required checks won't show why. Look before opening or merging the promotion
-PR, on both the dev head and the promotion merge ref:
+approved when an open alert at that severity exists, and the required checks
+won't show why. Check the promotion PR before approving it.
+
+CodeQL files its PR analyses under `refs/pull/<n>/merge`, not `/head`, with
+`commit_sha` set to the PR's current `merge_commit_sha`. First confirm an
+analysis exists for exactly that commit. If none matches, the scan hasn't run
+on what you're merging, so stop and wait for it rather than treating the empty
+alert list as clean. Then count open alerts at high, critical or error, and
+approve only at 0:
 
 ```sh
-gh api "repos/CodesWhat/portwing/code-scanning/alerts?ref=refs/heads/dev/v1.0&state=open"
-gh api "repos/CodesWhat/portwing/code-scanning/alerts?ref=refs/pull/<n>/merge&state=open"
+n=<promotion PR number>
+mc=$(gh api "repos/CodesWhat/portwing/pulls/$n" --jq .merge_commit_sha)
+gh api --paginate "repos/CodesWhat/portwing/code-scanning/analyses?tool_name=CodeQL&ref=refs/pull/$n/merge" \
+  --jq ".[] | select(.commit_sha == \"$mc\") | .id" | head -1   # empty: no analysis, don't approve
+gh api --paginate "repos/CodesWhat/portwing/code-scanning/alerts?ref=refs/pull/$n/merge&state=open" \
+  --jq '.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical" or .rule.severity == "error") | .number' | wc -l   # must be 0
 ```
 
-Fix real alerts on the dev branch first and let the scan rerun. Dismiss a
-verified false positive with a reason. Never change or loosen the rule to get a
-promotion through.
+Fix real alerts on the dev branch and let the scan rerun. Dismiss a verified
+false positive with a reason that names the sanitizer or check. Never change
+or loosen the rule to get a promotion through.
 
 When a quality-report run needs a retry, rerun all jobs, not only the failed
 ones. `quality-report-aggregate` counts artifacts from the current attempt
