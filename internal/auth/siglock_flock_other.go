@@ -10,3 +10,8 @@ package auth
 func flockExclusive(string) (func(), error) {
 	return func() {}, nil
 }
+
+// flockEnrolledLock is a no-op where syscall.Flock is unavailable.
+func flockEnrolledLock(string) (func(), error) {
+	return func() {}, nil
+}

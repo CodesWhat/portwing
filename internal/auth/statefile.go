@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,10 +22,25 @@ func WriteStateFile(path string, data []byte) error {
 	})
 }
 
+// publishedError wraps a failure after commit made the file visible at its
+// final path, so a caller can tell it from a failure with nothing published.
+type publishedError struct{ err error }
+
+func (e *publishedError) Error() string { return e.err.Error() }
+func (e *publishedError) Unwrap() error { return e.err }
+
+// wasPublished reports whether err happened after the file reached its path.
+func wasPublished(err error) bool {
+	var pe *publishedError
+	return errors.As(err, &pe)
+}
+
 // writeFileVia writes data to a private temporary file next to path, syncs it,
 // hands it to commit to move into place, then syncs the directory. commit owns
 // the final step (rename to replace, link to create exclusively) and wraps its
 // own errors.
+// A directory sync failure comes back as a publishedError: the file is already
+// linked or renamed into place by then.
 func writeFileVia(path string, data []byte, prefix string, commit func(tmp, path string) error) error {
 	dir := filepath.Dir(path)
 	f, err := createRotationStateFile(dir, prefix)
@@ -46,5 +62,8 @@ func writeFileVia(path string, data []byte, prefix string, commit func(tmp, path
 	if err := commit(f.Name(), path); err != nil {
 		return err
 	}
-	return syncRotationStateDirectory(dir)
+	if err := syncRotationStateDirectory(dir); err != nil {
+		return &publishedError{err: err}
+	}
+	return nil
 }
