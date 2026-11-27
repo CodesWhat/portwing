@@ -527,6 +527,8 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 	if _, err := cm.resolveStackRoot(stackDir); err != nil {
 		return "", fmt.Errorf("invalid stack path: %w", err)
 	}
+	targets := make(map[string]string, len(req.Files)+1)
+	cleaned := make([]string, 0, len(req.Files)+1)
 	for relPath := range req.Files {
 		// An empty or "." key names the stack directory itself, never a file.
 		if relPath == "" || filepath.Clean(relPath) == "." {
@@ -535,6 +537,22 @@ func (cm *ComposeManager) validateRequest(req ComposeRequest) (string, error) {
 		if _, err := cm.resolvePath(stackDir, relPath); err != nil {
 			return "", fmt.Errorf("invalid stack file path %q: %w", relPath, err)
 		}
+		clean := filepath.Clean(relPath)
+		if other, dup := targets[clean]; dup {
+			return "", fmt.Errorf("invalid stack file path: %q and %q resolve to the same file", other, relPath)
+		}
+		targets[clean] = relPath
+		cleaned = append(cleaned, clean)
+	}
+	if len(req.EnvVars) > 0 {
+		if other, dup := targets[".env.drydock"]; dup {
+			return "", fmt.Errorf("invalid stack file path: %q and the envVars file resolve to the same file", other)
+		}
+		targets[".env.drydock"] = ".env.drydock"
+		cleaned = append(cleaned, ".env.drydock")
+	}
+	if err := checkStackPathConflicts(targets, cleaned); err != nil {
+		return "", fmt.Errorf("invalid stack file path: %w", err)
 	}
 
 	root, err := os.OpenRoot(physicalBase)
@@ -770,17 +788,30 @@ func (cm *ComposeManager) prepareStackWrites(req ComposeRequest) ([]stackWrite, 
 		}
 	}
 
-	// A target that is also a parent directory of another target can't be both
-	// a file and a directory. Staging the child would create the directory and
-	// the rename of the file would fail only after earlier files had landed.
+	rels := make([]string, 0, len(writes))
 	for _, w := range writes {
-		for dir := filepath.Dir(w.rel); dir != "." && dir != string(filepath.Separator); dir = filepath.Dir(dir) {
-			if other, conflict := seen[dir]; conflict {
-				return nil, fmt.Errorf("%q is a file but %q needs it to be a directory", other, seen[w.rel])
+		rels = append(rels, w.rel)
+	}
+	if err := checkStackPathConflicts(seen, rels); err != nil {
+		return nil, err
+	}
+	return writes, nil
+}
+
+// checkStackPathConflicts rejects a target that is also a parent directory of
+// another target: it can't be both a file and a directory. Staging the child
+// would create the directory and the rename of the file would fail only after
+// earlier files had landed. names maps each cleaned target path to the request
+// name that produced it; rels lists the targets to check.
+func checkStackPathConflicts(names map[string]string, rels []string) error {
+	for _, rel := range rels {
+		for dir := filepath.Dir(rel); dir != "." && dir != string(filepath.Separator); dir = filepath.Dir(dir) {
+			if other, conflict := names[dir]; conflict {
+				return fmt.Errorf("%q is a file but %q needs it to be a directory", other, names[rel])
 			}
 		}
 	}
-	return writes, nil
+	return nil
 }
 
 // writeStackFiles writes the files from the request into the stack directory.

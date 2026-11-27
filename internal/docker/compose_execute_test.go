@@ -813,6 +813,33 @@ func TestValidateRequest_FileKeyNamesStackDirectory(t *testing.T) {
 	}
 }
 
+func TestValidateRequest_FileKeysConflict(t *testing.T) {
+	t.Parallel()
+
+	cm := &ComposeManager{stacksDir: t.TempDir()}
+
+	cases := map[string]ComposeRequest{
+		"file is parent of another":   {StackName: "app", Files: map[string]string{"0": "x", "0/0": ""}},
+		"parent via unclean key":      {StackName: "app", Files: map[string]string{"./0": "x", "0//1/2": ""}},
+		"two keys, same file":         {StackName: "app", Files: map[string]string{"a": "x", "./a": "y"}},
+		"envVars file vs dir":         {StackName: "app", EnvVars: map[string]string{"A": "b"}, Files: map[string]string{".env.drydock/x": ""}},
+		"envVars file vs files entry": {StackName: "app", EnvVars: map[string]string{"A": "b"}, Files: map[string]string{".env.drydock": ""}},
+	}
+	for name, req := range cases {
+		if _, err := cm.validateRequest(req); err == nil {
+			t.Errorf("%s: validateRequest accepted a request writeStackFiles must reject", name)
+		}
+		if err := cm.writeStackFiles(req); err == nil {
+			t.Errorf("%s: writeStackFiles accepted a conflicting request", name)
+		}
+	}
+
+	ok := ComposeRequest{StackName: "app", Files: map[string]string{"a/b": "x", "a/c": "y", "ab": "z"}}
+	if _, err := cm.validateRequest(ok); err != nil {
+		t.Fatalf("sibling files rejected: %v", err)
+	}
+}
+
 // ---- validateRequest: stack path escapes stacks dir ----
 
 func TestValidateRequest_StackPathTraversal(t *testing.T) {

@@ -3,7 +3,8 @@
 set -euo pipefail
 
 # Proves the shipped Compose binary embeds the pinned containerd version,
-# or the pinned compression version when that module is selected.
+# or the pinned compression or OpenTelemetry version when that module is
+# selected.
 #
 # The Dockerfile pin (`go get github.com/containerd/containerd/v2@vX.Y.Z` in
 # the compose-builder stage) is only text. A build that silently stayed on an
@@ -28,7 +29,7 @@ if [[ $# -lt 2 || $# -gt 3 ]]; then
 	exit 2
 fi
 case "${module}" in
-github.com/containerd/containerd/v2 | github.com/klauspost/compress) ;;
+github.com/containerd/containerd/v2 | github.com/klauspost/compress | go.opentelemetry.io/otel/sdk | go.opentelemetry.io/otel/trace) ;;
 *)
 	echo "error: unsupported Compose dependency: ${module}" >&2
 	exit 2

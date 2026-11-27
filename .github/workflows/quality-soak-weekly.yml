@@ -46,7 +46,7 @@ concurrency:
 jobs:
   soak:
     name: "Soak (portwing RSS growth)"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Allow 30 minutes for build + warmup + post-run reporting on top of the
     # 4-hour soak; well under the 6-hour github-hosted ceiling.
     timeout-minutes: 270
@@ -191,7 +191,7 @@ jobs:
     name: "Record the soak run in the quality history"
     needs: soak
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     permissions:

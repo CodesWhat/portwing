@@ -109,6 +109,7 @@ const CTA_COMBINATIONS = new Set<string>([
   "docs_root:header",
   "docs_root:hero",
   "docs_root:footer",
+  "docs_getting_started:hero",
   "docs_getting_started:get_started",
   "docs_installation:get_started",
   "github_org:footer",

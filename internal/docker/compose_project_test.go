@@ -149,6 +149,13 @@ func TestComposeFileName(t *testing.T) {
 		{"commented out", "# name: custom\n", "", false},
 		{"prefix key", "names: x\n", "", false},
 		{"empty", "", "", false},
+		{"anchor and alias", "x-n: &n custom\nname: *n\n", "custom", false},
+		{"merge key", "base: &b\n  name: custom\n<<: *b\n", "custom", false},
+		{"numeric name", "name: 123\n", "", false},
+		{"duplicate name key", "name: a\nname: b\n", "", true},
+		{"duplicate other key", "services: {}\nservices: {}\n", "", true},
+		{"tab indent", "services:\n\tweb: {}\n", "", true},
+		{"multi document", "name: a\n---\nname: b\n", "a", false},
 		{"invalid yaml", "name: [unterminated\n", "", true},
 		{"root is a list", "- name: custom\n", "", true},
 	}

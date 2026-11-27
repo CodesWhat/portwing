@@ -273,7 +273,7 @@ reset_rerun_fixture
 sed -i.bak 's/^  triage:$/  decoy:/' "${rerun_fixture}"
 cat >>"${rerun_fixture}" <<'YAML'
   triage:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - run: echo ungated triage
 YAML

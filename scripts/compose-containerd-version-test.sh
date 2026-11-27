@@ -207,6 +207,20 @@ elif ! grep -Fq 'embeds github.com/klauspost/compress v1.19.2, but' <<<"${output
 	fail "compression mismatch must identify the linked version: ${output}"
 fi
 
+for otel_module in go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/trace; do
+	write_dockerfile "${otel_module}@v1.47.0"
+	write_build_info $'\tdep\t'"${otel_module}"$'\tv1.47.0\th1:xyz='
+	if ! output="$(run_script "${otel_module}")"; then
+		fail "a binary on the pinned ${otel_module} must pass: ${output}"
+	fi
+	write_build_info $'\tdep\t'"${otel_module}"$'\tv1.46.0\th1:xyz='
+	if output="$(run_script "${otel_module}")"; then
+		fail "an older ${otel_module} must fail: ${output}"
+	elif ! grep -Fq "embeds ${otel_module} v1.46.0, but" <<<"${output}"; then
+		fail "${otel_module} mismatch must identify the linked version: ${output}"
+	fi
+done
+
 if [ "${failures}" -ne 0 ]; then
 	echo "${failures} verify-compose-containerd check(s) failed" >&2
 	exit 1

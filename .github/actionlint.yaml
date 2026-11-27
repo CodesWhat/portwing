@@ -1,0 +1,6 @@
+# actionlint's bundled runner-label list lags GitHub-hosted images. ubuntu-26.04
+# is a real hosted label (the image ships as Ubuntu2604), so declare it here
+# until the bundled list catches up, then delete this file.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

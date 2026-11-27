@@ -160,6 +160,38 @@ and `current/` moves on to the new line. Layout and rules:
 Never edit a file under an archived `vX.Y/`. A correction goes in `current/`;
 an archive that no longer matches its tag fails the contract.
 
+## Before promoting: open code-scanning alerts
+
+`main`'s ruleset has a CodeQL `code_scanning` rule (alerts threshold `errors`,
+security threshold `high_or_higher`). It blocks a promotion PR that is green and
+approved when an open alert at that severity exists, and the required checks
+won't show why. Check the promotion PR before approving it.
+
+CodeQL files its PR analyses under `refs/pull/<n>/merge`, not `/head`, with
+`commit_sha` set to the PR's current `merge_commit_sha`. First confirm an
+analysis exists for exactly that commit. If none matches, the scan hasn't run
+on what you're merging, so stop and wait for it rather than treating the empty
+alert list as clean. Then count open alerts at high, critical or error, and
+approve only at 0:
+
+```sh
+n=<promotion PR number>
+mc=$(gh api "repos/CodesWhat/portwing/pulls/$n" --jq .merge_commit_sha)
+gh api --paginate "repos/CodesWhat/portwing/code-scanning/analyses?tool_name=CodeQL&ref=refs/pull/$n/merge" \
+  --jq ".[] | select(.commit_sha == \"$mc\") | .id" | head -1   # empty: no analysis, don't approve
+gh api --paginate "repos/CodesWhat/portwing/code-scanning/alerts?ref=refs/pull/$n/merge&state=open" \
+  --jq '.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical" or .rule.severity == "error") | .number' | wc -l   # must be 0
+```
+
+Fix real alerts on the dev branch and let the scan rerun. Dismiss a verified
+false positive with a reason that names the sanitizer or check. Never change
+or loosen the rule to get a promotion through.
+
+When a quality-report run needs a retry, rerun all jobs, not only the failed
+ones. `quality-report-aggregate` counts artifacts from the current attempt
+only, so a failed-jobs rerun leaves it short of the reports the earlier attempt
+already uploaded.
+
 ## Cutting the tag
 
 **Preferred path: use the `release-cut` workflow.**
@@ -277,11 +309,11 @@ the Git-backed deployment or update its GitHub status.
    failure gate still run without it, with findings retained in the job log.
 
    **Static runtime on every platform.** The images retain Alpine 3.24 release
-   metadata and CA certificates alongside static binaries. Docker CLI 29.9.2
+   metadata and CA certificates alongside static binaries. Docker CLI 29.10.1
    is an official per-architecture download pinned by SHA256 and built with Go
-   1.26.10. Compose is built from checksum-pinned upstream 5.5.1 source with
-   containerd 2.3.7, x/net 0.63.0, compression 1.20.2 and Go 1.27.4, identifies
-   itself as `v5.5.1-portwing.7`, and runs directly or as a CLI plugin.
+   1.27.4. Compose is built from checksum-pinned upstream 5.5.1 source with
+   containerd 2.3.7, x/net 0.63.0, compression 1.20.2, OpenTelemetry 1.47.0 and Go 1.27.4, identifies
+   itself as `v5.5.1-portwing.8`, and runs directly or as a CLI plugin.
    The recipes omit glibc packages and BusyBox. Image health checks use
    `portwing healthcheck` for HTTP/TLS probes, with HTTPS pinned to the
    configured `TLS_CERT` leaf. Source-image checks verify static linkage,
