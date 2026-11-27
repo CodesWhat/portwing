@@ -60,7 +60,7 @@ jobs:
   #
   changes:
     name: "Changed Paths"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: read
@@ -451,7 +451,7 @@ jobs:
   website-browser-checks:
     name: "Website Browser Checks"
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # The suite itself is about a minute. The rest is the image pull, npm ci and the site build.
     # Kept short on purpose: hosted runners kill sustained-CPU jobs past ~14 minutes.
     timeout-minutes: 12
@@ -520,7 +520,7 @@ jobs:
     name: "Coverage: Codecov Upload"
     needs: [changes, go-ci, go-ci-receipt]
     if: ${{ !cancelled() && needs.changes.outputs.push_covered != 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: read
@@ -592,7 +592,7 @@ jobs:
 
   secrets:
     name: "Security: Secrets"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -651,7 +651,7 @@ jobs:
     # Keep this job local: the explicit category preserves the default-branch
     # code-scanning identity while the organization workflow is canaried.
     if: github.event.repository.visibility == 'public' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       actions: read
@@ -713,7 +713,7 @@ jobs:
       (github.event_name == 'pull_request' ||
        (github.event_name == 'push' && !github.event.deleted &&
         (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/dev/'))))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -773,7 +773,7 @@ jobs:
   # from recurring.
   release-contract:
     name: "Release Contract"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read

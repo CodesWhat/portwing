@@ -36,7 +36,7 @@ concurrency:
 jobs:
   gremlins:
     name: "Quality: Gremlins (${{ matrix.name }})"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
 
     strategy:
@@ -411,7 +411,7 @@ jobs:
     # capped at timeout-minutes: 20.
     needs: [gremlins, mutation-advisory]
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     permissions:
@@ -545,7 +545,7 @@ jobs:
     name: "Quality: Mutation floor ratchet proposal"
     needs: [gremlins, history]
     if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     permissions:
@@ -724,7 +724,7 @@ jobs:
   # shape this job used to write directly.
   mutation-advisory:
     name: "Quality: Gremlins advisory mutators (${{ matrix.group }})"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
 
     strategy:
@@ -1021,7 +1021,7 @@ jobs:
     name: "Quality: Gremlins advisory mutators summary"
     needs: mutation-advisory
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     permissions:
@@ -1186,7 +1186,7 @@ jobs:
   # regression test rather than a one-off demonstration.
   gate-canary:
     name: "Quality: Mutation gate canary"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
 
     steps:

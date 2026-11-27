@@ -52,7 +52,7 @@ permissions: {}
 jobs:
   test:
     name: Build & Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -99,7 +99,7 @@ jobs:
 
   govulncheck:
     name: Govulncheck
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -138,7 +138,7 @@ jobs:
 
   commit-message:
     name: Commit Message
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -165,7 +165,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -179,7 +179,7 @@ jobs:
 
   workflow-security:
     name: Workflow Security
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -193,7 +193,7 @@ jobs:
 
   goreleaser:
     name: GoReleaser Config
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -207,7 +207,7 @@ jobs:
 
   qlty:
     name: Qlty Check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -257,7 +257,7 @@ jobs:
   fuzz:
     name: "Go Fuzz (${{ matrix.fuzzer.name }})"
     if: inputs.fuzzers-json != '' && fromJSON(inputs.fuzzers-json)[0] != null
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
