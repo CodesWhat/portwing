@@ -9,9 +9,10 @@ RUN apk add --no-cache git
 ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 \
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod set -eu; \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} GOARM=7 \
     go build -trimpath -ldflags="-s -w" -o /portwing ./cmd/portwing
 
 # Compose v5.5.1 with patched containerd, x/net and OpenTelemetry, isolated from Portwing modules.
@@ -19,7 +20,8 @@ FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605
 ADD --checksum=sha256:c72877db37172d8ee55f565e4fed20067af89015e986b190768fd4ee621025f2 https://github.com/docker/compose/archive/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de.tar.gz /tmp/compose.tar.gz
 ARG TARGETARCH
 WORKDIR /compose
-RUN tar -xzf /tmp/compose.tar.gz --strip-components=1 \
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod set -eu; \
+    tar -xzf /tmp/compose.tar.gz --strip-components=1 \
     && go get github.com/containerd/containerd/v2@v2.3.7 \
         golang.org/x/net@v0.63.0 github.com/klauspost/compress@v1.20.2 \
         go.opentelemetry.io/otel@v1.47.0 go.opentelemetry.io/otel/sdk@v1.47.0 \

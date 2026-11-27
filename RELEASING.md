@@ -175,12 +175,15 @@ alert list as clean. Then count open alerts at high, critical or error, and
 approve only at 0:
 
 ```sh
+set -euo pipefail
 n=<promotion PR number>
 mc=$(gh api "repos/CodesWhat/portwing/pulls/$n" --jq .merge_commit_sha)
-gh api --paginate "repos/CodesWhat/portwing/code-scanning/analyses?tool_name=CodeQL&ref=refs/pull/$n/merge" \
-  --jq ".[] | select(.commit_sha == \"$mc\") | .id" | head -1   # empty: no analysis, don't approve
-gh api --paginate "repos/CodesWhat/portwing/code-scanning/alerts?ref=refs/pull/$n/merge&state=open" \
-  --jq '.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical" or .rule.severity == "error") | .number' | wc -l   # must be 0
+analysis=$(gh api --paginate "repos/CodesWhat/portwing/code-scanning/analyses?tool_name=CodeQL&ref=refs/pull/$n/merge" \
+  --jq ".[] | select(.commit_sha == \"$mc\") | .id")
+[ -n "$analysis" ] || { echo "no CodeQL analysis for $mc, stop" >&2; exit 1; }
+alerts=$(gh api --paginate "repos/CodesWhat/portwing/code-scanning/alerts?tool_name=CodeQL&ref=refs/pull/$n/merge&state=open" \
+  --jq '.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical" or .rule.severity == "error") | .number')
+echo "open high/critical/error alerts: $(printf '%s' "$alerts" | grep -c . || true)"   # must be 0
 ```
 
 Fix real alerts on the dev branch and let the scan rerun. Dismiss a verified
@@ -203,7 +206,7 @@ Go to **Actions → Release: Cut** → **Run workflow** on `main`. The workflow:
 - Validates the CHANGELOG entry is non-empty for the computed tag
 - Creates and pushes an annotated tag using the repo bot identity
 
-For a release candidate, pass an explicit version such as `1.6.0-rc.1`.
+For a release candidate, pass an explicit version such as `1.6.1-rc.1`.
 Use that exact version in the newest dated changelog heading and the current
 release references. The same checks run before the tag is pushed. GoReleaser
 marks it as a prerelease and leaves the stable container `latest` tag
@@ -332,6 +335,8 @@ the Git-backed deployment or update its GitHub status.
 - GHCR image exists: `docker pull ghcr.io/codeswhat/portwing:<version>`
 - The release page has archives and native packages for every supported platform, each package has a `.bundle`, and `checksums.txt` lists them
 - `portwing version` (or `GET /api/v1/version`) on the new image reports the tagged version, not `0.1.0` — this catches ldflags injection regressions
+
+**Local image builds.** The from-source Dockerfiles keep Go build and module caches in BuildKit cache mounts, which never enter image layers. Lanes run NAS image builds one at a time, never with `--no-cache`, and never prune the NAS.
 
 ---
 
