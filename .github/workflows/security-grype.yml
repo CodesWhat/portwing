@@ -138,6 +138,14 @@ jobs:
           COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}
         run: ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}" github.com/klauspost/compress
 
+      - name: Verify Compose embeds patched OpenTelemetry SDK and trace
+        env:
+          GOTOOLCHAIN: local
+          COMPOSE_DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}" go.opentelemetry.io/otel/sdk
+          ./scripts/ci/verify-compose-containerd.sh /tmp/docker-compose "${COMPOSE_DOCKERFILE}" go.opentelemetry.io/otel/trace
+
       - name: Run Grype vulnerability scanner
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
         id: grype
