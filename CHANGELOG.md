@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - The bundled Docker CLI moves to 29.10.1 (built with Go 1.27.4) for GO-2026-6859, and the bundled Compose plugin (now `v5.5.1-portwing.8`) is rebuilt on OpenTelemetry v1.47.0 for GHSA-q7gw-24fr-5p69. CI now checks the linked OpenTelemetry SDK and trace versions in the shipped Compose binary.
+### Fixed
+
+- First-start enrollment is stricter about its key directory. A failed final directory sync after the key is linked no longer deletes the pending marker, so the next start still enrolls. The enrollment lock file and marker are opened without following symlinks, and the agent refuses a lock that isn't a private regular file it owns, or a key directory owned by another user.
 
 ## [v1.6.0] - 2026-11-26
 
