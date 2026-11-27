@@ -285,7 +285,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: CodesWhat/.github/.github/workflows/go-ci.yml@29a963e6df100295bdd88c3d87dc1f73ceb30f65  # main, 2026-10-31
+    uses: CodesWhat/.github/.github/workflows/go-ci.yml@684a6b931e7802f1985e2cb4f6ea0c95861988e3  # main, 2026-11-26
     with:
       go-version-file: go.mod
       go-cache-dependency-path: go.sum
@@ -341,9 +341,11 @@ jobs:
         vuln.go.dev:443
       workflow-security-egress-policy: block
       workflow-security-allowed-endpoints: >-
+        files.pythonhosted.org:443
         ghcr.io:443
         github.com:443
         pkg-containers.githubusercontent.com:443
+        pypi.org:443
       commit-message-egress-policy: block
       commit-message-allowed-endpoints: github.com:443
       goreleaser-egress-policy: block
@@ -415,7 +417,7 @@ jobs:
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.push_covered != 'true' }}
     permissions:
       contents: read
-    uses: CodesWhat/.github/.github/workflows/node-ci.yml@29a963e6df100295bdd88c3d87dc1f73ceb30f65  # main, 2026-10-31
+    uses: CodesWhat/.github/.github/workflows/node-ci.yml@684a6b931e7802f1985e2cb4f6ea0c95861988e3  # main, 2026-11-26
     with:
       node-version: 26
       lockfile-path: package-lock.json
