@@ -35,9 +35,8 @@ ADD --checksum=sha256:873b3e0207857c3b2f28392fb922f3ea6efe37620c16d4d4aaf2fef409
 FROM scratch AS docker-arm
 ADD --checksum=sha256:7b911fe928d628e4eb6af8714d9ac8ad38b450649b05f3966e54994e6d25f21b https://download.docker.com/linux/static/stable/armhf/docker-29.9.2.tgz /tmp/docker.tgz
 
-FROM docker-${TARGETARCH} AS docker-client
-
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS rootfs
+ARG TARGETARCH
 RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && apk add --no-cache --initdb --root /out \
         --repository "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/main" \
@@ -52,14 +51,18 @@ RUN ALPINE_BRANCH="v$(cut -d. -f1,2 /etc/alpine-release)" \
     && rm -rf /out/var/cache/apk/*
 
 # Only static Docker and Compose clients enter the runtime.
-COPY --from=docker-client /tmp/docker.tgz /tmp/docker.tgz
+# Every arch stage is a checksum-pinned ADD; the matching tarball is picked
+# below so no FROM line has to resolve a build argument.
+COPY --from=docker-amd64 /tmp/docker.tgz /tmp/docker-amd64.tgz
+COPY --from=docker-arm64 /tmp/docker.tgz /tmp/docker-arm64.tgz
+COPY --from=docker-arm /tmp/docker.tgz /tmp/docker-arm.tgz
 COPY --from=compose-builder /docker-compose /out/usr/bin/docker-compose
 COPY --from=compose-builder /compose/LICENSE /out/usr/share/licenses/docker-compose/LICENSE
-RUN tar -xzf /tmp/docker.tgz -C /out/usr/bin --strip-components=1 docker/docker \
+RUN tar -xzf "/tmp/docker-${TARGETARCH}.tgz" -C /out/usr/bin --strip-components=1 docker/docker \
     && chmod 755 /out/usr/bin/docker /out/usr/bin/docker-compose \
     && mkdir -p /out/usr/libexec/docker/cli-plugins \
     && ln -s ../../../bin/docker-compose /out/usr/libexec/docker/cli-plugins/docker-compose \
-    && rm /tmp/docker.tgz
+    && rm /tmp/docker-amd64.tgz /tmp/docker-arm64.tgz /tmp/docker-arm.tgz
 
 # Final image: static clients plus the source-built binary. Runs as the dedicated
 # `portwing` user (UID 65532); reaching the host Docker socket requires adding
