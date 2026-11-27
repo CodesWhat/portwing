@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Docker builds keep the Go build and module caches in BuildKit cache mounts, so rebuilds skip re-downloading and recompiling unchanged packages. Image contents and release reproducibility are unchanged.
 - Compose project-name detection now parses with go-yaml v4 (was v3). Behavior is the same for valid compose files, and tests pin duplicate keys, anchors, merge keys, tabs and multi-document input.
 
 ### Fixed
