@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Compose project-name detection now parses with go-yaml v4 (was v3). Behavior is the same for valid compose files, and tests pin duplicate keys, anchors, merge keys, tabs and multi-document input.
+
 ## [v1.6.0] - 2026-11-26
 
 ### Added
