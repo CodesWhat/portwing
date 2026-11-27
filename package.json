@@ -25,15 +25,15 @@
     "check:web": "node scripts/node-version-contract.mjs && npm run test:web && npm run lint && npm run knip && npm run build && npm run docs:export-contract && npm run links:web && npm run budget:web && npm run lighthouse"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.7",
+    "@biomejs/biome": "2.6.8",
     "@playwright/test": "1.65.1",
     "chrome-launcher": "1.2.3",
-    "knip": "6.45.1",
+    "knip": "6.48.0",
     "lighthouse": "13.5.0",
     "remark-mdx": "3.1.1",
     "remark-parse": "11.0.0",
     "remark-stringify": "11.0.0",
-    "turbo": "2.11.11",
+    "turbo": "2.11.13",
     "unified": "11.0.5"
   },
   "overrides": {
@@ -42,7 +42,7 @@
       "sharp": "^0.35.4"
     }
   },
-  "packageManager": "npm@12.2.2",
+  "packageManager": "npm@12.2.3",
   "engines": {
     "node": ">=26.0.0"
   }
